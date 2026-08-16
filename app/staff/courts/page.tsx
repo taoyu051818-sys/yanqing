@@ -49,7 +49,7 @@ export default function StaffCourtsPage() {
       />
 
       <div className="flex flex-col gap-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <StatCard label="今日占用" value={`${usedCells}/${totalCells}`} hint="格位数" tone="primary" />
           <StatCard label="整体利用率" value={rate} unit="%" tone="brand" />
           <StatCard label="黄金时段利用率" value={primeRate} unit="%" hint="18:00 后时段" tone="gold" />

@@ -92,7 +92,7 @@ export default function MemberCouponsPage() {
                 return (
                   <div
                     key={t.id}
-                    className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3"
+                    className="flex flex-col gap-2 rounded-xl bg-secondary/50 p-3"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex flex-col gap-0.5">
@@ -171,7 +171,7 @@ export default function MemberCouponsPage() {
                     return (
                       <div
                         key={c.id}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 p-3"
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-secondary/50 bg-muted/40 p-3"
                       >
                         <div className="flex flex-col gap-0.5">
                           <span className="text-xs font-semibold">{t?.name}</span>

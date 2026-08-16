@@ -58,7 +58,7 @@ export default function AdminOrdersPage() {
       />
 
       <div className="flex flex-col gap-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <StatCard label="订单笔数" value={filteredOrders.length} unit="单" tone="primary" />
           <StatCard label="有效收款" value={paidTotal.toLocaleString('zh-CN')} unit="元" tone="brand" />
           <StatCard label="退款金额" value={refundTotal.toLocaleString('zh-CN')} unit="元" />
@@ -112,7 +112,7 @@ export default function AdminOrdersPage() {
                   {filteredOrders.map((o) => (
                     <div
                       key={o.id}
-                      className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 lg:flex-row lg:items-center lg:justify-between"
+                      className="flex flex-col gap-2 rounded-xl bg-secondary/50 p-3 lg:flex-row lg:items-center lg:justify-between"
                     >
                       <div className="flex flex-col gap-1.5">
                         <div className="flex flex-wrap items-center gap-2">

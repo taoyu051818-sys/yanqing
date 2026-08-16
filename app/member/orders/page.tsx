@@ -68,7 +68,7 @@ export default function MemberOrdersPage() {
                 <TabsContent key={t.key} value={t.key} className="flex flex-col gap-2 pt-3">
                   {list.length === 0 && <EmptyHint text="该分类下暂无订单" />}
                   {list.map((o) => (
-                    <div key={o.id} className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+                    <div key={o.id} className="flex flex-col gap-2 rounded-xl bg-secondary/50 p-3">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="flex flex-col gap-0.5">
                           <span className="flex items-center gap-2 text-sm font-medium">

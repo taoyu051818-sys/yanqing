@@ -68,7 +68,7 @@ export default function MerchantRedeemPage() {
 
       <FlowProgress flow={FLOWS[3]} />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <StatCard label="待核销券码" value={claimed.length} unit="张" tone="gold" />
         <StatCard label="已核销" value={redeemed.length} unit="张" tone="brand" />
         <StatCard
@@ -124,7 +124,7 @@ export default function MerchantRedeemPage() {
                 return (
                   <li
                     key={c.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-secondary/50 px-3 py-2.5"
                   >
                     <div className="flex flex-col gap-0.5">
                       <span className="text-sm font-medium">{t?.name}</span>

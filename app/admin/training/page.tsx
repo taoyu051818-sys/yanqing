@@ -67,7 +67,7 @@ export default function AdminTrainingPage() {
       />
 
       <div className="flex flex-col gap-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <StatCard label="培训总收款" value={stats.gross.toLocaleString('zh-CN')} unit="元" hint="全额进入平台账户" />
           <StatCard
             label="计入球馆流水"
@@ -176,7 +176,7 @@ export default function AdminTrainingPage() {
             ) : (
               <div className="flex flex-col gap-2">
                 {enrollments.map((e) => (
-                  <div key={e.id} className="flex flex-col gap-1 rounded-lg border border-border bg-card p-3">
+                  <div key={e.id} className="flex flex-col gap-1 rounded-xl bg-secondary/50 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-semibold text-foreground">
                         {e.studentName} · {courseName(e.courseId)}

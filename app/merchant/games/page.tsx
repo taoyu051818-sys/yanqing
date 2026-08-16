@@ -29,7 +29,7 @@ export default function MerchantGamesPage() {
       />
 
       <div className="flex flex-col gap-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <StatCard label="我的球局" value={mine.length} unit="场" tone="primary" />
           <StatCard label="报名席位" value={`${filled}/${seats}`} hint="已报名 / 总席位" tone="brand" />
           <StatCard label="球局收款" value={revenue.toLocaleString('zh-CN')} unit="元" />
@@ -47,7 +47,7 @@ export default function MerchantGamesPage() {
               {mine.map((g) => {
                 const pct = Math.round((g.joined / g.capacity) * 100)
                 return (
-                  <div key={g.id} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
+                  <div key={g.id} className="flex flex-col gap-3 rounded-xl bg-secondary/50 p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex flex-col gap-1">
                         <span className="text-sm font-semibold text-foreground">{g.title}</span>

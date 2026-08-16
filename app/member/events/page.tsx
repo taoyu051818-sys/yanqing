@@ -79,14 +79,14 @@ export default function MemberEventsPage() {
           action={<Badge variant="outline">{event.status}</Badge>}
         >
           <div className="flex flex-col gap-4">
-            <div className="grid gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <StatCard label="报名费" value={event.fee} unit="元/组" tone="primary" />
               <StatCard label="已报名" value={`${event.pairs.length}/${event.capacity}`} unit="组" tone="brand" />
               <StatCard label="总轮次" value={event.totalRounds} unit="轮" />
               <StatCard label="当前轮次" value={event.currentRound} unit="轮" tone="gold" />
             </div>
 
-            <div className="flex flex-col gap-2 rounded-lg border border-border bg-secondary/40 p-4">
+            <div className="flex flex-col gap-2 rounded-xl bg-secondary/40 p-4">
               <span className="text-xs font-semibold text-foreground">赛事规则</span>
               <ul className="flex flex-col gap-1">
                 {event.rules.map((r) => (
@@ -224,7 +224,7 @@ export default function MemberEventsPage() {
               ) : (
                 <ul className="flex flex-col gap-2">
                   {myHistory.map((h) => (
-                    <li key={h.id} className="flex flex-col gap-0.5 rounded-md border border-border px-3 py-2">
+                    <li key={h.id} className="flex flex-col gap-0.5 rounded-lg bg-secondary/50 px-3 py-2">
                       <span className="text-xs font-medium">{h.eventName}</span>
                       <span className="font-mono text-[11px] text-muted-foreground">
                         {h.date} · 第{h.rank}/{h.totalPairs}名 · {h.wins}胜{h.losses}负 · +{h.pointsGained}分
@@ -248,7 +248,7 @@ export default function MemberEventsPage() {
           {leaderboard.map((m, i) => (
             <li
               key={m.id}
-              className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2"
+              className="flex items-center justify-between gap-3 rounded-xl bg-secondary/50 px-3 py-2"
             >
               <div className="flex items-center gap-3">
                 <span
@@ -276,7 +276,7 @@ export default function MemberEventsPage() {
       </SectionCard>
 
       <SectionCard title="报名单位说明" description="赛事以双人组合为最小报名与计分单位。">
-        <div className="flex items-start gap-3 rounded-lg border border-border bg-secondary/40 p-4">
+        <div className="flex items-start gap-3 rounded-xl bg-secondary/40 p-4">
           <Users className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
           <p className="text-xs leading-relaxed text-muted-foreground">
             每组两名选手共用一份积分、胜负与净胜分记录；轮次编排、比分录入、名次折算积分均以组合为单位处理，

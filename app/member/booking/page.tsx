@@ -9,13 +9,11 @@ import { flowByKey } from '@/lib/flows'
 import { isTrainingOccupied, yuan } from '@/lib/finance'
 import { DEMO_DATES, WEEKDAY_LABEL } from '@/lib/seed'
 import type { PayChannel, SourceChannel } from '@/lib/types'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { LinkButton } from '@/components/link-button'
-import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { FieldRow, FlowProgress, FourFactorTags, PageIntro } from '@/components/blocks'
+import { FieldRow, FlowProgress, FourFactorTags, PageIntro, SectionCard } from '@/components/blocks'
 import { cn } from '@/lib/utils'
 
 export default function BookingPage() {
@@ -68,14 +66,13 @@ export default function BookingPage() {
   const submit = () => {
     if (!selected) return
     const sourceChannel: SourceChannel = useCoupon && couponEligible ? '新客体验券' : '小程序自然流量'
-    const channel: PayChannel = useCoupon && couponEligible && price === 9.9 ? payChannel : payChannel
     const res = createVenueOrder({
       memberId: me.id,
       date,
       courtId: selected,
       slotId,
       amount: price,
-      payChannel: channel,
+      payChannel,
       sourceChannel,
       couponCode: useCoupon && couponEligible ? myNewbieCoupon!.code : undefined,
     })
@@ -96,267 +93,232 @@ export default function BookingPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <PageIntro
         title="预约订场"
         desc="20 片场地按区域分组呈现，培训占场与已订场次实时置灰。新客体验券仅可用于非黄金时段。"
-        rules={['20片场地全量可视化', '体验券不可用于黄金时段', '订单绑定四要素（FR-01）']}
+        rules={['20片场地全量可视化', '体验券不可用于黄金时段', 'FR-01 四要素']}
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="flex flex-col gap-4">
-          <Card>
-            <CardHeader className="gap-1">
-              <CardTitle className="text-sm">选择日期与时段</CardTitle>
-              <p className="text-xs text-muted-foreground">黄金时段价格最高，早场与日场适合体验券核销。</p>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <div className="flex flex-wrap gap-2">
-                {DEMO_DATES.map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => {
-                      setDate(d)
-                      setSelected(null)
-                    }}
-                    className={cn(
-                      'flex flex-col items-center gap-0.5 rounded-lg border px-3 py-2 transition-colors',
-                      d === date
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-border bg-card hover:border-primary/40',
-                    )}
-                  >
-                    <span className="font-mono text-xs">{d.slice(5)}</span>
-                    <span className="text-[10px] opacity-80">{WEEKDAY_LABEL[d]}</span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {slots.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => {
-                      setSlotId(s.id)
-                      setSelected(null)
-                    }}
-                    className={cn(
-                      'flex flex-col gap-1 rounded-lg border px-3 py-2 text-left transition-colors',
-                      s.id === slotId
-                        ? 'border-primary bg-primary/[0.06]'
-                        : 'border-border bg-card hover:border-primary/40',
-                    )}
-                  >
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-xs font-medium">{s.label}</span>
-                      <Badge
-                        variant={s.period === '黄金时段' ? 'default' : 'secondary'}
-                        className="rounded-sm text-[10px]"
-                      >
-                        {s.period}
-                      </Badge>
-                    </span>
-                    <span className="font-mono text-[11px] text-muted-foreground">
-                      {yuan(s.price)}
-                      {s.period !== '黄金时段' && ` · 体验价 ${yuan(s.newbiePrice)}`}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="gap-1">
-              <CardTitle className="text-sm">
-                场地矩阵 · {date.slice(5)} {slot.label}
-              </CardTitle>
-              <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <span className="size-2.5 rounded-sm bg-brand" />
-                  可预订
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="size-2.5 rounded-sm bg-muted-foreground/40" />
-                  已订出
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="size-2.5 rounded-sm bg-gold" />
-                  培训占用
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="size-2.5 rounded-sm bg-primary" />
-                  已选中
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              {zones.map((zone) => (
-                <div key={zone} className="flex flex-col gap-2">
-                  <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                    {zone}
-                  </span>
-                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-                    {courts
-                      .filter((c) => c.zone === zone)
-                      .map((c) => {
-                        const training = isTrainingOccupied(c.id, slotId)
-                        const takenStatus = booked.get(c.id)
-                        const disabled = training || Boolean(takenStatus)
-                        const isSel = selected === c.id
-                        return (
-                          <button
-                            key={c.id}
-                            type="button"
-                            disabled={disabled}
-                            onClick={() => setSelected(c.id)}
-                            className={cn(
-                              'flex flex-col items-start gap-0.5 rounded-lg border px-2.5 py-2 text-left transition-colors',
-                              isSel && 'border-primary bg-primary text-primary-foreground',
-                              !isSel && !disabled && 'border-brand/40 bg-brand/10 hover:border-brand',
-                              training && 'cursor-not-allowed border-gold/40 bg-gold/15 text-gold-foreground',
-                              !training && takenStatus && 'cursor-not-allowed border-border bg-muted text-muted-foreground',
-                            )}
-                          >
-                            <span className="font-mono text-xs font-semibold">{c.name}</span>
-                            <span className="text-[10px] leading-tight opacity-80">
-                              {training ? '培训占用' : takenStatus ? '已订出' : c.usage}
-                            </span>
-                          </button>
-                        )
-                      })}
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="flex flex-col gap-4">
-          <FlowProgress flow={flowByKey('flow1')} />
-
-          <Card>
-            <CardHeader className="gap-1">
-              <CardTitle className="text-sm">下单确认</CardTitle>
-              <p className="text-xs text-muted-foreground">{me.name} · {me.level}</p>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <div className="flex flex-col">
-                <FieldRow label="日期时段" value={`${date} ${slot.label}`} mono />
-                <FieldRow
-                  label="场地"
-                  value={selected ? courts.find((c) => c.id === selected)!.name : '未选择'}
-                  mono
-                />
-                <FieldRow label="时段类型" value={slot.period} />
-                <FieldRow label="应付金额" value={yuan(price)} mono />
-              </div>
-
-              {myNewbieCoupon ? (
-                <button
-                  type="button"
-                  onClick={() => couponEligible && setUseCoupon((v) => !v)}
-                  disabled={!couponEligible}
-                  className={cn(
-                    'flex items-start gap-2 rounded-lg border p-3 text-left transition-colors',
-                    useCoupon && couponEligible
-                      ? 'border-gold bg-gold/15'
-                      : 'border-border bg-card hover:border-gold/50',
-                    !couponEligible && 'cursor-not-allowed opacity-60',
-                  )}
-                >
-                  <Ticket className="mt-0.5 size-4 shrink-0 text-gold-foreground" />
-                  <span className="flex flex-col gap-0.5">
-                    <span className="text-xs font-medium">{newbieTemplate?.name ?? '新客体验券'}</span>
-                    <span className="font-mono text-[10px] text-muted-foreground">{myNewbieCoupon.code}</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {couponEligible ? '点击使用，体验价 9.9 元' : '当前为黄金时段，体验券不可用'}
-                    </span>
-                  </span>
-                </button>
-              ) : (
-                <Link
-                  href="/member/coupons"
-                  className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground transition-colors hover:border-gold/50"
-                >
-                  还没有新客体验券？前往券包领取 →
-                </Link>
+      {/* 日期横向选择 */}
+      <section className="flex flex-col gap-2 rounded-xl bg-card px-3 py-3">
+        <span className="text-[13px] font-semibold tracking-tight text-foreground">选择日期</span>
+        <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1">
+          {DEMO_DATES.map((d) => (
+            <button
+              key={d}
+              type="button"
+              onClick={() => {
+                setDate(d)
+                setSelected(null)
+              }}
+              className={cn(
+                'flex shrink-0 flex-col items-center gap-0.5 rounded-xl px-3 py-2 transition-colors',
+                d === date ? 'bg-brand text-brand-foreground' : 'bg-secondary text-secondary-foreground',
               )}
-
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs text-muted-foreground">支付渠道</span>
-                <Select value={payChannel} onValueChange={(v) => v && setPayChannel(v as PayChannel)}>
-                  <SelectTrigger size="sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="微信支付">微信支付</SelectItem>
-                    <SelectItem value="现金余额">现金余额（{yuan(me.cashBalance)}）</SelectItem>
-                    <SelectItem value="赠送余额">赠送余额（{yuan(me.giftBalance)}）</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <FourFactorTags
-                businessType="venue"
-                subject="球馆本部"
-                payChannel={payChannel}
-                sourceChannel={useCoupon && couponEligible ? '新客体验券' : '小程序自然流量'}
-              />
-
-              <Button disabled={!selected} onClick={() => setConfirmOpen(true)} className="w-full">
-                {selected ? `确认支付 ${yuan(price)}` : '请先选择场地'}
-              </Button>
-            </CardContent>
-          </Card>
-
-          {paidOrder && (
-            <Card className="border-brand/40 bg-brand/[0.06]">
-              <CardHeader className="gap-1">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <QrCode className="size-4" />
-                  签到码已生成
-                </CardTitle>
-                <p className="text-xs text-muted-foreground">到场后由员工端扫码核销放行。</p>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <div className="flex items-center justify-center rounded-lg border border-brand/40 bg-card p-4">
-                  <span className="font-mono text-lg font-bold tracking-wider">{paidOrder.qrCode}</span>
-                </div>
-                <div className="flex flex-col">
-                  <FieldRow label="订单号" value={paidOrder.id} mono />
-                  <FieldRow label="内容" value={paidOrder.title} />
-                  <FieldRow label="金额" value={yuan(paidOrder.amount)} mono />
-                </div>
-                <LinkButton href="/staff/checkin" size="sm" variant="outline">
-                  前往员工端核销 →
-                </LinkButton>
-              </CardContent>
-            </Card>
-          )}
+            >
+              <span className="font-mono text-[11px] leading-none">{d.slice(5)}</span>
+              <span className="text-[10px] leading-none opacity-75">{WEEKDAY_LABEL[d]}</span>
+            </button>
+          ))}
         </div>
-      </div>
+      </section>
+
+      {/* 时段横向选择 */}
+      <section className="flex flex-col gap-2 rounded-xl bg-card px-3 py-3">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-[13px] font-semibold tracking-tight text-foreground">选择时段</span>
+          <span className="text-[10px] text-muted-foreground">黄金时段价最高</span>
+        </div>
+        <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1">
+          {slots.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => {
+                setSlotId(s.id)
+                setSelected(null)
+              }}
+              className={cn(
+                'flex w-[104px] shrink-0 flex-col gap-1 rounded-xl px-2.5 py-2 text-left transition-colors',
+                s.id === slotId ? 'bg-brand/15 ring-1 ring-brand' : 'bg-secondary',
+              )}
+            >
+              <span className="font-mono text-[11px] font-medium leading-none text-foreground">{s.label}</span>
+              <span
+                className={cn(
+                  'w-fit rounded px-1 py-0.5 text-[9px] leading-none',
+                  s.period === '黄金时段' ? 'bg-gold/25 text-gold-foreground' : 'bg-card text-muted-foreground',
+                )}
+              >
+                {s.period}
+              </span>
+              <span className="font-mono text-[10px] leading-none text-muted-foreground">
+                {yuan(s.price)}
+                {s.period !== '黄金时段' && ` / 券${yuan(s.newbiePrice)}`}
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* 场地矩阵 */}
+      <SectionCard title={`场地矩阵 · ${date.slice(5)} ${slot.label}`}>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <span className="size-2 rounded-sm bg-brand" />可预订
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="size-2 rounded-sm bg-muted-foreground/40" />已订出
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="size-2 rounded-sm bg-gold" />培训占用
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="size-2 rounded-sm bg-primary" />已选中
+          </span>
+        </div>
+        {zones.map((zone) => (
+          <div key={zone} className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-medium text-muted-foreground">{zone}</span>
+            <div className="grid grid-cols-4 gap-1.5">
+              {courts
+                .filter((c) => c.zone === zone)
+                .map((c) => {
+                  const training = isTrainingOccupied(c.id, slotId)
+                  const takenStatus = booked.get(c.id)
+                  const disabled = training || Boolean(takenStatus)
+                  const isSel = selected === c.id
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => setSelected(c.id)}
+                      className={cn(
+                        'flex flex-col items-center gap-0.5 rounded-lg py-1.5 transition-colors',
+                        isSel && 'bg-primary text-primary-foreground',
+                        !isSel && !disabled && 'bg-brand/12 text-brand-foreground',
+                        training && 'cursor-not-allowed bg-gold/18 text-gold-foreground',
+                        !training && takenStatus && 'cursor-not-allowed bg-secondary text-muted-foreground',
+                      )}
+                    >
+                      <span className="font-mono text-[11px] font-semibold leading-none">{c.name}</span>
+                      <span className="text-[9px] leading-none opacity-80">
+                        {training ? '培训' : takenStatus ? '已订' : '可订'}
+                      </span>
+                    </button>
+                  )
+                })}
+            </div>
+          </div>
+        ))}
+      </SectionCard>
+
+      {/* 下单确认 */}
+      <SectionCard title="下单确认" description={`${me.name} · ${me.level}`}>
+        <div className="flex flex-col divide-y divide-border/60">
+          <FieldRow label="日期时段" value={`${date} ${slot.label}`} mono />
+          <FieldRow label="场地" value={selected ? courts.find((c) => c.id === selected)!.name : '未选择'} mono />
+          <FieldRow label="时段类型" value={slot.period} />
+          <FieldRow label="应付金额" value={yuan(price)} mono />
+        </div>
+
+        {myNewbieCoupon ? (
+          <button
+            type="button"
+            onClick={() => couponEligible && setUseCoupon((v) => !v)}
+            disabled={!couponEligible}
+            className={cn(
+              'flex items-start gap-2 rounded-xl p-2.5 text-left transition-colors',
+              useCoupon && couponEligible ? 'bg-gold/18 ring-1 ring-gold' : 'bg-secondary/70',
+              !couponEligible && 'cursor-not-allowed opacity-60',
+            )}
+          >
+            <Ticket className="mt-0.5 size-4 shrink-0 text-gold-foreground" />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate text-[12px] font-medium text-foreground">
+                {newbieTemplate?.name ?? '新客体验券'}
+              </span>
+              <span className="font-mono text-[10px] text-muted-foreground">{myNewbieCoupon.code}</span>
+              <span className="text-[10px] leading-tight text-muted-foreground">
+                {couponEligible ? '点击使用，体验价 9.9 元' : '当前为黄金时段，体验券不可用'}
+              </span>
+            </span>
+          </button>
+        ) : (
+          <Link href="/member/coupons" className="rounded-xl bg-secondary/70 p-2.5 text-[11px] text-muted-foreground">
+            还没有新客体验券？前往券包领取 →
+          </Link>
+        )}
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11px] text-muted-foreground">支付渠道</span>
+          <Select value={payChannel} onValueChange={(v) => v && setPayChannel(v as PayChannel)}>
+            <SelectTrigger size="sm" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="微信支付">微信支付</SelectItem>
+              <SelectItem value="现金余额">现金余额（{yuan(me.cashBalance)}）</SelectItem>
+              <SelectItem value="赠送余额">赠送余额（{yuan(me.giftBalance)}）</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <FourFactorTags
+          businessType="venue"
+          subject="球馆本部"
+          payChannel={payChannel}
+          sourceChannel={useCoupon && couponEligible ? '新客体验券' : '小程序自然流量'}
+        />
+
+        <Button disabled={!selected} onClick={() => setConfirmOpen(true)} className="h-10 w-full rounded-xl">
+          {selected ? `确认支付 ${yuan(price)}` : '请先选择场地'}
+        </Button>
+      </SectionCard>
+
+      {paidOrder && (
+        <SectionCard title="签到码已生成" description="到场后由员工端扫码核销放行。">
+          <div className="flex items-center justify-center gap-2 rounded-xl bg-brand/12 py-4">
+            <QrCode className="size-4 text-brand-foreground" />
+            <span className="font-mono text-base font-bold tracking-wider text-brand-foreground">
+              {paidOrder.qrCode}
+            </span>
+          </div>
+          <div className="flex flex-col divide-y divide-border/60">
+            <FieldRow label="订单号" value={paidOrder.id} mono />
+            <FieldRow label="内容" value={paidOrder.title} />
+            <FieldRow label="金额" value={yuan(paidOrder.amount)} mono />
+          </div>
+          <LinkButton href="/staff/checkin" size="sm" variant="outline" className="w-full rounded-xl">
+            前往员工端核销 →
+          </LinkButton>
+        </SectionCard>
+      )}
+
+      <FlowProgress flow={flowByKey('flow1')} />
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-[calc(100vw-2rem)] rounded-2xl">
           <DialogHeader>
-            <DialogTitle>确认订单</DialogTitle>
-            <DialogDescription>模拟支付流程，确认后立即生成签到码。</DialogDescription>
+            <DialogTitle className="text-sm">确认订单</DialogTitle>
+            <DialogDescription className="text-[11px]">模拟支付流程，确认后立即生成签到码。</DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col">
+          <div className="flex flex-col divide-y divide-border/60">
             <FieldRow label="场地" value={selected ? courts.find((c) => c.id === selected)!.name : '-'} mono />
             <FieldRow label="时间" value={`${date} ${slot.label}`} mono />
             <FieldRow label="支付渠道" value={payChannel} />
             <FieldRow label="来源渠道" value={useCoupon && couponEligible ? '新客体验券' : '小程序自然流量'} />
             <FieldRow label="金额" value={yuan(price)} mono />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+          <DialogFooter className="flex-row gap-2">
+            <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setConfirmOpen(false)}>
               取消
             </Button>
-            <Button onClick={submit}>确认支付</Button>
+            <Button className="flex-1 rounded-xl" onClick={submit}>
+              确认支付
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -3,179 +3,202 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, RotateCcw, Home } from 'lucide-react'
-import { ROLE_NAV, navByRole, roleFromPath } from '@/lib/nav'
+import { ChevronLeft, MoreHorizontal, RotateCcw } from 'lucide-react'
+import { ROLE_ICON, ROLE_NAV, navByRole, roleFromPath, tabsByRole } from '@/lib/nav'
 import { useDemoStore } from '@/lib/store'
 import { DEMO_TODAY } from '@/lib/seed'
-import { Button } from '@/components/ui/button'
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
-function NavList({ onNavigate }: { onNavigate?: () => void }) {
+/** 底部标签栏：每个角色 4 个主入口 + 更多 */
+function TabBar({ onMore }: { onMore: () => void }) {
   const pathname = usePathname()
   const role = roleFromPath(pathname)
-  const nav = navByRole(role)
+  const tabs = tabsByRole(role)
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <span className="px-3 text-[11px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/50">
-          切换角色视角
-        </span>
-        <div className="flex flex-wrap gap-1.5 px-3 pt-1">
-          {ROLE_NAV.map((r) => (
-            <Link
-              key={r.role}
-              href={r.home}
-              onClick={onNavigate}
-              className={cn(
-                'rounded-full border px-3 py-1 text-xs transition-colors',
-                r.role === role
-                  ? 'border-sidebar-primary bg-sidebar-primary text-sidebar-primary-foreground'
-                  : 'border-sidebar-border text-sidebar-foreground/70 hover:border-sidebar-primary/60 hover:text-sidebar-foreground',
-              )}
-            >
-              {r.short}
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-1">
-        <span className="px-3 pb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/50">
-          {nav.label}
-        </span>
-        {nav.items.map((item) => {
-          const active = pathname === item.href
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onNavigate}
-              className={cn(
-                'flex flex-col gap-0.5 rounded-lg px-3 py-2 transition-colors',
-                active
-                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                  : 'text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
-              )}
-            >
-              <span className="text-sm font-medium leading-tight">{item.label}</span>
-              <span className="text-[11px] leading-tight text-sidebar-foreground/45">{item.desc}</span>
-            </Link>
-          )
-        })}
-      </div>
-    </div>
+    <nav
+      aria-label="主导航"
+      className="sticky bottom-0 z-30 flex items-stretch border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+    >
+      {tabs.map((t) => {
+        const active = pathname === t.href
+        const Icon = t.icon
+        return (
+          <Link
+            key={t.href}
+            href={t.href}
+            aria-current={active ? 'page' : undefined}
+            className={cn(
+              'flex flex-1 flex-col items-center justify-center gap-0.5 py-2 transition-colors',
+              active ? 'text-brand-foreground' : 'text-muted-foreground',
+            )}
+          >
+            <Icon className={cn('size-[18px]', active && 'text-brand-foreground')} strokeWidth={active ? 2.4 : 1.8} />
+            <span className={cn('text-[10px] leading-none', active && 'font-semibold')}>{t.tabLabel}</span>
+          </Link>
+        )
+      })}
+      <button
+        type="button"
+        onClick={onMore}
+        className="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-muted-foreground"
+      >
+        <MoreHorizontal className="size-[18px]" strokeWidth={1.8} />
+        <span className="text-[10px] leading-none">更多</span>
+      </button>
+    </nav>
   )
 }
 
-function SidebarInner({ onNavigate }: { onNavigate?: () => void }) {
+/** 更多面板：角色切换 + 该角色全部页面 + 演示控制 */
+function MorePanel({ onNavigate }: { onNavigate: () => void }) {
+  const pathname = usePathname()
+  const role = roleFromPath(pathname)
+  const nav = navByRole(role)
   const resetDemo = useDemoStore((s) => s.resetDemo)
+
   return (
-    <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      <Link
-        href="/"
-        onClick={onNavigate}
-        className="flex items-center gap-3 border-b border-sidebar-border px-5 py-4"
-      >
-        <span className="flex size-9 items-center justify-center rounded-lg bg-sidebar-primary text-sm font-black text-sidebar-primary-foreground">
-          金羽
-        </span>
-        <span className="flex flex-col leading-tight">
-          <span className="text-sm font-semibold">延庆羽毛球馆</span>
-          <span className="text-[11px] text-sidebar-foreground/50">会员生态经营系统原型</span>
-        </span>
-      </Link>
-
-      <ScrollArea className="flex-1">
-        <div className="px-2 py-4">
-          <NavList onNavigate={onNavigate} />
+    <div className="flex flex-col gap-5 overflow-y-auto px-4 pb-8 pt-2">
+      <section className="flex flex-col gap-2">
+        <span className="text-[11px] font-medium text-muted-foreground">切换角色视角</span>
+        <div className="grid grid-cols-2 gap-2">
+          {ROLE_NAV.map((r) => {
+            const Icon = ROLE_ICON[r.role]
+            const active = r.role === role
+            return (
+              <Link
+                key={r.role}
+                href={r.home}
+                onClick={onNavigate}
+                className={cn(
+                  'flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-medium transition-colors',
+                  active
+                    ? 'bg-brand text-brand-foreground'
+                    : 'bg-secondary text-secondary-foreground hover:bg-secondary/70',
+                )}
+              >
+                <Icon className="size-4 shrink-0" />
+                <span className="truncate">{r.short}端</span>
+              </Link>
+            )
+          })}
         </div>
-      </ScrollArea>
+      </section>
 
-      <div className="flex flex-col gap-2 border-t border-sidebar-border px-4 py-3">
-        <span className="font-mono text-[11px] text-sidebar-foreground/45">演示日期 {DEMO_TODAY}</span>
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            className="h-8 flex-1 bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent/80"
-            nativeButton={false}
-            render={<Link href="/" onClick={onNavigate} />}
-          >
-            <Home className="size-3.5" />
-            演示中心
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            className="h-8 bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent/80"
-            onClick={() => {
-              resetDemo()
-              toast.success('演示数据已重置为初始状态')
-              onNavigate?.()
-            }}
-          >
-            <RotateCcw className="size-3.5" />
-            重置
-          </Button>
+      <section className="flex flex-col gap-2">
+        <span className="text-[11px] font-medium text-muted-foreground">{nav.label}全部功能</span>
+        <div className="overflow-hidden rounded-xl bg-card">
+          {nav.items.map((item) => {
+            const Icon = item.icon
+            const active = pathname === item.href
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onNavigate}
+                className="flex items-center gap-3 border-b border-border/60 px-3 py-3 last:border-0 active:bg-secondary/60"
+              >
+                <span
+                  className={cn(
+                    'flex size-8 shrink-0 items-center justify-center rounded-lg',
+                    active ? 'bg-brand text-brand-foreground' : 'bg-secondary text-muted-foreground',
+                  )}
+                >
+                  <Icon className="size-4" />
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className={cn('truncate text-sm', active ? 'font-semibold text-foreground' : 'text-foreground')}>
+                    {item.label}
+                  </span>
+                  <span className="truncate text-[11px] text-muted-foreground">{item.desc}</span>
+                </span>
+              </Link>
+            )
+          })}
         </div>
-      </div>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            resetDemo()
+            toast.success('演示数据已重置为初始状态')
+            onNavigate()
+          }}
+          className="flex items-center justify-center gap-2 rounded-xl bg-secondary py-3 text-xs font-medium text-secondary-foreground active:bg-secondary/70"
+        >
+          <RotateCcw className="size-3.5" />
+          重置演示数据
+        </button>
+        <p className="text-center font-mono text-[10px] text-muted-foreground">演示日期 {DEMO_TODAY} · 模拟数据</p>
+      </section>
     </div>
   )
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const [open, setOpen] = useState(false)
+  const [more, setMore] = useState(false)
   const role = roleFromPath(pathname)
   const setRole = useDemoStore((s) => s.setRole)
   const nav = navByRole(role)
   const current = nav.items.find((i) => i.href === pathname) ?? nav.items[0]
+  const isRoleHome = pathname === nav.home
 
   useEffect(() => {
     setRole(role)
   }, [role, setRole])
 
   return (
-    <div className="flex min-h-svh bg-background">
-      <aside className="hidden w-64 shrink-0 border-r border-sidebar-border lg:block">
-        <div className="sticky top-0 h-svh">
-          <SidebarInner />
-        </div>
-      </aside>
+    <div className="flex min-h-svh justify-center bg-muted">
+      <div className="flex min-h-svh w-full max-w-[430px] flex-col border-border bg-background sm:border-x">
+        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-border bg-card/95 px-3 py-2.5 backdrop-blur">
+          {isRoleHome ? (
+            <Link
+              href="/"
+              aria-label="返回演示中心"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-[11px] font-black text-brand-foreground"
+            >
+              金羽
+            </Link>
+          ) : (
+            <Link
+              href={nav.home}
+              aria-label="返回上一级"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground active:bg-secondary"
+            >
+              <ChevronLeft className="size-5" />
+            </Link>
+          )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border bg-background/90 px-4 py-3 backdrop-blur lg:px-8">
-          <Sheet open={open} onOpenChange={setOpen}>
-            <SheetTrigger
-              render={
-                <Button size="icon" variant="outline" className="lg:hidden" aria-label="打开导航菜单">
-                  <Menu className="size-4" />
-                </Button>
-              }
-            />
-            <SheetContent side="left" className="w-72 border-sidebar-border bg-sidebar p-0">
-              <SheetHeader className="sr-only">
-                <SheetTitle>导航菜单</SheetTitle>
-              </SheetHeader>
-              <SidebarInner onNavigate={() => setOpen(false)} />
-            </SheetContent>
-          </Sheet>
-
-          <div className="flex min-w-0 flex-col">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{nav.label}</span>
-            <h1 className="truncate text-base font-semibold leading-tight text-foreground">{current.label}</h1>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <h1 className="truncate text-[15px] font-semibold leading-tight text-foreground">{current.label}</h1>
+            <span className="truncate text-[10px] leading-tight text-muted-foreground">{nav.label}</span>
           </div>
 
-          <span className="ml-auto hidden rounded-full border border-border bg-card px-3 py-1 font-mono text-[11px] text-muted-foreground sm:block">
-            原型演示 · 模拟数据
-          </span>
+          <Link
+            href="/"
+            className="shrink-0 rounded-full bg-secondary px-2.5 py-1 text-[10px] font-medium text-secondary-foreground"
+          >
+            {nav.short}端
+          </Link>
         </header>
 
-        <main className="flex-1 px-4 py-6 lg:px-8 lg:py-8">{children}</main>
+        <main className="flex-1 bg-muted px-3 py-3">{children}</main>
+
+        <TabBar onMore={() => setMore(true)} />
+
+        <Sheet open={more} onOpenChange={setMore}>
+          <SheetContent side="bottom" className="max-h-[86svh] rounded-t-2xl bg-muted p-0">
+            <SheetHeader className="px-4 pb-1 pt-4">
+              <SheetTitle className="text-sm">全部功能与角色切换</SheetTitle>
+            </SheetHeader>
+            <MorePanel onNavigate={() => setMore(false)} />
+          </SheetContent>
+        </Sheet>
       </div>
     </div>
   )

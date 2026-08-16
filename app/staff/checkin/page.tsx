@@ -89,7 +89,7 @@ export default function StaffCheckinPage() {
 
       <FlowProgress flow={FLOWS[0]} />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <StatCard label="今日待核销" value={waiting.length} unit="单" tone="gold" />
         <StatCard label="今日已核销" value={done.length} unit="单" tone="brand" />
         <StatCard label="核销操作人" value={OPERATOR} hint="所有操作写入审计日志" />
@@ -107,7 +107,7 @@ export default function StaffCheckinPage() {
               {waiting.map((o) => (
                 <li
                   key={o.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-secondary/50 px-3 py-2.5"
                 >
                   <div className="flex flex-col gap-0.5">
                     <span className="text-sm font-medium">
@@ -190,7 +190,7 @@ export default function StaffCheckinPage() {
             {done.map((o) => (
               <li
                 key={o.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/40 px-3 py-2"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-secondary/40 px-3 py-2"
               >
                 <span className="text-sm">
                   {o.memberName} · {describe(o.courtId, o.slotId)}

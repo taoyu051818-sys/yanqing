@@ -45,7 +45,7 @@ export default function MerchantHomePage() {
 
       <FlowProgress flow={FLOWS[3]} />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <StatCard label="发行量" value={row.issued} unit="张" hint={`${row.templates.length} 个券模板`} />
         <StatCard label="已领取" value={row.claimed} unit="张" tone="primary" />
         <StatCard label="已核销" value={row.redeemed} unit="张" hint={`核销率 ${row.redeemRate}%`} tone="brand" />
@@ -77,7 +77,7 @@ export default function MerchantHomePage() {
         title="商户档案"
         description="合作费用与结算状态由球馆后台统一对账，结算金额以实际核销归因为准。"
       >
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <StatCard label="商户类型" value={row.merchant.category} />
           <StatCard label="联系人" value={row.merchant.contact} />
           <StatCard label="合作费用" value={yuan(row.cooperationFee)} />
@@ -100,7 +100,7 @@ export default function MerchantHomePage() {
               return (
                 <li
                   key={t.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-secondary/50 px-3 py-2.5"
                 >
                   <div className="flex flex-col gap-0.5">
                     <span className="text-sm font-medium">{t.name}</span>

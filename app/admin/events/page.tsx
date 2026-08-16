@@ -82,7 +82,7 @@ export default function AdminEventsPage() {
       </PageIntro>
 
       <div className="flex flex-col gap-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <StatCard label="报名组合" value={event.pairs.length} unit="组" tone="primary" />
           <StatCard label="已完成轮次" value={event.currentRound} unit={`/${event.totalRounds}`} tone="brand" />
           <StatCard label="已录分比赛" value={finishedMatches.length} unit="场" />

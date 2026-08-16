@@ -83,7 +83,7 @@ export default function MemberTrainingPage() {
                     className={
                       active
                         ? 'flex flex-col gap-2 rounded-lg border-2 border-primary bg-primary/5 p-4 text-left transition-colors'
-                        : 'flex flex-col gap-2 rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-primary/40'
+                        : 'flex flex-col gap-2 rounded-xl bg-secondary/50 p-4 text-left transition-colors hover:border-primary/40'
                     }
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -121,7 +121,7 @@ export default function MemberTrainingPage() {
                   const pct = Math.round((e.usedSessions / e.totalSessions) * 100)
                   const logs = sessionLogs.filter((l) => l.enrollmentId === e.id)
                   return (
-                    <div key={e.id} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
+                    <div key={e.id} className="flex flex-col gap-3 rounded-xl bg-secondary/50 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="flex flex-col gap-0.5">
                           <span className="text-sm font-semibold">
@@ -142,7 +142,7 @@ export default function MemberTrainingPage() {
                         </div>
                         <Progress value={pct} aria-label="消课进度" />
                       </div>
-                      <div className="grid gap-2 sm:grid-cols-3">
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                         <StatCard label="已确认收入" value={yuan(e.confirmedRevenue)} hint="消课确认部分" tone="brand" />
                         <StatCard label="未消课余额" value={yuan(e.unusedBalance)} hint="可按剩余课时退费" tone="gold" />
                         <StatCard label="已退费" value={yuan(e.refundAmount)} />
@@ -221,7 +221,7 @@ export default function MemberTrainingPage() {
           <SectionCard title="青少年成长积分" description="消课与考核累积成长值，仅用于成长档案与晋级。">
             <div className="flex flex-col gap-2">
               <StatCard label="成长积分" value={me.growthPoints} unit="分" tone="brand" hint="不可当钱消费" />
-              <div className="flex items-start gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2">
+              <div className="flex items-start gap-2 rounded-lg bg-secondary/50 bg-secondary/40 px-3 py-2">
                 <Sprout className="mt-0.5 size-3.5 text-brand-foreground" aria-hidden />
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
                   成长积分随消课与阶段考核累积，用于展示技术等级进度、评定晋级班型，不参与任何支付抵扣。

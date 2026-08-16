@@ -41,14 +41,14 @@ export default function StaffHomePage() {
         rules={['核销即改变订单状态', '操作人留痕', '不可重复核销']}
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <StatCard label="待核销订单" value={waiting.length} unit="单" hint="已支付未到场" tone="gold" />
         <StatCard label="已核销入场" value={checked.length} unit="单" hint="含已完成订单" tone="brand" />
         <StatCard label="今日占用场地" value={`${occupied.size}/${courts.length}`} hint={`时段利用率 ${utilization}%`} />
         <StatCard label="待消课时" value={pendingSessions} unit="人" hint="学员剩余课时>0" tone="primary" />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         {QUICK.map((q) => (
           <SectionCard key={q.href} title={q.label} description={q.desc}>
             <div className="flex items-center justify-between gap-2">
@@ -82,7 +82,7 @@ export default function StaffHomePage() {
               return (
                 <li
                   key={o.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/40 px-3 py-2.5"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-secondary/40 px-3 py-2.5"
                 >
                   <div className="flex flex-col gap-0.5">
                     <span className="text-sm font-medium">
@@ -116,7 +116,7 @@ export default function StaffHomePage() {
             </LinkButton>
           }
         >
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <StatCard label="已签到组合" value={runningEvent.pairs.filter((p) => p.checkedIn).length} unit="组" />
             <StatCard label="待录入比分" value={runningEvent.matches.filter((m) => !m.confirmed).length} unit="场" />
             <StatCard label="赛事状态" value={runningEvent.status} />

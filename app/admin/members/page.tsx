@@ -75,7 +75,7 @@ export default function AdminMembersPage() {
       />
 
       <div className="flex flex-col gap-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <StatCard label="现金本金余额" value={totals.cash.toLocaleString('zh-CN')} unit="元" hint="可退可提" tone="primary" />
           <StatCard label="赠送余额" value={totals.gift.toLocaleString('zh-CN')} unit="元" hint="不可退" tone="gold" />
           <StatCard label="羽球币" value={totals.coins.toLocaleString('zh-CN')} unit="币" hint="权益兑换" tone="brand" />
@@ -210,7 +210,7 @@ export default function AdminMembersPage() {
                 {referrals.map((r) => (
                   <div
                     key={r.id}
-                    className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3"
+                    className="flex items-start justify-between gap-3 rounded-xl bg-secondary/50 p-3"
                   >
                     <div className="flex flex-col gap-0.5">
                       <span className="text-xs font-medium text-foreground">

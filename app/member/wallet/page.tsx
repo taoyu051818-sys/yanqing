@@ -97,7 +97,7 @@ export default function MemberWalletPage() {
           const withdrawable = a.key === '现金本金余额'
           return (
             <Card key={a.key} className="gap-0 py-0">
-              <CardContent className="flex flex-col gap-3 p-5">
+              <CardContent className="flex flex-col gap-3 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <a.icon className={cn('size-4', a.tone)} aria-hidden />
@@ -125,7 +125,7 @@ export default function MemberWalletPage() {
         })}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <StatCard
           label="可退款金额（现金本金）"
           value={cashTotal.toLocaleString('zh-CN')}

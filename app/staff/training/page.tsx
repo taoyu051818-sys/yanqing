@@ -43,7 +43,7 @@ export default function StaffTrainingPage() {
 
       <FlowProgress flow={FLOWS[2]} />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <StatCard label="已确认收入" value={yuan(summary.confirmedRevenue)} hint="培训有效流水" tone="brand" />
         <StatCard label="未消课预收" value={yuan(summary.unusedBalance)} hint="可退费部分" tone="gold" />
         <StatCard
@@ -67,7 +67,7 @@ export default function StaffTrainingPage() {
               return (
                 <div
                   key={e.id}
-                  className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-3 rounded-xl bg-secondary/50 p-4 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="flex min-w-0 flex-1 flex-col gap-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -100,7 +100,7 @@ export default function StaffTrainingPage() {
         但按合同约定<strong>不产生培训应付场地费</strong>，当前培训应付账款为 {yuan(summary.trainingPayableFromVenue)}。
       </RuleNote>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <StatCard label="占用场地片次" value={summary.occupiedCourtCount} unit="片次" hint="仅效率分析" />
         <StatCard label="占用场地小时" value={summary.occupiedHours} unit="小时" hint="仅效率分析" />
         <StatCard label="教练成本" value={yuan(summary.coachCost)} />

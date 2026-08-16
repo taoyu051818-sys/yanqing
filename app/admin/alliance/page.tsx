@@ -49,7 +49,7 @@ export default function AdminAlliancePage() {
       />
 
       <div className="flex flex-col gap-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <StatCard label="发行券码" value={totalIssued} unit="张" />
           <StatCard label="已核销" value={totalRedeemed} unit="张" tone="brand" />
           <StatCard label="归因成交额" value={totalGmv.toLocaleString('zh-CN')} unit="元" tone="primary" />
@@ -70,7 +70,7 @@ export default function AdminAlliancePage() {
           ) : (
             <div className="flex flex-col gap-3">
               {rows.map((r) => (
-                <div key={r.merchant.id} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
+                <div key={r.merchant.id} className="flex flex-col gap-3 rounded-xl bg-secondary/50 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex flex-col gap-1">
                       <span className="text-sm font-semibold text-foreground">{r.merchant.name}</span>
@@ -95,7 +95,7 @@ export default function AdminAlliancePage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[11px] text-muted-foreground">发行 / 领取</span>
                       <span className="font-mono text-sm text-foreground">

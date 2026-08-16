@@ -86,7 +86,7 @@ export default function MerchantCouponsPage() {
         rules={['模板发行量受控', '券码全局唯一', '过期自动失效']}
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <StatCard label="券模板数" value={myTemplates.length} unit="个" />
         <StatCard label="计划发行量" value={myTemplates.reduce((s, t) => s + t.issuedCount, 0)} unit="张" tone="primary" />
         <StatCard

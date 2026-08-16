@@ -40,7 +40,7 @@ export default function AdminAuditPage() {
       />
 
       <div className="flex flex-col gap-5">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <StatCard label="审计记录" value={logs.length} unit="条" tone="primary" />
           <StatCard label="含原因说明" value={withReason} unit="条" tone="brand" />
           <StatCard label="含前后值对比" value={withDiff} unit="条" tone="gold" />
@@ -84,7 +84,7 @@ export default function AdminAuditPage() {
           ) : (
             <ol className="flex flex-col gap-2">
               {list.map((l) => (
-                <li key={l.id} className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+                <li key={l.id} className="flex flex-col gap-2 rounded-xl bg-secondary/50 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="secondary" className="rounded-sm text-[10px]">

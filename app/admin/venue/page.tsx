@@ -65,7 +65,7 @@ export default function AdminVenuePage() {
       />
 
       <div className="flex flex-col gap-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <StatCard label="今日场地收入" value={totalRevenue.toLocaleString('zh-CN')} unit="元" tone="primary" />
           <StatCard label="黄金时段收入" value={primeRevenue.toLocaleString('zh-CN')} unit="元" tone="gold" />
           <StatCard label="黄金时段占比" value={primeShare} unit="%" hint="收入结构健康度" tone="brand" />
@@ -132,7 +132,7 @@ export default function AdminVenuePage() {
         <SectionCard title="分区利用率" description="按场地分区查看今日整体售出情况，辅助排布主力区域与训练区域。">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {byZone.map((z) => (
-              <div key={z.zone} className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
+              <div key={z.zone} className="flex flex-col gap-2 rounded-xl bg-secondary/50 p-4">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-semibold text-foreground">{z.zone}</span>
                   <span className="font-mono text-xs text-muted-foreground">{z.courts} 片</span>

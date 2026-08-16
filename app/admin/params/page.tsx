@@ -56,7 +56,7 @@ export default function AdminParamsPage() {
       />
 
       <div className="flex flex-col gap-5">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <StatCard label="参数总数" value={params.length} unit="项" tone="primary" />
           <StatCard label="已锁定" value={lockedCount} unit="项" hint="财务口径不可改" tone="gold" />
           <StatCard label="有变更历史" value={changedCount} unit="项" tone="brand" />
@@ -82,7 +82,7 @@ export default function AdminParamsPage() {
                 ) : (
                   <div className="flex flex-col gap-2">
                     {items.map((p) => (
-                      <div key={p.key} className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+                      <div key={p.key} className="flex flex-col gap-2 rounded-xl bg-secondary/50 p-3">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="flex flex-col gap-1">
                             <div className="flex flex-wrap items-center gap-2">

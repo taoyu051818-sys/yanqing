@@ -82,7 +82,7 @@ export default function StaffEventPage() {
 
       <FlowProgress flow={FLOWS[1]} />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <StatCard label="赛事状态" value={event.status} hint={`${event.date} ${event.venue}`} />
         <StatCard label="已签到组合" value={`${checkedCount}/${event.pairs.length}`} unit="组" tone="brand" />
         <StatCard label="当前轮次" value={`${event.currentRound}/${event.totalRounds}`} unit="轮" tone="primary" />
@@ -103,7 +103,7 @@ export default function StaffEventPage() {
           {event.pairs.map((p) => (
             <div
               key={p.id}
-              className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2"
+              className="flex items-center justify-between gap-2 rounded-xl bg-secondary/50 px-3 py-2"
             >
               <div className="flex flex-col gap-0.5">
                 <span className="text-sm font-medium">{pairName(p)}</span>
@@ -174,7 +174,7 @@ export default function StaffEventPage() {
               return (
                 <div
                   key={m.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-secondary/50 px-3 py-2.5"
                 >
                   <div className="flex flex-col gap-0.5">
                     <span className="text-sm font-medium">
