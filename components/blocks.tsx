@@ -77,6 +77,46 @@ export function StatCard({
   )
 }
 
+/** 带标题与说明的内容分区容器 */
+export function SectionCard({
+  title,
+  description,
+  action,
+  children,
+}: {
+  title: string
+  description?: string
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <Card className="gap-0 py-0">
+      <CardContent className="flex flex-col gap-4 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-col gap-1">
+            <h3 className="text-sm font-semibold tracking-tight text-foreground">{title}</h3>
+            {description && (
+              <p className="max-w-2xl text-pretty text-xs leading-relaxed text-muted-foreground">{description}</p>
+            )}
+          </div>
+          {action}
+        </div>
+        {children}
+      </CardContent>
+    </Card>
+  )
+}
+
+/** 业务口径说明条，用于标注需求书中的强规则 */
+export function RuleNote({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border border-gold/40 bg-gold/10 px-4 py-3">
+      <span className="text-xs font-semibold text-gold-foreground">{title}</span>
+      <p className="text-pretty text-xs leading-relaxed text-foreground/80">{children}</p>
+    </div>
+  )
+}
+
 export function FieldRow({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
     <div className="flex items-start justify-between gap-4 border-b border-border/60 py-2 last:border-0">

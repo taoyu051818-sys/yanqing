@@ -47,9 +47,10 @@
   --color-brand-foreground: var(--brand-foreground);
   --color-gold: var(--gold);
   --color-gold-foreground: var(--gold-foreground);
-  --font-sans: 'Noto Sans SC', 'Noto Sans SC Fallback', ui-sans-serif, sans-serif;
+  --font-sans: 'Noto Sans SC', 'Noto Sans SC Fallback', 'PingFang SC', 'Microsoft YaHei',
+    'Source Han Sans SC', ui-sans-serif, sans-serif;
   --font-mono: 'JetBrains Mono', 'JetBrains Mono Fallback', 'Noto Sans SC', 'Noto Sans SC Fallback',
-    ui-monospace, monospace;
+    'PingFang SC', 'Microsoft YaHei', ui-monospace, monospace;
 }
 
 :root {

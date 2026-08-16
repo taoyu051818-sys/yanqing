@@ -5,7 +5,7 @@ import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
 const _notoSansSC = Noto_Sans_SC({
-  subsets: ['latin', 'chinese-simplified'],
+  subsets: ['latin'],
   weight: ['400', '500', '700', '900'],
 })
 const _jetbrainsMono = JetBrains_Mono({ subsets: ['latin'] })
