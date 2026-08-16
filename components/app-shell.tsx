@@ -8,6 +8,7 @@ import { ROLE_ICON, ROLE_NAV, navByRole, roleFromPath, tabsByRole } from '@/lib/
 import { useDemoStore } from '@/lib/store'
 import { DEMO_TODAY } from '@/lib/seed'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { GuideProvider } from '@/components/guide'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -187,7 +188,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         </header>
 
-        <main className="flex-1 bg-muted px-3 py-3">{children}</main>
+        <GuideProvider>
+          <main className="flex-1 bg-muted px-3 pb-16 pt-3">{children}</main>
+        </GuideProvider>
 
         <TabBar onMore={() => setMore(true)} />
 

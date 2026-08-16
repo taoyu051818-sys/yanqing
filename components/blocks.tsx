@@ -1,12 +1,15 @@
 'use client'
 
 import Link from 'next/link'
-import { Check, ChevronRight } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useDemoStore } from '@/lib/store'
+import { useRegisterFlow, useRegisterIntro, useRegisterNote } from '@/components/guide'
 import type { FlowDef } from '@/lib/flows'
 
-/** 页面顶部说明：灰底上的紧凑标题区，不再使用卡片 */
+/**
+ * 页面说明：文案与规则不再写在页面里，统一注册到右下角悬浮指引。
+ * 仅渲染页面自带的操作控件（如筛选器）。
+ */
 export function PageIntro({
   title,
   desc,
@@ -18,26 +21,9 @@ export function PageIntro({
   rules?: string[]
   children?: React.ReactNode
 }) {
-  return (
-    <div className="mb-3 flex flex-col gap-2">
-      {/* 标题已在顶部导航栏展示，此处仅供屏幕阅读器 */}
-      <h2 className="sr-only">{title}</h2>
-      <p className="text-pretty text-xs leading-relaxed text-muted-foreground">{desc}</p>
-      {rules && rules.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {rules.map((r) => (
-            <span
-              key={r}
-              className="rounded-md bg-secondary px-1.5 py-1 text-[10px] leading-none text-secondary-foreground"
-            >
-              {r}
-            </span>
-          ))}
-        </div>
-      )}
-      {children}
-    </div>
-  )
+  useRegisterIntro({ title, desc, rules })
+  if (!children) return null
+  return <div className="mb-3 flex flex-col gap-2">{children}</div>
 }
 
 /** 数据指标格：白底平铺，无嵌套边框 */
@@ -103,14 +89,10 @@ export function SectionCard({
   )
 }
 
-/** 业务口径说明条 */
+/** 业务口径说明：收进悬浮指引，页面内不占位 */
 export function RuleNote({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1 rounded-xl bg-gold/12 px-3 py-2.5">
-      <span className="text-[11px] font-semibold text-gold-foreground">{title}</span>
-      <p className="text-pretty text-[11px] leading-relaxed text-foreground/75">{children}</p>
-    </div>
-  )
+  useRegisterNote(title, children)
+  return null
 }
 
 export function FieldRow({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
@@ -183,49 +165,10 @@ export function FourFactorTags({
   )
 }
 
-/** 闭环进度条 */
+/** 闭环声明：进度与步骤跳转由悬浮指引承载，页面内不再渲染进度条 */
 export function FlowProgress({ flow }: { flow: FlowDef }) {
-  const steps = useDemoStore((s) => s.flows[flow.key].steps)
-  const done = flow.steps.filter((s) => steps[s.key]).length
-  const pct = Math.round((done / flow.steps.length) * 100)
-  return (
-    <section className="flex flex-col gap-2.5 rounded-xl bg-card px-3 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-[13px] font-semibold text-foreground">
-          闭环{flow.index} · {flow.title}
-        </span>
-        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-          {done}/{flow.steps.length}
-        </span>
-      </div>
-      <div className="h-1 overflow-hidden rounded-full bg-secondary">
-        <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${pct}%` }} />
-      </div>
-      <ol className="flex flex-col gap-1.5">
-        {flow.steps.map((s, i) => {
-          const ok = steps[s.key]
-          return (
-            <li key={s.key} className="flex items-center gap-2">
-              <span
-                className={cn(
-                  'flex size-4 shrink-0 items-center justify-center rounded-full font-mono text-[9px]',
-                  ok ? 'bg-brand text-brand-foreground' : 'bg-secondary text-muted-foreground',
-                )}
-              >
-                {ok ? <Check className="size-2.5" /> : i + 1}
-              </span>
-              <Link
-                href={s.href}
-                className={cn('truncate text-[11px]', ok ? 'text-foreground' : 'text-muted-foreground')}
-              >
-                {s.label}
-              </Link>
-            </li>
-          )
-        })}
-      </ol>
-    </section>
-  )
+  useRegisterFlow(flow.key)
+  return null
 }
 
 export function StatusBadge({ status }: { status: string }) {
