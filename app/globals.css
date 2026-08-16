@@ -48,7 +48,8 @@
   --color-gold: var(--gold);
   --color-gold-foreground: var(--gold-foreground);
   --font-sans: 'Noto Sans SC', 'Noto Sans SC Fallback', ui-sans-serif, sans-serif;
-  --font-mono: 'JetBrains Mono', 'JetBrains Mono Fallback', ui-monospace, monospace;
+  --font-mono: 'JetBrains Mono', 'JetBrains Mono Fallback', 'Noto Sans SC', 'Noto Sans SC Fallback',
+    ui-monospace, monospace;
 }
 
 :root {
