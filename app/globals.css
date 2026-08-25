@@ -172,4 +172,19 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  [data-guide-active='true'] {
+    position: relative;
+    z-index: 45;
+    border-radius: var(--radius);
+    outline: 3px solid color-mix(in oklab, var(--primary) 70%, transparent);
+    outline-offset: 5px;
+    box-shadow: 0 0 0 9999px color-mix(in oklab, var(--foreground) 38%, transparent);
+    animation: guide-focus 1.4s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes guide-focus {
+  from { outline-offset: 3px; }
+  to { outline-offset: 7px; }
 }

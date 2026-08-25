@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDemoStore } from '@/lib/store'
+import { HostsModule } from '@/components/extended-modules'
 
 const LEVELS = ['全部', '初级', '中级', '高级', '混合'] as const
 
@@ -122,6 +123,8 @@ export default function MemberGamesPage() {
             </div>
           )}
         </SectionCard>
+
+        <HostsModule />
 
         <RuleNote title="球局与场地的记账边界">
           主理人购买场地时段属于「场地」业务收款，会员报名球局属于「球局」业务收款，两者不合并、不互相冲抵。主理人奖励以羽球币发放，属不可提现权益，不进入现金流水。

@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { rankPairs, pairName } from '@/lib/swiss'
 import type { PayChannel } from '@/lib/types'
+import { EventRulesModule } from '@/components/extended-modules'
 
 const CHANNELS: PayChannel[] = ['微信支付', '现金余额', '赠送余额', '羽球币']
 
@@ -274,6 +275,8 @@ export default function MemberEventsPage() {
           ))}
         </ul>
       </SectionCard>
+
+      <EventRulesModule />
 
       <SectionCard title="报名单位说明" description="赛事以双人组合为最小报名与计分单位。">
         <div className="flex items-start gap-3 rounded-xl bg-secondary/40 p-4">

@@ -305,7 +305,7 @@ function StepToast({
   )
 }
 
-/** 悬浮指引：右下角气泡按钮 + 底部面板 + 步骤完成提示 */
+/** 悬浮指引：右下角气泡按钮 + 底部面板 + 步骤完成��示 */
 export function GuideProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
@@ -313,6 +313,13 @@ export function GuideProvider({ children }: { children: React.ReactNode }) {
   const [notes, setNotes] = useState<GuideNote[]>([])
   const [flowKeys, setFlowKeys] = useState<FlowKey[]>([])
   const [tip, setTip] = useState<{ doneLabel: string; nextLabel?: string; nextHref?: string } | null>(null)
+  const [visible, setVisible] = useState(true)
+
+  useEffect(() => {
+    const onMode = (event: Event) => setVisible((event as CustomEvent).detail !== 'customer')
+    window.addEventListener('demo-guide-mode', onMode)
+    return () => window.removeEventListener('demo-guide-mode', onMode)
+  }, [])
 
   const setIntro = useCallback((v: GuideIntro | null) => setIntroState(v), [])
   const upsertNote = useCallback((n: GuideNote) => {
@@ -393,7 +400,7 @@ export function GuideProvider({ children }: { children: React.ReactNode }) {
     <GuideContext.Provider value={value}>
       {children}
 
-      {hasContent && (
+      {hasContent && visible && (
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 mx-auto flex w-full max-w-[430px] flex-col items-end gap-2 px-3 pb-[calc(58px+env(safe-area-inset-bottom))]">
           {tip && <StepToast tip={tip} onClose={() => setTip(null)} onOpenGuide={openGuide} />}
 

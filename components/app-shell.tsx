@@ -9,6 +9,7 @@ import { useDemoStore } from '@/lib/store'
 import { DEMO_TODAY } from '@/lib/seed'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { GuideProvider } from '@/components/guide'
+import { DemoDirector } from '@/components/demo-director'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -190,6 +191,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <GuideProvider>
           <main className="flex-1 bg-muted px-3 pb-16 pt-3">{children}</main>
+          <DemoDirector />
         </GuideProvider>
 
         <TabBar onMore={() => setMore(true)} />

@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { yuan } from '@/lib/finance'
+import { AcademicsModule } from '@/components/extended-modules'
 
 export default function MemberTrainingPage() {
   const courses = useDemoStore((s) => s.courses)
@@ -231,6 +232,8 @@ export default function MemberTrainingPage() {
           </SectionCard>
         </div>
       </div>
+
+      <AcademicsModule />
 
       <RuleNote title="培训财务口径（合同强规则）">
         培训业务<strong>独立建账</strong>；培训实际有效流水（已确认收入）的 <strong>20%</strong> 计入球馆合同流水；

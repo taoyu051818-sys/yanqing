@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDemoStore } from '@/lib/store'
 import { rankPairs } from '@/lib/swiss'
+import { EventRulesModule } from '@/components/extended-modules'
 
 export default function AdminEventsPage() {
   const events = useDemoStore((s) => s.events)
@@ -211,6 +212,8 @@ export default function AdminEventsPage() {
             </div>
           )}
         </SectionCard>
+
+        <EventRulesModule />
 
         <RuleNote title="为什么修正必须留痕">
           比分直接影响积分排名与赛事积分发放，属于敏感操作。系统不提供静默修改能力：任何修正都会生成审计记录（操作人、时间、修正前后值、原因），确保争议可回溯、责任可追踪。

@@ -71,7 +71,7 @@ export default function AdminCockpitPage() {
       </PageIntro>
 
       <div className="flex flex-col gap-5">
-        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <div data-guide="admin-kpis" className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <StatCard
             label="现金贡献净额"
             value={cash.net.toLocaleString('zh-CN')}

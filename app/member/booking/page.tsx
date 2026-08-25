@@ -181,7 +181,7 @@ export default function BookingPage() {
         {zones.map((zone) => (
           <div key={zone} className="flex flex-col gap-1.5">
             <span className="text-[10px] font-medium text-muted-foreground">{zone}</span>
-            <div className="grid grid-cols-4 gap-1.5">
+            <div data-guide="court-grid" className="grid grid-cols-4 gap-1.5">
               {courts
                 .filter((c) => c.zone === zone)
                 .map((c) => {

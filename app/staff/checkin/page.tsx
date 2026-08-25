@@ -152,7 +152,7 @@ export default function StaffCheckinPage() {
                   }}
                 />
               </div>
-              <Button onClick={() => handleScan()}>
+              <Button data-guide="checkin-action" onClick={() => handleScan()}>
                 <ScanLine className="size-4" />
                 确认核销
               </Button>
