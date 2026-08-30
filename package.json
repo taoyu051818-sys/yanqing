@@ -1,12 +1,26 @@
 {
-  "name": "my-project",
+  "name": "yanqing-badminton-ecosystem",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:web": "next dev",
+    "dev:api": "pnpm --dir apps/api start:dev",
+    "dev:miniapp": "pnpm --dir apps/miniapp dev:mp-weixin",
     "build": "next build",
+    "build:web": "next build",
+    "typecheck:web": "tsc --noEmit",
+    "build:api": "pnpm --dir apps/api build",
+    "build:miniapp": "pnpm --dir apps/miniapp build:mp-weixin",
+    "build:all": "pnpm build:web && pnpm build:api && pnpm build:miniapp",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "pnpm typecheck:web && pnpm --dir apps/api lint && pnpm --dir packages/shared type-check && pnpm --dir apps/miniapp type-check",
+    "test:api": "pnpm --dir apps/api test",
+    "test:miniapp": "pnpm --dir apps/miniapp test",
+    "test:shared": "pnpm --dir packages/shared test",
+    "typecheck:miniapp": "pnpm --dir apps/miniapp type-check",
+    "verify": "pnpm test:shared && pnpm test:api && pnpm test:miniapp && pnpm --dir apps/api test:e2e && pnpm build:api && pnpm typecheck:miniapp && pnpm build:miniapp",
+    "verify:full": "pnpm verify && pnpm build:web"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -34,10 +48,5 @@
     "postcss": "^8.5",
     "tailwindcss": "^4.3.3",
     "typescript": "5.7.3"
-  },
-  "pnpm": {
-    "overrides": {
-      "hono": "4.12.25"
-    }
   }
 }

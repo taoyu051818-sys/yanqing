@@ -13,3 +13,21 @@ __v0_jsx-dev-runtime.ts
 node_modules
 .next/
 .DS_Store
+
+# Build outputs
+dist/
+apps/*/dist/
+apps/miniapp/unpackage/
+coverage/
+*.tsbuildinfo
+
+# Generated database client and local data
+apps/api/src/generated/prisma/
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+
+# Runtime secrets
+.env
+apps/*/.env
+!.env.example
+!apps/*/.env.example

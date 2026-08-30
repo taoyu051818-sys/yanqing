@@ -1,0 +1,1837 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AppRole {
+  MEMBER
+  FRONT_DESK
+  COACH
+  EVENT_MANAGER
+  HOST
+  MERCHANT
+  FINANCE
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  DELETED
+}
+
+enum MemberLevel {
+  EXPERIENCE
+  REGULAR
+  GOLD
+  BLACK
+}
+
+enum AccountType {
+  CASH_PRINCIPAL
+  GIFT_BALANCE
+  BADMINTON_COIN
+  EVENT_POINTS
+  GROWTH_POINTS
+}
+
+enum AccountTxnKind {
+  CREDIT
+  DEBIT
+  FREEZE
+  UNFREEZE
+  EXPIRE
+  REVERSAL
+}
+
+enum AccountAdjustmentStatus {
+  REQUESTED
+  POSTED
+  REJECTED
+}
+
+enum BusinessType {
+  VENUE
+  GAME
+  EVENT
+  TRAINING
+  GOODS
+  MEMBERSHIP
+  RECHARGE
+  ALLIANCE
+}
+
+enum SubjectAccount {
+  VENUE
+  TRAINING
+}
+
+enum PaymentChannel {
+  WECHAT
+  CASH_PRINCIPAL
+  GIFT_BALANCE
+  BADMINTON_COIN
+  OFFLINE_CASH
+  COUPON
+}
+
+enum SourceChannel {
+  MINI_PROGRAM
+  NEWCOMER_COUPON
+  ALLIANCE
+  REFERRAL
+  QUSPORT
+  STORE_VISIT
+  DOUYIN
+  MEITUAN
+  OTHER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTING
+  TRIAL_RESERVED
+  ATTENDED
+  CONVERTED
+  LOST
+  ARCHIVED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  CHECKED_IN
+  COMPLETED
+  REFUND_PENDING
+  PARTIALLY_REFUNDED
+  REFUNDED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  CREATED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CLOSED
+  REFUNDED
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+}
+
+enum CourtZone {
+  EAST
+  WEST
+  SOUTH
+  NORTH
+}
+
+enum CourtUsage {
+  RETAIL
+  TRAINING
+  MEMBER_BLOCK
+  MAINTENANCE
+}
+
+enum SlotPeriod {
+  EARLY
+  DAYTIME
+  PRIME
+}
+
+enum BookingStatus {
+  HELD
+  CONFIRMED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+}
+
+enum CourtClosureStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum MembershipStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  FROZEN
+}
+
+enum GameLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  MIXED
+}
+
+enum GameStatus {
+  DRAFT
+  OPEN
+  FULL
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum RegistrationStatus {
+  WAITLISTED
+  REGISTERED
+  PAID
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum HostStatus {
+  APPLIED
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum RewardStatus {
+  PENDING_OBSERVATION
+  AVAILABLE
+  GRANTED
+  REVERSED
+  REJECTED
+}
+
+enum EventStatus {
+  DRAFT
+  OPEN
+  FULL
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum EventPrizeStatus {
+  ISSUED
+  RECEIVED
+}
+
+enum TeamCategory {
+  MEN_DOUBLES
+  WOMEN_DOUBLES
+  MIXED_DOUBLES
+}
+
+enum MatchStatus {
+  PENDING
+  IN_PROGRESS
+  SUBMITTED
+  CONFIRMED
+  CORRECTED
+}
+
+enum TrainingAudience {
+  YOUTH
+  ADULT
+}
+
+enum TrainingEnrollmentStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  COMPLETED
+  PARTIALLY_REFUNDED
+  REFUNDED
+  CANCELLED
+}
+
+enum TrainingSessionStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum AttendanceStatus {
+  PENDING
+  ATTENDED
+  LEAVE
+  MAKEUP_REQUIRED
+  MADE_UP
+  ABSENT
+  CANCELLED
+}
+
+enum TrainingRecognitionType {
+  CONSUME
+  REVERSAL
+}
+
+enum TrainingConsumeCorrectionStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+}
+
+enum SettlementStatus {
+  DRAFT
+  PENDING_CONFIRMATION
+  CONFIRMED
+  SETTLED
+  VOID
+}
+
+/// A business-day reconciliation moves from an editable opening snapshot to
+/// review when unresolved money/settlement items are found, and finally to a
+/// locked, immutable close.  Keeping this separate from settlement status
+/// lets finance close a day without changing the lifecycle of each statement.
+enum ReconciliationPeriodStatus {
+  OPEN
+  REVIEW
+  LOCKED
+}
+
+enum FrontDeskShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum MerchantLevel {
+  TRAFFIC_PARTNER
+  MEMBER_BENEFIT
+  SPONSOR
+}
+
+enum CouponStatus {
+  ISSUED
+  CLAIMED
+  REDEEMED
+  EXPIRED
+  VOID
+}
+
+enum InventoryMode {
+  PURCHASE
+  CONSIGNMENT
+}
+
+enum InventoryTxnType {
+  PURCHASE_IN
+  CONSIGNMENT_IN
+  SALE_OUT
+  TRAINING_USAGE
+  EVENT_USAGE
+  TRANSFER_OUT
+  TRANSFER_IN
+  LOSS_OUT
+  STOCKTAKE_GAIN
+  STOCKTAKE_LOSS
+  ADJUSTMENT
+  RETURN_OUT
+  STOCKTAKE
+}
+
+enum SupplierType {
+  OWNED
+  CONSIGNMENT
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PARTIAL_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+enum StocktakeStatus {
+  DRAFT
+  COUNTING
+  REVIEW
+  POSTED
+}
+
+enum InventoryOperationType {
+  TRANSFER
+  LOSS
+}
+
+enum InventoryOperationStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  POSTED
+  CANCELLED
+}
+
+enum ParameterType {
+  STRING
+  INTEGER
+  DECIMAL
+  BOOLEAN
+  JSON
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+  DENIED
+}
+
+enum RiskSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskStatus {
+  OPEN
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+enum ExportStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+  EXPIRED
+}
+
+model User {
+  id                                  String                      @id @default(cuid())
+  openId                              String?                     @unique
+  unionId                             String?                     @unique
+  phone                               String?                     @unique
+  displayName                         String
+  avatarUrl                           String?
+  status                              UserStatus                  @default(ACTIVE)
+  primaryRole                         AppRole                     @default(MEMBER)
+  referrerId                          String?
+  referrer                            User?                       @relation("DirectReferral", fields: [referrerId], references: [id], onDelete: SetNull)
+  directReferrals                     User[]                      @relation("DirectReferral")
+  leadsReferred                       CustomerLead[]              @relation("LeadReferrer")
+  leadsOwned                          CustomerLead[]              @relation("LeadOwner")
+  leadsConverted                      CustomerLead[]              @relation("LeadConvertedMember")
+  leadsCreated                        CustomerLead[]              @relation("LeadCreator")
+  leadFollowUps                       LeadFollowUp[]              @relation("LeadFollowUpActor")
+  roles                               UserRole[]
+  memberProfile                       MemberProfile?
+  guardianStudents                    Student[]                   @relation("StudentGuardian")
+  accounts                            Account[]
+  accountAdjustments                  AccountTransaction[]        @relation("AccountOperator")
+  requestedAccountAdjustmentReviews   AccountAdjustmentRequest[]  @relation("AccountAdjustmentRequester")
+  reviewedAccountAdjustmentReviews    AccountAdjustmentRequest[]  @relation("AccountAdjustmentReviewer")
+  memberOrders                        Order[]                     @relation("MemberOrders")
+  createdOrders                       Order[]                     @relation("CreatedOrders")
+  payments                            Payment[]                   @relation("PaymentPayer")
+  operatedPayments                    Payment[]                   @relation("PaymentOperator")
+  requestedRefunds                    Refund[]                    @relation("RequestedRefunds")
+  approvedRefunds                     Refund[]                    @relation("ApprovedRefunds")
+  courtBookings                       CourtBooking[]              @relation("MemberBookings")
+  courtClosuresCreated                CourtClosure[]              @relation("CourtClosureCreator")
+  courtClosuresCancelled              CourtClosure[]              @relation("CourtClosureCanceller")
+  hostedGames                         Game[]                      @relation("HostedGames")
+  hostProfile                         HostProfile?
+  hostRewards                         HostReward[]                @relation("HostRewards")
+  gameRegistrations                   GameRegistration[]
+  eventCaptains                       EventTeam[]                 @relation("EventCaptains")
+  trainingPurchases                   TrainingEnrollment[]        @relation("TrainingPurchases")
+  attendanceOperations                TrainingAttendance[]        @relation("AttendanceOperator")
+  requestedTrainingConsumeCorrections TrainingConsumeCorrection[] @relation("TrainingConsumeCorrectionRequester")
+  reviewedTrainingConsumeCorrections  TrainingConsumeCorrection[] @relation("TrainingConsumeCorrectionReviewer")
+  couponHoldings                      CouponCode[]                @relation("CouponHolder")
+  couponRedemptions                   CouponCode[]                @relation("CouponRedeemer")
+  parameterChanges                    SystemParameter[]           @relation("ParameterCreator")
+  auditLogs                           AuditLog[]                  @relation("AuditActor")
+  riskEvents                          RiskEvent[]                 @relation("RiskUser")
+  inventoryOperations                 InventoryTransaction[]      @relation("InventoryOperator")
+  createdPurchaseOrders               PurchaseOrder[]             @relation("PurchaseOrderCreator")
+  submittedPurchaseOrders             PurchaseOrder[]             @relation("PurchaseOrderSubmitter")
+  approvedPurchaseOrders              PurchaseOrder[]             @relation("PurchaseOrderApprover")
+  purchaseReceipts                    PurchaseReceipt[]           @relation("PurchaseReceiptOperator")
+  createdStocktakes                   Stocktake[]                 @relation("StocktakeCreator")
+  submittedStocktakes                 Stocktake[]                 @relation("StocktakeSubmitter")
+  reviewedStocktakes                  Stocktake[]                 @relation("StocktakeReviewer")
+  postedStocktakes                    Stocktake[]                 @relation("StocktakePoster")
+  createdInventoryDocuments           InventoryOperation[]        @relation("InventoryOperationCreator")
+  approvedInventoryDocuments          InventoryOperation[]        @relation("InventoryOperationApprover")
+  postedInventoryDocuments            InventoryOperation[]        @relation("InventoryOperationPoster")
+  issuedEventPrizes                   EventPrizeAward[]           @relation("EventPrizeIssuer")
+  signedEventPrizes                   EventPrizeAward[]           @relation("EventPrizeSigner")
+  referralRewardsGiven                ReferralReward[]            @relation("RewardReferrer")
+  referralRewardsEarned               ReferralReward[]            @relation("RewardNewUser")
+  exportJobs                          ExportJob[]
+  notifications                       Notification[]
+  closedReconciliationPeriods         ReconciliationPeriod[]      @relation("ClosedReconciliationPeriods")
+  operatedFrontDeskShifts             FrontDeskShift[]            @relation("FrontDeskShiftOperator")
+  openedFrontDeskShifts               FrontDeskShift[]            @relation("FrontDeskShiftOpenedBy")
+  closedFrontDeskShifts               FrontDeskShift[]            @relation("FrontDeskShiftClosedBy")
+  reviewedFrontDeskShiftVariances     FrontDeskShift[]            @relation("FrontDeskShiftVarianceReviewer")
+  createdAt                           DateTime                    @default(now())
+  updatedAt                           DateTime                    @updatedAt
+  deletedAt                           DateTime?
+
+  @@index([referrerId])
+  @@index([primaryRole, status])
+}
+
+model UserRole {
+  id         String    @id @default(cuid())
+  userId     String
+  role       AppRole
+  merchantId String?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  merchant   Merchant? @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+
+  @@unique([userId, role, merchantId])
+  @@index([role])
+}
+
+model MemberProfile {
+  id                  String               @id @default(cuid())
+  userId              String               @unique
+  level               MemberLevel          @default(EXPERIENCE)
+  tags                String[]
+  sourceChannel       SourceChannel        @default(MINI_PROGRAM)
+  membershipExpiresAt DateTime?
+  isNewCustomer       Boolean              @default(true)
+  firstVisitAt        DateTime?
+  lastVisitAt         DateTime?
+  visitCount          Int                  @default(0)
+  consentVersion      String?
+  consentedAt         DateTime?
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptions       MemberSubscription[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@index([level, membershipExpiresAt])
+  @@index([sourceChannel, createdAt])
+}
+
+model CustomerLead {
+  id                String         @id @default(cuid())
+  displayName       String
+  phone             String?
+  status            LeadStatus     @default(NEW)
+  sourceChannel     SourceChannel
+  campaign          String?
+  referrerId        String?
+  ownerId           String?
+  convertedMemberId String?
+  createdById       String
+  nextFollowUpAt    DateTime?
+  slaDueAt          DateTime
+  convertedAt       DateTime?
+  lostAt            DateTime?
+  archivedAt        DateTime?
+  lostReason        String?
+  referrer          User?          @relation("LeadReferrer", fields: [referrerId], references: [id], onDelete: SetNull)
+  owner             User?          @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  convertedMember   User?          @relation("LeadConvertedMember", fields: [convertedMemberId], references: [id], onDelete: SetNull)
+  createdBy         User           @relation("LeadCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  followUps         LeadFollowUp[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([status, slaDueAt])
+  @@index([ownerId, status, nextFollowUpAt])
+  @@index([sourceChannel, campaign, createdAt])
+  @@index([convertedMemberId])
+  @@index([phone])
+}
+
+model LeadFollowUp {
+  id             String       @id @default(cuid())
+  leadId         String
+  actorId        String
+  kind           String
+  content        String
+  statusBefore   LeadStatus
+  statusAfter    LeadStatus
+  nextFollowUpAt DateTime?
+  lead           CustomerLead @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  actor          User         @relation("LeadFollowUpActor", fields: [actorId], references: [id], onDelete: Restrict)
+  createdAt      DateTime     @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model Student {
+  id                    String               @id @default(cuid())
+  guardianId            String
+  displayName           String
+  birthMonth            DateTime?
+  guardianConsentStatus Boolean              @default(false)
+  authorizationNote     String?
+  guardian              User                 @relation("StudentGuardian", fields: [guardianId], references: [id], onDelete: Restrict)
+  enrollments           TrainingEnrollment[]
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  @@index([guardianId])
+}
+
+model Account {
+  id                 String                     @id @default(cuid())
+  userId             String
+  type               AccountType
+  balance            Int                        @default(0)
+  frozenBalance      Int                        @default(0)
+  version            Int                        @default(0)
+  user               User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions       AccountTransaction[]
+  adjustmentRequests AccountAdjustmentRequest[]
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+
+  @@unique([userId, type])
+  @@index([type])
+}
+
+model AccountTransaction {
+  id                String                    @id @default(cuid())
+  accountId         String
+  kind              AccountTxnKind
+  amount            Int
+  balanceBefore     Int
+  balanceAfter      Int
+  reasonCode        String
+  reason            String
+  orderId           String?
+  operatorId        String?
+  idempotencyKey    String                    @unique
+  expiresAt         DateTime?
+  metadata          Json?
+  account           Account                   @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  order             Order?                    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  operator          User?                     @relation("AccountOperator", fields: [operatorId], references: [id], onDelete: SetNull)
+  adjustmentRequest AccountAdjustmentRequest?
+  createdAt         DateTime                  @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([orderId])
+}
+
+model AccountAdjustmentRequest {
+  id                    String                  @id @default(cuid())
+  accountId             String
+  amount                Int
+  reason                String
+  status                AccountAdjustmentStatus @default(REQUESTED)
+  requestedById         String
+  reviewedById          String?
+  requestIdempotencyKey String                  @unique
+  commandHash           String
+  reviewReason          String?
+  transactionId         String?                 @unique
+  reviewedAt            DateTime?
+  account               Account                 @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  requestedBy           User                    @relation("AccountAdjustmentRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedBy            User?                   @relation("AccountAdjustmentReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  transaction           AccountTransaction?     @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+
+  @@index([status, createdAt])
+  @@index([accountId, createdAt])
+  @@index([requestedById, createdAt])
+}
+
+model SystemParameter {
+  id            String        @id @default(cuid())
+  key           String
+  value         Json
+  type          ParameterType
+  description   String
+  locked        Boolean       @default(false)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  createdById   String?
+  createdBy     User?         @relation("ParameterCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime      @default(now())
+
+  @@unique([key, effectiveFrom])
+  @@index([key, effectiveFrom, effectiveTo])
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  actorId    String?
+  actorRole  AppRole?
+  action     String
+  objectType String
+  objectId   String?
+  oldValue   Json?
+  newValue   Json?
+  reason     String?
+  result     AuditResult @default(SUCCESS)
+  requestId  String?
+  ip         String?
+  deviceInfo String?
+  actor      User?       @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  createdAt  DateTime    @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([objectType, objectId, createdAt])
+  @@index([requestId])
+}
+
+model ReconciliationPeriod {
+  id             String                     @id @default(cuid())
+  /// The start of the business day in Asia/Shanghai (stored as a UTC instant).
+  businessDate   DateTime                   @unique
+  status         ReconciliationPeriodStatus @default(OPEN)
+  totals         Json
+  exceptionCount Int                        @default(0)
+  closedById     String?
+  closedAt       DateTime?
+  detail         Json
+  closedBy       User?                      @relation("ClosedReconciliationPeriods", fields: [closedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  @@index([status, businessDate])
+}
+
+model FrontDeskShift {
+  id                   String               @id @default(cuid())
+  /// Start of the operating day in Asia/Shanghai, stored as a UTC instant.
+  businessDate         DateTime
+  venueCode            String               @default("MAIN")
+  operatorId           String
+  status               FrontDeskShiftStatus @default(OPEN)
+  openedAt             DateTime             @default(now())
+  openingCashCents     Int
+  closedAt             DateTime?
+  closingCashCents     Int?
+  expectedCashCents    Int?
+  cashVarianceCents    Int?
+  handoverNote         String?
+  closeReason          String?
+  varianceReviewedById String?
+  varianceReviewedAt   DateTime?
+  varianceReviewReason String?
+  pendingSnapshot      Json?
+  openedById           String
+  closedById           String?
+  operator             User                 @relation("FrontDeskShiftOperator", fields: [operatorId], references: [id], onDelete: Restrict)
+  openedBy             User                 @relation("FrontDeskShiftOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
+  closedBy             User?                @relation("FrontDeskShiftClosedBy", fields: [closedById], references: [id], onDelete: Restrict)
+  varianceReviewedBy   User?                @relation("FrontDeskShiftVarianceReviewer", fields: [varianceReviewedById], references: [id], onDelete: Restrict)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  @@unique([businessDate, operatorId, venueCode], map: "front_desk_shift_business_operator_venue_key")
+  @@index([status, businessDate])
+  @@index([venueCode, businessDate])
+  @@index([operatorId, openedAt])
+  @@index([varianceReviewedById, varianceReviewedAt])
+}
+
+model RiskEvent {
+  id         String       @id @default(cuid())
+  ruleCode   String
+  severity   RiskSeverity
+  status     RiskStatus   @default(OPEN)
+  userId     String?
+  orderId    String?
+  objectType String
+  objectId   String?
+  summary    String
+  evidence   Json?
+  resolvedBy String?
+  resolvedAt DateTime?
+  user       User?        @relation("RiskUser", fields: [userId], references: [id], onDelete: SetNull)
+  order      Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdAt  DateTime     @default(now())
+
+  @@index([status, severity, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Court {
+  id        String         @id @default(cuid())
+  code      String         @unique
+  name      String
+  zone      CourtZone
+  usage     CourtUsage     @default(RETAIL)
+  enabled   Boolean        @default(true)
+  sortOrder Int
+  bookings  CourtBooking[]
+  closures  CourtClosure[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([enabled, sortOrder])
+}
+
+model CourtClosure {
+  id                     String             @id @default(cuid())
+  courtId                String
+  startsAt               DateTime
+  endsAt                 DateTime
+  reason                 String
+  status                 CourtClosureStatus @default(ACTIVE)
+  creationIdempotencyKey String             @unique
+  createdById            String
+  cancelledById          String?
+  cancelledAt            DateTime?
+  cancelReason           String?
+  court                  Court              @relation(fields: [courtId], references: [id], onDelete: Restrict)
+  createdBy              User               @relation("CourtClosureCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  cancelledBy            User?              @relation("CourtClosureCanceller", fields: [cancelledById], references: [id], onDelete: Restrict)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  @@index([courtId, status, startsAt])
+  @@index([status, startsAt, endsAt])
+  @@index([createdById, createdAt])
+}
+
+model TimeSlot {
+  id           String      @id @default(cuid())
+  code         String      @unique
+  label        String
+  startMinutes Int
+  endMinutes   Int
+  period       SlotPeriod
+  enabled      Boolean     @default(true)
+  sortOrder    Int
+  priceRules   PriceRule[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model PriceRule {
+  id                 String    @id @default(cuid())
+  name               String
+  timeSlotId         String?
+  weekdayMask        Int       @default(127)
+  priceCents         Int
+  newcomerPriceCents Int?
+  effectiveFrom      DateTime
+  effectiveTo        DateTime?
+  enabled            Boolean   @default(true)
+  timeSlot           TimeSlot? @relation(fields: [timeSlotId], references: [id], onDelete: Cascade)
+  createdAt          DateTime  @default(now())
+
+  @@index([timeSlotId, effectiveFrom, effectiveTo])
+}
+
+model CourtBooking {
+  id              String         @id @default(cuid())
+  courtId         String
+  memberId        String?
+  orderId         String?        @unique
+  status          BookingStatus  @default(HELD)
+  startsAt        DateTime
+  endsAt          DateTime
+  holdExpiresAt   DateTime?
+  usage           CourtUsage     @default(RETAIL)
+  trainingClassId String?
+  gameId          String?
+  note            String?
+  court           Court          @relation(fields: [courtId], references: [id], onDelete: Restrict)
+  member          User?          @relation("MemberBookings", fields: [memberId], references: [id], onDelete: SetNull)
+  order           Order?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  trainingClass   TrainingClass? @relation(fields: [trainingClassId], references: [id], onDelete: SetNull)
+  game            Game?          @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  // Active bookings are protected by a partial database index (see the
+  // follow-up migration).  A plain Prisma @@unique would also include
+  // cancelled historical rows and would prevent a customer from booking the
+  // same slot again after a cancellation.
+  @@index([courtId, startsAt, status])
+  @@index([memberId, startsAt])
+}
+
+model MembershipProduct {
+  id            String               @id @default(cuid())
+  code          String               @unique
+  name          String
+  level         MemberLevel
+  priceCents    Int
+  durationDays  Int
+  benefits      Json
+  enabled       Boolean              @default(true)
+  subscriptions MemberSubscription[]
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+}
+
+model MemberSubscription {
+  id        String            @id @default(cuid())
+  memberId  String
+  productId String
+  orderId   String?           @unique
+  startsAt  DateTime
+  endsAt    DateTime
+  status    MembershipStatus  @default(ACTIVE)
+  member    MemberProfile     @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  product   MembershipProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+  order     Order?            @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdAt DateTime          @default(now())
+
+  @@index([memberId, status, endsAt])
+}
+
+model Order {
+  id                     String               @id @default(cuid())
+  orderNo                String               @unique
+  creationIdempotencyKey String?              @unique
+  creationCommandHash    String?
+  memberId               String
+  createdById            String?
+  businessType           BusinessType
+  subjectAccount         SubjectAccount
+  paymentChannel         PaymentChannel?
+  sourceChannel          SourceChannel
+  status                 OrderStatus          @default(PENDING)
+  title                  String
+  listAmountCents        Int
+  discountCents          Int                  @default(0)
+  payableCents           Int
+  paidCents              Int                  @default(0)
+  refundedCents          Int                  @default(0)
+  externalOrderNo        String?              @unique
+  consumedCouponCode     String?
+  parameterSnapshot      Json
+  paidAt                 DateTime?
+  completedAt            DateTime?
+  cancelledAt            DateTime?
+  member                 User                 @relation("MemberOrders", fields: [memberId], references: [id], onDelete: Restrict)
+  createdBy              User?                @relation("CreatedOrders", fields: [createdById], references: [id], onDelete: SetNull)
+  items                  OrderItem[]
+  payments               Payment[]
+  refunds                Refund[]
+  accountTransactions    AccountTransaction[]
+  riskEvents             RiskEvent[]
+  bookings               CourtBooking[]
+  membership             MemberSubscription?
+  gameRegistration       GameRegistration?
+  eventTeam              EventTeam?
+  trainingEnrollment     TrainingEnrollment?
+  couponAttributions     CouponCode[]         @relation("CouponAttributionOrder")
+  referralRewards        ReferralReward[]
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+
+  @@index([memberId, createdAt])
+  @@index([businessType, subjectAccount, createdAt])
+  @@index([status, createdAt])
+  @@index([sourceChannel, createdAt])
+}
+
+model OrderItem {
+  id                    String                 @id @default(cuid())
+  orderId               String
+  itemType              String
+  itemId                String?
+  name                  String
+  quantity              Int                    @default(1)
+  unitPriceCents        Int
+  amountCents           Int
+  metadata              Json?
+  order                 Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inventoryTransactions InventoryTransaction[]
+
+  @@index([orderId])
+}
+
+model Payment {
+  id              String         @id @default(cuid())
+  paymentNo       String         @unique
+  orderId         String
+  userId          String
+  operatorId      String
+  channel         PaymentChannel
+  amountCents     Int
+  status          PaymentStatus  @default(CREATED)
+  providerTradeNo String?        @unique
+  idempotencyKey  String         @unique
+  providerPayload Json?
+  paidAt          DateTime?
+  order           Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  user            User           @relation("PaymentPayer", fields: [userId], references: [id], onDelete: Restrict)
+  operator        User           @relation("PaymentOperator", fields: [operatorId], references: [id], onDelete: Restrict)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([orderId, status])
+  @@index([operatorId, channel, paidAt])
+}
+
+model Refund {
+  id               String       @id @default(cuid())
+  refundNo         String       @unique
+  // Client supplied key used to make repeated refund taps safe.  Nullable
+  // keeps the migration backwards-compatible with refunds created before
+  // idempotency was introduced; new requests always persist a derived key.
+  idempotencyKey   String?      @unique
+  orderId          String
+  requestedById    String
+  approvedById     String?
+  amountCents      Int
+  reason           String
+  status           RefundStatus @default(REQUESTED)
+  providerRefundNo String?      @unique
+  requestedAt      DateTime     @default(now())
+  approvedAt       DateTime?
+  completedAt      DateTime?
+  order            Order        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  requestedBy      User         @relation("RequestedRefunds", fields: [requestedById], references: [id], onDelete: Restrict)
+  approvedBy       User?        @relation("ApprovedRefunds", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([orderId, status])
+  @@index([status, requestedAt])
+}
+
+model Game {
+  id            String             @id @default(cuid())
+  code          String             @unique
+  title         String
+  hostId        String
+  level         GameLevel
+  status        GameStatus         @default(DRAFT)
+  startsAt      DateTime
+  endsAt        DateTime
+  capacity      Int
+  feeCents      Int
+  newcomerOnly  Boolean            @default(false)
+  description   String?
+  rewardRule    Json?
+  host          User               @relation("HostedGames", fields: [hostId], references: [id], onDelete: Restrict)
+  registrations GameRegistration[]
+  hostRewards   HostReward[]
+  courtBookings CourtBooking[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([status, startsAt])
+  @@index([hostId, startsAt])
+}
+
+model GameRegistration {
+  id          String             @id @default(cuid())
+  gameId      String
+  userId      String
+  orderId     String?            @unique
+  status      RegistrationStatus @default(REGISTERED)
+  checkedInAt DateTime?
+  game        Game               @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user        User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  order       Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdAt   DateTime           @default(now())
+
+  @@unique([gameId, userId])
+  @@index([gameId, status])
+}
+
+model HostProfile {
+  id              String     @id @default(cuid())
+  userId          String     @unique
+  status          HostStatus @default(APPLIED)
+  level           String     @default("BRONZE")
+  appliedAt       DateTime   @default(now())
+  approvedAt      DateTime?
+  suspendedReason String?
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model HostReward {
+  id          String       @id @default(cuid())
+  hostId      String
+  gameId      String
+  rewardType  String
+  rewardValue Int
+  basisCount  Int
+  status      RewardStatus @default(PENDING_OBSERVATION)
+  availableAt DateTime?
+  grantedAt   DateTime?
+  game        Game         @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  host        User         @relation("HostRewards", fields: [hostId], references: [id], onDelete: Restrict)
+  createdAt   DateTime     @default(now())
+
+  @@unique([gameId])
+  @@index([hostId, status])
+}
+
+model Event {
+  id                 String            @id @default(cuid())
+  code               String            @unique
+  name               String
+  startsAt           DateTime
+  registrationEndsAt DateTime
+  status             EventStatus       @default(DRAFT)
+  capacityPeople     Int               @default(48)
+  minimumPeople      Int               @default(24)
+  totalRounds        Int               @default(5)
+  currentRound       Int               @default(0)
+  feeCents           Int
+  memberFeeCents     Int?
+  rules              Json
+  prizePool          Json?
+  sponsor            String?
+  teams              EventTeam[]
+  matches            EventMatch[]
+  prizeAwards        EventPrizeAward[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([status, startsAt])
+}
+
+model EventTeam {
+  id                 String             @id @default(cuid())
+  eventId            String
+  captainId          String
+  orderId            String?            @unique
+  name               String
+  playerAName        String
+  playerBName        String
+  playerAUserId      String?
+  playerBUserId      String?
+  category           TeamCategory
+  seed               Int
+  status             RegistrationStatus @default(REGISTERED)
+  checkedInAt        DateTime?
+  points             Int                @default(0)
+  wins               Int                @default(0)
+  losses             Int                @default(0)
+  scoreDiff          Int                @default(0)
+  opponents          String[]
+  finalRank          Int?
+  eventPointsAwarded Int                @default(0)
+  event              Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  captain            User               @relation("EventCaptains", fields: [captainId], references: [id], onDelete: Restrict)
+  order              Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  matchesAsA         EventMatch[]       @relation("MatchTeamA")
+  matchesAsB         EventMatch[]       @relation("MatchTeamB")
+  prizeAwards        EventPrizeAward[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@unique([eventId, seed])
+  @@index([eventId, status])
+}
+
+model EventMatch {
+  id               String      @id @default(cuid())
+  eventId          String
+  round            Int
+  courtLabel       String?
+  teamAId          String
+  teamBId          String?
+  startingScoreA   Int         @default(0)
+  startingScoreB   Int         @default(0)
+  scoreA           Int?
+  scoreB           Int?
+  status           MatchStatus @default(PENDING)
+  submittedById    String?
+  confirmedById    String?
+  correctionReason String?
+  submittedAt      DateTime?
+  confirmedAt      DateTime?
+  event            Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  teamA            EventTeam   @relation("MatchTeamA", fields: [teamAId], references: [id], onDelete: Restrict)
+  teamB            EventTeam?  @relation("MatchTeamB", fields: [teamBId], references: [id], onDelete: Restrict)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@unique([eventId, round, teamAId])
+  @@index([eventId, round, status])
+}
+
+model EventPrizeAward {
+  id                     String               @id @default(cuid())
+  eventId                String
+  teamId                 String
+  awardName              String
+  finalRank              Int
+  recipientNames         String[]
+  inventoryItemId        String
+  quantity               Int
+  status                 EventPrizeStatus     @default(ISSUED)
+  operatorId             String
+  inventoryTransactionId String               @unique
+  idempotencyKey         String               @unique
+  note                   String?
+  prizePoolSnapshot      Json?
+  issuedAt               DateTime             @default(now())
+  receivedByName         String?
+  signedById             String?
+  receiptNote            String?
+  receiptIdempotencyKey  String?              @unique
+  receivedAt             DateTime?
+  event                  Event                @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  team                   EventTeam            @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  inventoryItem          InventoryItem        @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  inventoryTransaction   InventoryTransaction @relation(fields: [inventoryTransactionId], references: [id], onDelete: Restrict)
+  operator               User                 @relation("EventPrizeIssuer", fields: [operatorId], references: [id], onDelete: Restrict)
+  signedBy               User?                @relation("EventPrizeSigner", fields: [signedById], references: [id], onDelete: Restrict)
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+
+  @@unique([eventId, teamId, awardName, inventoryItemId])
+  @@index([eventId, status, issuedAt])
+  @@index([teamId])
+  @@index([inventoryItemId, issuedAt])
+}
+
+model TrainingProduct {
+  id               String               @id @default(cuid())
+  code             String               @unique
+  name             String
+  audience         TrainingAudience
+  totalSessions    Int
+  validityDays     Int
+  priceCents       Int
+  unitRevenueCents Int
+  refundRule       Json
+  enabled          Boolean              @default(true)
+  classes          TrainingClass[]
+  enrollments      TrainingEnrollment[]
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+}
+
+model TrainingClass {
+  id                   String               @id @default(cuid())
+  code                 String               @unique
+  productId            String
+  name                 String
+  coachId              String?
+  assistantId          String?
+  schedule             Json
+  capacity             Int
+  courtCountPerSession Int                  @default(1)
+  hoursPerSession      Decimal              @default(1) @db.Decimal(6, 2)
+  coachCostCents       Int                  @default(0)
+  assistantCostCents   Int                  @default(0)
+  materialCostCents    Int                  @default(0)
+  active               Boolean              @default(true)
+  product              TrainingProduct      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  enrollments          TrainingEnrollment[]
+  sessions             TrainingSession[]
+  courtBookings        CourtBooking[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  @@index([productId, active])
+}
+
+model TrainingEnrollment {
+  id                    String                       @id @default(cuid())
+  enrollmentNo          String                       @unique
+  productId             String
+  classId               String?
+  studentId             String?
+  buyerId               String
+  orderId               String?                      @unique
+  contractNo            String                       @unique
+  totalSessions         Int
+  consumedSessions      Int                          @default(0)
+  totalAmountCents      Int
+  prepaidBalanceCents   Int
+  confirmedRevenueCents Int                          @default(0)
+  refundedCents         Int                          @default(0)
+  status                TrainingEnrollmentStatus     @default(PENDING_PAYMENT)
+  seatReservedUntil     DateTime?
+  startsAt              DateTime
+  expiresAt             DateTime
+  guardianAuthorization Json?
+  product               TrainingProduct              @relation(fields: [productId], references: [id], onDelete: Restrict)
+  class                 TrainingClass?               @relation(fields: [classId], references: [id], onDelete: SetNull)
+  student               Student?                     @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  buyer                 User                         @relation("TrainingPurchases", fields: [buyerId], references: [id], onDelete: Restrict)
+  order                 Order?                       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  attendances           TrainingAttendance[]
+  revenueRecognitions   TrainingRevenueRecognition[]
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+
+  @@index([buyerId, status])
+  @@index([classId, status])
+  @@index([classId, status, seatReservedUntil])
+  @@index([studentId])
+}
+
+model TrainingSession {
+  id                 String                @id @default(cuid())
+  classId            String
+  startsAt           DateTime
+  endsAt             DateTime
+  status             TrainingSessionStatus @default(SCHEDULED)
+  courtCount         Int
+  occupiedCourtHours Decimal               @db.Decimal(8, 2)
+  coachCostCents     Int                   @default(0)
+  assistantCostCents Int                   @default(0)
+  materialCostCents  Int                   @default(0)
+  note               String?
+  class              TrainingClass         @relation(fields: [classId], references: [id], onDelete: Restrict)
+  attendances        TrainingAttendance[]
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@unique([classId, startsAt])
+  @@index([startsAt, status])
+}
+
+model TrainingAttendance {
+  id                          String                       @id @default(cuid())
+  sessionId                   String
+  enrollmentId                String
+  status                      AttendanceStatus             @default(PENDING)
+  consumedSessions            Int                          @default(0)
+  confirmedRevenueCents       Int                          @default(0)
+  coachCostAllocatedCents     Int                          @default(0)
+  assistantCostAllocatedCents Int                          @default(0)
+  materialCostAllocatedCents  Int                          @default(0)
+  growthPointsAwarded         Int                          @default(0)
+  feedback                    String?
+  operatorId                  String?
+  checkedInAt                 DateTime?
+  consumedAt                  DateTime?
+  session                     TrainingSession              @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  enrollment                  TrainingEnrollment           @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  operator                    User?                        @relation("AttendanceOperator", fields: [operatorId], references: [id], onDelete: SetNull)
+  revenueRecognitions         TrainingRevenueRecognition[]
+  consumeCorrections          TrainingConsumeCorrection[]
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+
+  @@unique([sessionId, enrollmentId])
+  @@index([enrollmentId, status])
+}
+
+model TrainingSettlement {
+  id                          String                       @id @default(cuid())
+  periodStart                 DateTime
+  periodEnd                   DateTime
+  effectiveRevenueCents       Int
+  contractRateBps             Int                          @default(2000)
+  venueContributionCents      Int
+  venueFeeCents               Int                          @default(0)
+  trainingPayableVenueCents   Int                          @default(0)
+  coachCostCents              Int                          @default(0)
+  assistantCostCents          Int                          @default(0)
+  materialCostCents           Int                          @default(0)
+  acquisitionCostCents        Int                          @default(0)
+  marketingCostCents          Int                          @default(0)
+  occupiedCourtHours          Decimal                      @default(0) @db.Decimal(10, 2)
+  cashContributionMarginCents Int
+  status                      SettlementStatus             @default(DRAFT)
+  confirmedById               String?
+  confirmedAt                 DateTime?
+  recognitions                TrainingRevenueRecognition[]
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+
+  @@unique([periodStart, periodEnd])
+  @@index([status, periodEnd])
+}
+
+model TrainingRevenueRecognition {
+  id                        String                      @id @default(cuid())
+  attendanceId              String
+  enrollmentId              String
+  settlementId              String?
+  type                      TrainingRecognitionType     @default(CONSUME)
+  sequence                  Int                         @default(1)
+  reversalOfId              String?                     @unique
+  effectiveRevenueCents     Int
+  contractRateBps           Int                         @default(2000)
+  venueContributionCents    Int
+  venueFeeCents             Int                         @default(0)
+  trainingPayableVenueCents Int                         @default(0)
+  idempotencyKey            String                      @unique
+  attendance                TrainingAttendance          @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  enrollment                TrainingEnrollment          @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  settlement                TrainingSettlement?         @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+  reversalOf                TrainingRevenueRecognition? @relation("TrainingRecognitionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy                TrainingRevenueRecognition? @relation("TrainingRecognitionReversal")
+  correctionRequests        TrainingConsumeCorrection[] @relation("TrainingConsumeCorrectionTarget")
+  correctionReversal        TrainingConsumeCorrection?  @relation("TrainingConsumeCorrectionReversal")
+  createdAt                 DateTime                    @default(now())
+
+  @@unique([attendanceId, sequence], map: "training_recognition_attendance_sequence_key")
+  @@index([createdAt])
+  @@index([type, createdAt])
+  @@index([settlementId])
+  @@index([enrollmentId])
+}
+
+model TrainingConsumeCorrection {
+  id                     String                          @id @default(cuid())
+  recognitionId          String
+  attendanceId           String
+  status                 TrainingConsumeCorrectionStatus @default(REQUESTED)
+  reason                 String
+  reviewReason           String?
+  requestedById          String
+  reviewedById           String?
+  reversalRecognitionId  String?                         @unique
+  requestIdempotencyKey  String                          @unique
+  decisionIdempotencyKey String?                         @unique
+  requestedAt            DateTime                        @default(now())
+  reviewedAt             DateTime?
+  recognition            TrainingRevenueRecognition      @relation("TrainingConsumeCorrectionTarget", fields: [recognitionId], references: [id], onDelete: Restrict)
+  reversalRecognition    TrainingRevenueRecognition?     @relation("TrainingConsumeCorrectionReversal", fields: [reversalRecognitionId], references: [id], onDelete: Restrict)
+  attendance             TrainingAttendance              @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  requestedBy            User                            @relation("TrainingConsumeCorrectionRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedBy             User?                           @relation("TrainingConsumeCorrectionReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  createdAt              DateTime                        @default(now())
+  updatedAt              DateTime                        @updatedAt
+
+  @@index([status, requestedAt])
+  @@index([recognitionId, status])
+  @@index([attendanceId, status])
+}
+
+model Merchant {
+  id                  String               @id @default(cuid())
+  code                String               @unique
+  name                String
+  category            String
+  level               MerchantLevel
+  contactName         String?
+  contactPhone        String?
+  status              UserStatus           @default(ACTIVE)
+  settlementRule      Json
+  cooperationStartsAt DateTime?
+  cooperationEndsAt   DateTime?
+  userRoles           UserRole[]
+  couponTemplates     CouponTemplate[]
+  couponRedemptions   CouponCode[]         @relation("CouponRedeemMerchant")
+  settlements         AllianceSettlement[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+}
+
+model CouponTemplate {
+  id                 String       @id @default(cuid())
+  code               String       @unique
+  merchantId         String
+  name               String
+  activityName       String
+  benefitDescription String
+  faceValueCents     Int          @default(0)
+  validFrom          DateTime
+  validTo            DateTime
+  claimLimitPerUser  Int          @default(1)
+  issueLimit         Int
+  issuedCount        Int          @default(0)
+  claimedCount       Int          @default(0)
+  redeemedCount      Int          @default(0)
+  enabled            Boolean      @default(true)
+  merchant           Merchant     @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  codes              CouponCode[]
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@index([merchantId, enabled, validTo])
+}
+
+model CouponCode {
+  id                    String         @id @default(cuid())
+  templateId            String
+  code                  String         @unique
+  status                CouponStatus   @default(ISSUED)
+  holderId              String?
+  redeemedById          String?
+  redeemedMerchantId    String?
+  attributionOrderId    String?
+  claimedAt             DateTime?
+  redeemedAt            DateTime?
+  expiresAt             DateTime
+  attributedAmountCents Int            @default(0)
+  idempotencyKey        String?        @unique
+  template              CouponTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  holder                User?          @relation("CouponHolder", fields: [holderId], references: [id], onDelete: SetNull)
+  redeemedBy            User?          @relation("CouponRedeemer", fields: [redeemedById], references: [id], onDelete: SetNull)
+  redeemedMerchant      Merchant?      @relation("CouponRedeemMerchant", fields: [redeemedMerchantId], references: [id], onDelete: SetNull)
+  attributionOrder      Order?         @relation("CouponAttributionOrder", fields: [attributionOrderId], references: [id], onDelete: SetNull)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@index([templateId, status])
+  @@index([holderId, status])
+  @@index([redeemedMerchantId, redeemedAt])
+}
+
+model AllianceSettlement {
+  id                         String           @id @default(cuid())
+  merchantId                 String
+  periodStart                DateTime
+  periodEnd                  DateTime
+  issuedCount                Int
+  claimedCount               Int
+  redeemedCount              Int
+  effectiveNewCustomers      Int
+  attributedGmvCents         Int
+  attributedGrossProfitCents Int
+  cooperationFeeCents        Int
+  roi                        Decimal?         @db.Decimal(12, 4)
+  status                     SettlementStatus @default(DRAFT)
+  detail                     Json
+  confirmedAt                DateTime?
+  settledAt                  DateTime?
+  merchant                   Merchant         @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+
+  @@unique([merchantId, periodStart, periodEnd])
+  @@index([status, periodEnd])
+}
+
+model ReferralReward {
+  id                String       @id @default(cuid())
+  referrerId        String
+  newUserId         String
+  triggerOrderId    String?
+  triggerType       String
+  rewardType        String
+  rewardValue       Int
+  status            RewardStatus @default(PENDING_OBSERVATION)
+  observationEndsAt DateTime
+  grantedAt         DateTime?
+  reversedAt        DateTime?
+  referrer          User         @relation("RewardReferrer", fields: [referrerId], references: [id], onDelete: Restrict)
+  newUser           User         @relation("RewardNewUser", fields: [newUserId], references: [id], onDelete: Restrict)
+  triggerOrder      Order?       @relation(fields: [triggerOrderId], references: [id], onDelete: SetNull)
+  createdAt         DateTime     @default(now())
+
+  // A reward is a property of the new member + business trigger, not of a
+  // particular order.  Keeping triggerOrderId in the old key allowed two
+  // concurrent first payments (with different order ids) to create two
+  // rewards.  The trigger order remains an audit/reference field, while this
+  // invariant is enforced independently at the database boundary.
+  @@unique([newUserId, triggerType])
+  @@index([referrerId, status])
+}
+
+model InventoryItem {
+  id                 String                  @id @default(cuid())
+  sku                String                  @unique
+  name               String
+  category           String
+  mode               InventoryMode
+  supplier           String
+  purchasePriceCents Int
+  salePriceCents     Int
+  stock              Int                     @default(0)
+  safeStock          Int                     @default(0)
+  supplierId         String?
+  defaultLocationId  String?
+  batchCode          String?
+  expiresAt          DateTime?
+  enabled            Boolean                 @default(true)
+  transactions       InventoryTransaction[]
+  eventPrizeAwards   EventPrizeAward[]
+  supplierRecord     Supplier?               @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  defaultLocation    InventoryLocation?      @relation("InventoryItemDefaultLocation", fields: [defaultLocationId], references: [id], onDelete: SetNull)
+  stockBalances      InventoryStockBalance[]
+  purchaseOrderLines PurchaseOrderLine[]
+  stocktakeLines     StocktakeLine[]
+  inventoryDocuments InventoryOperation[]
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@index([enabled, category])
+  @@index([stock, safeStock])
+  @@index([supplierId, enabled])
+  @@index([defaultLocationId, enabled])
+  @@index([expiresAt])
+}
+
+model InventoryTransaction {
+  id                       String               @id @default(cuid())
+  itemId                   String
+  type                     InventoryTxnType
+  quantity                 Int
+  stockBefore              Int
+  stockAfter               Int
+  unitCostCents            Int?
+  orderItemId              String?
+  operatorId               String
+  reason                   String
+  idempotencyKey           String               @unique
+  metadata                 Json?
+  item                     InventoryItem        @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  orderItem                OrderItem?           @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  operator                 User                 @relation("InventoryOperator", fields: [operatorId], references: [id], onDelete: Restrict)
+  eventPrizeAward          EventPrizeAward?
+  purchaseReceiptLine      PurchaseReceiptLine?
+  stocktakeLine            StocktakeLine?
+  inventoryOperationSource InventoryOperation?  @relation("InventoryOperationSourceTransaction")
+  inventoryOperationTarget InventoryOperation?  @relation("InventoryOperationTargetTransaction")
+  createdAt                DateTime             @default(now())
+
+  @@index([itemId, createdAt])
+}
+
+model Supplier {
+  id             String          @id @default(cuid())
+  code           String          @unique
+  name           String
+  type           SupplierType
+  contactName    String?
+  contactPhone   String?
+  settlementRule Json?
+  enabled        Boolean         @default(true)
+  items          InventoryItem[]
+  purchaseOrders PurchaseOrder[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([type, enabled])
+}
+
+model InventoryLocation {
+  id                 String                  @id @default(cuid())
+  code               String                  @unique
+  name               String
+  enabled            Boolean                 @default(true)
+  defaultItems       InventoryItem[]         @relation("InventoryItemDefaultLocation")
+  stockBalances      InventoryStockBalance[]
+  purchaseOrderLines PurchaseOrderLine[]
+  receiptLines       PurchaseReceiptLine[]
+  stocktakes         Stocktake[]
+  sourceOperations   InventoryOperation[]    @relation("InventoryOperationSourceLocation")
+  targetOperations   InventoryOperation[]    @relation("InventoryOperationTargetLocation")
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+}
+
+model InventoryStockBalance {
+  id         String            @id @default(cuid())
+  itemId     String
+  locationId String
+  batchCode  String            @default("DEFAULT")
+  expiresAt  DateTime?
+  quantity   Int               @default(0)
+  item       InventoryItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  location   InventoryLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@unique([itemId, locationId, batchCode])
+  @@index([locationId, quantity])
+  @@index([expiresAt])
+}
+
+model PurchaseOrder {
+  id            String              @id @default(cuid())
+  orderNo       String              @unique
+  supplierId    String
+  status        PurchaseOrderStatus @default(DRAFT)
+  remark        String?
+  createdById   String
+  submittedById String?
+  approvedById  String?
+  submittedAt   DateTime?
+  approvedAt    DateTime?
+  cancelledAt   DateTime?
+  cancelReason  String?
+  supplier      Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdBy     User                @relation("PurchaseOrderCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  submittedBy   User?               @relation("PurchaseOrderSubmitter", fields: [submittedById], references: [id], onDelete: Restrict)
+  approvedBy    User?               @relation("PurchaseOrderApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  lines         PurchaseOrderLine[]
+  receipts      PurchaseReceipt[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([status, createdAt])
+  @@index([supplierId, status])
+}
+
+model PurchaseOrderLine {
+  id               String                @id @default(cuid())
+  purchaseOrderId  String
+  itemId           String
+  locationId       String
+  orderedQuantity  Int
+  receivedQuantity Int                   @default(0)
+  unitCostCents    Int
+  batchCode        String                @default("DEFAULT")
+  expiresAt        DateTime?
+  purchaseOrder    PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  item             InventoryItem         @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  location         InventoryLocation     @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  receiptLines     PurchaseReceiptLine[]
+  createdAt        DateTime              @default(now())
+
+  @@unique([purchaseOrderId, itemId, locationId, batchCode], map: "po_line_item_location_batch_key")
+  @@index([itemId])
+}
+
+model PurchaseReceipt {
+  id              String                @id @default(cuid())
+  receiptNo       String                @unique
+  purchaseOrderId String
+  operatorId      String
+  idempotencyKey  String                @unique
+  receivedAt      DateTime              @default(now())
+  purchaseOrder   PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  operator        User                  @relation("PurchaseReceiptOperator", fields: [operatorId], references: [id], onDelete: Restrict)
+  lines           PurchaseReceiptLine[]
+  createdAt       DateTime              @default(now())
+
+  @@index([purchaseOrderId, receivedAt])
+}
+
+model PurchaseReceiptLine {
+  id                     String               @id @default(cuid())
+  receiptId              String
+  purchaseOrderLineId    String
+  locationId             String
+  quantity               Int
+  batchCode              String
+  expiresAt              DateTime?
+  inventoryTransactionId String               @unique
+  receipt                PurchaseReceipt      @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  purchaseOrderLine      PurchaseOrderLine    @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
+  location               InventoryLocation    @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  inventoryTransaction   InventoryTransaction @relation(fields: [inventoryTransactionId], references: [id], onDelete: Restrict)
+
+  @@unique([receiptId, purchaseOrderLineId])
+}
+
+model Stocktake {
+  id                 String            @id @default(cuid())
+  stocktakeNo        String            @unique
+  locationId         String
+  status             StocktakeStatus   @default(DRAFT)
+  reason             String
+  createdById        String
+  submittedById      String?
+  reviewedById       String?
+  postedById         String?
+  startedAt          DateTime?
+  submittedAt        DateTime?
+  reviewedAt         DateTime?
+  postedAt           DateTime?
+  postIdempotencyKey String?           @unique
+  location           InventoryLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  createdBy          User              @relation("StocktakeCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  submittedBy        User?             @relation("StocktakeSubmitter", fields: [submittedById], references: [id], onDelete: Restrict)
+  reviewedBy         User?             @relation("StocktakeReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  postedBy           User?             @relation("StocktakePoster", fields: [postedById], references: [id], onDelete: Restrict)
+  lines              StocktakeLine[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([status, createdAt])
+  @@index([locationId, status])
+}
+
+model StocktakeLine {
+  id                     String                @id @default(cuid())
+  stocktakeId            String
+  itemId                 String
+  batchCode              String
+  expiresAt              DateTime?
+  bookQuantity           Int
+  countedQuantity        Int?
+  difference             Int?
+  inventoryTransactionId String?               @unique
+  stocktake              Stocktake             @relation(fields: [stocktakeId], references: [id], onDelete: Restrict)
+  item                   InventoryItem         @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  inventoryTransaction   InventoryTransaction? @relation(fields: [inventoryTransactionId], references: [id], onDelete: Restrict)
+
+  @@unique([stocktakeId, itemId, batchCode])
+}
+
+model InventoryOperation {
+  id                  String                   @id @default(cuid())
+  documentNo          String                   @unique
+  type                InventoryOperationType
+  status              InventoryOperationStatus @default(DRAFT)
+  itemId              String
+  quantity            Int
+  batchCode           String                   @default("DEFAULT")
+  expiresAt           DateTime?
+  sourceLocationId    String
+  targetLocationId    String?
+  reason              String
+  referenceType       String?
+  referenceId         String?
+  createdById         String
+  approvedById        String?
+  postedById          String?
+  submittedAt         DateTime?
+  approvedAt          DateTime?
+  postedAt            DateTime?
+  cancelledAt         DateTime?
+  postIdempotencyKey  String?                  @unique
+  sourceTransactionId String?                  @unique
+  targetTransactionId String?                  @unique
+  item                InventoryItem            @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  sourceLocation      InventoryLocation        @relation("InventoryOperationSourceLocation", fields: [sourceLocationId], references: [id], onDelete: Restrict)
+  targetLocation      InventoryLocation?       @relation("InventoryOperationTargetLocation", fields: [targetLocationId], references: [id], onDelete: Restrict)
+  createdBy           User                     @relation("InventoryOperationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy          User?                    @relation("InventoryOperationApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  postedBy            User?                    @relation("InventoryOperationPoster", fields: [postedById], references: [id], onDelete: Restrict)
+  sourceTransaction   InventoryTransaction?    @relation("InventoryOperationSourceTransaction", fields: [sourceTransactionId], references: [id], onDelete: Restrict)
+  targetTransaction   InventoryTransaction?    @relation("InventoryOperationTargetTransaction", fields: [targetTransactionId], references: [id], onDelete: Restrict)
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  @@index([status, createdAt])
+  @@index([sourceLocationId, status])
+  @@index([targetLocationId, status])
+}
+
+model ExportJob {
+  id          String       @id @default(cuid())
+  userId      String
+  scope       String
+  filters     Json
+  format      String       @default("xlsx")
+  status      ExportStatus @default(PENDING)
+  fileKey     String?
+  downloadUrl String?
+  expiresAt   DateTime?
+  error       String?
+  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  content   String
+  payload   Json?
+  readAt    DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+}

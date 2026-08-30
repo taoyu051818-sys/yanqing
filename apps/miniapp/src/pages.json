@@ -1,0 +1,60 @@
+{
+  "pages": [
+    { "path": "pages/home/index", "style": { "navigationBarTitleText": "延庆金羽" } },
+    { "path": "pages/booking/index", "style": { "navigationBarTitleText": "在线订场" } },
+    { "path": "pages/community/index", "style": { "navigationBarTitleText": "球局与赛事" } },
+    { "path": "pages/profile/index", "style": { "navigationBarTitleText": "个人中心" } },
+    { "path": "pages/login/index", "style": { "navigationBarTitleText": "登录", "navigationStyle": "custom" } },
+    { "path": "pages/order/index", "style": { "navigationBarTitleText": "订单" } },
+    { "path": "pages/wallet/index", "style": { "navigationBarTitleText": "五账户" } },
+    { "path": "pages/training/index", "style": { "navigationBarTitleText": "培训中心" } },
+    { "path": "pages/coupon/index", "style": { "navigationBarTitleText": "联盟优惠券" } },
+    { "path": "pages/membership/index", "style": { "navigationBarTitleText": "会员权益" } },
+    { "path": "pages/shop/index", "style": { "navigationBarTitleText": "金羽小店" } },
+    { "path": "pages/workspace/index", "style": { "navigationBarTitleText": "今日营业" } }
+  ],
+  "subPackages": [
+    {
+      "root": "packages/admin",
+      "name": "admin",
+      "pages": [
+        { "path": "pages/switch/index", "style": { "navigationBarTitleText": "管理员演示通道" } }
+      ]
+    },
+    {
+      "root": "packages/ops",
+      "name": "operations",
+      "pages": [
+        { "path": "pages/frontdesk/index", "style": { "navigationBarTitleText": "前台运营" } },
+        { "path": "pages/coach/index", "style": { "navigationBarTitleText": "教练运营" } },
+        { "path": "pages/host/index", "style": { "navigationBarTitleText": "主理人运营" } },
+        { "path": "pages/event/index", "style": { "navigationBarTitleText": "赛事运营" } },
+        { "path": "pages/merchant/index", "style": { "navigationBarTitleText": "联盟商户运营" } },
+        { "path": "pages/admin/index", "style": { "navigationBarTitleText": "经营管理" } },
+        { "path": "pages/finance/index", "style": { "navigationBarTitleText": "财务结算" } },
+        { "path": "pages/inventory/index", "style": { "navigationBarTitleText": "商品库存" } },
+        { "path": "pages/members/index", "style": { "navigationBarTitleText": "会员服务" } },
+        { "path": "pages/venue/index", "style": { "navigationBarTitleText": "场馆维护日历" } }
+      ]
+    }
+  ],
+  "tabBar": {
+    "color": "#7a837d",
+    "selectedColor": "#17653d",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "首页" },
+      { "pagePath": "pages/booking/index", "text": "订场" },
+      { "pagePath": "pages/community/index", "text": "活动" },
+      { "pagePath": "pages/profile/index", "text": "我的" }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "延庆金羽",
+    "navigationBarBackgroundColor": "#f3f6f2",
+    "backgroundColor": "#f3f6f2",
+    "enablePullDownRefresh": false
+  }
+}
