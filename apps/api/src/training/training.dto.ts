@@ -103,13 +103,11 @@ export class CreateTrainingProductDto extends AuditedTrainingCreationDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(200)
   totalSessions: number;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(730)
   validityDays: number;
 
   @Type(() => Number)
@@ -119,6 +117,49 @@ export class CreateTrainingProductDto extends AuditedTrainingCreationDto {
 
   @IsObject()
   refundRule: Record<string, unknown>;
+}
+
+export class UpdateTrainingProductDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  totalSessions?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  validityDays?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  priceCents?: number;
+
+  @IsOptional()
+  @IsObject()
+  refundRule?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string;
 }
 
 export class CreateTrainingClassDto extends AuditedTrainingCreationDto {

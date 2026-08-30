@@ -36,7 +36,10 @@ describe('all direct order creation entrypoints', () => {
     const prisma = replayPrisma({})
     prisma.order.findUnique.mockResolvedValue(null)
     prisma.membershipProduct.findUnique.mockResolvedValue({
-      id: 'gold', enabled: true, name: '金卡', level: 'GOLD', durationDays: 365, priceCents: 69_900, benefits: {},
+      id: 'gold', code: 'MEMBERSHIP_GOLD', version: 1, enabled: true, name: '金卡', level: 'GOLD',
+      durationDays: 365, priceCents: 69_900, benefits: {},
+      effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
+      effectiveTo: new Date('2099-01-01T00:00:00.000Z'),
     })
     prisma.memberProfile.findUnique.mockResolvedValue({ id: 'profile-1' })
     prisma.order.create.mockResolvedValue({ id: 'order-new' })
@@ -67,11 +70,11 @@ describe('all direct order creation entrypoints', () => {
     expect(prisma.membershipProduct.findUnique).not.toHaveBeenCalled()
   })
 
-  it('replays recharge with the exact principal and gift command', async () => {
-    const command = { kind: 'RECHARGE', principalCents: 10_000, giftCents: 500 }
+  it('replays recharge with the exact server-owned plan command', async () => {
+    const command = { kind: 'RECHARGE', planId: 'recharge-plan-1' }
     const prisma = replayPrisma(command)
     await expect(new MembershipsService(prisma as never).recharge({
-      principalCents: 10_000, giftCents: 500, creationIdempotencyKey: key,
+      planId: 'recharge-plan-1', creationIdempotencyKey: key,
     }, actor)).resolves.toMatchObject({ id: 'order-existing' })
     expect(prisma.order.create).not.toHaveBeenCalled()
   })

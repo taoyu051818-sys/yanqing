@@ -7,17 +7,30 @@ import { endpoints } from "../../../../services/api";
 import { useSessionStore } from "../../../../stores/session";
 import { idempotencyKey, money } from "../../../../utils/format";
 
-type Tab = "STOCK" | "PURCHASE" | "STOCKTAKE" | "MOVEMENT";
+type Tab = "STOCK" | "PURCHASE" | "STOCKTAKE" | "MOVEMENT" | "MASTER";
+type MasterType = "ITEM" | "SUPPLIER" | "LOCATION";
 
 const session = useSessionStore();
 const tab = ref<Tab>("STOCK");
 const loading = ref(false);
+const saving = ref(false);
+const errorMessage = ref("");
 const items = ref<any[]>([]);
 const suppliers = ref<any[]>([]);
 const locations = ref<any[]>([]);
 const purchaseOrders = ref<any[]>([]);
 const stocktakes = ref<any[]>([]);
 const operations = ref<any[]>([]);
+const trainingSessions = ref<any[]>([]);
+const events = ref<any[]>([]);
+const masterType = ref<MasterType>("ITEM");
+const masterSearch = ref("");
+const masterStatus = ref<"ALL" | "ACTIVE" | "DISABLED">("ALL");
+const showMasterForm = ref(false);
+const editingMaster = ref<any>(null);
+const detailId = ref("");
+const masterDetail = ref<any>(null);
+const masterForm = ref<any>({});
 
 const isAdmin = computed(() =>
   session.roles.some((role) => ["ADMIN", "SUPER_ADMIN"].includes(role)),
@@ -27,8 +40,21 @@ const canOperate = computed(() =>
     ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"].includes(role),
   ),
 );
+const canUseForTraining = computed(() =>
+  session.roles.some((role) =>
+    ["COACH", "ADMIN", "SUPER_ADMIN"].includes(role),
+  ),
+);
+const canUseForEvent = computed(() =>
+  session.roles.some((role) =>
+    ["EVENT_MANAGER", "ADMIN", "SUPER_ADMIN"].includes(role),
+  ),
+);
 const lowStock = computed(() =>
-  items.value.filter((item) => Number(item.stock) <= Number(item.safeStock)),
+  items.value.filter(
+    (item) =>
+      item.enabled !== false && Number(item.stock) <= Number(item.safeStock),
+  ),
 );
 const metrics = computed(() => [
   ["库存 SKU", String(items.value.length), `低库存 ${lowStock.value.length}`],
@@ -53,6 +79,38 @@ const metrics = computed(() => [
   ],
 ]);
 
+const masterRecords = computed(() => {
+  const source =
+    masterType.value === "ITEM"
+      ? items.value
+      : masterType.value === "SUPPLIER"
+        ? suppliers.value
+        : locations.value;
+  const keyword = masterSearch.value.trim().toLowerCase();
+  return source.filter((entry) => {
+    if (
+      masterStatus.value === "ACTIVE" &&
+      entry.enabled === false
+    )
+      return false;
+    if (masterStatus.value === "DISABLED" && entry.enabled !== false)
+      return false;
+    if (!keyword) return true;
+    return [entry.code, entry.sku, entry.name, entry.category, entry.supplier]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(keyword));
+  });
+});
+
+const supplierNames = computed(() =>
+  suppliers.value.map((entry) =>
+    `${entry.name}（${entry.type === "CONSIGNMENT" ? "寄售" : "自营"}）`,
+  ),
+);
+const locationNames = computed(() =>
+  locations.value.map((entry) => `${entry.code} · ${entry.name}`),
+);
+
 const statusLabel: Record<string, string> = {
   DRAFT: "草稿",
   SUBMITTED: "待审批",
@@ -68,6 +126,7 @@ const statusLabel: Record<string, string> = {
 async function load() {
   await session.hydrate();
   loading.value = true;
+  errorMessage.value = "";
   try {
     const result = await Promise.all([
       endpoints.inventory(),
@@ -85,9 +144,20 @@ async function load() {
       stocktakes.value,
       operations.value,
     ] = result;
+    const usageReferences = await Promise.allSettled([
+      canUseForTraining.value
+        ? endpoints.trainingSessions()
+        : Promise.resolve([]),
+      canUseForEvent.value ? endpoints.events() : Promise.resolve([]),
+    ]);
+    trainingSessions.value =
+      usageReferences[0].status === "fulfilled" ? usageReferences[0].value : [];
+    events.value =
+      usageReferences[1].status === "fulfilled" ? usageReferences[1].value : [];
   } catch (cause: any) {
+    errorMessage.value = cause.message || "库存工作台加载失败";
     uni.showToast({
-      title: cause.message || "库存工作台加载失败",
+      title: errorMessage.value,
       icon: "none",
     });
   } finally {
@@ -124,10 +194,310 @@ async function run(action: () => Promise<unknown>, message: string) {
   }
 }
 
+function selectMasterType(value: MasterType) {
+  masterType.value = value;
+  showMasterForm.value = false;
+  detailId.value = "";
+  masterDetail.value = null;
+}
+
+function openMasterForm(record?: any) {
+  if (!isAdmin.value) return;
+  editingMaster.value = record || null;
+  const base = {
+    reason: "",
+    commandKey: idempotencyKey(
+      `master-${masterType.value.toLowerCase()}-${record ? "update" : "create"}`,
+    ),
+  };
+  if (masterType.value === "SUPPLIER") {
+    masterForm.value = {
+      ...base,
+      code: record?.code || "",
+      name: record?.name || "",
+      type: record?.type || "OWNED",
+      contactName: record?.contactName || "",
+      contactPhone: record?.contactPhone || "",
+      settlementCycle: record?.settlementRule?.settlementCycle || "MONTHLY",
+      paymentTermsDays: String(record?.settlementRule?.paymentTermsDays ?? 30),
+      commissionRatePercent: String(
+        Number(record?.settlementRule?.commissionRateBps ?? 2500) / 100,
+      ),
+    };
+  } else if (masterType.value === "LOCATION") {
+    masterForm.value = {
+      ...base,
+      code: record?.code || "",
+      name: record?.name || "",
+    };
+  } else {
+    masterForm.value = {
+      ...base,
+      sku: record?.sku || "",
+      name: record?.name || "",
+      category: record?.category || "",
+      mode: record?.mode || "PURCHASE",
+      supplierId:
+        record?.supplierId ||
+        suppliers.value.find((entry) => entry.enabled !== false)?.id ||
+        "",
+      defaultLocationId:
+        record?.defaultLocationId ||
+        locations.value.find((entry) => entry.enabled !== false)?.id ||
+        "",
+      purchasePriceYuan: String(Number(record?.purchasePriceCents || 0) / 100),
+      salePriceYuan: String(Number(record?.salePriceCents || 0) / 100),
+      safeStock: String(record?.safeStock ?? 0),
+      batchCode: record?.batchCode || "DEFAULT",
+      expiresAt: record?.expiresAt
+        ? new Date(record.expiresAt).toISOString().slice(0, 10)
+        : "",
+    };
+  }
+  showMasterForm.value = true;
+}
+
+function inventoryItemPayload(form: any) {
+  const purchasePriceCents = Math.round(Number(form.purchasePriceYuan) * 100);
+  const salePriceCents = Math.round(Number(form.salePriceYuan) * 100);
+  const safeStock = Number(form.safeStock);
+  if (
+    !Number.isInteger(purchasePriceCents) ||
+    purchasePriceCents < 0 ||
+    !Number.isInteger(salePriceCents) ||
+    salePriceCents < 0 ||
+    !Number.isInteger(safeStock) ||
+    safeStock < 0
+  ) {
+    throw new Error("进价、售价和安全库存必须为非负数");
+  }
+  return {
+    sku: form.sku,
+    name: form.name,
+    category: form.category,
+    mode: form.mode,
+    supplierId: form.supplierId,
+    defaultLocationId: form.defaultLocationId,
+    purchasePriceCents,
+    salePriceCents,
+    safeStock,
+    batchCode: form.batchCode || "DEFAULT",
+    expiresAt: form.expiresAt
+      ? `${form.expiresAt}T23:59:59+08:00`
+      : editingMaster.value
+        ? null
+        : undefined,
+  };
+}
+
+function supplierPayload(form: any) {
+  const settlementRule =
+    form.type === "CONSIGNMENT"
+      ? {
+          settlementCycle: form.settlementCycle,
+          commissionRateBps: Math.round(
+            Number(form.commissionRatePercent) * 100,
+          ),
+        }
+      : {
+          settlementCycle: form.settlementCycle,
+          paymentTermsDays: Number(form.paymentTermsDays),
+        };
+  return {
+    code: form.code,
+    name: form.name,
+    type: form.type,
+    contactName: form.contactName,
+    contactPhone: form.contactPhone,
+    settlementRule,
+  };
+}
+
+async function submitMasterForm() {
+  const form = masterForm.value;
+  if (!String(form.reason || "").trim())
+    return uni.showToast({ title: "请填写变更原因", icon: "none" });
+  const confirm = await uni.showModal({
+    title: editingMaster.value ? "确认保存资料" : "确认新增资料",
+    content: `${form.reason}\n关键变更将写入审计日志。`,
+  });
+  if (!confirm.confirm) return;
+  saving.value = true;
+  try {
+    const command = {
+      reason: String(form.reason).trim(),
+      idempotencyKey: form.commandKey,
+    };
+    if (masterType.value === "ITEM") {
+      const payload = { ...inventoryItemPayload(form), ...command };
+      if (editingMaster.value) {
+        await endpoints.updateInventoryItem(editingMaster.value.id, {
+          ...payload,
+          expectedUpdatedAt: editingMaster.value.updatedAt,
+        });
+      } else await endpoints.createInventoryItem(payload);
+    } else if (masterType.value === "SUPPLIER") {
+      const payload = { ...supplierPayload(form), ...command };
+      if (editingMaster.value) {
+        await endpoints.updateInventorySupplier(editingMaster.value.id, {
+          ...payload,
+          expectedUpdatedAt: editingMaster.value.updatedAt,
+        });
+      } else await endpoints.createInventorySupplier(payload);
+    } else {
+      const payload = { code: form.code, name: form.name, ...command };
+      if (editingMaster.value) {
+        await endpoints.updateInventoryLocation(editingMaster.value.id, {
+          ...payload,
+          expectedUpdatedAt: editingMaster.value.updatedAt,
+        });
+      } else await endpoints.createInventoryLocation(payload);
+    }
+    showMasterForm.value = false;
+    uni.showToast({ title: "资料已保存", icon: "success" });
+    await load();
+  } catch (cause: any) {
+    uni.showModal({
+      title: "资料未保存",
+      content: cause.message || "请核对字段和当前版本",
+      showCancel: false,
+    });
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function loadMasterDetail(record: any) {
+  if (detailId.value === record.id) {
+    detailId.value = "";
+    masterDetail.value = null;
+    return;
+  }
+  saving.value = true;
+  try {
+    masterDetail.value =
+      masterType.value === "ITEM"
+        ? await endpoints.inventoryItemDetail(record.id)
+        : masterType.value === "SUPPLIER"
+          ? await endpoints.inventorySupplierDetail(record.id)
+          : await endpoints.inventoryLocationDetail(record.id);
+    detailId.value = record.id;
+  } catch (cause: any) {
+    uni.showToast({ title: cause.message || "详情加载失败", icon: "none" });
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function toggleMasterStatus(record: any) {
+  const enabling = record.enabled === false;
+  const result = await uni.showModal({
+    title: enabling ? "确认启用" : "确认停用",
+    content: enabling
+      ? "启用后可用于新业务单。"
+      : "系统会检查库存、待支付订单和所有未完作业单。",
+    editable: true,
+    placeholderText: "请输入变更原因（至少2个字）",
+  });
+  if (!result.confirm) return;
+  const reason = String(result.content || "").trim();
+  if (reason.length < 2)
+    return uni.showToast({ title: "变更原因至少2个字", icon: "none" });
+  const command = {
+    enabled: enabling,
+    expectedUpdatedAt: record.updatedAt,
+    reason,
+    idempotencyKey: idempotencyKey(
+      `master-${masterType.value.toLowerCase()}-status-${record.id}`,
+    ),
+  };
+  await run(
+    () =>
+      masterType.value === "ITEM"
+        ? endpoints.setInventoryItemStatus(record.id, command)
+        : masterType.value === "SUPPLIER"
+          ? endpoints.setInventorySupplierStatus(record.id, command)
+          : endpoints.setInventoryLocationStatus(record.id, command),
+    enabling ? "已启用" : "已停用",
+  );
+}
+
+function usageReferenceLabel(
+  type: "TRAINING_USAGE" | "EVENT_USAGE",
+  entry: any,
+) {
+  if (type === "TRAINING_USAGE") {
+    const name = entry.class?.name || entry.name || "培训课次";
+    return `${name} · ${new Date(entry.startsAt).toLocaleDateString()}`;
+  }
+  return `${entry.name || entry.code || "赛事"} · ${entry.status}`;
+}
+
+async function useInventory(
+  item: any,
+  type: "TRAINING_USAGE" | "EVENT_USAGE",
+) {
+  const source = (
+    type === "TRAINING_USAGE" ? trainingSessions.value : events.value
+  ).filter((entry: any) =>
+    type === "TRAINING_USAGE"
+      ? ["SCHEDULED", "IN_PROGRESS"].includes(entry.status)
+      : ["OPEN", "FULL", "IN_PROGRESS"].includes(entry.status),
+  );
+  if (!source.length) {
+    return uni.showToast({
+      title: type === "TRAINING_USAGE" ? "暂无可关联课次" : "暂无可关联赛事",
+      icon: "none",
+    });
+  }
+  const candidates = source.slice(0, 6);
+  let selected: any;
+  try {
+    const choice = await uni.showActionSheet({
+      itemList: candidates.map((entry: any) =>
+        usageReferenceLabel(type, entry),
+      ),
+    });
+    selected = candidates[choice.tapIndex];
+  } catch {
+    return;
+  }
+  if (!selected) return;
+  const quantity = await positiveInteger(
+    `${type === "TRAINING_USAGE" ? "培训" : "赛事"}领用 ${item.name}`,
+    `当前库存 ${item.stock}`,
+  );
+  if (!quantity) return;
+  if (quantity > Number(item.stock || 0)) {
+    return uni.showToast({ title: "库存不足", icon: "none" });
+  }
+  const referenceLabel = usageReferenceLabel(type, selected);
+  await run(
+    () =>
+      endpoints.inventoryTransaction(item.id, {
+        type,
+        quantity: -quantity,
+        referenceType: type === "TRAINING_USAGE" ? "TrainingSession" : "Event",
+        referenceId: selected.id,
+        reason: `${referenceLabel}物料领用`,
+        idempotencyKey: idempotencyKey(
+          `${type.toLowerCase()}-${item.id}-${selected.id}`,
+        ),
+      }),
+    "领用已过账",
+  );
+}
+
 async function createPurchaseOrder() {
-  const item = items.value[0];
   const supplier = suppliers.value.find((entry) => entry.enabled !== false);
   const location = locations.value.find((entry) => entry.enabled !== false);
+  const item = items.value.find(
+    (entry) =>
+      entry.enabled !== false &&
+      entry.supplierId === supplier?.id &&
+      ((supplier?.type === "CONSIGNMENT" && entry.mode === "CONSIGNMENT") ||
+        (supplier?.type === "OWNED" && entry.mode === "PURCHASE")),
+  );
   if (!item || !supplier || !location)
     return uni.showToast({ title: "请先配置商品、供应商和库位", icon: "none" });
   const quantity = await positiveInteger(`采购 ${item.name}`);
@@ -235,9 +605,12 @@ async function stocktakeAction(document: any) {
 }
 
 async function createMovement(type: "TRANSFER" | "LOSS") {
-  const item = items.value[0];
-  const source = locations.value[0];
-  const target = locations.value[1];
+  const item = items.value.find((entry) => entry.enabled !== false);
+  const activeLocations = locations.value.filter(
+    (entry) => entry.enabled !== false,
+  );
+  const source = activeLocations[0];
+  const target = activeLocations[1];
   if (!item || !source || (type === "TRANSFER" && !target))
     return uni.showToast({ title: "商品或库位配置不完整", icon: "none" });
   const quantity = await positiveInteger(
@@ -296,7 +669,7 @@ onShow(load);
     title="库存作业中心"
     eyebrow="INVENTORY OPERATIONS"
     role="前台经办 / 管理员审批 / 财务只读"
-    description="采购、分批收货、盘点、调拨和报损均以单据状态流转，不直接改写库存。"
+    description="采购、分批收货、盘点、调拨、报损及培训/赛事物料领用均通过状态动作留痕。"
   >
     <view class="metric-grid"
       ><MetricCard
@@ -314,6 +687,7 @@ onShow(load);
             ['PURCHASE', '采购收货'],
             ['STOCKTAKE', '盘点'],
             ['MOVEMENT', '调拨报损'],
+            ['MASTER', '基础资料'],
           ]"
           :key="entry[0]"
           class="tab"
@@ -325,7 +699,16 @@ onShow(load);
       ></scroll-view
     >
 
-    <template v-if="tab === 'STOCK'">
+    <view v-if="errorMessage" class="card state-card error-state">
+      <text>{{ errorMessage }}</text>
+      <button class="secondary state-action" @tap="load">重新加载</button>
+    </view>
+    <view v-else-if="loading" class="card state-card">正在加载库存资料与作业单…</view>
+
+    <template v-if="!errorMessage && tab === 'STOCK'">
+      <view v-if="!loading && !items.length" class="card empty"
+        >暂无库存 SKU，请由管理员先维护基础资料。</view
+      >
       <view v-for="item in items" :key="item.id" class="card document"
         ><view class="row"
           ><view
@@ -340,11 +723,25 @@ onShow(load);
             :class="{ warning: item.stock <= item.safeStock }"
             >{{ item.stock }}</text
           ></view
-        ><text class="muted">售价 {{ money(item.salePriceCents) }}</text></view
+        ><text class="muted">售价 {{ money(item.salePriceCents) }}</text
+        ><view
+          v-if="item.enabled !== false && (canUseForTraining || canUseForEvent)"
+          class="usage-row"
+          ><button
+            v-if="canUseForTraining"
+            class="secondary usage-action"
+            @tap="useInventory(item, 'TRAINING_USAGE')"
+          >培训领用</button
+          ><button
+            v-if="canUseForEvent"
+            class="secondary usage-action"
+            @tap="useInventory(item, 'EVENT_USAGE')"
+          >赛事领用</button></view
+        ></view
       >
     </template>
 
-    <template v-else-if="tab === 'PURCHASE'">
+    <template v-else-if="!errorMessage && tab === 'PURCHASE'">
       <button
         v-if="canOperate"
         class="primary create"
@@ -352,6 +749,9 @@ onShow(load);
       >
         新建采购单
       </button>
+      <view v-if="!loading && !purchaseOrders.length" class="card empty"
+        >暂无采购单。</view
+      >
       <view
         v-for="order in purchaseOrders"
         :key="order.id"
@@ -380,10 +780,13 @@ onShow(load);
       >
     </template>
 
-    <template v-else-if="tab === 'STOCKTAKE'">
+    <template v-else-if="!errorMessage && tab === 'STOCKTAKE'">
       <button v-if="canOperate" class="primary create" @tap="createStocktake">
         新建盘点单
       </button>
+      <view v-if="!loading && !stocktakes.length" class="card empty"
+        >暂无盘点单。</view
+      >
       <view
         v-for="document in stocktakes"
         :key="document.id"
@@ -427,7 +830,7 @@ onShow(load);
       >
     </template>
 
-    <template v-else>
+    <template v-else-if="!errorMessage && tab === 'MOVEMENT'">
       <view v-if="canOperate" class="create-row"
         ><button
           class="secondary create-half"
@@ -437,6 +840,9 @@ onShow(load);
         ><button class="primary create-half" @tap="createMovement('LOSS')">
           新建报损
         </button></view
+      >
+      <view v-if="!loading && !operations.length" class="card empty"
+        >暂无调拨或报损单。</view
       >
       <view
         v-for="document in operations"
@@ -465,6 +871,175 @@ onShow(load);
           {{ movementActionLabel(document) }}
         </button></view
       >
+    </template>
+    <template v-else-if="!errorMessage && tab === 'MASTER'">
+      <view class="master-toolbar">
+        <view class="master-kind-row">
+          <button
+            v-for="entry in [
+              ['ITEM', 'SKU'],
+              ['SUPPLIER', '供应商'],
+              ['LOCATION', '库位'],
+            ]"
+            :key="entry[0]"
+            class="kind-button"
+            :class="{ active: masterType === entry[0] }"
+            @tap="selectMasterType(entry[0] as MasterType)"
+          >{{ entry[1] }}</button>
+        </view>
+        <input
+          v-model="masterSearch"
+          class="field search-field"
+          placeholder="按编码、名称或分类搜索"
+        />
+        <view class="status-filter-row">
+          <button
+            v-for="entry in [
+              ['ALL', '全部'],
+              ['ACTIVE', '启用'],
+              ['DISABLED', '停用'],
+            ]"
+            :key="entry[0]"
+            class="filter-button"
+            :class="{ active: masterStatus === entry[0] }"
+            @tap="masterStatus = entry[0] as any"
+          >{{ entry[1] }}</button>
+        </view>
+        <button
+          v-if="isAdmin"
+          class="primary create"
+          :disabled="saving"
+          @tap="openMasterForm()"
+        >
+          新增{{ masterType === "ITEM" ? "SKU" : masterType === "SUPPLIER" ? "供应商" : "库位" }}
+        </button>
+        <text v-else class="readonly-note">当前身份为只读，可查看状态、关联对象与历史上下文。</text>
+      </view>
+
+      <view v-if="showMasterForm" class="card master-form">
+        <view class="row">
+          <text class="title">{{ editingMaster ? "编辑" : "新增" }}{{ masterType === "ITEM" ? "SKU" : masterType === "SUPPLIER" ? "供应商" : "库位" }}</text>
+          <button class="link-button" @tap="showMasterForm = false">取消</button>
+        </view>
+
+        <template v-if="masterType === 'ITEM'">
+          <text class="field-label">SKU 编码</text>
+          <input v-model="masterForm.sku" class="field" placeholder="例如 BALL-002" />
+          <text class="field-label">商品名称</text>
+          <input v-model="masterForm.name" class="field" placeholder="商品名称" />
+          <text class="field-label">分类</text>
+          <input v-model="masterForm.category" class="field" placeholder="羽毛球 / 手胶 / 饮品" />
+          <text class="field-label">经营模式</text>
+          <view class="choice-row">
+            <button class="choice" :class="{ active: masterForm.mode === 'PURCHASE' }" @tap="masterForm.mode = 'PURCHASE'">自营</button>
+            <button class="choice" :class="{ active: masterForm.mode === 'CONSIGNMENT' }" @tap="masterForm.mode = 'CONSIGNMENT'">代销</button>
+          </view>
+          <text class="field-label">供应商</text>
+          <picker
+            mode="selector"
+            :range="supplierNames"
+            @change="masterForm.supplierId = suppliers[Number(($event as any).detail.value)]?.id"
+          ><view class="picker-field">{{ suppliers.find((entry) => entry.id === masterForm.supplierId)?.name || "请选择供应商" }}</view></picker>
+          <text class="field-label">默认库位</text>
+          <picker
+            mode="selector"
+            :range="locationNames"
+            @change="masterForm.defaultLocationId = locations[Number(($event as any).detail.value)]?.id"
+          ><view class="picker-field">{{ locations.find((entry) => entry.id === masterForm.defaultLocationId)?.name || "请选择库位" }}</view></picker>
+          <view class="field-grid">
+            <view><text class="field-label">进价（元）</text><input v-model="masterForm.purchasePriceYuan" class="field" type="digit" /></view>
+            <view><text class="field-label">售价（元）</text><input v-model="masterForm.salePriceYuan" class="field" type="digit" /></view>
+          </view>
+          <view class="field-grid">
+            <view><text class="field-label">安全库存</text><input v-model="masterForm.safeStock" class="field" type="number" /></view>
+            <view><text class="field-label">默认批次</text><input v-model="masterForm.batchCode" class="field" /></view>
+          </view>
+          <text class="field-label">效期（可空，YYYY-MM-DD）</text>
+          <input v-model="masterForm.expiresAt" class="field" placeholder="2027-12-31" />
+        </template>
+
+        <template v-else-if="masterType === 'SUPPLIER'">
+          <text class="field-label">供应商编码</text>
+          <input v-model="masterForm.code" class="field" placeholder="例如 VENDOR-001" />
+          <text class="field-label">供应商名称</text>
+          <input v-model="masterForm.name" class="field" />
+          <text class="field-label">合作属性</text>
+          <view class="choice-row">
+            <button class="choice" :class="{ active: masterForm.type === 'OWNED' }" @tap="masterForm.type = 'OWNED'">自营采购</button>
+            <button class="choice" :class="{ active: masterForm.type === 'CONSIGNMENT' }" @tap="masterForm.type = 'CONSIGNMENT'">寄售合作</button>
+          </view>
+          <view class="field-grid">
+            <view><text class="field-label">联系人</text><input v-model="masterForm.contactName" class="field" /></view>
+            <view><text class="field-label">联系电话</text><input v-model="masterForm.contactPhone" class="field" /></view>
+          </view>
+          <text class="field-label">结算周期</text>
+          <picker
+            mode="selector"
+            :range="['PER_ORDER · 逐单', 'WEEKLY · 周结', 'MONTHLY · 月结']"
+            @change="masterForm.settlementCycle = ['PER_ORDER', 'WEEKLY', 'MONTHLY'][Number(($event as any).detail.value)]"
+          ><view class="picker-field">{{ masterForm.settlementCycle }}</view></picker>
+          <template v-if="masterForm.type === 'CONSIGNMENT'">
+            <text class="field-label">场馆分成比例（%）</text>
+            <input v-model="masterForm.commissionRatePercent" class="field" type="digit" />
+          </template>
+          <template v-else>
+            <text class="field-label">采购账期（天）</text>
+            <input v-model="masterForm.paymentTermsDays" class="field" type="number" />
+          </template>
+        </template>
+
+        <template v-else>
+          <text class="field-label">库位编码</text>
+          <input v-model="masterForm.code" class="field" placeholder="例如 FRONT-02" />
+          <text class="field-label">库位名称</text>
+          <input v-model="masterForm.name" class="field" placeholder="前台展示仓" />
+        </template>
+
+        <text class="field-label">变更原因</text>
+        <textarea v-model="masterForm.reason" class="field reason-field" placeholder="说明新增或修改原因，写入审计日志" />
+        <button class="primary form-submit" :loading="saving" :disabled="saving" @tap="submitMasterForm">确认保存</button>
+      </view>
+
+      <view v-for="record in masterRecords" :key="record.id" class="card document master-card">
+        <view class="row">
+          <view>
+            <text class="title">{{ record.name }}</text>
+            <text class="muted">
+              <template v-if="masterType === 'ITEM'">{{ record.sku }} · {{ record.category }} · {{ record.mode === 'CONSIGNMENT' ? '代销' : '自营' }}</template>
+              <template v-else-if="masterType === 'SUPPLIER'">{{ record.code }} · {{ record.type === 'CONSIGNMENT' ? '寄售合作' : '自营采购' }}</template>
+              <template v-else>{{ record.code }} · 库存 {{ (record.stockBalances || []).reduce((sum: number, entry: any) => sum + Number(entry.quantity || 0), 0) }}</template>
+            </text>
+          </view>
+          <text class="status" :class="{ disabled: record.enabled === false }">{{ record.enabled === false ? "已停用" : "启用中" }}</text>
+        </view>
+        <text v-if="masterType === 'ITEM'" class="muted">库存 {{ record.stock }} / 安全线 {{ record.safeStock }} · 售价 {{ money(record.salePriceCents) }}</text>
+        <text v-else-if="masterType === 'SUPPLIER'" class="muted">SKU {{ record._count?.items ?? record.items?.length ?? 0 }} · 历史采购 {{ record._count?.purchaseOrders ?? record.purchaseOrders?.length ?? 0 }}</text>
+        <text v-else class="muted">默认 SKU {{ record._count?.defaultItems ?? record.defaultItems?.length ?? 0 }} · 库位分账 {{ record._count?.stockBalances ?? record.stockBalances?.length ?? 0 }}</text>
+        <view class="master-actions">
+          <button class="secondary mini-action" :loading="saving && detailId !== record.id" @tap="loadMasterDetail(record)">{{ detailId === record.id ? "收起详情" : "查看详情" }}</button>
+          <button v-if="isAdmin" class="secondary mini-action" @tap="openMasterForm(record)">编辑</button>
+          <button v-if="isAdmin" class="danger-action mini-action" @tap="toggleMasterStatus(record)">{{ record.enabled === false ? "启用" : "停用" }}</button>
+        </view>
+        <view v-if="detailId === record.id && masterDetail" class="detail-panel">
+          <template v-if="masterType === 'ITEM'">
+            <text>供应商：{{ masterDetail.supplierRecord?.name || "未配置" }}</text>
+            <text>默认库位：{{ masterDetail.defaultLocation?.name || "未配置" }}</text>
+            <text>库位/批次余额：{{ masterDetail.stockBalances?.length || 0 }} 条</text>
+            <text>最近库存流水：{{ masterDetail.transactions?.length || 0 }} 条</text>
+          </template>
+          <template v-else-if="masterType === 'SUPPLIER'">
+            <text>联系人：{{ masterDetail.contactName || "未填写" }} {{ masterDetail.contactPhone || "" }}</text>
+            <text>结算：{{ masterDetail.settlementRule?.settlementCycle }}<template v-if="masterDetail.type === 'CONSIGNMENT'"> · 分成 {{ Number(masterDetail.settlementRule?.commissionRateBps || 0) / 100 }}%</template><template v-else> · 账期 {{ masterDetail.settlementRule?.paymentTermsDays || 0 }} 天</template></text>
+            <text>关联 SKU：{{ masterDetail.items?.length || 0 }} · 最近采购单：{{ masterDetail.purchaseOrders?.length || 0 }}</text>
+          </template>
+          <template v-else>
+            <text>默认 SKU：{{ masterDetail.defaultItems?.length || 0 }}</text>
+            <text>库存分账：{{ masterDetail.stockBalances?.length || 0 }}</text>
+            <text>最近盘点：{{ masterDetail.stocktakes?.length || 0 }} · 调出单 {{ masterDetail.sourceOperations?.length || 0 }} · 调入单 {{ masterDetail.targetOperations?.length || 0 }}</text>
+          </template>
+        </view>
+      </view>
+      <view v-if="!loading && !masterRecords.length" class="card empty">当前筛选下暂无基础资料。</view>
     </template>
     <view
       v-if="
@@ -545,6 +1120,10 @@ onShow(load);
   color: #17653d;
   font-size: 20rpx;
 }
+.status.disabled {
+  background: #f2e9e5;
+  color: #9a4935;
+}
 .line {
   display: flex;
   justify-content: space-between;
@@ -559,9 +1138,148 @@ onShow(load);
   line-height: 60rpx;
   font-size: 22rpx;
 }
+.usage-row {
+  display: flex;
+  gap: 12rpx;
+  margin-top: 18rpx;
+}
+.usage-action {
+  flex: 1;
+  min-height: 58rpx;
+  margin: 0;
+  line-height: 58rpx;
+  font-size: 22rpx;
+}
 .empty {
   color: #758079;
   text-align: center;
+}
+.state-card {
+  margin-top: 18rpx;
+  padding: 24rpx;
+  color: #66736b;
+  text-align: center;
+}
+.error-state {
+  color: #9a4935;
+}
+.state-action {
+  width: 220rpx;
+  min-height: 58rpx;
+  margin: 18rpx auto 0;
+  line-height: 58rpx;
+  font-size: 22rpx;
+}
+.master-toolbar {
+  margin-top: 18rpx;
+}
+.master-kind-row,
+.status-filter-row,
+.choice-row,
+.master-actions {
+  display: flex;
+  gap: 10rpx;
+}
+.kind-button,
+.filter-button,
+.choice {
+  flex: 1;
+  min-height: 58rpx;
+  margin: 0;
+  line-height: 58rpx;
+  font-size: 22rpx;
+  background: #eef1ed;
+  color: #526057;
+}
+.kind-button.active,
+.filter-button.active,
+.choice.active {
+  background: #17653d;
+  color: #fff;
+}
+.status-filter-row {
+  margin-top: 12rpx;
+}
+.field,
+.picker-field {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 72rpx;
+  padding: 16rpx 18rpx;
+  border: 1rpx solid #dfe5df;
+  border-radius: 14rpx;
+  background: #fff;
+  color: #24342a;
+  font-size: 24rpx;
+}
+.search-field {
+  margin-top: 12rpx;
+}
+.field-label {
+  display: block;
+  margin: 18rpx 0 8rpx;
+  color: #657168;
+  font-size: 21rpx;
+}
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12rpx;
+}
+.reason-field {
+  height: 120rpx;
+}
+.master-form {
+  margin-top: 16rpx;
+  padding: 24rpx;
+}
+.form-submit {
+  margin: 22rpx 0 0;
+}
+.link-button {
+  min-height: 50rpx;
+  margin: 0;
+  padding: 0 14rpx;
+  line-height: 50rpx;
+  font-size: 21rpx;
+  background: transparent;
+  color: #17653d;
+}
+.readonly-note {
+  display: block;
+  margin-top: 14rpx;
+  color: #758079;
+  font-size: 22rpx;
+}
+.master-card .muted {
+  display: block;
+  margin-top: 8rpx;
+}
+.master-actions {
+  margin-top: 18rpx;
+}
+.mini-action,
+.danger-action {
+  flex: 1;
+  min-height: 58rpx;
+  margin: 0;
+  line-height: 58rpx;
+  font-size: 21rpx;
+}
+.danger-action {
+  background: #f5e8e3;
+  color: #9a4935;
+}
+.detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  margin-top: 16rpx;
+  padding: 16rpx;
+  border-radius: 14rpx;
+  background: #f4f7f4;
+  color: #526057;
+  font-size: 22rpx;
 }
 .row {
   display: flex;

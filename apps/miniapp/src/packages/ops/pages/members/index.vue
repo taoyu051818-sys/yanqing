@@ -6,22 +6,45 @@ import MetricCard from '../../../../components/MetricCard.vue'
 import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
+import { money } from '../../../../utils/format'
 
 const session = useSessionStore()
 const members = ref<any[]>([])
 const leads = ref<any[]>([])
 const hostApplications = ref<any[]>([])
+const rechargePlans = ref<any[]>([])
+const membershipProducts = ref<any[]>([])
 const customer = ref<any>(null)
 const query = ref('')
 const loading = ref(false)
+const membershipProductSubmitting = ref(false)
+const membershipProductError = ref('')
+const membershipProductSource = ref<any>(null)
 const selectedId = ref('')
-const tab = ref<'members' | 'leads'>('members')
+const tab = ref<'members' | 'leads' | 'membershipProducts' | 'rechargePlans'>('members')
 const sourceOptions = [
   { value: 'STORE_VISIT', label: '到店' }, { value: 'DOUYIN', label: '抖音' },
   { value: 'MEITUAN', label: '美团' }, { value: 'REFERRAL', label: '直接推荐' },
   { value: 'ALLIANCE', label: '联盟商户' }, { value: 'OTHER', label: '其他' },
 ]
 const createForm = reactive({ displayName: '', phone: '', sourceChannel: 'STORE_VISIT', campaign: '' })
+const rechargePlanForm = reactive({
+  code: '', name: '', principalYuan: '', giftYuan: '0',
+  effectiveFrom: new Date().toISOString().slice(0, 10),
+  effectiveTo: '2099-01-01', reason: '',
+})
+const memberLevelOptions = [
+  { value: 'EXPERIENCE', label: '体验会员' },
+  { value: 'REGULAR', label: '普通会员' },
+  { value: 'GOLD', label: '金卡会员' },
+  { value: 'BLACK', label: '黑金会员' },
+]
+const membershipProductForm = reactive({
+  code: '', name: '', level: 'REGULAR', priceYuan: '', durationDays: '365',
+  bookingBenefit: '', discountBenefit: '', additionalBenefit: '',
+  effectiveFrom: new Date().toISOString().slice(0, 10),
+  effectiveTo: '2099-01-01', reason: '',
+})
 const leadLabels: Record<string, string> = {
   NEW: '新线索', CONTACTING: '跟进中', TRIAL_RESERVED: '已约体验', ATTENDED: '已到店',
   CONVERTED: '已转会员', LOST: '已流失', ARCHIVED: '已归档',
@@ -30,6 +53,9 @@ const canViewLeads = computed(() => session.roles.some((role) => ['FRONT_DESK', 
 const canWriteLeads = computed(() => session.roles.some((role) => ['FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'].includes(role)))
 const canReviewHosts = computed(() => session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
 const canRequestAdjustments = computed(() => session.roles.some((role) => ['FINANCE', 'ADMIN', 'SUPER_ADMIN'].includes(role)))
+const canManageRechargePlans = computed(() => session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
+const canViewMembershipProducts = computed(() => session.roles.some((role) => ['FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'].includes(role)))
+const canManageMembershipProducts = computed(() => session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
 const filteredMembers = computed(() => {
   const keyword = query.value.trim().toLowerCase()
   if (!keyword) return members.value
@@ -50,15 +76,25 @@ const metrics = computed(() => [
 async function load() {
   await session.hydrate()
   loading.value = true
+  membershipProductError.value = ''
   try {
-    const [memberResult, leadResult, hostResult] = await Promise.all([
+    const [memberResult, leadResult, hostResult, rechargePlanResult, membershipProductResult] = await Promise.all([
       endpoints.members(),
       canViewLeads.value ? endpoints.customerLeads() : Promise.resolve({ items: [] }),
       canReviewHosts.value ? endpoints.hostApplications() : Promise.resolve([]),
+      canManageRechargePlans.value ? endpoints.manageRechargePlans() : Promise.resolve([]),
+      canViewMembershipProducts.value
+        ? endpoints.manageMembershipProducts().catch((cause: any) => {
+            membershipProductError.value = cause?.message || '会员产品版本加载失败'
+            return []
+          })
+        : Promise.resolve([]),
     ])
     members.value = memberResult.items || []
     leads.value = leadResult.items || []
     hostApplications.value = hostResult || []
+    rechargePlans.value = rechargePlanResult || []
+    membershipProducts.value = membershipProductResult || []
   } catch (cause: any) {
     uni.showToast({ title: cause.message || '客户数据加载失败', icon: 'none' })
   } finally { loading.value = false }
@@ -170,6 +206,215 @@ async function requestAccountAdjustment() {
   } catch (cause: any) { uni.showToast({ title: cause.message || '调整申请失败', icon: 'none' }) }
 }
 
+const yuanToCents = (value: string) => {
+  const normalized = value.trim()
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return NaN
+  return Math.round(Number(normalized) * 100)
+}
+
+const effectiveIso = (value: string) => {
+  const normalized = value.trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized))
+    return new Date(`${normalized}T00:00:00+08:00`).toISOString()
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString()
+}
+
+async function refreshRechargePlans(message: string) {
+  rechargePlans.value = await endpoints.manageRechargePlans()
+  uni.showToast({ title: message, icon: 'success' })
+}
+
+async function createRechargePlan() {
+  const principalCents = yuanToCents(rechargePlanForm.principalYuan)
+  const giftCents = yuanToCents(rechargePlanForm.giftYuan)
+  const effectiveFrom = effectiveIso(rechargePlanForm.effectiveFrom)
+  const effectiveTo = effectiveIso(rechargePlanForm.effectiveTo)
+  if (!/^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(rechargePlanForm.code.trim()))
+    return uni.showToast({ title: '计划编码需为大写字母、数字、下划线或横线', icon: 'none' })
+  if (rechargePlanForm.name.trim().length < 2)
+    return uni.showToast({ title: '请填写计划名称', icon: 'none' })
+  if (!Number.isSafeInteger(principalCents) || principalCents < 100)
+    return uni.showToast({ title: '充值本金无效', icon: 'none' })
+  if (!Number.isSafeInteger(giftCents) || giftCents < 0 || giftCents > principalCents)
+    return uni.showToast({ title: '赠送金额不得超过本金', icon: 'none' })
+  if (!effectiveFrom || !effectiveTo || new Date(effectiveTo) <= new Date(effectiveFrom))
+    return uni.showToast({ title: '有效期无效', icon: 'none' })
+  const reason = rechargePlanForm.reason.trim()
+  if (reason.length < 2) return uni.showToast({ title: '请填写创建原因', icon: 'none' })
+  const command = {
+    code: rechargePlanForm.code.trim(), name: rechargePlanForm.name.trim(),
+    principalCents, giftCents, effectiveFrom, effectiveTo, reason,
+  }
+  try {
+    await withPendingCreationKey('membership.recharge-plan.create', command, (idempotencyKey) =>
+      endpoints.createRechargePlan({ ...command, idempotencyKey }),
+    )
+    Object.assign(rechargePlanForm, { code: '', name: '', principalYuan: '', giftYuan: '0', reason: '' })
+    await refreshRechargePlans('充值计划版本已创建')
+  } catch (cause: any) { uni.showToast({ title: cause.message || '创建失败', icon: 'none' }) }
+}
+
+async function setRechargePlanStatus(plan: any) {
+  const enabled = !plan.enabled
+  const action = enabled ? '启用' : '停用'
+  const result = await uni.showModal({ title: `${action}充值计划`, editable: true, placeholderText: `填写${action}原因（至少2个字）` })
+  const reason = result.content?.trim() || ''
+  if (!result.confirm || reason.length < 2) return
+  const command = { planId: plan.id, enabled, reason }
+  try {
+    await withPendingCreationKey(`membership.recharge-plan.status.${plan.id}`, command, (idempotencyKey) =>
+      endpoints.setRechargePlanStatus(plan.id, { enabled, reason, idempotencyKey }),
+    )
+    await refreshRechargePlans(`计划已${action}`)
+  } catch (cause: any) { uni.showToast({ title: cause.message || `${action}失败`, icon: 'none' }) }
+}
+
+function resetMembershipProductForm() {
+  membershipProductSource.value = null
+  Object.assign(membershipProductForm, {
+    code: '', name: '', level: 'REGULAR', priceYuan: '', durationDays: '365',
+    bookingBenefit: '', discountBenefit: '', additionalBenefit: '',
+    effectiveFrom: new Date().toISOString().slice(0, 10),
+    effectiveTo: '2099-01-01', reason: '',
+  })
+}
+
+function beginMembershipProductVersion(product: any) {
+  membershipProductSource.value = product
+  const benefits = product.benefits || {}
+  const fallbackBenefits = Object.entries(benefits)
+    .filter(([key]) => !['booking', 'discount', 'additional'].includes(key))
+    .map(([key, value]) => `${key}：${String(value)}`)
+    .join('；')
+  Object.assign(membershipProductForm, {
+    code: product.code,
+    name: product.name,
+    level: product.level,
+    priceYuan: (Number(product.priceCents || 0) / 100).toFixed(2).replace(/\.00$/, ''),
+    durationDays: String(product.durationDays || 365),
+    bookingBenefit: String(benefits.booking || ''),
+    discountBenefit: String(benefits.discount || ''),
+    additionalBenefit: String(benefits.additional || fallbackBenefits),
+    effectiveFrom: new Date().toISOString().slice(0, 10),
+    effectiveTo: '2099-01-01',
+    reason: '',
+  })
+  uni.pageScrollTo({ scrollTop: 0, duration: 200 })
+}
+
+function changeMemberLevel(event: any) {
+  membershipProductForm.level = memberLevelOptions[Number(event.detail.value)]?.value || 'REGULAR'
+}
+
+function membershipBenefits(product: any) {
+  const entries = Object.entries(product?.benefits || {})
+  if (!entries.length) return '未配置权益说明'
+  return entries.map(([key, value]) => `${key}：${String(value)}`).join('；')
+}
+
+async function refreshMembershipProducts(message?: string) {
+  membershipProductError.value = ''
+  try {
+    membershipProducts.value = await endpoints.manageMembershipProducts()
+    if (message) uni.showToast({ title: message, icon: 'success' })
+  } catch (cause: any) {
+    membershipProductError.value = cause?.message || '会员产品版本加载失败'
+  }
+}
+
+async function createMembershipProductVersion() {
+  if (!canManageMembershipProducts.value || membershipProductSubmitting.value) return
+  const source = membershipProductSource.value
+  const code = membershipProductForm.code.trim()
+  const name = membershipProductForm.name.trim()
+  const priceCents = yuanToCents(membershipProductForm.priceYuan)
+  const durationDays = Number(membershipProductForm.durationDays)
+  const effectiveFrom = effectiveIso(membershipProductForm.effectiveFrom)
+  const effectiveTo = membershipProductForm.effectiveTo.trim()
+    ? effectiveIso(membershipProductForm.effectiveTo)
+    : ''
+  const reason = membershipProductForm.reason.trim()
+  if (!source && !/^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(code))
+    return uni.showToast({ title: '产品编码格式无效', icon: 'none' })
+  if (name.length < 2 || name.length > 80)
+    return uni.showToast({ title: '产品名称需为2-80个字', icon: 'none' })
+  if (!Number.isSafeInteger(priceCents) || priceCents < 0)
+    return uni.showToast({ title: '会员价格无效', icon: 'none' })
+  if (!Number.isSafeInteger(durationDays) || durationDays < 1 || durationDays > 3650)
+    return uni.showToast({ title: '有效天数需为1-3650天', icon: 'none' })
+  if (!effectiveFrom || (membershipProductForm.effectiveTo.trim() && !effectiveTo) || (effectiveTo && new Date(effectiveTo) <= new Date(effectiveFrom)))
+    return uni.showToast({ title: '产品生效区间无效', icon: 'none' })
+  if (reason.length < 2 || reason.length > 300)
+    return uni.showToast({ title: '请填写2-300字创建原因', icon: 'none' })
+  const benefits = {
+    booking: membershipProductForm.bookingBenefit.trim(),
+    discount: membershipProductForm.discountBenefit.trim(),
+    additional: membershipProductForm.additionalBenefit.trim(),
+  }
+  if (!Object.values(benefits).some(Boolean))
+    return uni.showToast({ title: '至少填写一项会员权益', icon: 'none' })
+  const confirmed = await uni.showModal({
+    title: source ? `确认创建 ${source.code} 新版本` : '确认创建会员产品',
+    content: `${name} · ${money(priceCents)} · ${durationDays}天\n创建后条款不可覆盖，新版本默认停用，需另行启用。`,
+    confirmText: '创建停用版本',
+  })
+  if (!confirmed.confirm) return
+  const command: Record<string, any> = {
+    name, level: membershipProductForm.level, priceCents, durationDays, benefits,
+    effectiveFrom, reason,
+  }
+  if (effectiveTo) command.effectiveTo = effectiveTo
+  if (!source) command.code = code
+  membershipProductSubmitting.value = true
+  try {
+    await withPendingCreationKey(
+      source ? `membership.product.version.${source.id}` : 'membership.product.create',
+      { sourceProductId: source?.id || null, ...command },
+      (idempotencyKey) => source
+        ? endpoints.createMembershipProductVersion(source.id, { ...command, idempotencyKey })
+        : endpoints.createMembershipProduct({ ...command, idempotencyKey }),
+    )
+    resetMembershipProductForm()
+    await refreshMembershipProducts('会员产品版本已创建')
+  } catch (cause: any) {
+    uni.showToast({ title: cause?.message || '会员产品创建失败', icon: 'none' })
+  } finally {
+    membershipProductSubmitting.value = false
+  }
+}
+
+async function setMembershipProductStatus(product: any) {
+  if (!canManageMembershipProducts.value || membershipProductSubmitting.value) return
+  const enabled = !product.enabled
+  const action = enabled ? '启用' : '停用'
+  const input = await uni.showModal({
+    title: `${action}会员产品`, editable: true,
+    placeholderText: `填写${action}原因（至少2个字）`,
+  })
+  const reason = input.content?.trim() || ''
+  if (!input.confirm || reason.length < 2 || reason.length > 300) return
+  const confirmed = await uni.showModal({
+    title: `二次确认${action}`,
+    content: `${product.name} · ${product.code} v${product.version}\n${enabled ? '启用后进入有效期才会对会员可售。' : '停用只影响后续销售，历史订单与订阅不会改变。'}`,
+    confirmText: `确认${action}`,
+    confirmColor: enabled ? '#17653d' : '#a52626',
+  })
+  if (!confirmed.confirm) return
+  const command = { productId: product.id, enabled, reason }
+  membershipProductSubmitting.value = true
+  try {
+    await withPendingCreationKey(`membership.product.status.${product.id}`, command, (idempotencyKey) =>
+      endpoints.setMembershipProductStatus(product.id, { enabled, reason, idempotencyKey }),
+    )
+    await refreshMembershipProducts(`会员产品已${action}`)
+  } catch (cause: any) {
+    uni.showToast({ title: cause?.message || `${action}失败`, icon: 'none' })
+  } finally {
+    membershipProductSubmitting.value = false
+  }
+}
+
 function changeSource(event: any) {
   createForm.sourceChannel = sourceOptions[Number(event.detail.value)]?.value || 'STORE_VISIT'
 }
@@ -180,8 +425,8 @@ onShow(load)
 <template>
   <OperationsFrame title="客户经营" eyebrow="CRM & MEMBER 360" role="前台 / 教练 / 财务" description="线索先进入责任队列，跟进记录只追加；转化后关联现有会员并进入客户360。">
     <view class="metric-grid"><MetricCard v-for="item in metrics" :key="item[0]" :label="item[0]" :value="item[1]" :note="item[2]" /></view>
-    <view class="tabs card"><button class="tab" :class="{ active: tab === 'members' }" @tap="tab = 'members'">会员360</button><button v-if="canViewLeads" class="tab" :class="{ active: tab === 'leads' }" @tap="tab = 'leads'">客户线索</button></view>
-    <view class="search-card card"><input v-model="query" class="input" :placeholder="tab === 'members' ? '输入姓名或手机号查询会员' : '搜索姓名、来源活动'" confirm-type="search" /></view>
+    <view class="tabs card"><button class="tab" :class="{ active: tab === 'members' }" @tap="tab = 'members'">会员360</button><button v-if="canViewLeads" class="tab" :class="{ active: tab === 'leads' }" @tap="tab = 'leads'">客户线索</button><button v-if="canViewMembershipProducts" class="tab" :class="{ active: tab === 'membershipProducts' }" @tap="tab = 'membershipProducts'">会员产品</button><button v-if="canManageRechargePlans" class="tab" :class="{ active: tab === 'rechargePlans' }" @tap="tab = 'rechargePlans'">充值计划</button></view>
+    <view v-if="tab === 'members' || tab === 'leads'" class="search-card card"><input v-model="query" class="input" :placeholder="tab === 'members' ? '输入姓名或手机号查询会员' : '搜索姓名、来源活动'" confirm-type="search" /></view>
 
     <template v-if="tab === 'members'">
       <view v-if="canReviewHosts" class="card host-queue">
@@ -203,7 +448,7 @@ onShow(load)
       </view>
     </template>
 
-    <template v-else>
+    <template v-else-if="tab === 'leads'">
       <view v-if="canWriteLeads" class="card lead-form">
         <view class="section-title">新建客户线索</view>
         <input v-model="createForm.displayName" class="input field" placeholder="客户姓名（必填）" />
@@ -220,11 +465,62 @@ onShow(load)
         <view v-if="canWriteLeads && !['CONVERTED', 'LOST', 'ARCHIVED'].includes(lead.status)" class="actions"><button size="mini" @tap="claim(lead)">认领</button><button size="mini" @tap="assign(lead)">分配</button><button size="mini" @tap="followUp(lead)">跟进推进</button><button size="mini" @tap="convert(lead)">转会员</button><button size="mini" @tap="lose(lead)">流失</button></view>
       </view>
     </template>
+    <template v-else-if="tab === 'membershipProducts'">
+      <view v-if="canManageMembershipProducts" class="card membership-product-form">
+        <view class="form-heading">
+          <view><text class="member-name">{{ membershipProductSource ? `创建 ${membershipProductSource.code} 新版本` : '新建会员产品 v1' }}</text><text class="muted block">商业条款一经创建不可覆盖；新版本默认停用，启用时校验同编码有效期。</text></view>
+          <button v-if="membershipProductSource" class="secondary compact-action" :disabled="membershipProductSubmitting" @tap="resetMembershipProductForm">取消派生</button>
+        </view>
+        <input v-model="membershipProductForm.code" class="input field" :disabled="Boolean(membershipProductSource)" placeholder="产品编码，例如 MEMBER_GOLD_YEAR" />
+        <input v-model="membershipProductForm.name" class="input field" placeholder="产品名称" />
+        <picker :range="memberLevelOptions" range-key="label" @change="changeMemberLevel"><view class="picker field">会员等级：{{ memberLevelOptions.find((item) => item.value === membershipProductForm.level)?.label }} ›</view></picker>
+        <view class="amount-grid"><input v-model="membershipProductForm.priceYuan" class="input field" type="digit" placeholder="售价（元）" /><input v-model="membershipProductForm.durationDays" class="input field" type="number" placeholder="有效天数" /></view>
+        <input v-model="membershipProductForm.bookingBenefit" class="input field" placeholder="订场权益，例如提前14天订场" />
+        <input v-model="membershipProductForm.discountBenefit" class="input field" placeholder="折扣权益，例如场地9折" />
+        <input v-model="membershipProductForm.additionalBenefit" class="input field" placeholder="其他权益，例如每月同行券" />
+        <view class="amount-grid"><input v-model="membershipProductForm.effectiveFrom" class="input field" placeholder="生效日 YYYY-MM-DD" /><input v-model="membershipProductForm.effectiveTo" class="input field" placeholder="失效日，可留空" /></view>
+        <input v-model="membershipProductForm.reason" class="input field" placeholder="创建原因（审计留痕）" />
+        <button class="primary create-plan" :loading="membershipProductSubmitting" :disabled="membershipProductSubmitting" @tap="createMembershipProductVersion">创建停用状态的新版本</button>
+      </view>
+      <view v-else class="card readonly-note"><text class="member-name">前台只读</text><text class="muted">可核对产品条款和上下架状态；创建版本、启停必须由管理员完成。</text></view>
+      <view class="section-title">会员产品版本 <text class="section-note">{{ loading ? '同步中' : `${membershipProducts.length} 个` }}</text></view>
+      <view v-if="membershipProductError" class="card product-error"><text class="member-name">会员产品加载失败</text><text class="muted block">{{ membershipProductError }}</text><button class="secondary status-button" @tap="refreshMembershipProducts()">重新加载</button></view>
+      <view v-else-if="loading" class="card empty">正在同步会员产品版本…</view>
+      <view v-else-if="!membershipProducts.length" class="card empty">尚未配置会员产品版本</view>
+      <view v-for="product in membershipProducts" v-else :key="product.id" class="card plan-row">
+        <view class="plan-head"><view><text class="member-name">{{ product.name }}</text><text class="muted">{{ product.code }} · v{{ product.version }} · {{ product.level }} · {{ money(product.priceCents) }} / {{ product.durationDays }}天</text></view><text class="lead-status" :class="{ disabled: !product.enabled }">{{ product.enabled ? '已启用' : '已停用' }}</text></view>
+        <text class="benefit-line">{{ membershipBenefits(product) }}</text>
+        <text class="muted block">有效期：{{ new Date(product.effectiveFrom).toLocaleDateString() }} 至 {{ product.effectiveTo ? new Date(product.effectiveTo).toLocaleDateString() : '长期' }} · 创建人 {{ product.createdBy?.displayName || product.createdById }}</text>
+        <text v-if="product.transitions?.[0]" class="follow-up">最近变更：{{ product.transitions[0].reason }} · {{ product.transitions[0].actor?.displayName }}</text>
+        <view v-if="canManageMembershipProducts" class="product-actions"><button class="secondary status-button" :disabled="membershipProductSubmitting" @tap="beginMembershipProductVersion(product)">基于此版本派生</button><button class="secondary status-button" :disabled="membershipProductSubmitting" @tap="setMembershipProductStatus(product)">{{ product.enabled ? '停用产品' : '启用产品' }}</button></view>
+      </view>
+    </template>
+    <template v-else>
+      <view class="card recharge-plan-form">
+        <view class="section-title">新建充值计划版本</view>
+        <text class="muted block">财务条款创建后不可修改；新版本默认停用，需单独启用。赠送金额不得超过本金。</text>
+        <input v-model="rechargePlanForm.code" class="input field" placeholder="计划编码，例如 RECHARGE_500" />
+        <input v-model="rechargePlanForm.name" class="input field" placeholder="计划名称" />
+        <view class="amount-grid"><input v-model="rechargePlanForm.principalYuan" class="input field" type="digit" placeholder="充值本金（元）" /><input v-model="rechargePlanForm.giftYuan" class="input field" type="digit" placeholder="赠送金额（元）" /></view>
+        <view class="amount-grid"><input v-model="rechargePlanForm.effectiveFrom" class="input field" placeholder="生效日 YYYY-MM-DD" /><input v-model="rechargePlanForm.effectiveTo" class="input field" placeholder="失效日 YYYY-MM-DD" /></view>
+        <input v-model="rechargePlanForm.reason" class="input field" placeholder="创建原因（审计留痕）" />
+        <button class="primary create-plan" @tap="createRechargePlan">创建停用状态的新版本</button>
+      </view>
+      <view class="section-title">充值计划版本 <text class="section-note">{{ rechargePlans.length }} 个</text></view>
+      <view v-for="plan in rechargePlans" :key="plan.id" class="card plan-row">
+        <view class="plan-head"><view><text class="member-name">{{ plan.name }}</text><text class="muted">{{ plan.code }} · v{{ plan.version }} · 本金 {{ money(plan.principalCents) }} · 赠送 {{ money(plan.giftCents) }}</text></view><text class="lead-status" :class="{ disabled: !plan.enabled }">{{ plan.enabled ? '已启用' : '已停用' }}</text></view>
+        <text class="muted block">有效期：{{ new Date(plan.effectiveFrom).toLocaleDateString() }} 至 {{ plan.effectiveTo ? new Date(plan.effectiveTo).toLocaleDateString() : '长期' }} · 创建人 {{ plan.createdBy?.displayName || plan.createdById }}</text>
+        <text v-if="plan.transitions?.[0]" class="follow-up">最近变更：{{ plan.transitions[0].reason }} · {{ plan.transitions[0].actor?.displayName }}</text>
+        <button class="secondary status-button" @tap="setRechargePlanStatus(plan)">{{ plan.enabled ? '停用计划' : '启用计划' }}</button>
+      </view>
+    </template>
     <view class="card boundary"><text class="muted">线索跟进记录不可删除；教练仅能查看分配给自己或本班会员关联线索，且看不到账户和联系方式。</text></view>
   </OperationsFrame>
 </template>
 
 <style scoped>
-.metric-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14rpx; margin-top:22rpx; }.tabs { display:flex; gap:12rpx; margin-top:22rpx; padding:10rpx; }.tab { flex:1; margin:0; background:#f3f5f3; color:#5f6e65; }.tab.active { color:#fff; background:#17653d; }.search-card,.customer-card,.lead-form,.host-queue { margin-top:18rpx; padding:20rpx; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.member-row,.lead-card { margin-top:14rpx; padding:22rpx 24rpx; }.member-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; }.member-row.selected { border-color:#17653d; background:#f1f8f2; }.member-name { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; }.select-mark,.lead-status { color:#17653d; font-size:23rpx; }.account-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10rpx; margin-top:18rpx; }.account { padding:14rpx; background:#f4f7f4; border-radius:12rpx; font-size:20rpx; }.account-value { display:block; margin-top:6rpx; font-size:28rpx; font-weight:800; }.privacy,.follow-up { display:block; margin-top:14rpx; color:#8a6030; font-size:22rpx; line-height:1.6; }.field { margin-top:12rpx; }.picker { padding:20rpx; border:1rpx solid #dce5df; border-radius:12rpx; color:#405449; }.lead-head,.host-row { display:flex; justify-content:space-between; gap:12rpx; }.host-row { align-items:center; padding:18rpx 0; border-bottom:1rpx solid #edf1ee; }.block { display:block; margin-top:12rpx; }.actions { display:flex; flex-wrap:wrap; gap:10rpx; margin-top:16rpx; }.host-row .actions { margin-top:0; }.actions button { margin:0; }.boundary { margin-top:22rpx; line-height:1.7; }
+.metric-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14rpx; margin-top:22rpx; }.tabs { display:flex; flex-wrap:wrap; gap:12rpx; margin-top:22rpx; padding:10rpx; }.tab { flex:1 1 42%; margin:0; background:#f3f5f3; color:#5f6e65; }.tab.active { color:#fff; background:#17653d; }.search-card,.customer-card,.lead-form,.host-queue { margin-top:18rpx; padding:20rpx; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.member-row,.lead-card { margin-top:14rpx; padding:22rpx 24rpx; }.member-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; }.member-row.selected { border-color:#17653d; background:#f1f8f2; }.member-name { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; }.select-mark,.lead-status { color:#17653d; font-size:23rpx; }.account-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10rpx; margin-top:18rpx; }.account { padding:14rpx; background:#f4f7f4; border-radius:12rpx; font-size:20rpx; }.account-value { display:block; margin-top:6rpx; font-size:28rpx; font-weight:800; }.privacy,.follow-up { display:block; margin-top:14rpx; color:#8a6030; font-size:22rpx; line-height:1.6; }.field { margin-top:12rpx; }.picker { padding:20rpx; border:1rpx solid #dce5df; border-radius:12rpx; color:#405449; }.lead-head,.host-row { display:flex; justify-content:space-between; gap:12rpx; }.host-row { align-items:center; padding:18rpx 0; border-bottom:1rpx solid #edf1ee; }.block { display:block; margin-top:12rpx; }.actions { display:flex; flex-wrap:wrap; gap:10rpx; margin-top:16rpx; }.host-row .actions { margin-top:0; }.actions button { margin:0; }.boundary { margin-top:22rpx; line-height:1.7; }
 .adjustment-button { margin-top:16rpx; }
+.recharge-plan-form { margin-top:18rpx; }.amount-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12rpx; }.create-plan,.status-button { margin-top:16rpx; }.plan-row { margin-top:14rpx; }.plan-head { display:flex; justify-content:space-between; gap:14rpx; }.lead-status.disabled { color:#8b4b41; }
+.membership-product-form,.readonly-note { margin-top:18rpx; }.form-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16rpx; }.compact-action { flex:0 0 auto; width:auto; margin:0; padding:0 18rpx; }.benefit-line { display:block; margin-top:14rpx; color:#405449; font-size:23rpx; line-height:1.6; }.product-actions { display:grid; grid-template-columns:repeat(2,1fr); gap:12rpx; }.product-actions button { width:100%; margin-top:16rpx; }.product-error { color:#8f2828; background:#fff5f3; }
 </style>

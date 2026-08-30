@@ -20,16 +20,16 @@ const roleLabels: Record<AppRole, string> = {
 }
 
 const modules: Module[] = [
+  { key: 'management', title: '经营管理', description: '统一待办、岗位交接与跨域异常', route: '/packages/ops/pages/admin/index', roles: ['FRONT_DESK', 'COACH', 'HOST', 'MERCHANT', 'FINANCE', 'EVENT_MANAGER', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'today', title: '今日营业', description: '值班、现场队列、异常与交接', route: '/packages/ops/pages/frontdesk/index', roles: ['FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'] },
-  { key: 'transactions', title: '交易中心', description: '订单、收款、退款申请与审核', route: '/packages/ops/pages/finance/index', roles: ['FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'venue', title: '场馆资源', description: '封场维护日历、资源占用与可售状态', route: '/packages/ops/pages/venue/index', roles: ['FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'members', title: '会员服务', description: '会员查询、权益、账户与服务记录', route: '/packages/ops/pages/members/index', roles: ['FRONT_DESK', 'COACH', 'FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'training', title: '培训运营', description: '课表、学员签到、消课与反馈', route: '/packages/ops/pages/coach/index', roles: ['COACH', 'FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'games', title: '球局运营', description: '报名名单、现场签到与激励结算', route: '/packages/ops/pages/host/index', roles: ['HOST', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'events', title: '赛事运营', description: '队伍、比分、排名、奖品出库与签收', route: '/packages/ops/pages/event/index', roles: ['EVENT_MANAGER', 'FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'alliance', title: '联盟商户', description: '券码核销、消费归因与周期结算', route: '/packages/ops/pages/merchant/index', roles: ['MERCHANT', 'FRONT_DESK', 'FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
-  { key: 'inventory', title: '商品库存', description: '库存台账、低库存与出入库', route: '/packages/ops/pages/inventory/index', roles: ['FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'] },
-  { key: 'finance', title: '财务结算', description: '经营收入、培训分成、对账与导出', route: '/packages/ops/pages/finance/index', roles: ['FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
+  { key: 'inventory', title: '商品库存', description: '采购、寄售、盘点及培训/赛事物料领用', route: '/packages/ops/pages/inventory/index', roles: ['FRONT_DESK', 'COACH', 'EVENT_MANAGER', 'FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
+  { key: 'finance', title: '财务与交易', description: '订单收款、退款审批、经营收入、对账结算与导出', route: '/packages/ops/pages/finance/index', roles: ['FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'governance', title: '治理与审计', description: '员工微信身份、岗位权限、参数版本、风险与导出', route: '/packages/ops/pages/governance/index', roles: ['FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
 ]
 

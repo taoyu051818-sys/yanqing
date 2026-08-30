@@ -17,6 +17,54 @@ const actor: AuthUser = {
 };
 
 describe('WorkItemsService', () => {
+  it('surfaces a member erasure request to administrators as a high-priority handoff', async () => {
+    const prisma = {
+      refund: { findMany: vi.fn().mockResolvedValue([]) },
+      trainingAttendance: { findMany: vi.fn().mockResolvedValue([]) },
+      eventMatch: { findMany: vi.fn().mockResolvedValue([]) },
+      eventPrizeAward: { findMany: vi.fn().mockResolvedValue([]) },
+      allianceSettlement: { findMany: vi.fn().mockResolvedValue([]) },
+      trainingSettlement: { findMany: vi.fn().mockResolvedValue([]) },
+      inventoryItem: { findMany: vi.fn().mockResolvedValue([]) },
+      order: { findMany: vi.fn().mockResolvedValue([]) },
+      customerLead: { findMany: vi.fn().mockResolvedValue([]) },
+      hostProfile: { findMany: vi.fn().mockResolvedValue([]) },
+      dataErasureRequest: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'erasure-1',
+            userId: 'member-1',
+            status: 'REQUESTED',
+            reason: '不再使用服务',
+            requestedAt: new Date('2026-08-30T02:00:00Z'),
+            user: {
+              displayName: '小林',
+              status: 'ACTIVE',
+              primaryRole: 'MEMBER',
+            },
+          },
+        ]),
+      },
+      accountAdjustmentRequest: { findMany: vi.fn().mockResolvedValue([]) },
+      trainingConsumeCorrection: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+
+    const result = await new WorkItemsService(prisma as never).list(
+      { ...actor, roles: [AppRole.ADMIN] },
+      20,
+    );
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        kind: 'DATA_ERASURE_REVIEW',
+        priority: 99,
+        objectId: 'erasure-1',
+        action:
+          '/packages/ops/pages/governance/index?focus=privacy&id=erasure-1',
+      }),
+    ]);
+  });
+
   it('normalizes pending money and settlement work into one priority queue', async () => {
     const prisma = {
       refund: {
@@ -94,6 +142,56 @@ describe('WorkItemsService', () => {
     );
     expect(prisma.trainingAttendance.findMany).not.toHaveBeenCalled();
     expect(prisma.trainingConsumeCorrection.findMany).not.toHaveBeenCalled();
+  });
+
+  it('routes supplier settlement review and payment to a different finance maker-checker', async () => {
+    const prisma = {
+      refund: { findMany: vi.fn().mockResolvedValue([]) },
+      allianceSettlement: { findMany: vi.fn().mockResolvedValue([]) },
+      trainingSettlement: { findMany: vi.fn().mockResolvedValue([]) },
+      consignmentSettlement: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'consignment-settlement-1',
+            statementNo: 'CS202608001',
+            supplierId: 'supplier-1',
+            supplier: { name: '寄售伙伴', code: 'CONSIGN-1' },
+            status: SettlementStatus.CONFIRMED,
+            createdById: 'finance-2',
+            entryCount: 6,
+            payableCents: 12_600,
+            periodEnd: new Date('2026-09-01T00:00:00Z'),
+            createdAt: new Date('2026-08-30T01:00:00Z'),
+          },
+        ]),
+      },
+      accountAdjustmentRequest: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+
+    const result = await new WorkItemsService(prisma as never).list(actor, 20);
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        kind: 'CONSIGNMENT_SETTLEMENT',
+        objectId: 'consignment-settlement-1',
+        priority: 78,
+        amountCents: 12_600,
+        action:
+          '/packages/ops/pages/finance/index?focus=consignment-settlement&id=consignment-settlement-1',
+      }),
+    ]);
+    expect(prisma.consignmentSettlement.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [
+            { status: SettlementStatus.DRAFT },
+            expect.objectContaining({
+              createdById: { not: actor.sub },
+            }),
+          ],
+        },
+      }),
+    );
   });
 
   it('returns no internal work for a member even when source records exist', async () => {

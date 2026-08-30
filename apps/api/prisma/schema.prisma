@@ -157,6 +157,7 @@ enum BookingStatus {
   HELD
   CONFIRMED
   CHECKED_IN
+  NO_SHOW
   COMPLETED
   CANCELLED
 }
@@ -194,6 +195,7 @@ enum RegistrationStatus {
   REGISTERED
   PAID
   CHECKED_IN
+  NO_SHOW
   COMPLETED
   CANCELLED
   REFUNDED
@@ -284,6 +286,23 @@ enum TrainingConsumeCorrectionStatus {
   REJECTED
 }
 
+enum TrainingTrialStatus {
+  RESERVED
+  CHECKED_IN
+  NO_SHOW
+  ASSESSED
+  CONVERTED
+  LOST
+  CANCELLED
+}
+
+enum YouthTrainingRuleStatus {
+  DRAFT
+  PUBLISHED
+  REJECTED
+  SUPERSEDED
+}
+
 enum SettlementStatus {
   DRAFT
   PENDING_CONFIRMATION
@@ -345,6 +364,21 @@ enum InventoryTxnType {
 enum SupplierType {
   OWNED
   CONSIGNMENT
+}
+
+enum ConsignmentPayableEntryType {
+  SALE
+  REFUND_REVERSAL
+}
+
+enum ConsignmentSettlementAction {
+  CREATED
+  SUBMITTED
+  CONFIRMED
+  DISPUTED
+  RETURNED
+  SETTLED
+  VOIDED
 }
 
 enum PurchaseOrderStatus {
@@ -412,78 +446,110 @@ enum ExportStatus {
   EXPIRED
 }
 
+enum DataErasureRequestStatus {
+  REQUESTED
+  CANCELLED
+  REJECTED
+  COMPLETED
+}
+
 model User {
-  id                                  String                      @id @default(cuid())
-  openId                              String?                     @unique
-  unionId                             String?                     @unique
-  phone                               String?                     @unique
+  id                                  String                            @id @default(cuid())
+  openId                              String?                           @unique
+  unionId                             String?                           @unique
+  phone                               String?                           @unique
   displayName                         String
   avatarUrl                           String?
-  status                              UserStatus                  @default(ACTIVE)
-  primaryRole                         AppRole                     @default(MEMBER)
+  status                              UserStatus                        @default(ACTIVE)
+  primaryRole                         AppRole                           @default(MEMBER)
   referrerId                          String?
-  referrer                            User?                       @relation("DirectReferral", fields: [referrerId], references: [id], onDelete: SetNull)
-  directReferrals                     User[]                      @relation("DirectReferral")
-  leadsReferred                       CustomerLead[]              @relation("LeadReferrer")
-  leadsOwned                          CustomerLead[]              @relation("LeadOwner")
-  leadsConverted                      CustomerLead[]              @relation("LeadConvertedMember")
-  leadsCreated                        CustomerLead[]              @relation("LeadCreator")
-  leadFollowUps                       LeadFollowUp[]              @relation("LeadFollowUpActor")
+  referrer                            User?                             @relation("DirectReferral", fields: [referrerId], references: [id], onDelete: SetNull)
+  directReferrals                     User[]                            @relation("DirectReferral")
+  leadsReferred                       CustomerLead[]                    @relation("LeadReferrer")
+  leadsOwned                          CustomerLead[]                    @relation("LeadOwner")
+  leadsConverted                      CustomerLead[]                    @relation("LeadConvertedMember")
+  leadsCreated                        CustomerLead[]                    @relation("LeadCreator")
+  leadFollowUps                       LeadFollowUp[]                    @relation("LeadFollowUpActor")
   roles                               UserRole[]
   memberProfile                       MemberProfile?
-  guardianStudents                    Student[]                   @relation("StudentGuardian")
+  guardianStudents                    Student[]                         @relation("StudentGuardian")
   accounts                            Account[]
-  accountAdjustments                  AccountTransaction[]        @relation("AccountOperator")
-  requestedAccountAdjustmentReviews   AccountAdjustmentRequest[]  @relation("AccountAdjustmentRequester")
-  reviewedAccountAdjustmentReviews    AccountAdjustmentRequest[]  @relation("AccountAdjustmentReviewer")
-  memberOrders                        Order[]                     @relation("MemberOrders")
-  createdOrders                       Order[]                     @relation("CreatedOrders")
-  payments                            Payment[]                   @relation("PaymentPayer")
-  operatedPayments                    Payment[]                   @relation("PaymentOperator")
-  requestedRefunds                    Refund[]                    @relation("RequestedRefunds")
-  approvedRefunds                     Refund[]                    @relation("ApprovedRefunds")
-  courtBookings                       CourtBooking[]              @relation("MemberBookings")
-  courtClosuresCreated                CourtClosure[]              @relation("CourtClosureCreator")
-  courtClosuresCancelled              CourtClosure[]              @relation("CourtClosureCanceller")
-  hostedGames                         Game[]                      @relation("HostedGames")
+  accountAdjustments                  AccountTransaction[]              @relation("AccountOperator")
+  requestedAccountAdjustmentReviews   AccountAdjustmentRequest[]        @relation("AccountAdjustmentRequester")
+  reviewedAccountAdjustmentReviews    AccountAdjustmentRequest[]        @relation("AccountAdjustmentReviewer")
+  memberOrders                        Order[]                           @relation("MemberOrders")
+  createdOrders                       Order[]                           @relation("CreatedOrders")
+  payments                            Payment[]                         @relation("PaymentPayer")
+  operatedPayments                    Payment[]                         @relation("PaymentOperator")
+  requestedRefunds                    Refund[]                          @relation("RequestedRefunds")
+  approvedRefunds                     Refund[]                          @relation("ApprovedRefunds")
+  createdRechargePlans                RechargePlan[]                    @relation("RechargePlanCreator")
+  rechargePlanTransitions             RechargePlanTransition[]          @relation("RechargePlanTransitionActor")
+  createdMembershipProducts           MembershipProduct[]               @relation("MembershipProductCreator")
+  membershipProductTransitions        MembershipProductTransition[]     @relation("MembershipProductTransitionActor")
+  createdPriceRules                   PriceRule[]                        @relation("PriceRuleCreator")
+  priceRuleTransitions                PriceRuleTransition[]              @relation("PriceRuleTransitionActor")
+  courtBookings                       CourtBooking[]                    @relation("MemberBookings")
+  fulfilledCourtBookings              CourtBooking[]                    @relation("CourtBookingFulfiller")
+  courtClosuresCreated                CourtClosure[]                    @relation("CourtClosureCreator")
+  courtClosuresCancelled              CourtClosure[]                    @relation("CourtClosureCanceller")
+  hostedGames                         Game[]                            @relation("HostedGames")
+  cancelledGames                      Game[]                            @relation("GameCanceller")
   hostProfile                         HostProfile?
-  hostRewards                         HostReward[]                @relation("HostRewards")
+  hostRewards                         HostReward[]                      @relation("HostRewards")
   gameRegistrations                   GameRegistration[]
-  eventCaptains                       EventTeam[]                 @relation("EventCaptains")
-  trainingPurchases                   TrainingEnrollment[]        @relation("TrainingPurchases")
-  attendanceOperations                TrainingAttendance[]        @relation("AttendanceOperator")
-  requestedTrainingConsumeCorrections TrainingConsumeCorrection[] @relation("TrainingConsumeCorrectionRequester")
-  reviewedTrainingConsumeCorrections  TrainingConsumeCorrection[] @relation("TrainingConsumeCorrectionReviewer")
-  couponHoldings                      CouponCode[]                @relation("CouponHolder")
-  couponRedemptions                   CouponCode[]                @relation("CouponRedeemer")
-  parameterChanges                    SystemParameter[]           @relation("ParameterCreator")
-  auditLogs                           AuditLog[]                  @relation("AuditActor")
-  riskEvents                          RiskEvent[]                 @relation("RiskUser")
-  inventoryOperations                 InventoryTransaction[]      @relation("InventoryOperator")
-  createdPurchaseOrders               PurchaseOrder[]             @relation("PurchaseOrderCreator")
-  submittedPurchaseOrders             PurchaseOrder[]             @relation("PurchaseOrderSubmitter")
-  approvedPurchaseOrders              PurchaseOrder[]             @relation("PurchaseOrderApprover")
-  purchaseReceipts                    PurchaseReceipt[]           @relation("PurchaseReceiptOperator")
-  createdStocktakes                   Stocktake[]                 @relation("StocktakeCreator")
-  submittedStocktakes                 Stocktake[]                 @relation("StocktakeSubmitter")
-  reviewedStocktakes                  Stocktake[]                 @relation("StocktakeReviewer")
-  postedStocktakes                    Stocktake[]                 @relation("StocktakePoster")
-  createdInventoryDocuments           InventoryOperation[]        @relation("InventoryOperationCreator")
-  approvedInventoryDocuments          InventoryOperation[]        @relation("InventoryOperationApprover")
-  postedInventoryDocuments            InventoryOperation[]        @relation("InventoryOperationPoster")
-  issuedEventPrizes                   EventPrizeAward[]           @relation("EventPrizeIssuer")
-  signedEventPrizes                   EventPrizeAward[]           @relation("EventPrizeSigner")
-  referralRewardsGiven                ReferralReward[]            @relation("RewardReferrer")
-  referralRewardsEarned               ReferralReward[]            @relation("RewardNewUser")
+  eventCaptains                       EventTeam[]                       @relation("EventCaptains")
+  cancelledEventTeams                 EventTeam[]                       @relation("EventTeamCanceller")
+  cancelledEvents                     Event[]                           @relation("EventCanceller")
+  trainingPurchases                   TrainingEnrollment[]              @relation("TrainingPurchases")
+  trainingTrials                      TrainingTrial[]                   @relation("TrainingTrialMember")
+  guardedTrainingTrials               TrainingTrial[]                   @relation("TrainingTrialGuardian")
+  coachedTrainingTrials               TrainingTrial[]                   @relation("TrainingTrialCoach")
+  createdTrainingTrials               TrainingTrial[]                   @relation("TrainingTrialCreator")
+  trainingTrialTransitions            TrainingTrialTransition[]         @relation("TrainingTrialTransitionActor")
+  requestedYouthTrainingRules         YouthTrainingRule[]               @relation("YouthTrainingRuleRequester")
+  reviewedYouthTrainingRules          YouthTrainingRule[]               @relation("YouthTrainingRuleReviewer")
+  attendanceOperations                TrainingAttendance[]              @relation("AttendanceOperator")
+  requestedTrainingConsumeCorrections TrainingConsumeCorrection[]       @relation("TrainingConsumeCorrectionRequester")
+  reviewedTrainingConsumeCorrections  TrainingConsumeCorrection[]       @relation("TrainingConsumeCorrectionReviewer")
+  couponHoldings                      CouponCode[]                      @relation("CouponHolder")
+  couponRedemptions                   CouponCode[]                      @relation("CouponRedeemer")
+  parameterChanges                    SystemParameter[]                 @relation("ParameterCreator")
+  auditLogs                           AuditLog[]                        @relation("AuditActor")
+  riskEvents                          RiskEvent[]                       @relation("RiskUser")
+  inventoryOperations                 InventoryTransaction[]            @relation("InventoryOperator")
+  createdPurchaseOrders               PurchaseOrder[]                   @relation("PurchaseOrderCreator")
+  submittedPurchaseOrders             PurchaseOrder[]                   @relation("PurchaseOrderSubmitter")
+  approvedPurchaseOrders              PurchaseOrder[]                   @relation("PurchaseOrderApprover")
+  purchaseReceipts                    PurchaseReceipt[]                 @relation("PurchaseReceiptOperator")
+  createdStocktakes                   Stocktake[]                       @relation("StocktakeCreator")
+  submittedStocktakes                 Stocktake[]                       @relation("StocktakeSubmitter")
+  reviewedStocktakes                  Stocktake[]                       @relation("StocktakeReviewer")
+  postedStocktakes                    Stocktake[]                       @relation("StocktakePoster")
+  createdInventoryDocuments           InventoryOperation[]              @relation("InventoryOperationCreator")
+  approvedInventoryDocuments          InventoryOperation[]              @relation("InventoryOperationApprover")
+  postedInventoryDocuments            InventoryOperation[]              @relation("InventoryOperationPoster")
+  createdConsignmentSettlements       ConsignmentSettlement[]           @relation("ConsignmentSettlementCreator")
+  submittedConsignmentSettlements     ConsignmentSettlement[]           @relation("ConsignmentSettlementSubmitter")
+  confirmedConsignmentSettlements     ConsignmentSettlement[]           @relation("ConsignmentSettlementConfirmer")
+  settledConsignmentSettlements       ConsignmentSettlement[]           @relation("ConsignmentSettlementSettler")
+  voidedConsignmentSettlements        ConsignmentSettlement[]           @relation("ConsignmentSettlementVoider")
+  consignmentSettlementTransitions    ConsignmentSettlementTransition[] @relation("ConsignmentSettlementTransitionActor")
+  issuedEventPrizes                   EventPrizeAward[]                 @relation("EventPrizeIssuer")
+  signedEventPrizes                   EventPrizeAward[]                 @relation("EventPrizeSigner")
+  referralRewardsGiven                ReferralReward[]                  @relation("RewardReferrer")
+  referralRewardsEarned               ReferralReward[]                  @relation("RewardNewUser")
   exportJobs                          ExportJob[]
+  dataErasureRequests                 DataErasureRequest[]              @relation("DataErasureRequester")
+  reviewedDataErasureRequests         DataErasureRequest[]              @relation("DataErasureReviewer")
   notifications                       Notification[]
-  closedReconciliationPeriods         ReconciliationPeriod[]      @relation("ClosedReconciliationPeriods")
-  operatedFrontDeskShifts             FrontDeskShift[]            @relation("FrontDeskShiftOperator")
-  openedFrontDeskShifts               FrontDeskShift[]            @relation("FrontDeskShiftOpenedBy")
-  closedFrontDeskShifts               FrontDeskShift[]            @relation("FrontDeskShiftClosedBy")
-  reviewedFrontDeskShiftVariances     FrontDeskShift[]            @relation("FrontDeskShiftVarianceReviewer")
-  createdAt                           DateTime                    @default(now())
-  updatedAt                           DateTime                    @updatedAt
+  closedReconciliationPeriods         ReconciliationPeriod[]            @relation("ClosedReconciliationPeriods")
+  operatedFrontDeskShifts             FrontDeskShift[]                  @relation("FrontDeskShiftOperator")
+  openedFrontDeskShifts               FrontDeskShift[]                  @relation("FrontDeskShiftOpenedBy")
+  closedFrontDeskShifts               FrontDeskShift[]                  @relation("FrontDeskShiftClosedBy")
+  reviewedFrontDeskShiftVariances     FrontDeskShift[]                  @relation("FrontDeskShiftVarianceReviewer")
+  createdAt                           DateTime                          @default(now())
+  updatedAt                           DateTime                          @updatedAt
   deletedAt                           DateTime?
 
   @@index([referrerId])
@@ -526,10 +592,10 @@ model MemberProfile {
 }
 
 model CustomerLead {
-  id                String         @id @default(cuid())
+  id                String          @id @default(cuid())
   displayName       String
   phone             String?
-  status            LeadStatus     @default(NEW)
+  status            LeadStatus      @default(NEW)
   sourceChannel     SourceChannel
   campaign          String?
   referrerId        String?
@@ -542,13 +608,14 @@ model CustomerLead {
   lostAt            DateTime?
   archivedAt        DateTime?
   lostReason        String?
-  referrer          User?          @relation("LeadReferrer", fields: [referrerId], references: [id], onDelete: SetNull)
-  owner             User?          @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  convertedMember   User?          @relation("LeadConvertedMember", fields: [convertedMemberId], references: [id], onDelete: SetNull)
-  createdBy         User           @relation("LeadCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  referrer          User?           @relation("LeadReferrer", fields: [referrerId], references: [id], onDelete: SetNull)
+  owner             User?           @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  convertedMember   User?           @relation("LeadConvertedMember", fields: [convertedMemberId], references: [id], onDelete: SetNull)
+  createdBy         User            @relation("LeadCreator", fields: [createdById], references: [id], onDelete: Restrict)
   followUps         LeadFollowUp[]
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  trainingTrials    TrainingTrial[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
   @@index([status, slaDueAt])
   @@index([ownerId, status, nextFollowUpAt])
@@ -583,6 +650,7 @@ model Student {
   authorizationNote     String?
   guardian              User                 @relation("StudentGuardian", fields: [guardianId], references: [id], onDelete: Restrict)
   enrollments           TrainingEnrollment[]
+  trainingTrials        TrainingTrial[]
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
@@ -821,41 +889,75 @@ model TimeSlot {
 }
 
 model PriceRule {
-  id                 String    @id @default(cuid())
-  name               String
-  timeSlotId         String?
-  weekdayMask        Int       @default(127)
-  priceCents         Int
-  newcomerPriceCents Int?
-  effectiveFrom      DateTime
-  effectiveTo        DateTime?
-  enabled            Boolean   @default(true)
-  timeSlot           TimeSlot? @relation(fields: [timeSlotId], references: [id], onDelete: Cascade)
-  createdAt          DateTime  @default(now())
+  id                     String                @id @default(cuid())
+  code                   String
+  version                Int
+  name                   String
+  timeSlotId             String?
+  weekdayMask            Int                   @default(127)
+  priceCents             Int
+  newcomerPriceCents     Int?
+  effectiveFrom          DateTime
+  effectiveTo            DateTime?
+  enabled                Boolean               @default(false)
+  creationIdempotencyKey String                @unique
+  creationCommandHash    String
+  createdById            String
+  timeSlot               TimeSlot?             @relation(fields: [timeSlotId], references: [id], onDelete: Restrict)
+  createdBy              User                  @relation("PriceRuleCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  transitions            PriceRuleTransition[]
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
 
-  @@index([timeSlotId, effectiveFrom, effectiveTo])
+  @@unique([code, version])
+  @@index([timeSlotId, enabled, effectiveFrom, effectiveTo])
+  @@index([createdById, createdAt])
+}
+
+model PriceRuleTransition {
+  id             String    @id @default(cuid())
+  priceRuleId    String
+  oldEnabled     Boolean
+  newEnabled     Boolean
+  reason         String
+  actorId        String
+  idempotencyKey String    @unique
+  commandHash    String
+  priceRule      PriceRule @relation(fields: [priceRuleId], references: [id], onDelete: Restrict)
+  actor          User      @relation("PriceRuleTransitionActor", fields: [actorId], references: [id], onDelete: Restrict)
+  createdAt      DateTime  @default(now())
+
+  @@index([priceRuleId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model CourtBooking {
-  id              String         @id @default(cuid())
-  courtId         String
-  memberId        String?
-  orderId         String?        @unique
-  status          BookingStatus  @default(HELD)
-  startsAt        DateTime
-  endsAt          DateTime
-  holdExpiresAt   DateTime?
-  usage           CourtUsage     @default(RETAIL)
-  trainingClassId String?
-  gameId          String?
-  note            String?
-  court           Court          @relation(fields: [courtId], references: [id], onDelete: Restrict)
-  member          User?          @relation("MemberBookings", fields: [memberId], references: [id], onDelete: SetNull)
-  order           Order?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  trainingClass   TrainingClass? @relation(fields: [trainingClassId], references: [id], onDelete: SetNull)
-  game            Game?          @relation(fields: [gameId], references: [id], onDelete: SetNull)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id                        String         @id @default(cuid())
+  courtId                   String
+  memberId                  String?
+  orderId                   String?        @unique
+  status                    BookingStatus  @default(HELD)
+  startsAt                  DateTime
+  endsAt                    DateTime
+  holdExpiresAt             DateTime?
+  usage                     CourtUsage     @default(RETAIL)
+  trainingClassId           String?
+  gameId                    String?
+  note                      String?
+  fulfillmentIdempotencyKey String?        @unique
+  fulfillmentCommandHash    String?
+  fulfillmentReason         String?
+  fulfillmentEvidence       Json?
+  fulfilledById             String?
+  fulfilledAt               DateTime?
+  court                     Court          @relation(fields: [courtId], references: [id], onDelete: Restrict)
+  member                    User?          @relation("MemberBookings", fields: [memberId], references: [id], onDelete: SetNull)
+  order                     Order?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  trainingClass             TrainingClass? @relation(fields: [trainingClassId], references: [id], onDelete: SetNull)
+  game                      Game?          @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  fulfilledBy               User?          @relation("CourtBookingFulfiller", fields: [fulfilledById], references: [id], onDelete: Restrict)
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
 
   // Active bookings are protected by a partial database index (see the
   // follow-up migration).  A plain Prisma @@unique would also include
@@ -863,20 +965,91 @@ model CourtBooking {
   // same slot again after a cancellation.
   @@index([courtId, startsAt, status])
   @@index([memberId, startsAt])
+  @@index([status, endsAt])
+  @@index([fulfilledById, fulfilledAt])
 }
 
 model MembershipProduct {
-  id            String               @id @default(cuid())
-  code          String               @unique
-  name          String
-  level         MemberLevel
-  priceCents    Int
-  durationDays  Int
-  benefits      Json
-  enabled       Boolean              @default(true)
-  subscriptions MemberSubscription[]
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  id                     String                        @id @default(cuid())
+  code                   String
+  version                Int
+  name                   String
+  level                  MemberLevel
+  priceCents             Int
+  durationDays           Int
+  benefits               Json
+  effectiveFrom          DateTime
+  effectiveTo            DateTime?
+  enabled                Boolean                       @default(false)
+  creationIdempotencyKey String                        @unique
+  creationCommandHash    String
+  createdById            String
+  createdBy              User                          @relation("MembershipProductCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  subscriptions          MemberSubscription[]
+  transitions            MembershipProductTransition[]
+  createdAt              DateTime                      @default(now())
+  updatedAt              DateTime                      @updatedAt
+
+  @@unique([code, version])
+  @@index([enabled, effectiveFrom, effectiveTo])
+  @@index([createdById, createdAt])
+}
+
+model MembershipProductTransition {
+  id                  String            @id @default(cuid())
+  membershipProductId String
+  oldEnabled          Boolean
+  newEnabled          Boolean
+  reason              String
+  actorId             String
+  idempotencyKey      String            @unique
+  commandHash         String
+  membershipProduct   MembershipProduct @relation(fields: [membershipProductId], references: [id], onDelete: Restrict)
+  actor               User              @relation("MembershipProductTransitionActor", fields: [actorId], references: [id], onDelete: Restrict)
+  createdAt           DateTime          @default(now())
+
+  @@index([membershipProductId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model RechargePlan {
+  id                     String                   @id @default(cuid())
+  code                   String
+  version                Int
+  name                   String
+  principalCents         Int
+  giftCents              Int
+  effectiveFrom          DateTime
+  effectiveTo            DateTime?
+  enabled                Boolean                  @default(false)
+  creationIdempotencyKey String                   @unique
+  creationCommandHash    String
+  createdById            String
+  createdBy              User                     @relation("RechargePlanCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  transitions            RechargePlanTransition[]
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+
+  @@unique([code, version])
+  @@index([enabled, effectiveFrom, effectiveTo])
+  @@index([createdById, createdAt])
+}
+
+model RechargePlanTransition {
+  id             String       @id @default(cuid())
+  planId         String
+  oldEnabled     Boolean
+  newEnabled     Boolean
+  reason         String
+  actorId        String
+  idempotencyKey String       @unique
+  commandHash    String
+  plan           RechargePlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  actor          User         @relation("RechargePlanTransitionActor", fields: [actorId], references: [id], onDelete: Restrict)
+  createdAt      DateTime     @default(now())
+
+  @@index([planId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model MemberSubscription {
@@ -896,9 +1069,9 @@ model MemberSubscription {
 }
 
 model Order {
-  id                     String               @id @default(cuid())
-  orderNo                String               @unique
-  creationIdempotencyKey String?              @unique
+  id                     String                    @id @default(cuid())
+  orderNo                String                    @unique
+  creationIdempotencyKey String?                   @unique
   creationCommandHash    String?
   memberId               String
   createdById            String?
@@ -906,21 +1079,21 @@ model Order {
   subjectAccount         SubjectAccount
   paymentChannel         PaymentChannel?
   sourceChannel          SourceChannel
-  status                 OrderStatus          @default(PENDING)
+  status                 OrderStatus               @default(PENDING)
   title                  String
   listAmountCents        Int
-  discountCents          Int                  @default(0)
+  discountCents          Int                       @default(0)
   payableCents           Int
-  paidCents              Int                  @default(0)
-  refundedCents          Int                  @default(0)
-  externalOrderNo        String?              @unique
+  paidCents              Int                       @default(0)
+  refundedCents          Int                       @default(0)
+  externalOrderNo        String?                   @unique
   consumedCouponCode     String?
   parameterSnapshot      Json
   paidAt                 DateTime?
   completedAt            DateTime?
   cancelledAt            DateTime?
-  member                 User                 @relation("MemberOrders", fields: [memberId], references: [id], onDelete: Restrict)
-  createdBy              User?                @relation("CreatedOrders", fields: [createdById], references: [id], onDelete: SetNull)
+  member                 User                      @relation("MemberOrders", fields: [memberId], references: [id], onDelete: Restrict)
+  createdBy              User?                     @relation("CreatedOrders", fields: [createdById], references: [id], onDelete: SetNull)
   items                  OrderItem[]
   payments               Payment[]
   refunds                Refund[]
@@ -931,10 +1104,11 @@ model Order {
   gameRegistration       GameRegistration?
   eventTeam              EventTeam?
   trainingEnrollment     TrainingEnrollment?
-  couponAttributions     CouponCode[]         @relation("CouponAttributionOrder")
+  couponAttributions     CouponCode[]              @relation("CouponAttributionOrder")
   referralRewards        ReferralReward[]
-  createdAt              DateTime             @default(now())
-  updatedAt              DateTime             @updatedAt
+  consignmentPayables    ConsignmentPayableEntry[]
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
 
   @@index([memberId, createdAt])
   @@index([businessType, subjectAccount, createdAt])
@@ -943,17 +1117,18 @@ model Order {
 }
 
 model OrderItem {
-  id                    String                 @id @default(cuid())
+  id                    String                    @id @default(cuid())
   orderId               String
   itemType              String
   itemId                String?
   name                  String
-  quantity              Int                    @default(1)
+  quantity              Int                       @default(1)
   unitPriceCents        Int
   amountCents           Int
   metadata              Json?
-  order                 Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order                 Order                     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   inventoryTransactions InventoryTransaction[]
+  consignmentPayables   ConsignmentPayableEntry[]
 
   @@index([orderId])
 }
@@ -982,53 +1157,63 @@ model Payment {
 }
 
 model Refund {
-  id               String       @id @default(cuid())
-  refundNo         String       @unique
+  id                  String                    @id @default(cuid())
+  refundNo            String                    @unique
   // Client supplied key used to make repeated refund taps safe.  Nullable
   // keeps the migration backwards-compatible with refunds created before
   // idempotency was introduced; new requests always persist a derived key.
-  idempotencyKey   String?      @unique
-  orderId          String
-  requestedById    String
-  approvedById     String?
-  amountCents      Int
-  reason           String
-  status           RefundStatus @default(REQUESTED)
-  providerRefundNo String?      @unique
-  requestedAt      DateTime     @default(now())
-  approvedAt       DateTime?
-  completedAt      DateTime?
-  order            Order        @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  requestedBy      User         @relation("RequestedRefunds", fields: [requestedById], references: [id], onDelete: Restrict)
-  approvedBy       User?        @relation("ApprovedRefunds", fields: [approvedById], references: [id], onDelete: SetNull)
+  idempotencyKey      String?                   @unique
+  orderId             String
+  requestedById       String
+  approvedById        String?
+  amountCents         Int
+  reason              String
+  originalOrderStatus OrderStatus
+  status              RefundStatus              @default(REQUESTED)
+  providerRefundNo    String?                   @unique
+  requestedAt         DateTime                  @default(now())
+  approvedAt          DateTime?
+  completedAt         DateTime?
+  order               Order                     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  requestedBy         User                      @relation("RequestedRefunds", fields: [requestedById], references: [id], onDelete: Restrict)
+  approvedBy          User?                     @relation("ApprovedRefunds", fields: [approvedById], references: [id], onDelete: SetNull)
+  consignmentPayables ConsignmentPayableEntry[]
 
   @@index([orderId, status])
   @@index([status, requestedAt])
 }
 
 model Game {
-  id            String             @id @default(cuid())
-  code          String             @unique
-  title         String
-  hostId        String
-  level         GameLevel
-  status        GameStatus         @default(DRAFT)
-  startsAt      DateTime
-  endsAt        DateTime
-  capacity      Int
-  feeCents      Int
-  newcomerOnly  Boolean            @default(false)
-  description   String?
-  rewardRule    Json?
-  host          User               @relation("HostedGames", fields: [hostId], references: [id], onDelete: Restrict)
-  registrations GameRegistration[]
-  hostRewards   HostReward[]
-  courtBookings CourtBooking[]
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  id                   String             @id @default(cuid())
+  code                 String             @unique
+  title                String
+  hostId               String
+  level                GameLevel
+  status               GameStatus         @default(DRAFT)
+  startsAt             DateTime
+  endsAt               DateTime
+  capacity             Int
+  feeCents             Int
+  newcomerOnly         Boolean            @default(false)
+  description          String?
+  rewardRule           Json?
+  cancelReason         String?
+  cancelPolicySnapshot Json?
+  cancelIdempotencyKey String?            @unique
+  cancelCommandHash    String?
+  cancelledById        String?
+  cancelledAt          DateTime?
+  host                 User               @relation("HostedGames", fields: [hostId], references: [id], onDelete: Restrict)
+  cancelledBy          User?              @relation("GameCanceller", fields: [cancelledById], references: [id], onDelete: Restrict)
+  registrations        GameRegistration[]
+  hostRewards          HostReward[]
+  courtBookings        CourtBooking[]
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
   @@index([status, startsAt])
   @@index([hostId, startsAt])
+  @@index([cancelledById, cancelledAt])
 }
 
 model GameRegistration {
@@ -1077,62 +1262,91 @@ model HostReward {
 }
 
 model Event {
-  id                 String            @id @default(cuid())
-  code               String            @unique
-  name               String
-  startsAt           DateTime
-  registrationEndsAt DateTime
-  status             EventStatus       @default(DRAFT)
-  capacityPeople     Int               @default(48)
-  minimumPeople      Int               @default(24)
-  totalRounds        Int               @default(5)
-  currentRound       Int               @default(0)
-  feeCents           Int
-  memberFeeCents     Int?
-  rules              Json
-  prizePool          Json?
-  sponsor            String?
-  teams              EventTeam[]
-  matches            EventMatch[]
-  prizeAwards        EventPrizeAward[]
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  id                   String            @id @default(cuid())
+  code                 String            @unique
+  name                 String
+  startsAt             DateTime
+  registrationEndsAt   DateTime
+  status               EventStatus       @default(DRAFT)
+  capacityPeople       Int               @default(48)
+  minimumPeople        Int               @default(24)
+  totalRounds          Int               @default(5)
+  currentRound         Int               @default(0)
+  feeCents             Int
+  memberFeeCents       Int?
+  rules                Json
+  prizePool            Json?
+  sponsor              String?
+  cancelReason         String?
+  cancelPolicySnapshot Json?
+  cancelIdempotencyKey String?           @unique
+  cancelCommandHash    String?
+  cancelledById        String?
+  cancelledAt          DateTime?
+  cancelledBy          User?             @relation("EventCanceller", fields: [cancelledById], references: [id], onDelete: Restrict)
+  teams                EventTeam[]
+  matches              EventMatch[]
+  prizeAwards          EventPrizeAward[]
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
   @@index([status, startsAt])
+  @@index([cancelledById, cancelledAt])
 }
 
 model EventTeam {
-  id                 String             @id @default(cuid())
-  eventId            String
-  captainId          String
-  orderId            String?            @unique
-  name               String
-  playerAName        String
-  playerBName        String
-  playerAUserId      String?
-  playerBUserId      String?
-  category           TeamCategory
-  seed               Int
-  status             RegistrationStatus @default(REGISTERED)
-  checkedInAt        DateTime?
-  points             Int                @default(0)
-  wins               Int                @default(0)
-  losses             Int                @default(0)
-  scoreDiff          Int                @default(0)
-  opponents          String[]
-  finalRank          Int?
-  eventPointsAwarded Int                @default(0)
-  event              Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  captain            User               @relation("EventCaptains", fields: [captainId], references: [id], onDelete: Restrict)
-  order              Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  matchesAsA         EventMatch[]       @relation("MatchTeamA")
-  matchesAsB         EventMatch[]       @relation("MatchTeamB")
-  prizeAwards        EventPrizeAward[]
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  id                     String             @id @default(cuid())
+  eventId                String
+  captainId              String
+  orderId                String?            @unique
+  creationIdempotencyKey String?            @unique
+  creationCommandHash    String?
+  name                   String
+  playerAName            String
+  playerBName            String
+  playerAUserId          String?
+  playerBUserId          String?
+  category               TeamCategory
+  sourceChannel          SourceChannel?
+  listAmountCents        Int?
+  payableCents           Int?
+  memberFeeApplied       Boolean            @default(false)
+  seed                   Int
+  status                 RegistrationStatus @default(REGISTERED)
+  waitlistedAt           DateTime?
+  promotedAt             DateTime?
+  paymentDueAt           DateTime?
+  cancelReason           String?
+  cancelIdempotencyKey   String?            @unique
+  cancelCommandHash      String?
+  cancelledById          String?
+  cancelRequestedAt      DateTime?
+  cancellationPending    Boolean            @default(false)
+  cancellationResolvedAt DateTime?
+  cancelledAt            DateTime?
+  checkedInAt            DateTime?
+  points                 Int                @default(0)
+  wins                   Int                @default(0)
+  losses                 Int                @default(0)
+  scoreDiff              Int                @default(0)
+  opponents              String[]
+  finalRank              Int?
+  eventPointsAwarded     Int                @default(0)
+  event                  Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  captain                User               @relation("EventCaptains", fields: [captainId], references: [id], onDelete: Restrict)
+  cancelledBy            User?              @relation("EventTeamCanceller", fields: [cancelledById], references: [id], onDelete: Restrict)
+  order                  Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  matchesAsA             EventMatch[]       @relation("MatchTeamA")
+  matchesAsB             EventMatch[]       @relation("MatchTeamB")
+  prizeAwards            EventPrizeAward[]
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
 
   @@unique([eventId, seed])
   @@index([eventId, status])
+  @@index([eventId, status, createdAt])
+  @@index([status, paymentDueAt])
+  @@index([cancelledById, cancelRequestedAt])
 }
 
 model EventMatch {
@@ -1211,6 +1425,7 @@ model TrainingProduct {
   enabled          Boolean              @default(true)
   classes          TrainingClass[]
   enrollments      TrainingEnrollment[]
+  trainingTrials   TrainingTrial[]
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 }
@@ -1234,6 +1449,7 @@ model TrainingClass {
   enrollments          TrainingEnrollment[]
   sessions             TrainingSession[]
   courtBookings        CourtBooking[]
+  trainingTrials       TrainingTrial[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 
@@ -1267,6 +1483,7 @@ model TrainingEnrollment {
   order                 Order?                       @relation(fields: [orderId], references: [id], onDelete: SetNull)
   attendances           TrainingAttendance[]
   revenueRecognitions   TrainingRevenueRecognition[]
+  convertedTrial        TrainingTrial?               @relation("TrainingTrialConversion")
   createdAt             DateTime                     @default(now())
   updatedAt             DateTime                     @updatedAt
 
@@ -1290,6 +1507,7 @@ model TrainingSession {
   note               String?
   class              TrainingClass         @relation(fields: [classId], references: [id], onDelete: Restrict)
   attendances        TrainingAttendance[]
+  trainingTrials     TrainingTrial[]
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
@@ -1406,6 +1624,106 @@ model TrainingConsumeCorrection {
   @@index([status, requestedAt])
   @@index([recognitionId, status])
   @@index([attendanceId, status])
+}
+
+model TrainingTrial {
+  id                     String                    @id @default(cuid())
+  trialNo                String                    @unique
+  status                 TrainingTrialStatus       @default(RESERVED)
+  leadId                 String?
+  studentId              String?
+  guardianId             String?
+  memberId               String?
+  productId              String
+  classId                String?
+  sessionId              String?
+  coachId                String
+  sourceChannel          SourceChannel
+  scheduledStartsAt      DateTime
+  scheduledEndsAt        DateTime
+  assessmentDimensions   Json?
+  recommendation         String?
+  assessmentNote         String?
+  convertedEnrollmentId  String?                   @unique
+  createdById            String
+  creationIdempotencyKey String                    @unique
+  creationCommandHash    String
+  checkedInAt            DateTime?
+  noShowAt               DateTime?
+  assessedAt             DateTime?
+  convertedAt            DateTime?
+  lostAt                 DateTime?
+  cancelledAt            DateTime?
+  lead                   CustomerLead?             @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  student                Student?                  @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  guardian               User?                     @relation("TrainingTrialGuardian", fields: [guardianId], references: [id], onDelete: Restrict)
+  member                 User?                     @relation("TrainingTrialMember", fields: [memberId], references: [id], onDelete: Restrict)
+  product                TrainingProduct           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  class                  TrainingClass?            @relation(fields: [classId], references: [id], onDelete: SetNull)
+  session                TrainingSession?          @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  coach                  User                      @relation("TrainingTrialCoach", fields: [coachId], references: [id], onDelete: Restrict)
+  convertedEnrollment    TrainingEnrollment?       @relation("TrainingTrialConversion", fields: [convertedEnrollmentId], references: [id], onDelete: Restrict)
+  createdBy              User                      @relation("TrainingTrialCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  transitions            TrainingTrialTransition[]
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+
+  @@index([status, scheduledStartsAt])
+  @@index([coachId, status, scheduledStartsAt])
+  @@index([guardianId, scheduledStartsAt])
+  @@index([memberId, scheduledStartsAt])
+  @@index([leadId])
+  @@index([studentId])
+  @@index([productId, classId])
+}
+
+model TrainingTrialTransition {
+  id             String               @id @default(cuid())
+  trialId        String
+  fromStatus     TrainingTrialStatus?
+  toStatus       TrainingTrialStatus
+  action         String
+  reason         String
+  payload        Json?
+  commandHash    String
+  idempotencyKey String               @unique
+  actorId        String
+  trial          TrainingTrial        @relation(fields: [trialId], references: [id], onDelete: Restrict)
+  actor          User                 @relation("TrainingTrialTransitionActor", fields: [actorId], references: [id], onDelete: Restrict)
+  createdAt      DateTime             @default(now())
+
+  @@index([trialId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([toStatus, createdAt])
+}
+
+model YouthTrainingRule {
+  id                     String                  @id @default(cuid())
+  version                String                  @unique
+  status                 YouthTrainingRuleStatus @default(DRAFT)
+  maxTotalSessions       Int
+  maxValidityDays        Int
+  maxContractAmountCents Int
+  warningThresholdDays   Int
+  hardBlock              Boolean                 @default(true)
+  effectiveFrom          DateTime
+  effectiveTo            DateTime?
+  requestReason          String
+  reviewReason           String?
+  requestedById          String
+  reviewedById           String?
+  requestIdempotencyKey  String                  @unique
+  decisionIdempotencyKey String?                 @unique
+  commandHash            String
+  decisionCommandHash    String?
+  reviewedAt             DateTime?
+  requestedBy            User                    @relation("YouthTrainingRuleRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedBy             User?                   @relation("YouthTrainingRuleReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  @@index([status, effectiveFrom, effectiveTo])
+  @@index([requestedById, createdAt])
 }
 
 model Merchant {
@@ -1531,31 +1849,32 @@ model ReferralReward {
 }
 
 model InventoryItem {
-  id                 String                  @id @default(cuid())
-  sku                String                  @unique
-  name               String
-  category           String
-  mode               InventoryMode
-  supplier           String
-  purchasePriceCents Int
-  salePriceCents     Int
-  stock              Int                     @default(0)
-  safeStock          Int                     @default(0)
-  supplierId         String?
-  defaultLocationId  String?
-  batchCode          String?
-  expiresAt          DateTime?
-  enabled            Boolean                 @default(true)
-  transactions       InventoryTransaction[]
-  eventPrizeAwards   EventPrizeAward[]
-  supplierRecord     Supplier?               @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  defaultLocation    InventoryLocation?      @relation("InventoryItemDefaultLocation", fields: [defaultLocationId], references: [id], onDelete: SetNull)
-  stockBalances      InventoryStockBalance[]
-  purchaseOrderLines PurchaseOrderLine[]
-  stocktakeLines     StocktakeLine[]
-  inventoryDocuments InventoryOperation[]
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @updatedAt
+  id                  String                    @id @default(cuid())
+  sku                 String                    @unique
+  name                String
+  category            String
+  mode                InventoryMode
+  supplier            String
+  purchasePriceCents  Int
+  salePriceCents      Int
+  stock               Int                       @default(0)
+  safeStock           Int                       @default(0)
+  supplierId          String?
+  defaultLocationId   String?
+  batchCode           String?
+  expiresAt           DateTime?
+  enabled             Boolean                   @default(true)
+  transactions        InventoryTransaction[]
+  eventPrizeAwards    EventPrizeAward[]
+  supplierRecord      Supplier?                 @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  defaultLocation     InventoryLocation?        @relation("InventoryItemDefaultLocation", fields: [defaultLocationId], references: [id], onDelete: SetNull)
+  stockBalances       InventoryStockBalance[]
+  purchaseOrderLines  PurchaseOrderLine[]
+  stocktakeLines      StocktakeLine[]
+  inventoryDocuments  InventoryOperation[]
+  consignmentPayables ConsignmentPayableEntry[]
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
 
   @@index([enabled, category])
   @@index([stock, safeStock])
@@ -1591,20 +1910,144 @@ model InventoryTransaction {
 }
 
 model Supplier {
-  id             String          @id @default(cuid())
-  code           String          @unique
-  name           String
-  type           SupplierType
-  contactName    String?
-  contactPhone   String?
-  settlementRule Json?
-  enabled        Boolean         @default(true)
-  items          InventoryItem[]
-  purchaseOrders PurchaseOrder[]
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id                     String                    @id @default(cuid())
+  code                   String                    @unique
+  name                   String
+  type                   SupplierType
+  contactName            String?
+  contactPhone           String?
+  settlementRule         Json?
+  enabled                Boolean                   @default(true)
+  items                  InventoryItem[]
+  purchaseOrders         PurchaseOrder[]
+  consignmentPayables    ConsignmentPayableEntry[]
+  consignmentSettlements ConsignmentSettlement[]
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
 
   @@index([type, enabled])
+}
+
+/// Immutable supplier-payable ledger. SALE is recognised only when a goods
+/// order reaches the fulfilment boundary; a successful whole-order refund
+/// appends a REFUND_REVERSAL instead of mutating the original sale evidence.
+model ConsignmentPayableEntry {
+  id                 String                      @id @default(cuid())
+  type               ConsignmentPayableEntryType
+  supplierId         String
+  itemId             String
+  orderId            String
+  orderItemId        String
+  refundId           String?
+  reversalOfId       String?                     @unique
+  quantity           Int
+  unitSalePriceCents Int
+  grossSaleCents     Int
+  commissionRateBps  Int
+  commissionCents    Int
+  payableCents       Int
+  ruleSnapshot       Json
+  occurredAt         DateTime
+  idempotencyKey     String                      @unique
+  supplier           Supplier                    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  item               InventoryItem               @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  order              Order                       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderItem          OrderItem                   @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  refund             Refund?                     @relation(fields: [refundId], references: [id], onDelete: Restrict)
+  reversalOf         ConsignmentPayableEntry?    @relation("ConsignmentPayableReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy         ConsignmentPayableEntry?    @relation("ConsignmentPayableReversal")
+  settlementLines    ConsignmentSettlementLine[]
+  createdAt          DateTime                    @default(now())
+
+  @@index([supplierId, occurredAt])
+  @@index([orderId, createdAt])
+  @@index([orderItemId, type])
+  @@index([refundId])
+  @@index([type, occurredAt])
+}
+
+/// Versioned supplier statement. Monetary totals are frozen from its lines;
+/// returns and disputes move the workflow back to DRAFT, while VOID releases
+/// the active line claims without deleting the historic statement snapshot.
+model ConsignmentSettlement {
+  id                     String                            @id @default(cuid())
+  statementNo            String                            @unique
+  supplierId             String
+  periodStart            DateTime
+  periodEnd              DateTime
+  version                Int                               @default(1)
+  status                 SettlementStatus                  @default(DRAFT)
+  entryCount             Int
+  netQuantity            Int
+  grossSaleCents         Int
+  commissionCents        Int
+  payableCents           Int
+  ruleSnapshot           Json
+  creationReason         String
+  creationIdempotencyKey String                            @unique
+  creationCommandHash    String
+  createdById            String
+  submittedById          String?
+  confirmedById          String?
+  settledById            String?
+  voidedById             String?
+  submittedAt            DateTime?
+  confirmedAt            DateTime?
+  settledAt              DateTime?
+  voidedAt               DateTime?
+  paymentReference       String?
+  supplier               Supplier                          @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdBy              User                              @relation("ConsignmentSettlementCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  submittedBy            User?                             @relation("ConsignmentSettlementSubmitter", fields: [submittedById], references: [id], onDelete: Restrict)
+  confirmedBy            User?                             @relation("ConsignmentSettlementConfirmer", fields: [confirmedById], references: [id], onDelete: Restrict)
+  settledBy              User?                             @relation("ConsignmentSettlementSettler", fields: [settledById], references: [id], onDelete: Restrict)
+  voidedBy               User?                             @relation("ConsignmentSettlementVoider", fields: [voidedById], references: [id], onDelete: Restrict)
+  lines                  ConsignmentSettlementLine[]
+  transitions            ConsignmentSettlementTransition[]
+  createdAt              DateTime                          @default(now())
+  updatedAt              DateTime                          @updatedAt
+
+  @@unique([supplierId, periodStart, periodEnd, version], map: "consignment_settlement_supplier_period_version_key")
+  @@index([supplierId, status, periodEnd])
+  @@index([status, periodEnd])
+  @@index([createdById, createdAt])
+}
+
+model ConsignmentSettlementLine {
+  id              String                  @id @default(cuid())
+  settlementId    String
+  payableEntryId  String
+  quantity        Int
+  grossSaleCents  Int
+  commissionCents Int
+  payableCents    Int
+  releasedAt      DateTime?
+  settlement      ConsignmentSettlement   @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  payableEntry    ConsignmentPayableEntry @relation(fields: [payableEntryId], references: [id], onDelete: Restrict)
+  createdAt       DateTime                @default(now())
+
+  @@unique([settlementId, payableEntryId], map: "consignment_settlement_line_statement_entry_key")
+  @@index([payableEntryId, releasedAt])
+  @@index([settlementId, releasedAt])
+}
+
+model ConsignmentSettlementTransition {
+  id             String                      @id @default(cuid())
+  settlementId   String
+  action         ConsignmentSettlementAction
+  fromStatus     SettlementStatus?
+  toStatus       SettlementStatus
+  reason         String
+  actorId        String
+  idempotencyKey String                      @unique
+  commandHash    String
+  settlement     ConsignmentSettlement       @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  actor          User                        @relation("ConsignmentSettlementTransitionActor", fields: [actorId], references: [id], onDelete: Restrict)
+  createdAt      DateTime                    @default(now())
+
+  @@index([settlementId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
 }
 
 model InventoryLocation {
@@ -1820,6 +2263,30 @@ model ExportJob {
 
   @@index([userId, createdAt])
   @@index([status, createdAt])
+}
+
+model DataErasureRequest {
+  id                     String                   @id @default(cuid())
+  userId                 String
+  status                 DataErasureRequestStatus @default(REQUESTED)
+  reason                 String
+  requestIdempotencyKey  String                   @unique
+  requestCommandHash     String
+  decisionIdempotencyKey String?                  @unique
+  decisionCommandHash    String?
+  reviewedById           String?
+  reviewReason           String?
+  requestedAt            DateTime                 @default(now())
+  reviewedAt             DateTime?
+  completedAt            DateTime?
+  user                   User                     @relation("DataErasureRequester", fields: [userId], references: [id], onDelete: Restrict)
+  reviewedBy             User?                    @relation("DataErasureReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+
+  @@index([status, requestedAt])
+  @@index([userId, requestedAt])
+  @@index([reviewedById, reviewedAt])
 }
 
 model Notification {

@@ -3,7 +3,9 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
+  IsDefined,
   IsOptional,
   IsString,
   Matches,
@@ -11,9 +13,66 @@ import {
   MaxLength,
   MinLength,
   Min,
+  ValidateNested,
 } from 'class-validator'
 
-import { CourtClosureStatus, CourtUsage, SourceChannel } from '../generated/prisma/enums.js'
+import {
+  BookingStatus,
+  CourtClosureStatus,
+  CourtUsage,
+  SourceChannel,
+} from '../generated/prisma/enums.js'
+
+export const VENUE_FULFILLMENT_OUTCOMES = [
+  BookingStatus.COMPLETED,
+  BookingStatus.NO_SHOW,
+] as const
+
+export const VENUE_FULFILLMENT_EVIDENCE_SOURCES = [
+  'FRONT_DESK_ROLL_CALL',
+  'ACCESS_CONTROL_LOG',
+  'COURT_INSPECTION',
+] as const
+
+export class VenueFulfillmentEvidenceDto {
+  /** A controlled source code only; no member name, phone or raw media. */
+  @IsIn(VENUE_FULFILLMENT_EVIDENCE_SOURCES)
+  source: (typeof VENUE_FULFILLMENT_EVIDENCE_SOURCES)[number]
+
+  @IsDateString()
+  observedAt: string
+}
+
+export class CompleteVenueBookingDto {
+  @IsIn(VENUE_FULFILLMENT_OUTCOMES)
+  outcome: (typeof VENUE_FULFILLMENT_OUTCOMES)[number]
+
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string
+
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => VenueFulfillmentEvidenceDto)
+  evidence: VenueFulfillmentEvidenceDto
+
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string
+}
+
+export class VenueCheckInDto {
+  @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  overrideReason?: string
+}
 
 export class AvailabilityQueryDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
@@ -70,6 +129,11 @@ export class UpdateCourtDto {
 
 export class CreatePriceRuleDto {
   @IsString()
+  @Matches(/^[A-Z0-9][A-Z0-9_-]{1,39}$/)
+  code: string
+
+  @IsString()
+  @MinLength(2)
   @MaxLength(80)
   name: string
 
@@ -79,27 +143,101 @@ export class CreatePriceRuleDto {
 
   @Type(() => Number)
   @IsInt()
-  @Min(0)
+  @Min(1)
   @Max(127)
   weekdayMask = 127
 
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(10_000_000)
   priceCents: number
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(10_000_000)
   newcomerPriceCents?: number
 
-  @IsDateString()
+  @IsDateString({ strict: true })
   effectiveFrom: string
 
   @IsOptional()
-  @IsDateString()
+  @IsDateString({ strict: true })
   effectiveTo?: string
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string
+}
+
+export class CreatePriceRuleVersionDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  name: string
+
+  @IsOptional()
+  @IsString()
+  timeSlotId?: string
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(127)
+  weekdayMask = 127
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(10_000_000)
+  priceCents: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(10_000_000)
+  newcomerPriceCents?: number
+
+  @IsDateString({ strict: true })
+  effectiveFrom: string
+
+  @IsOptional()
+  @IsDateString({ strict: true })
+  effectiveTo?: string
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string
+}
+
+export class SetPriceRuleStatusDto {
+  @IsBoolean()
+  enabled: boolean
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string
 }
 
 export class ListCourtClosuresQueryDto {

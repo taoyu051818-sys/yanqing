@@ -17,7 +17,33 @@ export class ReferralsService {
   myRewards(actor: AuthUser) {
     return this.prisma.referralReward.findMany({
       where: { referrerId: actor.sub },
-      include: { newUser: { select: { id: true, displayName: true } }, triggerOrder: true },
+      // The referrer may see why a reward is pending/reversed, but must not
+      // receive the referred member's order amount, payment channel or full
+      // parameter snapshot through an unrestricted nested order relation.
+      select: {
+        id: true,
+        referrerId: true,
+        newUserId: true,
+        triggerOrderId: true,
+        triggerType: true,
+        rewardType: true,
+        rewardValue: true,
+        status: true,
+        observationEndsAt: true,
+        grantedAt: true,
+        reversedAt: true,
+        createdAt: true,
+        newUser: { select: { id: true, displayName: true } },
+        triggerOrder: {
+          select: {
+            id: true,
+            businessType: true,
+            status: true,
+            paidAt: true,
+            completedAt: true,
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     })
   }
@@ -27,6 +53,13 @@ export class ReferralsService {
       where: {
         status: { in: [RewardStatus.PENDING_OBSERVATION, RewardStatus.AVAILABLE] },
         observationEndsAt: { lte: new Date() },
+        triggerOrder: {
+          is: {
+            status: OrderStatus.COMPLETED,
+            completedAt: { not: null },
+            refundedCents: 0,
+          },
+        },
       },
       include: { triggerOrder: true },
       take: 500,
@@ -49,7 +82,14 @@ export class ReferralsService {
             }
             if (current.observationEndsAt > new Date()) return null
             if (
-              current.triggerOrder &&
+              !current.triggerOrder ||
+              !current.triggerOrder.completedAt ||
+              current.triggerOrder.status === OrderStatus.REFUND_PENDING
+            ) {
+              return null
+            }
+            if (
+              current.triggerOrder.refundedCents > 0 ||
               [OrderStatus.REFUNDED, OrderStatus.PARTIALLY_REFUNDED, OrderStatus.CANCELLED].includes(current.triggerOrder.status as never)
             ) {
               const reversed = await tx.referralReward.update({
@@ -69,6 +109,9 @@ export class ReferralsService {
                 },
               })
               return reversed
+            }
+            if (current.triggerOrder.status !== OrderStatus.COMPLETED) {
+              return null
             }
             const accountType = current.rewardType === 'BADMINTON_COIN'
               ? AccountType.BADMINTON_COIN

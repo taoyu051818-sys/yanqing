@@ -17,7 +17,9 @@ type WorkGroupKey =
   | "event"
   | "coupon"
   | "inventory"
-  | "reconciliation";
+  | "fulfillment"
+  | "reconciliation"
+  | "governance";
 
 type WorkGroupDefinition = {
   key: WorkGroupKey;
@@ -95,9 +97,17 @@ const workGroupDefinitions: WorkGroupDefinition[] = [
   {
     key: "inventory",
     title: "库存预警",
-    description: "低于安全线的商品与耗材",
+    description: "低于安全线的商品、培训及赛事耗材",
     emptyText: "库存均高于安全线",
     route: "/packages/ops/pages/inventory/index",
+    roles: ["FRONT_DESK", "COACH", "EVENT_MANAGER", "ADMIN", "SUPER_ADMIN"],
+  },
+  {
+    key: "fulfillment",
+    title: "现场履约",
+    description: "待签到、待完成与超时履约异常",
+    emptyText: "暂无待处理履约订单",
+    route: "/packages/ops/pages/frontdesk/index",
     roles: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
   },
   {
@@ -107,6 +117,14 @@ const workGroupDefinitions: WorkGroupDefinition[] = [
     emptyText: "暂无待处理对账或结算",
     route: "/packages/ops/pages/finance/index",
     roles: ["FINANCE", "ADMIN", "SUPER_ADMIN"],
+  },
+  {
+    key: "governance",
+    title: "治理复核",
+    description: "账号注销、匿名化条件与不可逆操作复核",
+    emptyText: "暂无账号注销或数据治理待办",
+    route: "/packages/ops/pages/governance/index?focus=privacy",
+    roles: ["ADMIN", "SUPER_ADMIN"],
   },
 ];
 
@@ -146,7 +164,7 @@ const centerDefinitions: Array<{
     title: "培训运营",
     description: "课表、点名、消课与训练反馈",
     route: "/packages/ops/pages/coach/index",
-    roles: ["COACH", "ADMIN", "SUPER_ADMIN"],
+    roles: ["COACH", "FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
   },
   {
     title: "主理人运营",
@@ -162,15 +180,22 @@ const centerDefinitions: Array<{
   },
   {
     title: "商品库存",
-    description: "SKU、低库存、采购与寄售",
+    description: "SKU、采购寄售、盘点及业务物料领用",
     route: "/packages/ops/pages/inventory/index",
-    roles: ["FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN"],
+    roles: [
+      "FRONT_DESK",
+      "COACH",
+      "EVENT_MANAGER",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN",
+    ],
   },
   {
     title: "联盟营销",
     description: "商户、券码核销与归因数据",
     route: "/packages/ops/pages/merchant/index",
-    roles: ["FRONT_DESK", "MERCHANT", "ADMIN", "SUPER_ADMIN"],
+    roles: ["FRONT_DESK", "MERCHANT", "FINANCE", "ADMIN", "SUPER_ADMIN"],
   },
   {
     title: "财务结算",
@@ -194,12 +219,16 @@ const roleLabel = computed(() => {
   return labels.length ? labels.join(" / ") : "待登录";
 });
 
+const canViewDashboard = computed(() =>
+  canSee(["FINANCE", "ADMIN", "SUPER_ADMIN"]),
+);
+
 const visibleCenters = computed(() =>
   centerDefinitions.filter((center) => canSee(center.roles)),
 );
 
 const groupedWorkItems = computed<DisplayWorkGroup[]>(() =>
-  workGroupDefinitions.map((group) => ({
+  workGroupDefinitions.filter((group) => canSee(group.roles)).map((group) => ({
     ...group,
     items: workItems.value.filter((item) => workGroupKey(item) === group.key),
   })),
@@ -214,22 +243,80 @@ const syncLabel = computed(() => {
   return lastSyncedAt.value ? `更新于 ${lastSyncedAt.value}` : "尚未同步";
 });
 
+const percent = (value: unknown) => {
+  const parsed = Number(value || 0);
+  return `${Number.isFinite(parsed) ? parsed.toFixed(2).replace(/\.00$/, "") : "0"}%`;
+};
+
 const metrics = computed(() => [
   [
-    "场馆利用率",
-    `${dashboard.value?.venue?.utilizationRate || 0}%`,
-    "今日资源效率",
+    "总出租率",
+    percent(dashboard.value?.venue?.utilizationRate),
+    "按可售场地小时",
   ],
   [
-    "经营收入",
-    money(
-      (dashboard.value?.venue?.revenueCents || 0) +
-        (dashboard.value?.goods?.revenueCents || 0),
-    ),
-    "场地 + 商品",
+    "白天出租率",
+    percent(dashboard.value?.venue?.daytimeUtilizationRate),
+    "晨练 + 白天时段",
   ],
+  [
+    "黄金出租率",
+    percent(dashboard.value?.venue?.primeUtilizationRate),
+    "晚高峰与夜场",
+  ],
+  ["RevPAH", money(dashboard.value?.venue?.revpahCents), "每可售场地小时收入"],
+  ["已实现收入", money(dashboard.value?.revenue?.realizedRevenueCents), "排除充值与培训预收"],
+  ["30日复购", percent(dashboard.value?.members?.thirtyDayRepurchase?.rate), "真实付费订单口径"],
+  ["培训现金毛利", money(dashboard.value?.training?.cashContributionMarginCents), "确认收入减直接成本"],
   ["统一待办", String(todoCount.value), "按当前角色分组"],
-  ["新会员", String(dashboard.value?.members?.newMembers || 0), "今日新增"],
+]);
+
+const decisionPanels = computed(() => [
+  {
+    title: "收款、预收与收入",
+    note: "资金流入不等于当期收入",
+    items: [
+      ["现金收款", money(dashboard.value?.collections?.cashCollectedCents ?? dashboard.value?.collections?.grossPaymentCents)],
+      ["现金净流入", money(dashboard.value?.collections?.netCashCents ?? dashboard.value?.collections?.netPaymentCents)],
+      ["充值新增预收", money(dashboard.value?.collections?.rechargePrepaidCents)],
+      ["培训新增预收", money(dashboard.value?.collections?.trainingPrepaidCollectedCents)],
+      ["当期已实现收入", money(dashboard.value?.revenue?.realizedRevenueCents)],
+    ],
+  },
+  {
+    title: "培训利润与合同口径",
+    note: "占场只做资源分析，场地费恒为 0",
+    items: [
+      ["消课确认收入", money(dashboard.value?.training?.confirmedRevenueCents)],
+      ["未消课预收余额", money(dashboard.value?.training?.unusedBalanceCents)],
+      ["本期培训退费", money(dashboard.value?.training?.refundedCents)],
+      ["20%场馆合同流水", money(dashboard.value?.training?.venueContributionCents)],
+      ["现金贡献毛利", money(dashboard.value?.training?.cashContributionMarginCents)],
+      ["每占场小时贡献", money(dashboard.value?.training?.resourceEfficiencyCentsPerCourtHour)],
+    ],
+  },
+  {
+    title: "会员与营销健康度",
+    note: "复购与有效转化优先于注册量",
+    items: [
+      ["新增 / 有效会员", `${dashboard.value?.members?.newMembers || 0} / ${dashboard.value?.members?.activeMembers || 0}`],
+      ["7日 / 30日复购", `${percent(dashboard.value?.members?.sevenDayRepurchase?.rate)} / ${percent(dashboard.value?.members?.thirtyDayRepurchase?.rate)}`],
+      ["30天内到期 / 流失预警", `${dashboard.value?.members?.expiringWithin30Days || 0} / ${dashboard.value?.members?.inactiveOver30Days || 0}`],
+      ["直接推荐有效新客", String(dashboard.value?.marketing?.directReferralConversions || 0)],
+      ["券核销率", percent(dashboard.value?.marketing?.couponRedemptionRate)],
+    ],
+  },
+  {
+    title: "商品与联盟回报",
+    note: "毛利和真实核销共同约束投放",
+    items: [
+      ["商品销售 / 毛利", `${money(dashboard.value?.goods?.revenueCents)} / ${money(dashboard.value?.goods?.grossProfitCents)}`],
+      ["商品毛利率", percent(dashboard.value?.goods?.grossMarginRate)],
+      ["低库存预警", String(dashboard.value?.goods?.lowStockCount || 0)],
+      ["联盟归因毛利 / 合作费", `${money(dashboard.value?.alliance?.attributedGrossProfitCents)} / ${money(dashboard.value?.alliance?.cooperationFeeCents)}`],
+      ["联盟 ROI", dashboard.value?.alliance?.roi == null ? "—" : Number(dashboard.value.alliance.roi).toFixed(2)],
+    ],
+  },
 ]);
 
 const normalizeToken = (value: unknown) =>
@@ -266,7 +353,8 @@ const explicitGroupMap: Record<string, WorkGroupKey> = {
   SETTLEMENT: "reconciliation",
   ALLIANCE_SETTLEMENT: "reconciliation",
   TRAINING_SETTLEMENT: "reconciliation",
-  ORDER_FULFILLMENT: "reconciliation",
+  ORDER_FULFILLMENT: "fulfillment",
+  DATA_ERASURE_REVIEW: "governance",
 };
 
 function workGroupKey(item: WorkItem): WorkGroupKey | null {
@@ -294,6 +382,7 @@ function workGroupKey(item: WorkItem): WorkGroupKey | null {
   if (/库存|安全线|低库存|INVENTORY|STOCK/.test(searchable)) return "inventory";
   if (/对账|结算|履约|RECONCILIATION|SETTLEMENT|FULFILLMENT/.test(searchable))
     return "reconciliation";
+  if (/注销|匿名化|DATA_ERASURE|PRIVACY/.test(searchable)) return "governance";
   return null;
 }
 
@@ -430,13 +519,15 @@ async function load() {
 
   try {
     const [dashboardResult, workItemsResult] = await Promise.allSettled([
-      endpoints.dashboard(),
+      canViewDashboard.value ? endpoints.dashboard() : Promise.resolve(null),
       endpoints.workItems(100),
     ]);
 
-    if (dashboardResult.status === "fulfilled")
+    if (dashboardResult.status === "fulfilled") {
       dashboard.value = dashboardResult.value;
-    else dashboardError.value = "经营指标暂时无法同步，请稍后重试。";
+    } else if (canViewDashboard.value) {
+      dashboardError.value = "经营指标暂时无法同步，请稍后重试。";
+    }
 
     if (workItemsResult.status === "fulfilled") {
       workItems.value = extractItems(workItemsResult.value);
@@ -501,13 +592,13 @@ onShow(load);
       <text class="sync-time">{{ syncLabel }}</text>
     </view>
 
-    <view v-if="dashboardError" class="error card">
+    <view v-if="canViewDashboard && dashboardError" class="error card">
       <text class="error-title">经营指标同步失败</text>
       <text class="muted">{{ dashboardError }}</text>
       <button class="secondary retry" @tap="load">重试同步</button>
     </view>
 
-    <view class="metric-grid">
+    <view v-if="canViewDashboard" class="metric-grid">
       <MetricCard
         v-for="item in metrics"
         :key="item[0]"
@@ -515,6 +606,19 @@ onShow(load);
         :value="item[1]"
         :note="item[2]"
       />
+    </view>
+
+    <view v-if="canViewDashboard" class="section-title">老板驾驶舱 <text class="section-note">决策口径</text></view>
+    <view v-if="canViewDashboard" class="decision-grid">
+      <view v-for="panel in decisionPanels" :key="panel.title" class="card decision-panel">
+        <text class="decision-title">{{ panel.title }}</text>
+        <text class="muted decision-note">{{ panel.note }}</text>
+        <view class="decision-rows">
+          <view v-for="item in panel.items" :key="item[0]" class="decision-row">
+            <text>{{ item[0] }}</text><text class="decision-value">{{ item[1] }}</text>
+          </view>
+        </view>
+      </view>
     </view>
 
     <view class="section-title"
@@ -649,6 +753,45 @@ onShow(load);
   grid-template-columns: repeat(2, 1fr);
   gap: 14rpx;
   margin-top: 18rpx;
+}
+.decision-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14rpx;
+}
+.decision-panel {
+  margin: 0;
+  padding: 24rpx;
+}
+.decision-title {
+  display: block;
+  font-size: 27rpx;
+  font-weight: 800;
+}
+.decision-note {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 20rpx;
+  line-height: 1.5;
+}
+.decision-rows {
+  margin-top: 16rpx;
+  border-top: 1rpx solid #edf0ed;
+}
+.decision-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14rpx;
+  padding: 14rpx 0;
+  color: #65736b;
+  border-bottom: 1rpx solid #edf0ed;
+  font-size: 21rpx;
+}
+.decision-value {
+  flex: none;
+  color: #1c4c33;
+  font-weight: 800;
+  text-align: right;
 }
 .section-note {
   color: #758079;

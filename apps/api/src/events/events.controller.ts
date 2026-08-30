@@ -5,8 +5,12 @@ import { CurrentUser, Roles } from '../common/auth/auth.decorators.js';
 import type { AuthUser } from '../common/auth/auth-user.js';
 import { AppRole } from '../generated/prisma/enums.js';
 import {
+  CancelEventDto,
+  CancelEventRegistrationDto,
   CorrectScoreDto,
+  CorrectEventPairingsDto,
   CreateEventDto,
+  EventTeamCheckInDto,
   IssueEventPrizeDto,
   PublishEventDto,
   ReceiveEventPrizeDto,
@@ -24,6 +28,11 @@ export class EventsController {
   @Get()
   list() {
     return this.events.list();
+  }
+
+  @Get(':id/registration/me')
+  myRegistration(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
+    return this.events.myRegistration(id, actor);
   }
 
   @Get(':id')
@@ -67,6 +76,31 @@ export class EventsController {
     return this.events.register(id, dto, actor);
   }
 
+  @Post(':id/promote-waitlist')
+  @Roles(AppRole.EVENT_MANAGER, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  promoteWaitlist(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
+    return this.events.promoteWaitlist(id, actor);
+  }
+
+  @Post(':id/registration/cancel')
+  cancelRegistration(
+    @Param('id') id: string,
+    @Body() dto: CancelEventRegistrationDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.events.cancelRegistration(id, dto, actor);
+  }
+
+  @Post(':id/cancel')
+  @Roles(AppRole.EVENT_MANAGER, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  cancel(
+    @Param('id') id: string,
+    @Body() dto: CancelEventDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.events.cancel(id, dto, actor);
+  }
+
   @Post(':id/teams/:teamId/check-in')
   @Roles(
     AppRole.EVENT_MANAGER,
@@ -77,15 +111,27 @@ export class EventsController {
   checkIn(
     @Param('id') id: string,
     @Param('teamId') teamId: string,
+    @Body() dto: EventTeamCheckInDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.events.checkIn(id, teamId, actor);
+    return this.events.checkIn(id, teamId, actor, dto);
   }
 
   @Post(':id/rounds/next')
   @Roles(AppRole.EVENT_MANAGER, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   nextRound(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
     return this.events.startNextRound(id, actor);
+  }
+
+  @Post(':id/rounds/:round/pairings/correct')
+  @Roles(AppRole.EVENT_MANAGER, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  correctPairings(
+    @Param('id') id: string,
+    @Param('round') round: string,
+    @Body() dto: CorrectEventPairingsDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.events.correctPairings(id, Number(round), dto, actor);
   }
 
   @Post('matches/:matchId/score')

@@ -6,6 +6,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { trainingContractContributionCents } from '@yanqing/shared';
 
@@ -48,6 +49,7 @@ import type {
   PurchaseTrainingDto,
   TrainingSessionActionDto,
   TrainingSettlementActionDto,
+  UpdateTrainingProductDto,
   UpdateStudentDto,
 } from './training.dto.js';
 import {
@@ -55,6 +57,13 @@ import {
   orderCreationCommandHash,
   type OrderCreationFields,
 } from '../orders/order-creation-idempotency.js';
+import { completeOrderFulfillment } from '../orders/order-fulfillment.js';
+import {
+  assertOperationTimeWindow,
+  TRAINING_ATTENDANCE_WINDOW_PARAMETER,
+  TRAINING_COMPLETION_WINDOW_PARAMETER,
+} from '../common/time-window/operation-time-window.js';
+import { YouthTrainingRulesService } from './youth-training-rules.service.js';
 
 const serial = (prefix: string) =>
   `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`;
@@ -106,7 +115,10 @@ const isPrismaErrorCode = (error: unknown, code: string): boolean =>
 
 @Injectable()
 export class TrainingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly youthRules?: YouthTrainingRulesService,
+  ) {}
 
   listProducts() {
     return this.prisma.trainingProduct.findMany({
@@ -116,7 +128,7 @@ export class TrainingService {
     });
   }
 
-  listEnrollments(actor: AuthUser, all = false) {
+  async listEnrollments(actor: AuthUser, all = false) {
     const coachScope =
       all &&
       actor.roles.includes(AppRole.COACH) &&
@@ -128,7 +140,7 @@ export class TrainingService {
           AppRole.FRONT_DESK,
         ].includes(role as never),
       );
-    return this.prisma.trainingEnrollment.findMany({
+    const enrollments = await this.prisma.trainingEnrollment.findMany({
       where: all
         ? coachScope
           ? {
@@ -140,6 +152,7 @@ export class TrainingService {
         : { buyerId: actor.sub },
       include: {
         product: true,
+        order: { select: { parameterSnapshot: true, status: true } },
         class: true,
         student: true,
         attendances: {
@@ -154,6 +167,36 @@ export class TrainingService {
         },
       },
       orderBy: { createdAt: 'desc' },
+    });
+    const now = new Date();
+    const activeYouthRule = this.youthRules
+      ? await this.youthRules.active(now)
+      : null;
+    return enrollments.map((enrollment) => {
+      const warnings: string[] = [];
+      if (enrollment.product.audience === TrainingAudience.YOUTH) {
+        const remainingDays = Math.ceil(
+          (enrollment.expiresAt.getTime() - now.getTime()) / 86_400_000,
+        );
+        if (remainingDays <= 0) {
+          warnings.push('青少年课包已到期');
+        } else if (
+          activeYouthRule &&
+          remainingDays <= activeYouthRule.warningThresholdDays
+        ) {
+          warnings.push(
+            `青少年课包将在 ${remainingDays} 天内到期（当前规则预警阈值 ${activeYouthRule.warningThresholdDays} 天）`,
+          );
+        }
+      }
+      const parameterSnapshot = enrollment.order?.parameterSnapshot as
+        Record<string, unknown> | null | undefined;
+      return {
+        ...enrollment,
+        regulatoryWarnings: warnings,
+        youthRegulatorySnapshot:
+          parameterSnapshot?.youthRegulatoryValidation ?? null,
+      };
     });
   }
 
@@ -229,6 +272,14 @@ export class TrainingService {
         throw new ConflictException('培训产品幂等记录对应的对象不存在');
       return existing;
     }
+    const regulatoryValidation =
+      dto.audience === TrainingAudience.YOUTH
+        ? await this.validateYouthProduct({
+            totalSessions: dto.totalSessions,
+            validityDays: dto.validityDays,
+            priceCents: dto.priceCents,
+          })
+        : null;
 
     return this.prisma.$transaction(
       async (tx) => {
@@ -281,12 +332,109 @@ export class TrainingService {
               unitRevenueCents: created.unitRevenueCents,
               refundRule: created.refundRule,
               enabled: created.enabled,
+              regulatoryValidation,
             } as never,
             reason,
             requestId,
           },
         });
         return created;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
+  async updateProduct(
+    id: string,
+    dto: UpdateTrainingProductDto,
+    actor: AuthUser,
+  ) {
+    this.assertTrainingRole(
+      actor,
+      TRAINING_CONFIGURATION_ROLES,
+      '仅管理员可变更培训产品',
+    );
+    const current = await this.prisma.trainingProduct.findUnique({
+      where: { id },
+    });
+    if (!current) throw new NotFoundException('培训产品不存在');
+    const next = {
+      name: dto.name?.trim() || current.name,
+      totalSessions: dto.totalSessions ?? current.totalSessions,
+      validityDays: dto.validityDays ?? current.validityDays,
+      priceCents: dto.priceCents ?? current.priceCents,
+      refundRule:
+        dto.refundRule ?? (current.refundRule as Record<string, unknown>),
+      enabled: dto.enabled ?? current.enabled,
+    };
+    const reason = dto.reason.trim();
+    const requestId = dto.idempotencyKey.trim();
+    const commandHash = orderCreationCommandHash({
+      kind: 'TRAINING_PRODUCT_UPDATE',
+      productId: id,
+      ...next,
+      reason,
+    });
+    const replay = await this.findTrainingCommandReplay(this.prisma, requestId);
+    if (replay) {
+      const objectId = this.assertTrainingCommandReplay(replay, {
+        actor,
+        action: 'TRAINING_PRODUCT_UPDATED',
+        objectType: 'TrainingProduct',
+        commandHash,
+      });
+      if (objectId !== id)
+        throw new ConflictException('产品变更幂等键已用于其他产品');
+      return this.prisma.trainingProduct.findUniqueOrThrow({ where: { id } });
+    }
+    const regulatoryValidation =
+      current.audience === TrainingAudience.YOUTH && next.enabled
+        ? await this.validateYouthProduct(next)
+        : null;
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const latest = await tx.trainingProduct.findUnique({ where: { id } });
+        if (!latest) throw new NotFoundException('培训产品不存在');
+        if (latest.updatedAt.getTime() !== current.updatedAt.getTime()) {
+          throw new ConflictException('培训产品已被其他操作更新，请刷新后重试');
+        }
+        const updated = await tx.trainingProduct.update({
+          where: { id },
+          data: {
+            ...next,
+            unitRevenueCents: Math.round(next.priceCents / next.totalSessions),
+            refundRule: next.refundRule as never,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.sub,
+            actorRole: this.trainingActorRole(
+              actor,
+              TRAINING_CONFIGURATION_ROLES,
+            ),
+            action: 'TRAINING_PRODUCT_UPDATED',
+            objectType: 'TrainingProduct',
+            objectId: id,
+            reason,
+            requestId,
+            oldValue: {
+              name: current.name,
+              totalSessions: current.totalSessions,
+              validityDays: current.validityDays,
+              priceCents: current.priceCents,
+              refundRule: current.refundRule,
+              enabled: current.enabled,
+            } as never,
+            newValue: {
+              commandHash,
+              ...next,
+              regulatoryValidation,
+            } as never,
+          },
+        });
+        return updated;
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -586,6 +734,18 @@ export class TrainingService {
     });
     if (!product?.enabled)
       throw new NotFoundException('培训产品不存在或已下架');
+    const now = new Date();
+    const regulatoryValidation =
+      product.audience === TrainingAudience.YOUTH
+        ? await this.validateYouthProduct(
+            {
+              totalSessions: product.totalSessions,
+              validityDays: product.validityDays,
+              priceCents: product.priceCents,
+            },
+            now,
+          )
+        : null;
     if (dto.classId) {
       const trainingClass = await this.prisma.trainingClass.findFirst({
         where: { id: dto.classId, productId: product.id, active: true },
@@ -608,7 +768,6 @@ export class TrainingService {
         throw new BadRequestException('学员不存在或监护人授权未完成');
     }
 
-    const now = new Date();
     const expiresAt = new Date(
       now.getTime() + product.validityDays * 86_400_000,
     );
@@ -669,6 +828,7 @@ export class TrainingService {
               refundRule: product.refundRule,
               classId: dto.classId,
               seatReservedUntil: seatReservedUntil?.toISOString(),
+              youthRegulatoryValidation: regulatoryValidation,
             },
             items: {
               create: {
@@ -713,6 +873,7 @@ export class TrainingService {
               classId: dto.classId,
               studentId: dto.studentId,
               seatReservedUntil: seatReservedUntil?.toISOString(),
+              youthRegulatoryValidation: regulatoryValidation,
             } as never,
             reason: '创建培训购买订单',
             requestId: creation.creationIdempotencyKey,
@@ -939,7 +1100,12 @@ export class TrainingService {
           },
           include: {
             session: { include: { class: true } },
-            enrollment: { include: { product: true } },
+            enrollment: {
+              include: {
+                product: true,
+                order: { select: { id: true, status: true } },
+              },
+            },
             revenueRecognitions: {
               include: { reversedBy: true },
               orderBy: { sequence: 'desc' },
@@ -1001,6 +1167,11 @@ export class TrainingService {
             proposedById: attendance.operatorId,
           };
         }
+        if (enrollment.order?.status === OrderStatus.REFUND_PENDING) {
+          throw new ConflictException(
+            '培训订单正在等待退款审批，请先处理退款再提交消课建议',
+          );
+        }
 
         const feedback = dto.feedback?.trim() || undefined;
         const updated = await tx.trainingAttendance.update({
@@ -1055,9 +1226,9 @@ export class TrainingService {
   ) {
     this.assertTrainingApprover(actor);
     const auditAction = options.auditAction ?? 'TRAINING_CONSUME_CONFIRMED';
-    const reason =
-      ('reason' in dto ? dto.reason?.trim() : undefined) ||
-      '培训主管确认消课入账';
+    const explicitReason =
+      'reason' in dto ? dto.reason?.trim() || undefined : undefined;
+    const reason = explicitReason || '培训主管确认消课入账';
     const requestedIdempotencyKey =
       'idempotencyKey' in dto ? dto.idempotencyKey?.trim() : undefined;
     const commandHash = orderCreationCommandHash({
@@ -1079,7 +1250,12 @@ export class TrainingService {
           },
           include: {
             session: { include: { class: true } },
-            enrollment: { include: { product: true } },
+            enrollment: {
+              include: {
+                product: true,
+                order: { select: { id: true, status: true } },
+              },
+            },
             revenueRecognitions: {
               include: { reversedBy: true },
               orderBy: { sequence: 'desc' },
@@ -1136,6 +1312,11 @@ export class TrainingService {
           throw new ForbiddenException('消课建议提交人与确认人不能是同一账号');
         }
         const enrollment = attendance.enrollment;
+        if (enrollment.order?.status === OrderStatus.REFUND_PENDING) {
+          throw new ConflictException(
+            '培训订单正在等待退款审批，请先处理退款再确认消课',
+          );
+        }
         if (!TRAINING_ATTENDING_STATUSES.includes(enrollment.status)) {
           throw new ConflictException('报名记录不是在读状态');
         }
@@ -1145,6 +1326,25 @@ export class TrainingService {
         ) {
           throw new ConflictException('可用课时或预收余额不足');
         }
+        await this.assertSettlementPeriodUnlocked(
+          tx,
+          attendance.session.startsAt,
+          attendance.session.endsAt,
+          '确认消课入账',
+        );
+        const now = new Date();
+        const timeWindowPolicy = await assertOperationTimeWindow(tx, {
+          actor,
+          parameterKey: TRAINING_COMPLETION_WINDOW_PARAMETER,
+          defaults: { earlyMinutes: 0, lateMinutes: 240 },
+          scheduledStartsAt: attendance.session.endsAt,
+          scheduledEndsAt: attendance.session.endsAt,
+          action: auditAction,
+          objectType: 'TrainingAttendance',
+          objectId: attendance.id,
+          overrideReason: explicitReason,
+          observedAt: now,
+        });
         const confirmedRevenueCents = Math.min(
           enrollment.product.unitRevenueCents,
           enrollment.prepaidBalanceCents,
@@ -1157,10 +1357,12 @@ export class TrainingService {
           confirmedRevenueCents,
           rateBps,
         );
-        const now = new Date();
         const consumedSessions = enrollment.consumedSessions + 1;
         const remainingPrepaidCents =
           enrollment.prepaidBalanceCents - confirmedRevenueCents;
+        const fullyConsumed =
+          consumedSessions >= enrollment.totalSessions ||
+          remainingPrepaidCents <= 0;
         const feedback =
           dto.feedback?.trim() || attendance.feedback || undefined;
         const proposedById = attendance.operatorId;
@@ -1210,11 +1412,9 @@ export class TrainingService {
             consumedSessions,
             confirmedRevenueCents: { increment: confirmedRevenueCents },
             prepaidBalanceCents: { decrement: confirmedRevenueCents },
-            status:
-              consumedSessions >= enrollment.totalSessions ||
-              remainingPrepaidCents <= 0
-                ? TrainingEnrollmentStatus.COMPLETED
-                : enrollment.status,
+            status: fullyConsumed
+              ? TrainingEnrollmentStatus.COMPLETED
+              : enrollment.status,
           },
         });
         const recognition = await tx.trainingRevenueRecognition.create({
@@ -1274,6 +1474,24 @@ export class TrainingService {
             });
           }
         }
+        if (fullyConsumed && enrollment.orderId) {
+          await completeOrderFulfillment(tx, {
+            orderId: enrollment.orderId,
+            actor,
+            objectType: 'TrainingEnrollment',
+            objectId: enrollment.id,
+            outcome: 'COMPLETED',
+            completedAt: now,
+            reason: '培训课包课时及预收余额已全部消耗',
+            metadata: {
+              sessionId,
+              attendanceId: attendance.id,
+              consumedSessions,
+              totalSessions: enrollment.totalSessions,
+              remainingPrepaidCents,
+            },
+          });
+        }
         await tx.auditLog.create({
           data: {
             actorId: actor.sub,
@@ -1296,6 +1514,7 @@ export class TrainingService {
               venueContributionCents,
               venueFeeCents: 0,
               trainingPayableVenueCents: 0,
+              timeWindowPolicy,
             } as never,
             requestId: requestedIdempotencyKey,
           },
@@ -1395,6 +1614,18 @@ export class TrainingService {
         const feedback =
           dto.feedback?.trim() || attendance.feedback || undefined;
         const now = new Date();
+        const timeWindowPolicy = await assertOperationTimeWindow(tx, {
+          actor,
+          parameterKey: TRAINING_ATTENDANCE_WINDOW_PARAMETER,
+          defaults: { earlyMinutes: 30, lateMinutes: 120 },
+          scheduledStartsAt: attendance.session.startsAt,
+          scheduledEndsAt: attendance.session.endsAt,
+          action: 'TRAINING_ATTENDANCE_MARKED',
+          objectType: 'TrainingAttendance',
+          objectId: attendance.id,
+          overrideReason: dto.reason,
+          observedAt: now,
+        });
         const updated = await tx.trainingAttendance.update({
           where: { id: attendance.id },
           data: {
@@ -1427,6 +1658,7 @@ export class TrainingService {
                 nextStatus === AttendanceStatus.ATTENDED
                   ? now.toISOString()
                   : null,
+              timeWindowPolicy,
             } as never,
           },
         });
@@ -1615,6 +1847,7 @@ export class TrainingService {
         : ({
             id: sessionId,
             status: TrainingSessionStatus.SCHEDULED,
+            endsAt: new Date(),
             class: {},
           } as never);
       if (!session) throw new NotFoundException('培训课次不存在');
@@ -1646,6 +1879,17 @@ export class TrainingService {
       if (session.status === TrainingSessionStatus.COMPLETED) return session;
       if (session.status === TrainingSessionStatus.CANCELLED)
         throw new ConflictException('已取消课次不能结课');
+      const timeWindowPolicy = await assertOperationTimeWindow(tx, {
+        actor,
+        parameterKey: TRAINING_COMPLETION_WINDOW_PARAMETER,
+        defaults: { earlyMinutes: 0, lateMinutes: 240 },
+        scheduledStartsAt: session.endsAt,
+        scheduledEndsAt: session.endsAt,
+        action: 'TRAINING_SESSION_COMPLETED',
+        objectType: 'TrainingSession',
+        objectId: sessionId,
+        overrideReason: dto.reason,
+      });
       const pending = await tx.trainingAttendance.count({
         where: {
           sessionId,
@@ -1666,8 +1910,7 @@ export class TrainingService {
           ],
         },
       });
-      if (pending > 0)
-        throw new ConflictException('仍有学员未完成点名或消课');
+      if (pending > 0) throw new ConflictException('仍有学员未完成点名或消课');
       const updated = await tx.trainingSession.update({
         where: { id: sessionId },
         data: { status: TrainingSessionStatus.COMPLETED },
@@ -1686,6 +1929,7 @@ export class TrainingService {
           newValue: {
             commandHash,
             status: TrainingSessionStatus.COMPLETED,
+            timeWindowPolicy,
           } as never,
           reason,
           requestId,
@@ -1887,7 +2131,23 @@ export class TrainingService {
           include: {
             recognition: { include: { reversedBy: true } },
             attendance: {
-              include: { enrollment: { include: { product: true } } },
+              include: {
+                session: {
+                  select: { startsAt: true, endsAt: true },
+                },
+                enrollment: {
+                  include: {
+                    product: true,
+                    order: {
+                      select: {
+                        id: true,
+                        status: true,
+                        completedAt: true,
+                      },
+                    },
+                  },
+                },
+              },
             },
             reversalRecognition: true,
           },
@@ -1917,6 +2177,11 @@ export class TrainingService {
         ) {
           throw new ConflictException('目标消课流水已冲正或不可冲正');
         }
+        if (correction.recognition.settlementId) {
+          throw new ConflictException(
+            '目标消课流水已进入结算单，不可直接冲正',
+          );
+        }
         const attendance = correction.attendance;
         const enrollment = attendance.enrollment;
         if (
@@ -1929,6 +2194,12 @@ export class TrainingService {
         ) {
           throw new ConflictException('当前消课余额与待冲正流水不一致');
         }
+        await this.assertSettlementPeriodUnlocked(
+          tx,
+          attendance.session.startsAt,
+          attendance.session.endsAt,
+          '批准消课冲正',
+        );
         const sequence = await tx.trainingRevenueRecognition.aggregate({
           where: { attendanceId: attendance.id },
           _max: { sequence: true },
@@ -2042,6 +2313,72 @@ export class TrainingService {
               },
             },
           });
+        }
+        if (
+          enrollment.status === TrainingEnrollmentStatus.COMPLETED &&
+          enrollment.order?.completedAt
+        ) {
+          const order = enrollment.order;
+          const previousCompletedAt = order.completedAt;
+          if (!previousCompletedAt) {
+            throw new ConflictException('培训订单缺少原履约完成时间');
+          }
+          if (
+            order.status !== OrderStatus.COMPLETED &&
+            order.status !== OrderStatus.PARTIALLY_REFUNDED &&
+            order.status !== OrderStatus.REFUND_PENDING
+          ) {
+            throw new ConflictException(
+              `培训订单状态 ${order.status} 不可因消课冲正重新打开`,
+            );
+          }
+          const nextOrderStatus =
+            order.status === OrderStatus.COMPLETED
+              ? OrderStatus.PAID
+              : order.status;
+          const reopened = await tx.order.updateMany({
+            where: {
+              id: order.id,
+              status: order.status,
+              completedAt: previousCompletedAt,
+            },
+            data: {
+              status: nextOrderStatus,
+              completedAt: null,
+            },
+          });
+          if (reopened.count !== 1) {
+            const latest = await tx.order.findUnique({
+              where: { id: order.id },
+              select: { id: true, status: true, completedAt: true },
+            });
+            if (!latest || latest.completedAt) {
+              throw new ConflictException('培训订单履约状态已变化，请重试');
+            }
+          } else {
+            await tx.auditLog.create({
+              data: {
+                actorId: actor.sub,
+                actorRole: actor.roles[0],
+                action: 'ORDER_FULFILLMENT_REOPENED',
+                objectType: 'Order',
+                objectId: order.id,
+                reason: reviewReason,
+                oldValue: {
+                  status: order.status,
+                  completedAt: previousCompletedAt.toISOString(),
+                } as never,
+                newValue: {
+                  status: nextOrderStatus,
+                  completedAt: null,
+                  businessType: BusinessType.TRAINING,
+                  trainingEnrollmentId: enrollment.id,
+                  correctionId: correction.id,
+                } as never,
+                requestId: dto.idempotencyKey,
+              },
+            });
+          }
         }
         const approved = await tx.trainingConsumeCorrection.update({
           where: { id },
@@ -2250,12 +2587,6 @@ export class TrainingService {
     const periodEnd = new Date(dto.periodEnd);
     if (periodEnd <= periodStart)
       throw new BadRequestException('结算结束时间必须晚于开始时间');
-    await this.assertSettlementPeriodUnlocked(
-      this.prisma,
-      periodStart,
-      periodEnd,
-    );
-
     const uniqueWhere = {
       periodStart_periodEnd: { periodStart, periodEnd },
     };
@@ -2280,7 +2611,6 @@ export class TrainingService {
     try {
       return await this.prisma.$transaction(
         async (tx) => {
-          await this.assertSettlementPeriodUnlocked(tx, periodStart, periodEnd);
           const duplicate = await tx.trainingSettlement.findUnique({
             where: uniqueWhere,
           });
@@ -2571,12 +2901,6 @@ export class TrainingService {
             `培训结算单当前状态为 ${current.status}，不能执行该操作`,
           );
         }
-        await this.assertSettlementPeriodUnlocked(
-          tx,
-          current.periodStart,
-          current.periodEnd,
-        );
-
         const changed = await tx.trainingSettlement.updateMany({
           where: { id: input.id, status: input.from },
           data: { status: input.to, ...input.data },
@@ -2732,6 +3056,7 @@ export class TrainingService {
     client: Pick<Prisma.TransactionClient, 'reconciliationPeriod'>,
     periodStart: Date,
     periodEnd: Date,
+    operation = '新增或变更结算',
   ): Promise<void> {
     const shifted = new Date(periodStart.getTime() + SHANGHAI_OFFSET_MS);
     const firstBusinessDay = new Date(
@@ -2750,7 +3075,7 @@ export class TrainingService {
     });
     if (locked) {
       throw new ConflictException(
-        `账期包含已锁定营业日 ${locked.businessDate.toISOString().slice(0, 10)}，不能新增或变更结算`,
+        `账期包含已锁定营业日 ${locked.businessDate.toISOString().slice(0, 10)}，不能${operation}`,
       );
     }
   }
@@ -2853,6 +3178,22 @@ export class TrainingService {
     if (normalized.getUTCFullYear() < 1900)
       throw new BadRequestException('出生月份超出合理范围');
     return normalized;
+  }
+
+  private validateYouthProduct(
+    input: {
+      totalSessions: number;
+      validityDays: number;
+      priceCents: number;
+    },
+    at = new Date(),
+  ) {
+    if (!this.youthRules) {
+      throw new ConflictException(
+        '青少年培训监管服务未加载，正式销售已安全阻断',
+      );
+    }
+    return this.youthRules.validateProduct(input, at);
   }
 
   private async contractRateAt(

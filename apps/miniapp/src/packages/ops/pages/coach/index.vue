@@ -16,6 +16,12 @@ const enrollments = ref<any[]>([])
 const corrections = ref<any[]>([])
 const products = ref<any[]>([])
 const courtAvailability = ref<CourtAvailability | null>(null)
+const trials = ref<any[]>([])
+const leads = ref<any[]>([])
+const trialStudents = ref<any[]>([])
+const trialMembers = ref<any[]>([])
+const youthRules = ref<any[]>([])
+const activeYouthRule = ref<any | null>(null)
 const loading = ref(false)
 const actionKey = ref('')
 const actionMessage = ref('')
@@ -56,12 +62,44 @@ const selectedCourtIds = ref<string[]>([])
 const sessionNote = ref('')
 const sessionReason = ref('')
 
+const trialSubjectOptions = ['会员', '客户线索', '青少年学员']
+const trialSubjectIndex = ref(0)
+const trialMemberIndex = ref(0)
+const trialLeadIndex = ref(0)
+const trialStudentIndex = ref(0)
+const trialSessionIndex = ref(0)
+const trialCoachId = ref('user-coach')
+const trialSourceOptions = ['STORE_VISIT', 'WECHAT_GROUP', 'DOUYIN', 'REFERRAL', 'OTHER']
+const trialSourceIndex = ref(0)
+const trialReason = ref('')
+const trialLinkLead = ref(false)
+
+const ruleMaxSessions = ref('')
+const ruleMaxValidityDays = ref('')
+const ruleMaxAmountYuan = ref('')
+const ruleWarningDays = ref('')
+const ruleHardBlock = ref(true)
+const ruleEffectiveDate = ref(shanghaiDate(1))
+const ruleEffectiveTime = ref('09:00')
+const ruleReason = ref('')
+
 const mayViewTraining = computed(() =>
   session.roles.some((role) => ['COACH', 'FRONT_DESK', 'FINANCE', 'ADMIN', 'SUPER_ADMIN'].includes(role)),
 )
 const canConfigureTraining = computed(() =>
   session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)),
 )
+const canManageTrials = computed(() =>
+  session.roles.some((role) => ['FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'].includes(role)),
+)
+const canAssessTrials = computed(() =>
+  session.roles.some((role) => ['COACH', 'ADMIN', 'SUPER_ADMIN'].includes(role)),
+)
+const canConvertTrials = computed(() =>
+  session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)),
+)
+const canDraftYouthRule = computed(() => session.roles.includes('ADMIN'))
+const canReviewYouthRule = computed(() => session.roles.includes('SUPER_ADMIN'))
 const canCreateSession = computed(() =>
   session.roles.some((role) => ['COACH', 'ADMIN', 'SUPER_ADMIN'].includes(role)),
 )
@@ -100,6 +138,23 @@ const sessionClasses = computed(() => {
 })
 const selectedClassProduct = computed(() => activeProducts.value[classProductIndex.value] || null)
 const selectedSessionClass = computed(() => sessionClasses.value[sessionClassIndex.value] || null)
+const schedulableTrialSessions = computed(() => lessons.value.filter((item) =>
+  item.status === 'SCHEDULED' && new Date(item.endsAt || item.startsAt).getTime() > Date.now(),
+))
+const selectedTrialSession = computed(() => schedulableTrialSessions.value[trialSessionIndex.value] || null)
+const selectedTrialClass = computed(() => {
+  const selected = selectedTrialSession.value
+  if (!selected) return null
+  return activeClasses.value.find((item) => item.id === selected.classId) || selected.class || null
+})
+const selectedTrialProduct = computed(() =>
+  selectedTrialClass.value?.product || activeProducts.value.find((item) => item.id === selectedTrialClass.value?.productId) || null,
+)
+const selectedTrialSubject = computed(() => {
+  if (trialSubjectIndex.value === 1) return leads.value[trialLeadIndex.value] || null
+  if (trialSubjectIndex.value === 2) return trialStudents.value[trialStudentIndex.value] || null
+  return trialMembers.value[trialMemberIndex.value] || null
+})
 const sessionCourts = computed(() => (courtAvailability.value?.courts || []).filter((court) => court.enabled))
 const sessionStartsAt = computed(() => `${sessionDate.value}T${sessionStartTime.value}:00+08:00`)
 const sessionEndsAt = computed(() => `${sessionDate.value}T${sessionEndTime.value}:00+08:00`)
@@ -134,6 +189,8 @@ const metrics = computed(() => [
   ['待签到学员', String(activeStudents.value.length), '可消课课包'],
   ['已消课', String(enrollments.value.reduce((total, item) => total + Number(item.usedSessions || 0), 0)), '累计课次'],
   ['待冲正复核', String(requestedCorrections.value.length), '不可变流水'],
+  ['待到场试听', String(trials.value.filter((item) => item.status === 'RESERVED').length), '前台跟进'],
+  ['试听转课', String(trials.value.filter((item) => item.status === 'CONVERTED').length), '已绑定正式报名'],
 ])
 
 async function load() {
@@ -149,15 +206,29 @@ async function load() {
     endpoints.adminEnrollments(),
     endpoints.trainingConsumeCorrections(),
     endpoints.trainingProducts(),
+    endpoints.trainingTrials(),
+    canManageTrials.value ? endpoints.customerLeads() : Promise.resolve({ items: [] }),
+    canManageTrials.value ? endpoints.adminTrainingStudents() : Promise.resolve([]),
+    canManageTrials.value ? endpoints.members() : Promise.resolve({ items: [] }),
+    endpoints.activeYouthTrainingRule(),
+    canConfigureTraining.value ? endpoints.youthTrainingRules() : Promise.resolve([]),
   ])
   if (result[0].status === 'fulfilled') lessons.value = result[0].value || []
   if (result[1].status === 'fulfilled') enrollments.value = result[1].value || []
   if (result[2].status === 'fulfilled') corrections.value = result[2].value || []
   if (result[3].status === 'fulfilled') products.value = result[3].value || []
+  if (result[4].status === 'fulfilled') trials.value = result[4].value || []
+  if (result[5].status === 'fulfilled') leads.value = (result[5].value as any)?.items || []
+  if (result[6].status === 'fulfilled') trialStudents.value = result[6].value || []
+  if (result[7].status === 'fulfilled') trialMembers.value = (result[7].value as any)?.items || result[7].value || []
+  if (result[8].status === 'fulfilled') activeYouthRule.value = result[8].value || null
+  if (result[9].status === 'fulfilled') youthRules.value = result[9].value || []
   const failed = result.find((item) => item.status === 'rejected') as PromiseRejectedResult | undefined
   if (failed) errorMessage.value = failed.reason?.message || '部分培训经营数据加载失败。'
   if (classProductIndex.value >= activeProducts.value.length) classProductIndex.value = 0
   if (sessionClassIndex.value >= sessionClasses.value.length) sessionClassIndex.value = 0
+  if (trialSessionIndex.value >= schedulableTrialSessions.value.length) trialSessionIndex.value = 0
+  if (selectedTrialClass.value?.coachId) trialCoachId.value = selectedTrialClass.value.coachId
   if (canCreateSession.value) await loadCourtAvailability()
   loading.value = false
 }
@@ -190,10 +261,10 @@ function requiredReason(value: string) {
   return reason
 }
 
-function positiveInteger(value: string, label: string, min: number, max: number) {
+function positiveInteger(value: string, label: string, min = 1, max?: number) {
   const parsed = Number(value)
-  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
-    throw new Error(`${label}必须为 ${min}-${max} 的整数。`)
+  if (!Number.isInteger(parsed) || parsed < min || (max !== undefined && parsed > max)) {
+    throw new Error(max === undefined ? `${label}必须为不小于 ${min} 的整数。` : `${label}必须为 ${min}-${max} 的整数。`)
   }
   return parsed
 }
@@ -249,8 +320,8 @@ async function createProduct() {
       code,
       name,
       audience: audienceOptions[productAudienceIndex.value].value,
-      totalSessions: positiveInteger(productTotalSessions.value, '总课次', 1, 200),
-      validityDays: positiveInteger(productValidityDays.value, '有效期天数', 1, 730),
+      totalSessions: positiveInteger(productTotalSessions.value, '总课次'),
+      validityDays: positiveInteger(productValidityDays.value, '有效期天数'),
       priceCents: yuanToCents(productPriceYuan.value, '课程售价', true),
       refundRule: {
         beforeStart: 'FULL_REFUND',
@@ -399,6 +470,276 @@ async function createSession() {
   }
 }
 
+function changeTrialSession(event: any) {
+  trialSessionIndex.value = Number(event.detail.value)
+  if (selectedTrialClass.value?.coachId) trialCoachId.value = selectedTrialClass.value.coachId
+}
+
+function setTrialLinkLead(event: any) {
+  trialLinkLead.value = Boolean(event.detail.value)
+}
+
+async function createTrial() {
+  if (!canManageTrials.value || actionKey.value) return
+  try {
+    const trialSession = selectedTrialSession.value
+    const trainingClass = selectedTrialClass.value
+    const product = selectedTrialProduct.value
+    const subject = selectedTrialSubject.value
+    const reason = requiredReason(trialReason.value)
+    if (!trialSession || !trainingClass || !product) throw new Error('请先选择已有场地资源的待开课次。')
+    if (!subject) throw new Error('请选择试听主体。')
+    if (trialSubjectIndex.value === 2 && product.audience !== 'YOUTH') {
+      throw new Error('青少年学员只能预约青少年培训产品。')
+    }
+    if (trialSubjectIndex.value !== 2 && product.audience === 'YOUTH') {
+      throw new Error('青少年产品必须选择已授权学员。')
+    }
+    const command: Record<string, any> = {
+      productId: product.id,
+      classId: trainingClass.id,
+      sessionId: trialSession.id,
+      coachId: trialCoachId.value.trim(),
+      sourceChannel: trialSourceOptions[trialSourceIndex.value],
+      scheduledStartsAt: trialSession.startsAt,
+      scheduledEndsAt: trialSession.endsAt,
+      reason,
+    }
+    if (trialSubjectIndex.value === 0) command.memberId = subject.id
+    if (trialSubjectIndex.value === 1) command.leadId = subject.id
+    if (trialSubjectIndex.value === 2) {
+      command.studentId = subject.id
+      if (trialLinkLead.value && leads.value[trialLeadIndex.value]) {
+        command.leadId = leads.value[trialLeadIndex.value].id
+      }
+    }
+    const confirmed = await uni.showModal({
+      title: '确认预约试听',
+      content: `${subject.displayName} · ${product.name}\n${shortDate(trialSession.startsAt)} · 教练 ${command.coachId}\n原因：${reason}`,
+      confirmText: '确认预约',
+    })
+    if (!confirmed.confirm) return
+    const succeeded = await runCreation('create-trial', '试听预约已进入待到场队列。', () =>
+      withPendingCreationKey('training.trial.reserve', command, (idempotencyKey) =>
+        endpoints.createTrainingTrial({ ...command, idempotencyKey }),
+      ),
+    )
+    if (succeeded) trialReason.value = ''
+  } catch (cause: any) {
+    errorMessage.value = cause?.message || '试听预约校验失败。'
+  }
+}
+
+async function transitionTrial(trial: any, action: 'check-in' | 'no-show' | 'lost' | 'cancel') {
+  if (actionKey.value) return
+  const labels = { 'check-in': '确认到场', 'no-show': '登记未到', lost: '确认流失', cancel: '取消试听' }
+  const result = await uni.showModal({
+    title: labels[action],
+    content: '',
+    editable: true,
+    placeholderText: '请填写事实原因（2-300字）',
+    confirmText: '提交',
+  })
+  if (!result.confirm) return
+  let reason = String(result.content || '').trim()
+  if (reason.length < 2 || reason.length > 300) {
+    uni.showToast({ title: '原因须为2-300字', icon: 'none' })
+    return
+  }
+  if (action === 'check-in' || action === 'no-show') {
+    const gate = await operationWindowReason({
+      startsAt: action === 'check-in' ? trial.scheduledStartsAt : trial.scheduledEndsAt,
+      endsAt: action === 'check-in' ? trial.scheduledEndsAt : trial.scheduledEndsAt,
+      earlyMinutes: action === 'check-in' ? 30 : 0,
+      lateMinutes: action === 'check-in' ? 120 : 240,
+      reason,
+      label: action === 'check-in' ? '试听签到' : '试听未到',
+    })
+    if (!gate.allowed) return
+    reason = gate.reason || reason
+  }
+  const command = { reason }
+  const apiByAction = {
+    'check-in': endpoints.checkInTrainingTrial,
+    'no-show': endpoints.noShowTrainingTrial,
+    lost: endpoints.loseTrainingTrial,
+    cancel: endpoints.cancelTrainingTrial,
+  }
+  actionKey.value = `trial-${action}-${trial.id}`
+  try {
+    await withPendingCreationKey(`training.trial.${trial.id}.${action}`, command, (idempotencyKey) =>
+      apiByAction[action](trial.id, { reason, idempotencyKey }),
+    )
+    actionMessage.value = `试听 ${trial.trialNo} 已${labels[action]}，状态证据与审计已记录。`
+    await load()
+  } catch (cause: any) {
+    errorMessage.value = cause?.message || '试听状态操作失败。'
+  } finally {
+    actionKey.value = ''
+  }
+}
+
+async function assessTrial(trial: any) {
+  if (!canAssessTrials.value || actionKey.value) return
+  const dimensions = []
+  for (const dimension of [
+    { key: 'movement', label: '步法与移动' },
+    { key: 'racket', label: '持拍与击球' },
+    { key: 'fitness', label: '体能与协调' },
+  ]) {
+    const scoreResult = await uni.showModal({
+      title: `${dimension.label}评分`,
+      content: '3',
+      editable: true,
+      placeholderText: '请输入1-5分',
+      confirmText: '下一项',
+    })
+    if (!scoreResult.confirm) return
+    const score = Number(scoreResult.content)
+    if (!Number.isInteger(score) || score < 1 || score > 5) {
+      uni.showToast({ title: '评分必须是1-5整数', icon: 'none' })
+      return
+    }
+    dimensions.push({ ...dimension, score })
+  }
+  const suggestion = await uni.showModal({
+    title: '训练建议',
+    content: '',
+    editable: true,
+    placeholderText: '请填写分班或训练建议（2-500字）',
+    confirmText: '提交测评',
+  })
+  if (!suggestion.confirm) return
+  const recommendation = String(suggestion.content || '').trim()
+  if (recommendation.length < 2 || recommendation.length > 500) {
+    uni.showToast({ title: '训练建议须为2-500字', icon: 'none' })
+    return
+  }
+  const command = { dimensions, recommendation, reason: '教练完成现场结构化测评' }
+  actionKey.value = `trial-assess-${trial.id}`
+  try {
+    await withPendingCreationKey(`training.trial.${trial.id}.assess`, command, (idempotencyKey) =>
+      endpoints.assessTrainingTrial(trial.id, { ...command, idempotencyKey }),
+    )
+    actionMessage.value = `试听 ${trial.trialNo} 测评已提交，等待管理员确认转课或流失。`
+    await load()
+  } catch (cause: any) {
+    errorMessage.value = cause?.message || '试听测评提交失败。'
+  } finally {
+    actionKey.value = ''
+  }
+}
+
+async function convertTrial(trial: any) {
+  if (!canConvertTrials.value || actionKey.value) return
+  const candidates = enrollments.value.filter((item) => {
+    if (!['ACTIVE', 'PARTIALLY_REFUNDED'].includes(item.status)) return false
+    if ((item.productId || item.product?.id) !== trial.productId) return false
+    if (trial.studentId) return item.studentId === trial.studentId && item.buyerId === trial.guardianId
+    return !item.studentId && item.buyerId === (trial.memberId || trial.lead?.convertedMemberId)
+  })
+  if (!candidates.length) {
+    uni.showModal({ title: '尚不能转正式课', content: '请先完成同产品、同学员/监护人的正式报名与支付激活。', showCancel: false })
+    return
+  }
+  const selected = await new Promise<any | undefined>((resolve) => {
+    uni.showActionSheet({
+      itemList: candidates.map((item) => `${item.enrollmentNo} · ${item.product?.name || trial.product?.name}`),
+      success: ({ tapIndex }) => resolve(candidates[tapIndex]),
+      fail: () => resolve(undefined),
+    })
+  })
+  if (!selected) return
+  const command = { enrollmentId: selected.id, reason: '正式课已支付并完成试听归属核对' }
+  actionKey.value = `trial-convert-${trial.id}`
+  try {
+    await withPendingCreationKey(`training.trial.${trial.id}.convert`, command, (idempotencyKey) =>
+      endpoints.convertTrainingTrial(trial.id, { ...command, idempotencyKey }),
+    )
+    actionMessage.value = `试听 ${trial.trialNo} 已转正式课 ${selected.enrollmentNo}。`
+    await load()
+  } catch (cause: any) {
+    errorMessage.value = cause?.message || '试听转正式课失败。'
+  } finally {
+    actionKey.value = ''
+  }
+}
+
+function setRuleHardBlock(event: any) {
+  ruleHardBlock.value = Boolean(event.detail.value)
+}
+
+async function createYouthRule() {
+  if (!canDraftYouthRule.value || actionKey.value) return
+  try {
+    const reason = requiredReason(ruleReason.value)
+    const command = {
+      maxTotalSessions: positiveInteger(ruleMaxSessions.value, '最大总课时'),
+      maxValidityDays: positiveInteger(ruleMaxValidityDays.value, '最大有效期限'),
+      maxContractAmountCents: yuanToCents(ruleMaxAmountYuan.value, '单合同金额上限', true),
+      warningThresholdDays: positiveInteger(ruleWarningDays.value, '到期预警阈值', 0),
+      hardBlock: ruleHardBlock.value,
+      effectiveFrom: `${ruleEffectiveDate.value}T${ruleEffectiveTime.value}:00+08:00`,
+      reason,
+    }
+    if (command.warningThresholdDays > command.maxValidityDays) {
+      throw new Error('到期预警阈值不能超过最大有效期限。')
+    }
+    const confirmation = await uni.showModal({
+      title: '提交监管规则草案',
+      content: `所有数值均来自本次管理员配置，不代表系统内置法定值。\n生效：${ruleEffectiveDate.value} ${ruleEffectiveTime.value}\n提交后须由另一 SUPER_ADMIN 复核。`,
+      confirmText: '确认制单',
+    })
+    if (!confirmation.confirm) return
+    const succeeded = await runCreation('create-youth-rule', '监管规则草案已提交，等待异人复核。', () =>
+      withPendingCreationKey('training.youth-rule.create', command, (idempotencyKey) =>
+        endpoints.createYouthTrainingRule({ ...command, idempotencyKey }),
+      ),
+    )
+    if (succeeded) {
+      ruleMaxSessions.value = ''
+      ruleMaxValidityDays.value = ''
+      ruleMaxAmountYuan.value = ''
+      ruleWarningDays.value = ''
+      ruleReason.value = ''
+    }
+  } catch (cause: any) {
+    errorMessage.value = cause?.message || '监管规则表单校验失败。'
+  }
+}
+
+async function decideYouthRule(rule: any, decision: 'publish' | 'reject') {
+  if (!canReviewYouthRule.value || actionKey.value) return
+  const result = await uni.showModal({
+    title: decision === 'publish' ? '复核并发布规则' : '驳回规则草案',
+    content: '',
+    editable: true,
+    placeholderText: '请填写独立复核意见（2-300字）',
+    confirmText: decision === 'publish' ? '同意发布' : '确认驳回',
+  })
+  if (!result.confirm) return
+  const reason = String(result.content || '').trim()
+  if (reason.length < 2 || reason.length > 300) {
+    uni.showToast({ title: '复核意见须为2-300字', icon: 'none' })
+    return
+  }
+  const command = { reason, decision }
+  actionKey.value = `youth-rule-${decision}-${rule.id}`
+  try {
+    await withPendingCreationKey(`training.youth-rule.${rule.id}.${decision}`, command, (idempotencyKey) =>
+      decision === 'publish'
+        ? endpoints.publishYouthTrainingRule(rule.id, { reason, idempotencyKey })
+        : endpoints.rejectYouthTrainingRule(rule.id, { reason, idempotencyKey }),
+    )
+    actionMessage.value = decision === 'publish' ? '监管规则已复核发布，将按生效时间启用。' : '监管规则草案已驳回。'
+    await load()
+  } catch (cause: any) {
+    errorMessage.value = cause?.message || '监管规则复核失败。'
+  } finally {
+    actionKey.value = ''
+  }
+}
+
 function recognitionTimeline(lesson: any, enrollment: any) {
   return [...(attendanceFor(lesson, enrollment)?.revenueRecognitions || [])]
     .sort((a: any, b: any) => Number(a.sequence) - Number(b.sequence))
@@ -491,6 +832,10 @@ function attendanceStatus(lesson: any, enrollment: any) {
   return attendanceFor(lesson, enrollment)?.status || 'PENDING'
 }
 
+function isRefundPending(enrollment: any) {
+  return enrollment.order?.status === 'REFUND_PENDING'
+}
+
 function attendanceLabel(status: string) {
   const labels: Record<string, string> = {
     PENDING: '待点名',
@@ -521,6 +866,43 @@ function hasUnresolvedAttendance(lesson: any) {
   })
 }
 
+async function operationWindowReason(options: {
+  startsAt: string
+  endsAt: string
+  earlyMinutes: number
+  lateMinutes: number
+  reason?: string
+  label: string
+}) {
+  const startsAt = new Date(options.startsAt).getTime()
+  const endsAt = new Date(options.endsAt).getTime()
+  if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt)) {
+    uni.showToast({ title: `${options.label}时间无效`, icon: 'none' })
+    return { allowed: false, reason: options.reason }
+  }
+  if (Date.now() < startsAt - options.earlyMinutes * 60_000) {
+    uni.showToast({ title: `未到${options.label}窗口，不能提前操作`, icon: 'none' })
+    return { allowed: false, reason: options.reason }
+  }
+  if (Date.now() <= endsAt + options.lateMinutes * 60_000) {
+    return { allowed: true, reason: options.reason }
+  }
+  if (!session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role))) {
+    uni.showToast({ title: `${options.label}已过窗口，请由管理员历史补录`, icon: 'none' })
+    return { allowed: false, reason: options.reason }
+  }
+  if (options.reason && options.reason.trim().length >= 2) {
+    return { allowed: true, reason: options.reason.trim() }
+  }
+  const modal = await uni.showModal({
+    title: `${options.label}历史补录`, content: '', editable: true,
+    placeholderText: '填写历史补录原因（2-300字）', confirmText: '确认补录',
+  })
+  const reason = modal.content?.trim() || ''
+  if (!modal.confirm || reason.length < 2 || reason.length > 300) return { allowed: false, reason }
+  return { allowed: true, reason }
+}
+
 async function mark(lesson: any, enrollment: any, status: 'ATTENDED' | 'ABSENT' | 'LEAVE' | 'CANCELLED') {
   let reason: string | undefined
   if (status === 'LEAVE' || status === 'CANCELLED') {
@@ -536,6 +918,16 @@ async function mark(lesson: any, enrollment: any, status: 'ATTENDED' | 'ABSENT' 
     }
     reason = modal.content.trim()
   }
+  const gate = await operationWindowReason({
+    startsAt: lesson.startsAt,
+    endsAt: lesson.endsAt,
+    earlyMinutes: 30,
+    lateMinutes: 120,
+    reason,
+    label: '培训点名',
+  })
+  if (!gate.allowed) return
+  reason = gate.reason
   try {
     await endpoints.markTrainingAttendance(lesson.id, {
       enrollmentId: enrollment.id,
@@ -591,10 +983,18 @@ async function confirm(lesson: any, enrollment: any) {
     content: '确认后将扣减 1 次课包、确认本节培训收入并记入 20% 场馆合同流水。',
   })
   if (!modal.confirm) return
+  const gate = await operationWindowReason({
+    startsAt: lesson.endsAt,
+    endsAt: lesson.endsAt,
+    earlyMinutes: 0,
+    lateMinutes: 240,
+    label: '确认消课',
+  })
+  if (!gate.allowed) return
   try {
     const result: any = await endpoints.confirmTrainingConsume(lesson.id, {
       enrollmentId: enrollment.id,
-      reason: '已核对点名与教练反馈',
+      reason: gate.reason || '已核对点名与教练反馈',
     })
     actionMessage.value = `消课已入账：确认收入 ¥${((result?.effectiveRevenueCents || result?.recognizedRevenueCents || 0) / 100).toFixed(2)}，场馆分成 20%，场地费为 ¥0`
     uni.showToast({ title: '已确认入账', icon: 'success' })
@@ -610,7 +1010,15 @@ async function complete(lesson: any) {
   }
   const modal = await uni.showModal({ title: '结束课程', content: '确认本节课程已结束？结束后不可继续消课。' })
   if (!modal.confirm) return
-  try { await endpoints.completeTrainingSession(lesson.id); uni.showToast({ title: '课程已结束', icon: 'success' }); await load() }
+  const gate = await operationWindowReason({
+    startsAt: lesson.endsAt,
+    endsAt: lesson.endsAt,
+    earlyMinutes: 0,
+    lateMinutes: 240,
+    label: '课次结课',
+  })
+  if (!gate.allowed) return
+  try { await endpoints.completeTrainingSession(lesson.id, gate.reason ? { reason: gate.reason } : {}); uni.showToast({ title: '课程已结束', icon: 'success' }); await load() }
   catch (cause: any) { uni.showToast({ title: cause.message || '结束失败', icon: 'none' }) }
 }
 
@@ -631,6 +1039,85 @@ onShow(load)
     </view>
     <view class="metric-grid"><MetricCard v-for="item in metrics" :key="item[0]" :label="item[0]" :value="item[1]" :note="item[2]" /></view>
     <view v-if="actionMessage" class="notice card">{{ actionMessage }}</view>
+
+    <view class="section-title">试听预约与测评漏斗 <text class="section-note">{{ trials.length }} 条 · 状态动作留痕</text></view>
+    <view v-if="canManageTrials" class="card creation-form">
+      <view class="form-grid">
+        <picker :range="trialSubjectOptions" :value="trialSubjectIndex" @change="trialSubjectIndex = Number(($event.detail as any).value)"><view><text class="field-label">试听主体类型</text><view class="picker-value">{{ trialSubjectOptions[trialSubjectIndex] }} ›</view></view></picker>
+        <picker v-if="trialSubjectIndex === 0" :range="trialMembers" range-key="displayName" :value="trialMemberIndex" @change="trialMemberIndex = Number(($event.detail as any).value)"><view><text class="field-label">会员</text><view class="picker-value">{{ selectedTrialSubject?.displayName || '暂无可选会员' }} ›</view></view></picker>
+        <picker v-else-if="trialSubjectIndex === 1" :range="leads" range-key="displayName" :value="trialLeadIndex" @change="trialLeadIndex = Number(($event.detail as any).value)"><view><text class="field-label">客户线索</text><view class="picker-value">{{ selectedTrialSubject?.displayName || '暂无可用线索' }} ›</view></view></picker>
+        <picker v-else :range="trialStudents" range-key="displayName" :value="trialStudentIndex" @change="trialStudentIndex = Number(($event.detail as any).value)"><view><text class="field-label">青少年学员</text><view class="picker-value">{{ selectedTrialSubject?.displayName || '暂无已授权学员' }} ›</view></view></picker>
+      </view>
+      <view v-if="trialSubjectIndex === 2 && leads.length" class="consent-line"><text>同时关联招生线索，后续签到/转课自动沉淀跟进证据</text><switch color="#17653d" :checked="trialLinkLead" @change="setTrialLinkLead" /></view>
+      <picker v-if="trialSubjectIndex === 2 && trialLinkLead" :range="leads" range-key="displayName" :value="trialLeadIndex" @change="trialLeadIndex = Number(($event.detail as any).value)"><view><text class="field-label">关联线索（选填）</text><view class="picker-value">{{ leads[trialLeadIndex]?.displayName || '请选择线索' }} ›</view></view></picker>
+      <picker :range="schedulableTrialSessions" :value="trialSessionIndex" @change="changeTrialSession"><view><text class="field-label">已有场地资源的待开课次</text><view class="picker-value">{{ selectedTrialSession ? `${selectedTrialClass?.name || selectedTrialSession.class?.name} · ${shortDate(selectedTrialSession.startsAt)}` : '暂无可预约课次' }} ›</view></view></picker>
+      <view class="trial-context">
+        <text>产品：{{ selectedTrialProduct?.name || '—' }}</text>
+        <text>班级：{{ selectedTrialClass?.name || '—' }}</text>
+        <text>时段：{{ selectedTrialSession ? `${shortDate(selectedTrialSession.startsAt)} 至 ${shortDate(selectedTrialSession.endsAt)}` : '—' }}</text>
+      </view>
+      <view class="form-grid">
+        <view><text class="field-label">试听教练用户 ID</text><input v-model="trialCoachId" class="form-input" placeholder="须为班级教练或助教" /></view>
+        <picker :range="trialSourceOptions" :value="trialSourceIndex" @change="trialSourceIndex = Number(($event.detail as any).value)"><view><text class="field-label">来源渠道</text><view class="picker-value">{{ trialSourceOptions[trialSourceIndex] }} ›</view></view></picker>
+      </view>
+      <view><text class="field-label">预约事实与原因（必填）</text><textarea v-model="trialReason" class="reason-input" maxlength="300" placeholder="例如：监护人电话确认周末到场试听" /></view>
+      <text class="guardrail">预约必须落在已有培训课次及场地占用内；同一教练或同一试听主体发生时段重叠会被服务端拒绝。</text>
+      <button class="primary full-button" :loading="actionKey === 'create-trial'" :disabled="loading || Boolean(actionKey) || !selectedTrialSession || !selectedTrialSubject" @tap="createTrial">预约试听</button>
+    </view>
+    <view v-for="trial in trials" :key="trial.id" class="card trial-card">
+      <view class="row"><view><text class="trial-title">{{ trial.student?.displayName || trial.member?.displayName || trial.lead?.displayName || trial.trialNo }}</text><text class="muted">{{ trial.trialNo }} · {{ trial.product?.name }} · {{ shortDate(trial.scheduledStartsAt) }}</text></view><StatusBadge :value="trial.status" /></view>
+      <view class="trial-context"><text>教练：{{ trial.coach?.displayName || trial.coachId }}</text><text>来源：{{ trial.sourceChannel }}</text><text>监护人：{{ trial.guardian?.displayName || '不适用' }}</text></view>
+      <view v-if="trial.assessmentDimensions?.length" class="assessment-grid">
+        <view v-for="dimension in trial.assessmentDimensions" :key="dimension.key"><text>{{ dimension.label }}</text><text class="score">{{ dimension.score }}/5</text></view>
+        <text class="recommendation">训练建议：{{ trial.recommendation }}</text>
+      </view>
+      <view class="trial-actions">
+        <template v-if="trial.status === 'RESERVED' && canManageTrials">
+          <button class="primary inline" @tap="transitionTrial(trial, 'check-in')">签到</button>
+          <button class="ghost inline" @tap="transitionTrial(trial, 'no-show')">未到</button>
+          <button class="danger inline" @tap="transitionTrial(trial, 'cancel')">取消</button>
+        </template>
+        <button v-if="trial.status === 'CHECKED_IN' && canAssessTrials" class="primary inline" @tap="assessTrial(trial)">提交测评</button>
+        <template v-if="trial.status === 'ASSESSED' && canConvertTrials">
+          <button class="primary inline" @tap="convertTrial(trial)">转正式课</button>
+          <button class="danger inline" @tap="transitionTrial(trial, 'lost')">确认流失</button>
+        </template>
+        <template v-if="trial.status === 'NO_SHOW'">
+          <button v-if="canConvertTrials" class="danger inline" @tap="transitionTrial(trial, 'lost')">确认流失</button>
+          <button v-if="canManageTrials" class="ghost inline" @tap="transitionTrial(trial, 'cancel')">关闭预约</button>
+        </template>
+      </view>
+      <text v-if="trial.transitions?.length" class="audit-hint">状态证据 {{ trial.transitions.length }} 条 · 最近：{{ trial.transitions[trial.transitions.length - 1].reason }}</text>
+    </view>
+    <view v-if="!loading && !trials.length" class="empty card">暂无试听预约；前台可从已分配场地的课次创建预约。</view>
+
+    <template v-if="canConfigureTraining">
+      <view class="section-title">青少年培训监管规则 <text class="section-note">管理员配置 · 异人复核 · 按生效时间版本化</text></view>
+      <view v-if="activeYouthRule" class="card active-rule">
+        <view class="row"><view><text class="trial-title">当前生效 {{ activeYouthRule.version }}</text><text class="muted">生效于 {{ shortDate(activeYouthRule.effectiveFrom) }}</text></view><StatusBadge value="PUBLISHED" /></view>
+        <view class="rule-values"><text>总课时上限 {{ activeYouthRule.maxTotalSessions }}</text><text>有效期限上限 {{ activeYouthRule.maxValidityDays }} 天</text><text>单合同上限 {{ money(activeYouthRule.maxContractAmountCents) }}</text><text>到期预警 {{ activeYouthRule.warningThresholdDays }} 天</text></view>
+      </view>
+      <view v-else class="card rule-blocked"><text class="trial-title">当前无生效规则</text><text>青少年培训产品启用、变更与正式购买均会明确阻断；请由 ADMIN 制单、另一 SUPER_ADMIN 复核，并等待生效时间。</text></view>
+      <view v-if="canDraftYouthRule" class="card creation-form">
+        <text class="guardrail">下列字段全部由管理员依据当期合规要求填写。系统不预置、不暗示任何法定数值。</text>
+        <view class="form-grid"><view><text class="field-label">最大总课时</text><input v-model="ruleMaxSessions" class="form-input" type="number" placeholder="请按现行要求填写" /></view><view><text class="field-label">最大有效期限（天）</text><input v-model="ruleMaxValidityDays" class="form-input" type="number" placeholder="请按现行要求填写" /></view></view>
+        <view class="form-grid"><view><text class="field-label">单合同金额上限（元）</text><input v-model="ruleMaxAmountYuan" class="form-input" type="digit" placeholder="请按现行要求填写" /></view><view><text class="field-label">到期预警阈值（天）</text><input v-model="ruleWarningDays" class="form-input" type="number" placeholder="由管理员配置" /></view></view>
+        <view class="form-grid"><picker mode="date" :value="ruleEffectiveDate" :start="shanghaiDate()" @change="ruleEffectiveDate = ($event.detail as any).value"><view><text class="field-label">计划生效日期</text><view class="picker-value">{{ ruleEffectiveDate }} ›</view></view></picker><picker mode="time" :value="ruleEffectiveTime" @change="ruleEffectiveTime = ($event.detail as any).value"><view><text class="field-label">计划生效时间</text><view class="picker-value">{{ ruleEffectiveTime }} ›</view></view></picker></view>
+        <view class="consent-line"><text>超限时硬阻断（关闭则产生显著 WARNING 并固化快照）</text><switch color="#17653d" :checked="ruleHardBlock" @change="setRuleHardBlock" /></view>
+        <view><text class="field-label">制单依据（必填）</text><textarea v-model="ruleReason" class="reason-input" maxlength="300" placeholder="填写规则来源、核对日期与业务依据" /></view>
+        <button class="primary full-button" :loading="actionKey === 'create-youth-rule'" :disabled="loading || Boolean(actionKey)" @tap="createYouthRule">提交规则草案</button>
+      </view>
+      <view v-for="rule in youthRules" :key="rule.id" class="card rule-card">
+        <view class="row"><view><text class="trial-title">{{ rule.version }}</text><text class="muted">申请人 {{ rule.requestedBy?.displayName || rule.requestedById }} · 计划 {{ shortDate(rule.effectiveFrom) }} 生效</text></view><StatusBadge :value="rule.status" /></view>
+        <view class="rule-values"><text>总课时 {{ rule.maxTotalSessions }}</text><text>有效期 {{ rule.maxValidityDays }} 天</text><text>合同额 {{ money(rule.maxContractAmountCents) }}</text><text>预警 {{ rule.warningThresholdDays }} 天 · {{ rule.hardBlock ? '硬阻断' : '仅预警' }}</text></view>
+        <text class="audit-hint">制单依据：{{ rule.requestReason }}</text>
+        <view v-if="rule.status === 'DRAFT' && canReviewYouthRule" class="trial-actions">
+          <button class="primary inline" :disabled="rule.requestedById === session.user?.id" @tap="decideYouthRule(rule, 'publish')">复核发布</button>
+          <button class="danger inline" :disabled="rule.requestedById === session.user?.id" @tap="decideYouthRule(rule, 'reject')">驳回</button>
+          <text v-if="rule.requestedById === session.user?.id" class="pending-text">本人制单，必须由另一账号复核</text>
+        </view>
+      </view>
+    </template>
 
     <view class="section-title">课程产品与班级 <text class="section-note">{{ activeProducts.length }} 个产品 · {{ activeClasses.length }} 个有效班</text></view>
     <scroll-view v-if="activeProducts.length" scroll-x class="product-scroll">
@@ -743,8 +1230,9 @@ onShow(load)
               <button class="ghost inline" @tap="mark(lesson, student, 'ABSENT')">缺席</button>
               <button class="ghost inline" @tap="mark(lesson, student, 'LEAVE')">请假</button>
             </template>
-            <button v-if="isConsumableLesson(lesson) && canProposeConsume && attendanceStatus(lesson, student) === 'ATTENDED' && !hasPendingProposal(lesson, student) && !(attendanceFor(lesson, student)?.consumedSessions)" class="secondary inline" @tap="propose(lesson, student)">提交消课建议</button>
-            <button v-if="isConsumableLesson(lesson) && isChecker && hasPendingProposal(lesson, student)" class="primary inline" :disabled="attendanceFor(lesson, student)?.operatorId === session.user?.id" @tap="confirm(lesson, student)">确认入账</button>
+            <button v-if="isConsumableLesson(lesson) && !isRefundPending(student) && canProposeConsume && attendanceStatus(lesson, student) === 'ATTENDED' && !hasPendingProposal(lesson, student) && !(attendanceFor(lesson, student)?.consumedSessions)" class="secondary inline" @tap="propose(lesson, student)">提交消课建议</button>
+            <button v-if="isConsumableLesson(lesson) && !isRefundPending(student) && isChecker && hasPendingProposal(lesson, student)" class="primary inline" :disabled="attendanceFor(lesson, student)?.operatorId === session.user?.id" @tap="confirm(lesson, student)">确认入账</button>
+            <text v-if="isRefundPending(student)" class="pending-text">退款待审，暂停消课</text>
             <text v-if="isConsumableLesson(lesson) && isChecker && hasPendingProposal(lesson, student) && attendanceFor(lesson, student)?.operatorId === session.user?.id" class="pending-text">本人提交，须由另一管理员确认</text>
             <text v-if="isConsumableLesson(lesson) && hasPendingProposal(lesson, student) && !isChecker" class="pending-text">待主管确认</text>
             <text v-if="attendanceStatus(lesson, student) === 'MAKEUP_REQUIRED'" class="pending-text">请安排补课</text>
@@ -783,4 +1271,5 @@ onShow(load)
 <style scoped>
 .metric-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14rpx; margin-top:22rpx; }.notice { margin-top:20rpx; color:#17653d; background:#e8f4eb; line-height:1.6; }.lesson-card,.correction-card { margin-top:22rpx; padding:24rpx; }.lesson-title,.student-name { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.student-list { margin-top:20rpx; border-top:1rpx solid #edf0ed; }.student-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; padding:18rpx 0; border-bottom:1rpx solid #edf0ed; }.student-main { min-width:0; flex:1; }.student-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8rpx; }.attendance-state { display:block; margin-top:6rpx; color:#17653d; font-size:21rpx; }.state-absent,.state-cancelled { color:#a24c35; }.state-makeup_required { color:#9a6b1c; }.pending-text { color:#9a6b1c; font-size:20rpx; white-space:nowrap; }.inline { min-width:92rpx; min-height:54rpx; margin:0; padding:0 10rpx; line-height:54rpx; font-size:20rpx; }.ghost { color:#69756e; background:#eef2ef; }.ledger-line { display:flex; flex-wrap:wrap; gap:8rpx; margin-top:8rpx; font-size:19rpx; }.ledger-positive { color:#17653d; }.ledger-negative { color:#a24c35; }.correction-reason { display:block; margin-top:16rpx; color:#4d5a52; font-size:23rpx; }.evidence-grid { display:grid; gap:8rpx; margin-top:14rpx; padding:16rpx; border-radius:14rpx; color:#526158; background:#f5f7f5; font-size:21rpx; }.correction-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10rpx; margin-top:16rpx; }.empty-line,.empty { color:#758079; text-align:center; }.empty-line { padding:22rpx 0 4rpx; }.finish { width:100%; margin-top:20rpx; }.boundary { margin-top:0; line-height:1.7; }
 .access-denied { margin-top:22rpx; text-align:center; }.panel-title { display:block; margin-bottom:8rpx; font-size:28rpx; font-weight:800; }.error-panel { display:flex; align-items:center; justify-content:space-between; gap:16rpx; margin-top:22rpx; color:#8a3636; background:#fff4f2; }.error-panel .muted { display:block; line-height:1.5; }.product-scroll { white-space:nowrap; }.product-row { display:flex; gap:14rpx; }.product-card { box-sizing:border-box; width:540rpx; flex:0 0 540rpx; white-space:normal; }.product-name,.class-name { display:block; font-weight:800; }.product-name { max-width:350rpx; overflow:hidden; font-size:28rpx; text-overflow:ellipsis; white-space:nowrap; }.product-price { display:block; margin-top:14rpx; color:#17653d; font-size:30rpx; font-weight:800; }.class-summary { display:grid; gap:10rpx; margin-top:16rpx; padding-top:12rpx; border-top:1rpx solid #edf0ed; }.class-summary-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; }.class-summary-row .muted,.class-empty { display:block; margin-top:5rpx; font-size:20rpx; }.creation-form { display:grid; gap:16rpx; }.form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; }.form-grid.three-columns { grid-template-columns:repeat(3,minmax(0,1fr)); }.field-label { display:block; margin-bottom:8rpx; color:#68756d; font-size:21rpx; }.form-input,.picker-value,.reason-input { box-sizing:border-box; width:100%; color:#244c37; background:#f2f6f3; border:1rpx solid #dfe9e2; border-radius:16rpx; font-size:23rpx; }.form-input,.picker-value { min-height:68rpx; padding:16rpx 18rpx; }.reason-input { min-height:112rpx; padding:16rpx 18rpx; }.guardrail { color:#7b6940; font-size:22rpx; line-height:1.6; }.full-button { width:100%; margin:0; }.court-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10rpx; }.court-choice { display:flex; align-items:center; gap:6rpx; padding:14rpx 10rpx; background:#eef5f0; border:1rpx solid #dce8df; border-radius:14rpx; font-size:21rpx; }.court-choice.blocked { color:#9a7770; background:#f5f1f0; }.court-usage { margin-left:auto; color:#758079; font-size:18rpx; }
+.trial-card,.rule-card,.active-rule,.rule-blocked { margin-top:18rpx; }.trial-title { display:block; margin-bottom:7rpx; font-size:27rpx; font-weight:800; }.trial-context,.rule-values { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9rpx 16rpx; margin-top:15rpx; padding:15rpx; color:#5c6a61; background:#f4f7f4; border-radius:14rpx; font-size:21rpx; }.assessment-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:9rpx; margin-top:15rpx; }.assessment-grid view { display:flex; justify-content:space-between; padding:12rpx; background:#eef5f0; border-radius:12rpx; font-size:20rpx; }.score { color:#17653d; font-weight:800; }.recommendation { grid-column:1/-1; color:#405b4a; font-size:22rpx; line-height:1.55; }.trial-actions { display:flex; align-items:center; flex-wrap:wrap; gap:9rpx; margin-top:15rpx; }.audit-hint { display:block; margin-top:13rpx; color:#7a725c; font-size:20rpx; line-height:1.5; }.consent-line { display:flex; align-items:center; justify-content:space-between; gap:18rpx; color:#59675e; font-size:22rpx; line-height:1.5; }.consent-line text { flex:1; }.rule-blocked { color:#8b563d; background:#fff5ef; line-height:1.6; }.active-rule { border:1rpx solid #bcd8c5; background:#f1f8f3; }
 </style>

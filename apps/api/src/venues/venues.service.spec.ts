@@ -7,8 +7,10 @@ import {
   AppRole,
   BookingStatus,
   BusinessType,
+  CouponStatus,
   CourtUsage,
   OrderStatus,
+  SlotPeriod,
   SourceChannel,
   UserStatus,
 } from '../generated/prisma/enums.js'
@@ -28,6 +30,19 @@ const bookingDto = {
   slotId: 'slot-1',
   sourceChannel: SourceChannel.MINI_PROGRAM,
 }
+
+const priceRuleFixture = (priceCents: number, newcomerPriceCents: number) => ({
+  id: 'price-1',
+  code: 'PRICE_S01',
+  version: 1,
+  name: '上午场基础价',
+  timeSlotId: 'slot-1',
+  weekdayMask: 127,
+  priceCents,
+  newcomerPriceCents,
+  effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
+  effectiveTo: new Date('2099-01-01T00:00:00.000Z'),
+})
 
 describe('VenuesService booking ownership', () => {
   it('requires an assisted-booking customer before touching the database', async () => {
@@ -81,7 +96,7 @@ describe('VenuesService booking ownership', () => {
       court: { findUnique: vi.fn().mockResolvedValue({ id: 'court-1', code: 'C01', name: '1号场', enabled: true, usage: CourtUsage.RETAIL }) },
       timeSlot: { findUnique: vi.fn().mockResolvedValue({ id: 'slot-1', code: 'S01', label: '上午场', enabled: true, startMinutes: 540, endMinutes: 660 }) },
       memberProfile: { findUnique: vi.fn().mockResolvedValue({ level: 'GOLD' }) },
-      priceRule: { findMany: vi.fn().mockResolvedValue([{ id: 'price-1', weekdayMask: 127, priceCents: 6_800, newcomerPriceCents: 4_800 }]) },
+      priceRule: { findMany: vi.fn().mockResolvedValue([priceRuleFixture(6_800, 4_800)]) },
       $transaction: runner(tx),
     }
     const service = new VenuesService(prisma as never)
@@ -121,7 +136,7 @@ describe('VenuesService booking ownership', () => {
       court: { findUnique: vi.fn().mockResolvedValue({ id: 'court-1', code: 'C01', name: '1号场', enabled: true, usage: CourtUsage.RETAIL }) },
       timeSlot: { findUnique: vi.fn().mockResolvedValue({ id: 'slot-1', code: 'S01', label: '上午场', enabled: true, startMinutes: 540, endMinutes: 660 }) },
       memberProfile: { findUnique: vi.fn().mockResolvedValue({ level: 'GOLD' }) },
-      priceRule: { findMany: vi.fn().mockResolvedValue([{ id: 'price-1', weekdayMask: 127, priceCents: 6_800, newcomerPriceCents: 4_800 }]) },
+      priceRule: { findMany: vi.fn().mockResolvedValue([priceRuleFixture(6_800, 4_800)]) },
       $transaction: runner(tx),
     }
 
@@ -162,6 +177,109 @@ describe('VenuesService booking ownership', () => {
       .rejects.toThrow('幂等键已用于不同命令')
     expect(prisma.user.findFirst).not.toHaveBeenCalled()
   })
+
+  it('rejects a newcomer experience coupon in a prime slot using the effective policy version', async () => {
+    const systemParameter = {
+      findFirst: vi.fn().mockResolvedValue({
+        id: 'newcomer-periods-v1',
+        value: [SlotPeriod.EARLY, SlotPeriod.DAYTIME],
+      }),
+    }
+    const prisma = {
+      court: { findUnique: vi.fn().mockResolvedValue({ id: 'court-1', code: 'C01', name: '1号场', enabled: true, usage: CourtUsage.RETAIL }) },
+      timeSlot: { findUnique: vi.fn().mockResolvedValue({
+        id: 'slot-1', code: 'S07', label: '晚黄金场', enabled: true,
+        startMinutes: 1_260, endMinutes: 1_380, period: SlotPeriod.PRIME,
+      }) },
+      memberProfile: { findUnique: vi.fn().mockResolvedValue({ level: 'EXPERIENCE', isNewCustomer: true }) },
+      priceRule: { findMany: vi.fn().mockResolvedValue([priceRuleFixture(8_800, 4_800)]) },
+      couponCode: { findUnique: vi.fn().mockResolvedValue({
+        id: 'coupon-newcomer',
+        code: 'YQ-NEWCOMER-1',
+        holderId: member.sub,
+        status: CouponStatus.CLAIMED,
+        expiresAt: new Date('2099-01-08T00:00:00.000Z'),
+        template: {
+          code: 'NEWCOMER-COURT-EXPERIENCE',
+          enabled: true,
+          validFrom: new Date('2026-01-01T00:00:00.000Z'),
+          validTo: new Date('2099-02-01T00:00:00.000Z'),
+          faceValueCents: 0,
+          merchant: { status: UserStatus.ACTIVE },
+        },
+      }) },
+      systemParameter,
+      $transaction: vi.fn(),
+    }
+    const service = new VenuesService(prisma as never)
+
+    await expect(service.createBooking({
+      ...bookingDto,
+      couponCode: 'YQ-NEWCOMER-1',
+    }, member)).rejects.toThrow('新客体验权益仅限非黄金时段使用')
+    expect(systemParameter.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ key: 'newcomer.experience.allowed_slot_periods' }),
+      select: { id: true, value: true },
+    }))
+    expect(prisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('snapshots the newcomer non-prime policy and applies the configured experience price', async () => {
+    const tx = {
+      courtClosure: { findFirst: vi.fn().mockResolvedValue(null) },
+      courtBooking: { findFirst: vi.fn().mockResolvedValue(null) },
+      order: { create: vi.fn().mockResolvedValue({ id: 'order-newcomer', bookings: [], items: [] }) },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    }
+    const prisma = {
+      court: { findUnique: vi.fn().mockResolvedValue({ id: 'court-1', code: 'C01', name: '1号场', enabled: true, usage: CourtUsage.RETAIL }) },
+      timeSlot: { findUnique: vi.fn().mockResolvedValue({
+        id: 'slot-1', code: 'S02', label: '上午场', enabled: true,
+        startMinutes: 540, endMinutes: 720, period: SlotPeriod.DAYTIME,
+      }) },
+      memberProfile: { findUnique: vi.fn().mockResolvedValue({ level: 'EXPERIENCE', isNewCustomer: true }) },
+      priceRule: { findMany: vi.fn().mockResolvedValue([priceRuleFixture(9_000, 4_900)]) },
+      couponCode: { findUnique: vi.fn().mockResolvedValue({
+        id: 'coupon-newcomer',
+        code: 'YQ-NEWCOMER-1',
+        holderId: member.sub,
+        status: CouponStatus.CLAIMED,
+        expiresAt: new Date('2099-01-08T00:00:00.000Z'),
+        template: {
+          code: 'NEWCOMER-COURT-EXPERIENCE', enabled: true,
+          validFrom: new Date('2026-01-01T00:00:00.000Z'), validTo: new Date('2099-02-01T00:00:00.000Z'),
+          faceValueCents: 0, merchant: { status: UserStatus.ACTIVE },
+        },
+      }) },
+      systemParameter: { findFirst: vi.fn().mockResolvedValue({ id: 'newcomer-periods-v1', value: [SlotPeriod.EARLY, SlotPeriod.DAYTIME] }) },
+      $transaction: runner(tx),
+    }
+    const service = new VenuesService(prisma as never)
+
+    await expect(service.createBooking({ ...bookingDto, couponCode: 'YQ-NEWCOMER-1' }, member))
+      .resolves.toMatchObject({ id: 'order-newcomer' })
+    expect(tx.order.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        listAmountCents: 9_000,
+        discountCents: 4_100,
+        payableCents: 4_900,
+        parameterSnapshot: expect.objectContaining({
+          priceRuleId: 'price-1',
+          priceRuleCode: 'PRICE_S01',
+          priceRuleVersion: 1,
+          priceRuleEffectiveFrom: '2026-01-01T00:00:00.000Z',
+          priceRuleEffectiveTo: '2099-01-01T00:00:00.000Z',
+          priceRuleTimeSlotId: 'slot-1',
+          priceRuleWeekdayMask: 127,
+          newcomerPolicy: {
+            allowedPeriodsParameterId: 'newcomer-periods-v1',
+            allowedPeriods: [SlotPeriod.EARLY, SlotPeriod.DAYTIME],
+            slotPeriod: SlotPeriod.DAYTIME,
+          },
+        }),
+      }),
+    }))
+  })
 })
 
 describe('VenuesService check-in workflow', () => {
@@ -192,7 +310,11 @@ describe('VenuesService check-in workflow', () => {
       id: 'order-1',
       businessType: BusinessType.VENUE,
       status: OrderStatus.PAID,
-      bookings: [{ id: 'booking-1', status: BookingStatus.CONFIRMED }],
+      bookings: [{
+        id: 'booking-1',
+        status: BookingStatus.CONFIRMED,
+        startsAt: new Date(Date.now() + 10 * 60_000),
+      }],
     }
     const updated = { ...paid, status: OrderStatus.CHECKED_IN }
     const tx = {
@@ -215,12 +337,43 @@ describe('VenuesService check-in workflow', () => {
     expect(tx.auditLog.create).toHaveBeenCalledOnce()
   })
 
+  it('rejects venue check-in before the configured opening boundary', async () => {
+    const paid = {
+      id: 'order-early',
+      businessType: BusinessType.VENUE,
+      status: OrderStatus.PAID,
+      bookings: [{
+        id: 'booking-early',
+        status: BookingStatus.CONFIRMED,
+        startsAt: new Date(Date.now() + 2 * 60 * 60_000),
+      }],
+    }
+    const tx = {
+      order: { findUnique: vi.fn().mockResolvedValue(paid), updateMany: vi.fn() },
+      frontDeskShift: { findFirst: vi.fn() },
+      courtBooking: { updateMany: vi.fn() },
+      auditLog: { create: vi.fn() },
+    }
+    const service = new VenuesService({ $transaction: runner(tx) } as never)
+
+    await expect(service.checkIn(paid.id, frontDesk)).rejects.toBeInstanceOf(
+      ConflictException,
+    )
+    expect(tx.frontDeskShift.findFirst).not.toHaveBeenCalled()
+    expect(tx.order.updateMany).not.toHaveBeenCalled()
+    expect(tx.auditLog.create).not.toHaveBeenCalled()
+  })
+
   it('blocks check-in after the front desk shift closes and audits an admin bypass', async () => {
     const paid = {
       id: 'order-gated',
       businessType: BusinessType.VENUE,
       status: OrderStatus.PAID,
-      bookings: [{ id: 'booking-gated', status: BookingStatus.CONFIRMED }],
+      bookings: [{
+        id: 'booking-gated',
+        status: BookingStatus.CONFIRMED,
+        startsAt: new Date(Date.now() + 10 * 60_000),
+      }],
     }
     const frontDeskTx = {
       order: { findUnique: vi.fn().mockResolvedValue(paid), updateMany: vi.fn() },

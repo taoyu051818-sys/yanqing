@@ -4,7 +4,15 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { CurrentUser, Roles } from '../common/auth/auth.decorators.js'
 import type { AuthUser } from '../common/auth/auth-user.js'
 import { AppRole } from '../generated/prisma/enums.js'
-import { CreateGameDto, PublishGameDto, RegisterGameDto, RejectHostDto, ReviewHostDto } from './games.dto.js'
+import {
+  CancelGameDto,
+  CreateGameDto,
+  GameCheckInDto,
+  PublishGameDto,
+  RegisterGameDto,
+  RejectHostDto,
+  ReviewHostDto,
+} from './games.dto.js'
 import { GamesService } from './games.service.js'
 
 @ApiTags('球局与主理人')
@@ -77,6 +85,16 @@ export class GamesController {
     return this.games.publish(id, dto, actor)
   }
 
+  @Post(':id/cancel')
+  @Roles(AppRole.HOST, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  cancel(
+    @Param('id') id: string,
+    @Body() dto: CancelGameDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.games.cancel(id, dto, actor)
+  }
+
   @Post(':id/register')
   register(
     @Param('id') id: string,
@@ -97,9 +115,10 @@ export class GamesController {
   checkIn(
     @Param('id') id: string,
     @Param('userId') userId: string,
+    @Body() dto: GameCheckInDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.games.checkIn(id, userId, actor)
+    return this.games.checkIn(id, userId, actor, dto)
   }
 
   @Post(':id/complete')

@@ -28,6 +28,7 @@ import {
   PurchaseTrainingDto,
   TrainingSessionActionDto,
   TrainingSettlementActionDto,
+  UpdateTrainingProductDto,
   UpdateStudentDto,
 } from './training.dto.js';
 import { TrainingService } from './training.service.js';
@@ -50,6 +51,16 @@ export class TrainingController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.training.createProduct(dto, actor);
+  }
+
+  @Patch('products/:id')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  updateProduct(
+    @Param('id') id: string,
+    @Body() dto: UpdateTrainingProductDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.training.updateProduct(id, dto, actor);
   }
 
   @Post('classes')

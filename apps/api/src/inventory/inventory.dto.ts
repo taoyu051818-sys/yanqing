@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -21,7 +22,24 @@ import {
   SupplierType,
 } from '../generated/prisma/enums.js';
 
-export class CreateInventoryItemDto {
+export class MasterDataCommandDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string;
+}
+
+export class VersionedMasterDataCommandDto extends MasterDataCommandDto {
+  @IsDateString()
+  expectedUpdatedAt: string;
+}
+
+export class CreateInventoryItemDto extends MasterDataCommandDto {
   @IsString()
   @MaxLength(60)
   sku: string;
@@ -38,8 +56,10 @@ export class CreateInventoryItemDto {
   mode: InventoryMode;
 
   @IsString()
-  @MaxLength(120)
-  supplier: string;
+  supplierId: string;
+
+  @IsString()
+  defaultLocationId: string;
 
   @Type(() => Number)
   @IsInt()
@@ -55,6 +75,38 @@ export class CreateInventoryItemDto {
   @IsInt()
   @Min(0)
   safeStock = 0;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  batchCode?: string;
+
+  @IsOptional()
+  @IsDateString()
+  expiresAt?: string;
+}
+
+export class UpdateInventoryItemDto extends VersionedMasterDataCommandDto {
+  @IsOptional() @IsString() @MaxLength(60) sku?: string;
+  @IsOptional() @IsString() @MaxLength(120) name?: string;
+  @IsOptional() @IsString() @MaxLength(80) category?: string;
+  @IsOptional() @IsEnum(InventoryMode) mode?: InventoryMode;
+  @IsOptional() @IsString() supplierId?: string;
+  @IsOptional() @IsString() defaultLocationId?: string;
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  purchasePriceCents?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) salePriceCents?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) safeStock?: number;
+  @IsOptional() @IsString() @MaxLength(80) batchCode?: string;
+  @IsOptional() @IsDateString() expiresAt?: string;
+}
+
+export class SetMasterDataStatusDto extends VersionedMasterDataCommandDto {
+  @IsBoolean()
+  enabled: boolean;
 }
 
 export class InventoryTransactionDto {
@@ -105,18 +157,32 @@ export class InventoryTransactionDto {
   idempotencyKey: string;
 }
 
-export class CreateSupplierDto {
+export class CreateSupplierDto extends MasterDataCommandDto {
   @IsString() @MinLength(2) @MaxLength(40) code: string;
   @IsString() @MinLength(2) @MaxLength(120) name: string;
   @IsEnum(SupplierType) type: SupplierType;
   @IsOptional() @IsString() @MaxLength(80) contactName?: string;
   @IsOptional() @IsString() @MaxLength(40) contactPhone?: string;
+  @IsObject() settlementRule: Record<string, unknown>;
+}
+
+export class UpdateSupplierDto extends VersionedMasterDataCommandDto {
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(40) code?: string;
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(120) name?: string;
+  @IsOptional() @IsEnum(SupplierType) type?: SupplierType;
+  @IsOptional() @IsString() @MaxLength(80) contactName?: string;
+  @IsOptional() @IsString() @MaxLength(40) contactPhone?: string;
   @IsOptional() @IsObject() settlementRule?: Record<string, unknown>;
 }
 
-export class CreateInventoryLocationDto {
+export class CreateInventoryLocationDto extends MasterDataCommandDto {
   @IsString() @MinLength(2) @MaxLength(40) code: string;
   @IsString() @MinLength(2) @MaxLength(80) name: string;
+}
+
+export class UpdateInventoryLocationDto extends VersionedMasterDataCommandDto {
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(40) code?: string;
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(80) name?: string;
 }
 
 export class PurchaseOrderLineDto {

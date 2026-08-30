@@ -18,7 +18,7 @@ export interface ApiEnvelope<T> { code: number; message: string; data: T; reques
 export interface CourtAvailability {
   date: string
   courts: Array<{ id: string; code?: string; number?: number; name: string; usage: string; enabled: boolean }>
-  slots: Array<{ id: string; code: string; label: string; startMinutes: number; endMinutes: number; price?: { priceCents: number; newcomerPriceCents?: number | null } }>
+  slots: Array<{ id: string; code: string; label: string; startMinutes: number; endMinutes: number; period?: 'EARLY' | 'DAYTIME' | 'PRIME'; price?: { id?: string; code?: string; version?: number; priceCents: number; newcomerPriceCents?: number | null } }>
   bookings: Array<{ courtId: string; startsAt: string; endsAt: string; status: string; usage: string }>
   closures: Array<{ id: string; courtId: string; startsAt: string; endsAt: string; reason: string; status: 'ACTIVE' | 'CANCELLED' }>
 }

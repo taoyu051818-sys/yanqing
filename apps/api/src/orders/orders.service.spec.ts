@@ -67,8 +67,9 @@ describe('OrdersService refund controls', () => {
       id: 'refund-3',
       requestedById: 'front-desk-1',
       status: RefundStatus.REQUESTED,
+      originalOrderStatus: OrderStatus.PAID,
       orderId: 'order-3',
-      order: { id: 'order-3', refundedCents: 0, status: OrderStatus.REFUND_PENDING },
+      order: { id: 'order-3', refundedCents: 0, completedAt: null, status: OrderStatus.REFUND_PENDING },
     }
     const tx = {
       refund: {
@@ -92,6 +93,49 @@ describe('OrdersService refund controls', () => {
       data: { status: OrderStatus.PAID },
     })
     expect(tx.auditLog.create).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    'GAME_CANCEL:game-1:order-1',
+    'EVENT_CANCEL:event-1:order-1',
+    'EVENT_LATE_PAYMENT:order-1',
+  ])('does not allow a terminal system refund to be rejected (%s)', async (idempotencyKey) => {
+    const refund = {
+      id: `refund-${idempotencyKey}`,
+      requestedById: 'member-1',
+      status: RefundStatus.REQUESTED,
+      idempotencyKey,
+      originalOrderStatus: OrderStatus.PAID,
+      orderId: 'order-1',
+      order: {
+        id: 'order-1',
+        refundedCents: 0,
+        completedAt: null,
+        status: OrderStatus.REFUND_PENDING,
+        eventTeam: null,
+      },
+    }
+    const tx = {
+      refund: {
+        findUnique: vi.fn().mockResolvedValue(refund),
+        update: vi.fn(),
+        aggregate: vi.fn(),
+      },
+      order: { updateMany: vi.fn() },
+      auditLog: { create: vi.fn() },
+    }
+    const service = new OrdersService(
+      { $transaction: vi.fn(async (work: (value: typeof tx) => unknown) => work(tx)) } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    )
+
+    await expect(
+      service.rejectRefund(refund.id, { reason: '不应恢复强制取消订单' }, actor),
+    ).rejects.toThrow('系统强制退款不可驳回')
+    expect(tx.refund.update).not.toHaveBeenCalled()
+    expect(tx.order.updateMany).not.toHaveBeenCalled()
   })
 
   it('counts other pending refunds before accepting a new request', async () => {

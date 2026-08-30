@@ -240,20 +240,25 @@ async function seed() {
       },
     });
     const priceStart = new Date('2026-01-01T00:00:00+08:00');
-    const existing = await prisma.priceRule.findFirst({
-      where: { timeSlotId: slot.id, effectiveFrom: priceStart },
+    await prisma.priceRule.upsert({
+      where: { code_version: { code: `PRICE_${code}`, version: 1 } },
+      update: {},
+      create: {
+        code: `PRICE_${code}`,
+        version: 1,
+        name: `${label}基础价`,
+        timeSlotId: slot.id,
+        weekdayMask: 127,
+        priceCents,
+        newcomerPriceCents: Math.round(priceCents * 0.7),
+        effectiveFrom: priceStart,
+        effectiveTo: new Date('2099-01-01T00:00:00+08:00'),
+        enabled: true,
+        creationIdempotencyKey: `SEED:PRICE_${code}:V1`,
+        creationCommandHash: 'b'.repeat(64),
+        createdById: admin.id,
+      },
     });
-    if (!existing) {
-      await prisma.priceRule.create({
-        data: {
-          name: `${label}基础价`,
-          timeSlotId: slot.id,
-          priceCents,
-          newcomerPriceCents: Math.round(priceCents * 0.7),
-          effectiveFrom: priceStart,
-        },
-      });
-    }
   }
 
   const parameters = [
@@ -287,7 +292,49 @@ async function seed() {
       ParameterType.INTEGER,
       '新客首付奖励观察期',
     ],
+    [
+      'newcomer.experience.valid_days',
+      7,
+      ParameterType.INTEGER,
+      '新客体验权益领取后有效天数',
+    ],
+    [
+      'newcomer.experience.allowed_slot_periods',
+      [SlotPeriod.EARLY, SlotPeriod.DAYTIME],
+      ParameterType.JSON,
+      '新客体验权益允许使用的非黄金时段',
+    ],
     ['booking.hold_minutes', 10, ParameterType.INTEGER, '场地订单锁定分钟数'],
+    [
+      'operations.venue_check_in_window.v1',
+      { version: 1, earlyMinutes: 30, lateMinutes: 30 },
+      ParameterType.JSON,
+      '场地签到窗口V1；开始前30分钟至开始后30分钟，单项运行时硬上限240分钟',
+    ],
+    [
+      'operations.game_check_in_window.v1',
+      { version: 1, earlyMinutes: 30, lateMinutes: 30 },
+      ParameterType.JSON,
+      '球局签到窗口V1；开赛前30分钟至开赛后30分钟，单项运行时硬上限240分钟',
+    ],
+    [
+      'operations.event_check_in_window.v1',
+      { version: 1, earlyMinutes: 30, lateMinutes: 30 },
+      ParameterType.JSON,
+      '赛事签到窗口V1；开赛前30分钟至开赛后30分钟，单项运行时硬上限240分钟',
+    ],
+    [
+      'training.attendance_window.v1',
+      { version: 1, earlyMinutes: 30, lateMinutes: 120 },
+      ParameterType.JSON,
+      '培训到课登记窗口V1；开课前30分钟至结课后120分钟，单项运行时硬上限240分钟',
+    ],
+    [
+      'training.completion_window.v1',
+      { version: 1, earlyMinutes: 0, lateMinutes: 240 },
+      ParameterType.JSON,
+      '培训消课与结课窗口V1；不得早于课次结束，结束后240分钟外仅允许管理员说明原因补录',
+    ],
   ] as const;
   for (const [key, value, type, description] of parameters) {
     const effectiveFrom = new Date('2026-01-01T00:00:00+08:00');
@@ -459,9 +506,48 @@ async function seed() {
     benefits,
   ] of membershipSeeds) {
     await prisma.membershipProduct.upsert({
-      where: { code },
+      where: { code_version: { code, version: 1 } },
       update: {},
-      create: { code, name, level, priceCents, durationDays, benefits },
+      create: {
+        code,
+        version: 1,
+        name,
+        level,
+        priceCents,
+        durationDays,
+        benefits,
+        effectiveFrom: new Date('2026-01-01T00:00:00+08:00'),
+        effectiveTo: new Date('2099-01-01T00:00:00+08:00'),
+        enabled: true,
+        creationIdempotencyKey: `SEED:${code}:V1`,
+        creationCommandHash: 'c'.repeat(64),
+        createdById: admin.id,
+      },
+    });
+  }
+
+  const rechargePlanSeeds = [
+    ['RECHARGE_100', '充值100元', 10_000, 0],
+    ['RECHARGE_500', '充值500元赠25元', 50_000, 2_500],
+    ['RECHARGE_1000', '充值1000元赠100元', 100_000, 10_000],
+  ] as const;
+  for (const [code, name, principalCents, giftCents] of rechargePlanSeeds) {
+    await prisma.rechargePlan.upsert({
+      where: { code_version: { code, version: 1 } },
+      update: {},
+      create: {
+        code,
+        version: 1,
+        name,
+        principalCents,
+        giftCents,
+        effectiveFrom: new Date('2026-01-01T00:00:00+08:00'),
+        effectiveTo: new Date('2099-01-01T00:00:00+08:00'),
+        enabled: true,
+        creationIdempotencyKey: `SEED:${code}:V1`,
+        creationCommandHash: 'a'.repeat(64),
+        createdById: admin.id,
+      },
     });
   }
 
@@ -540,11 +626,17 @@ async function seed() {
   });
   const ownedSupplier = await prisma.supplier.upsert({
     where: { code: 'SEED-OWNED' },
-    update: { name: '金羽自营采购', type: SupplierType.OWNED, enabled: true },
+    update: {
+      name: '金羽自营采购',
+      type: SupplierType.OWNED,
+      settlementRule: { settlementCycle: 'MONTHLY', paymentTermsDays: 30 },
+      enabled: true,
+    },
     create: {
       code: 'SEED-OWNED',
       name: '金羽自营采购',
       type: SupplierType.OWNED,
+      settlementRule: { settlementCycle: 'MONTHLY', paymentTermsDays: 30 },
     },
   });
   const consignmentSupplier = await prisma.supplier.upsert({
@@ -552,12 +644,20 @@ async function seed() {
     update: {
       name: '合作品牌寄售',
       type: SupplierType.CONSIGNMENT,
+      settlementRule: {
+        settlementCycle: 'MONTHLY',
+        commissionRateBps: 2500,
+      },
       enabled: true,
     },
     create: {
       code: 'SEED-CONSIGNMENT',
       name: '合作品牌寄售',
       type: SupplierType.CONSIGNMENT,
+      settlementRule: {
+        settlementCycle: 'MONTHLY',
+        commissionRateBps: 2500,
+      },
     },
   });
   for (const [

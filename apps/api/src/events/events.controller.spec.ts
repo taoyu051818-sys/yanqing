@@ -21,7 +21,9 @@ const actor: AuthUser = {
 
 describe('EventsController publish command', () => {
   it('delegates event creation with the authenticated operator', async () => {
-    const events = { create: vi.fn().mockResolvedValue({ id: 'event-1', status: 'DRAFT' }) };
+    const events = {
+      create: vi.fn().mockResolvedValue({ id: 'event-1', status: 'DRAFT' }),
+    };
     const controller = new EventsController(events as never);
     const dto = {
       code: 'EV-01',
@@ -57,6 +59,51 @@ describe('EventsController publish command', () => {
     expect(
       Reflect.getMetadata(ROLES_KEY, EventsController.prototype.publish),
     ).toEqual([AppRole.EVENT_MANAGER, AppRole.ADMIN, AppRole.SUPER_ADMIN]);
+  });
+});
+
+describe('EventsController reverse event workflow', () => {
+  const eventManagerRoles = [
+    AppRole.EVENT_MANAGER,
+    AppRole.ADMIN,
+    AppRole.SUPER_ADMIN,
+  ];
+
+  it('delegates FIFO retry and idempotent cancellation with the authenticated actor', async () => {
+    const events = {
+      promoteWaitlist: vi.fn().mockResolvedValue({ promotions: [] }),
+      cancel: vi.fn().mockResolvedValue({ event: { status: 'CANCELLED' } }),
+      cancelRegistration: vi.fn().mockResolvedValue({ outcome: 'CANCELLED' }),
+    };
+    const controller = new EventsController(events as never);
+    const cancelDto = {
+      reason: '场馆临时停电',
+      idempotencyKey: 'event-cancel-command-1',
+    };
+
+    await controller.promoteWaitlist('event-1', actor);
+    await controller.cancel('event-1', cancelDto, actor);
+    await controller.cancelRegistration('event-1', cancelDto, actor);
+
+    expect(events.promoteWaitlist).toHaveBeenCalledWith('event-1', actor);
+    expect(events.cancel).toHaveBeenCalledWith('event-1', cancelDto, actor);
+    expect(events.cancelRegistration).toHaveBeenCalledWith(
+      'event-1',
+      cancelDto,
+      actor,
+    );
+  });
+
+  it('protects promotion and cancellation with event-management roles', () => {
+    expect(
+      Reflect.getMetadata(
+        ROLES_KEY,
+        EventsController.prototype.promoteWaitlist,
+      ),
+    ).toEqual(eventManagerRoles);
+    expect(
+      Reflect.getMetadata(ROLES_KEY, EventsController.prototype.cancel),
+    ).toEqual(eventManagerRoles);
   });
 });
 

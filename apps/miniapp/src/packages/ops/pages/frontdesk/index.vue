@@ -18,12 +18,18 @@ const selectedMemberId = ref('')
 const loading = ref(false)
 const shift = ref<any>(null)
 const shiftOpen = computed(() => shift.value?.status === 'OPEN')
+const adminEmergencyBypass = computed(() => session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
+const onsiteAllowed = computed(() => shiftOpen.value || adminEmergencyBypass.value)
 const shiftLabel = computed(() => shiftOpen.value
   ? '前台班次已开启'
-  : shift.value?.status === 'CLOSED' ? '今日班次已关班' : '前台班次未开启')
+  : adminEmergencyBypass.value ? '管理员应急旁路 · 自动审计'
+    : shift.value?.status === 'CLOSED' ? '今日班次已关班' : '前台班次未开启')
 
-const pendingOrders = computed(() => orders.value.filter((order) => ['PENDING', 'PAID', 'REFUNDING', 'REFUND_PENDING'].includes(order.status)))
-const paidOrders = computed(() => orders.value.filter((order) => order.status === 'PAID'))
+const pendingOrders = computed(() => orders.value.filter((order) =>
+  ['PENDING', 'PAID', 'CHECKED_IN', 'REFUNDING', 'REFUND_PENDING', 'PARTIALLY_REFUNDED'].includes(order.status),
+))
+const venueOrders = computed(() => pendingOrders.value.filter((order) => order.businessType === 'VENUE'))
+const paidOrders = computed(() => venueOrders.value.filter((order) => order.status === 'PAID'))
 const selectedMember = computed(() => members.value.find((member) => member.id === selectedMemberId.value) || null)
 const selectedMemberDetail = computed(() => {
   if (!selectedMember.value) return '未选择客户，不能创建现场场地订单'
@@ -40,7 +46,7 @@ const freeCourts = computed(() => {
   return (availability.value.courts || []).filter((court: any) => court.enabled && !booked.has(court.id)).length
 })
 const metrics = computed(() => [
-  ['待现场处理', String(pendingOrders.value.length), '订单队列'],
+  ['待现场处理', String(venueOrders.value.length), '场地履约队列'],
   ['待签到', String(paidOrders.value.length), '已支付场地单'],
   ['可用场地', String(freeCourts.value), '今日资源'],
   ['会员查询', String(members.value.length), '可服务会员'],
@@ -94,7 +100,7 @@ async function openShift() {
 }
 
 function ensureShiftOpen() {
-  if (shiftOpen.value) return true
+  if (onsiteAllowed.value) return true
   uni.showToast({ title: shift.value?.status === 'CLOSED' ? '今日已关班，现场操作已锁定' : '请先开班再处理现场业务', icon: 'none' })
   return false
 }
@@ -163,11 +169,73 @@ async function manualOrder() {
 
 async function checkIn(order: any) {
   if (!ensureShiftOpen()) return
+  const booking = venueBooking(order)
+  const startsAt = new Date(booking?.startsAt || order.parameterSnapshot?.startsAt || 0).getTime()
+  const earliest = startsAt - 30 * 60_000
+  const latest = startsAt + 30 * 60_000
+  if (Number.isFinite(startsAt) && Date.now() < earliest) {
+    uni.showToast({ title: '未到签到窗口，不能提前签到', icon: 'none' }); return
+  }
+  let overrideReason: string | undefined
+  if (Number.isFinite(startsAt) && Date.now() > latest) {
+    if (!session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role))) {
+      uni.showToast({ title: '已过签到窗口，请由管理员历史补录', icon: 'none' }); return
+    }
+    const modal = await uni.showModal({
+      title: '历史补录签到', content: '', editable: true,
+      placeholderText: '填写迟到补录原因（2-300字）', confirmText: '确认补录',
+    })
+    overrideReason = modal.content?.trim()
+    if (!modal.confirm || !overrideReason || overrideReason.length < 2) return
+  }
   try {
-    await endpoints.checkInVenueOrder(order.id)
+    await endpoints.checkInVenueOrder(order.id, overrideReason ? { overrideReason } : {})
     uni.showToast({ title: '已完成签到', icon: 'success' })
     await load()
   } catch (cause: any) { uni.showToast({ title: cause.message || '签到失败', icon: 'none' }) }
+}
+
+function venueBooking(order: any) {
+  return (order.bookings || [])[0] || null
+}
+
+function bookingEnded(order: any) {
+  const endsAt = new Date(venueBooking(order)?.endsAt || order.parameterSnapshot?.endsAt || 0).getTime()
+  return Number.isFinite(endsAt) && endsAt <= Date.now()
+}
+
+async function fulfill(order: any, outcome: 'COMPLETED' | 'NO_SHOW') {
+  if (!ensureShiftOpen()) return
+  if (!bookingEnded(order)) {
+    uni.showToast({ title: '预约结束后才能确认履约', icon: 'none' }); return
+  }
+  const isNoShow = outcome === 'NO_SHOW'
+  const modal = await uni.showModal({
+    title: isNoShow ? '确认会员未到场' : '确认场地使用完成',
+    content: '', editable: true,
+    placeholderText: isNoShow ? '填写点名与现场核对说明' : '填写巡场与完成说明',
+    confirmText: isNoShow ? '标记未到' : '确认完成',
+  })
+  const reason = modal.content?.trim() || ''
+  if (!modal.confirm || reason.length < 2 || reason.length > 300) {
+    if (modal.confirm) uni.showToast({ title: '原因需填写2-300个字', icon: 'none' })
+    return
+  }
+  const command = {
+    outcome,
+    reason,
+    evidence: {
+      source: isNoShow ? 'FRONT_DESK_ROLL_CALL' : 'COURT_INSPECTION',
+      observedAt: new Date().toISOString(),
+    },
+  }
+  try {
+    await withPendingCreationKey(`venue.fulfillment.${order.id}.${outcome}`, command, (idempotencyKey) =>
+      endpoints.fulfillVenueOrder(order.id, { ...command, idempotencyKey }),
+    )
+    uni.showToast({ title: isNoShow ? '已标记未到并关单' : '履约完成并关单', icon: 'success' })
+    await load()
+  } catch (cause: any) { uni.showToast({ title: cause.message || '履约确认失败', icon: 'none' }) }
 }
 
 async function collectCash(order: any) {
@@ -251,22 +319,22 @@ onShow(load)
         <text class="order-title">代客订场客户</text>
         <text class="muted">{{ selectedMemberDetail }}</text>
       </view>
-      <picker mode="selector" :range="memberOptions" :disabled="!shiftOpen || !memberOptions.length" @change="selectMember">
+      <picker mode="selector" :range="memberOptions" :disabled="!onsiteAllowed || !memberOptions.length" @change="selectMember">
         <view class="customer-picker">{{ selectedMember ? '更换会员' : (memberOptions.length ? '选择会员' : '暂无会员') }}</view>
       </picker>
     </view>
     <view class="action-grid">
-      <button class="primary" :disabled="!shiftOpen" @tap="scanCheckIn">扫码签到</button>
-      <button class="secondary" :disabled="!shiftOpen || !selectedMember" @tap="manualOrder">为所选会员订场</button>
-      <button class="secondary" :disabled="!shiftOpen" @tap="redeemCoupon">联盟券核销</button>
+      <button class="primary" :disabled="!onsiteAllowed" @tap="scanCheckIn">扫码签到</button>
+      <button class="secondary" :disabled="!onsiteAllowed || !selectedMember" @tap="manualOrder">为所选会员订场</button>
+      <button class="secondary" :disabled="!onsiteAllowed" @tap="redeemCoupon">联盟券核销</button>
     </view>
 
     <view class="section-title">订单队列 <text class="section-note">{{ loading ? '同步中' : `共 ${pendingOrders.length} 笔` }}</text></view>
-    <view v-for="order in pendingOrders" :key="order.id" class="card order-card">
+    <view v-for="order in venueOrders" :key="order.id" class="card order-card">
       <view class="row"><view><text class="order-title">{{ order.title }}</text><text class="muted">{{ order.orderNo }} · {{ order.member?.displayName || '现场会员' }}</text></view><StatusBadge :value="order.status" /></view>
-      <view class="order-footer"><text class="money">{{ money(order.payableCents) }}</text><view class="order-actions"><button v-if="order.status === 'PENDING'" class="primary inline" :disabled="!shiftOpen" @tap="collectCash(order)">现金收款</button><button v-if="order.status === 'PAID'" class="secondary inline" :disabled="!shiftOpen" @tap="checkIn(order)">签到</button><button v-if="order.status === 'PAID'" class="danger inline" :disabled="!shiftOpen" @tap="requestRefund(order)">退款申请</button></view></view>
+      <view class="order-footer"><text class="money">{{ money(order.payableCents) }}</text><view class="order-actions"><button v-if="order.status === 'PENDING'" class="primary inline" :disabled="!onsiteAllowed" @tap="collectCash(order)">现金收款</button><button v-if="order.status === 'PAID' && !bookingEnded(order)" class="secondary inline" :disabled="!onsiteAllowed" @tap="checkIn(order)">签到</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CHECKED_IN' && bookingEnded(order)" class="primary inline" :disabled="!onsiteAllowed" @tap="fulfill(order, 'COMPLETED')">确认完成</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CONFIRMED' && bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="fulfill(order, 'NO_SHOW')">标记未到</button><button v-if="order.status === 'PAID' && !bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="requestRefund(order)">退款申请</button></view></view>
     </view>
-    <view v-if="!loading && !pendingOrders.length" class="empty card">当前没有待处理订单</view>
+    <view v-if="!loading && !venueOrders.length" class="empty card">当前没有待处理场地订单</view>
 
     <view class="section-title">场馆资源</view>
     <view class="card resource-card">

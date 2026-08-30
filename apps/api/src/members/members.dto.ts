@@ -108,6 +108,16 @@ export class LeadQueryDto {
   overdue?: string
 }
 
+export class LeadFunnelQueryDto {
+  @IsOptional()
+  @IsDateString()
+  from?: string
+
+  @IsOptional()
+  @IsDateString()
+  to?: string
+}
+
 export class CreateLeadDto {
   @IsString()
   @MinLength(1)

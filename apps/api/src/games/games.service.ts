@@ -20,8 +20,10 @@ import {
   GameStatus,
   HostStatus,
   OrderStatus,
+  PaymentStatus,
   Prisma,
   RegistrationStatus,
+  RefundStatus,
   RewardStatus,
   SourceChannel,
   SubjectAccount,
@@ -29,7 +31,9 @@ import {
 import {
   GAME_CAPACITY_MAX,
   GAME_CAPACITY_MIN,
+  type CancelGameDto,
   type CreateGameDto,
+  type GameCheckInDto,
   type PublishGameDto,
   type RegisterGameDto,
   type RejectHostDto,
@@ -40,9 +44,20 @@ import {
   orderCreationCommandHash,
   type OrderCreationFields,
 } from '../orders/order-creation-idempotency.js'
+import { completeOrderFulfillment } from '../orders/order-fulfillment.js'
+import {
+  assertOperationTimeWindow,
+  GAME_CHECK_IN_WINDOW_PARAMETER,
+} from '../common/time-window/operation-time-window.js'
 
 const serial = (prefix: string) =>
   `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`
+
+const isPrismaErrorCode = (error: unknown, code: string): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  (error as { code?: unknown }).code === code
 
 const isValidGameCapacity = (capacity: number) =>
   Number.isInteger(capacity) && capacity >= GAME_CAPACITY_MIN && capacity <= GAME_CAPACITY_MAX
@@ -69,6 +84,18 @@ const GAME_STATUSES_NOT_PUBLISHABLE: readonly GameStatus[] = [
   GameStatus.COMPLETED,
 ]
 
+const GAME_STATUSES_ALLOWED_TO_CANCEL: readonly GameStatus[] = [
+  GameStatus.DRAFT,
+  GameStatus.OPEN,
+  GameStatus.FULL,
+]
+
+const ACTIVE_GAME_CANCEL_REFUND_STATUSES: readonly RefundStatus[] = [
+  RefundStatus.REQUESTED,
+  RefundStatus.APPROVED,
+  RefundStatus.PROCESSING,
+]
+
 const ORDER_STATUSES_REFUNDED: readonly OrderStatus[] = [
   OrderStatus.REFUNDED,
   // A checked-in registration that has been partially refunded must not
@@ -82,6 +109,18 @@ const ORDER_STATUSES_REFUNDED: readonly OrderStatus[] = [
 const ORDER_STATUSES_REFUND_PENDING: readonly OrderStatus[] = [
   OrderStatus.REFUND_PENDING,
 ]
+
+const ORDER_STATUSES_WITHOUT_FULFILLMENT: ReadonlySet<OrderStatus> = new Set([
+  OrderStatus.REFUND_PENDING,
+  OrderStatus.REFUNDED,
+  OrderStatus.CANCELLED,
+])
+
+const ORDER_STATUSES_WITHOUT_NO_SHOW: ReadonlySet<OrderStatus> = new Set([
+  OrderStatus.REFUND_PENDING,
+  OrderStatus.REFUNDED,
+  OrderStatus.CANCELLED,
+])
 
 // A registration occupies a seat from the moment a pending order is created
 // until it is cancelled/refunded.  WAITLISTED is deliberately excluded: it
@@ -122,6 +161,7 @@ type RewardEligibility = {
   eligible: RegistrationForReward[]
   excludedRefunded: RegistrationForReward[]
   pendingRefund: RegistrationForReward[]
+  excludedSelf: RegistrationForReward[]
 }
 
 /**
@@ -508,6 +548,307 @@ export class GamesService {
     )
   }
 
+  async cancel(gameId: string, dto: CancelGameDto, actor: AuthUser) {
+    if (!actor.roles.some((role) =>
+      [AppRole.HOST, AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never),
+    )) {
+      throw new ForbiddenException('仅本局主理人或管理员可取消球局')
+    }
+    const reason = dto.reason.trim()
+    const idempotencyKey = dto.idempotencyKey.trim()
+    if (reason.length < 2 || reason.length > 300) {
+      throw new BadRequestException('取消原因长度必须为2-300个字符')
+    }
+    if (idempotencyKey.length < 8 || idempotencyKey.length > 100) {
+      throw new BadRequestException('球局取消幂等键长度必须为8-100个字符')
+    }
+    const commandHash = orderCreationCommandHash({
+      kind: 'GAME_CANCEL',
+      gameId,
+      reason,
+      actorId: actor.sub,
+    })
+
+    const replay = async () => {
+      const existing = await this.prisma.game.findUnique({
+        where: { cancelIdempotencyKey: idempotencyKey },
+      })
+      if (!existing) return null
+      if (
+        existing.id !== gameId ||
+        existing.cancelledById !== actor.sub ||
+        existing.cancelCommandHash !== commandHash
+      ) {
+        throw new ConflictException('球局取消幂等键已用于不同命令')
+      }
+      return { game: existing, idempotent: true }
+    }
+    const existingReplay = await replay()
+    if (existingReplay) return existingReplay
+
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const current = await tx.game.findUnique({ where: { id: gameId } })
+          if (!current) throw new NotFoundException('球局不存在')
+          this.assertGameOperator(current.hostId, actor)
+          if (current.status === GameStatus.CANCELLED) {
+            if (
+              current.cancelIdempotencyKey === idempotencyKey &&
+              current.cancelledById === actor.sub &&
+              current.cancelCommandHash === commandHash
+            ) {
+              return { game: current, idempotent: true }
+            }
+            throw new ConflictException('球局已经由另一取消命令处理')
+          }
+          if (!GAME_STATUSES_ALLOWED_TO_CANCEL.includes(current.status)) {
+            throw new ConflictException(`球局当前状态为 ${current.status}，不可取消`)
+          }
+          const now = new Date()
+          if (current.startsAt <= now) {
+            throw new ConflictException('球局已开赛，不能执行开赛前取消')
+          }
+
+          const registrations = await tx.gameRegistration.findMany({
+            where: {
+              gameId,
+              status: {
+                in: [
+                  RegistrationStatus.WAITLISTED,
+                  RegistrationStatus.REGISTERED,
+                  RegistrationStatus.PAID,
+                  RegistrationStatus.CHECKED_IN,
+                ],
+              },
+            },
+            include: { order: { include: { refunds: true } } },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          })
+          const refundPlans = registrations.flatMap((registration) => {
+            const order = registration.order
+            if (!order || order.paidCents <= order.refundedCents) return []
+            const activeRefunds = order.refunds.filter((refund) =>
+              ACTIVE_GAME_CANCEL_REFUND_STATUSES.includes(refund.status),
+            )
+            const activeRefundCents = activeRefunds
+              .reduce((sum, refund) => sum + refund.amountCents, 0)
+            const amountCents = Math.max(
+              0,
+              order.paidCents - order.refundedCents - activeRefundCents,
+            )
+            const originalOrderStatus =
+              order.refundedCents > 0
+                ? OrderStatus.PARTIALLY_REFUNDED
+                : order.status === OrderStatus.REFUND_PENDING
+                  ? activeRefunds[0]?.originalOrderStatus
+                  : order.status
+            if (
+              !originalOrderStatus ||
+              ![
+                OrderStatus.PAID,
+                OrderStatus.CHECKED_IN,
+                OrderStatus.COMPLETED,
+                OrderStatus.PARTIALLY_REFUNDED,
+              ].includes(originalOrderStatus as never)
+            ) {
+              throw new ConflictException('球局退款缺少可恢复的原订单状态证据')
+            }
+            return amountCents > 0
+              ? [{ registration, order, amountCents, originalOrderStatus }]
+              : []
+          })
+          const cancelPolicySnapshot = {
+            version: 1,
+            decidedAt: now.toISOString(),
+            eligibility: 'FULL_REMAINING_PAID_AMOUNT',
+            approvalRequired: true,
+            approvalRoles: [
+              AppRole.FINANCE,
+              AppRole.ADMIN,
+              AppRole.SUPER_ADMIN,
+            ],
+            actorScope: current.hostId === actor.sub ? 'HOST_OWNER' : 'ADMIN',
+            registrationCount: registrations.length,
+            pendingOrderCount: registrations.filter(
+              (registration) => registration.order?.status === OrderStatus.PENDING,
+            ).length,
+            waitlistCount: registrations.filter(
+              (registration) => registration.status === RegistrationStatus.WAITLISTED,
+            ).length,
+            refundRequestCount: refundPlans.length,
+            refundRequestedCents: refundPlans.reduce(
+              (sum, plan) => sum + plan.amountCents,
+              0,
+            ),
+          }
+          const changed = await tx.game.updateMany({
+            where: {
+              id: gameId,
+              status: current.status,
+              startsAt: { gt: now },
+            },
+            data: {
+              status: GameStatus.CANCELLED,
+              cancelReason: reason,
+              cancelPolicySnapshot,
+              cancelIdempotencyKey: idempotencyKey,
+              cancelCommandHash: commandHash,
+              cancelledById: actor.sub,
+              cancelledAt: now,
+            },
+          })
+          if (changed.count !== 1) {
+            throw new ConflictException('球局状态已变化，请刷新后重试取消')
+          }
+
+          const cancelledBookings = await tx.courtBooking.updateMany({
+            where: { gameId, status: { not: BookingStatus.CANCELLED } },
+            data: { status: BookingStatus.CANCELLED },
+          })
+          const cancelledRegistrationIds: string[] = []
+          let cancelledPendingOrders = 0
+          for (const registration of registrations) {
+            const cancelled = await tx.gameRegistration.updateMany({
+              where: { id: registration.id, status: registration.status },
+              data: {
+                status: RegistrationStatus.CANCELLED,
+                checkedInAt: null,
+              },
+            })
+            if (cancelled.count !== 1) continue
+            cancelledRegistrationIds.push(registration.id)
+            if (registration.order?.status !== OrderStatus.PENDING) continue
+            const cancelledOrder = await tx.order.updateMany({
+              where: { id: registration.order.id, status: OrderStatus.PENDING },
+              data: { status: OrderStatus.CANCELLED, cancelledAt: now },
+            })
+            cancelledPendingOrders += cancelledOrder.count
+            await tx.payment.updateMany({
+              where: {
+                orderId: registration.order.id,
+                status: {
+                  in: [
+                    PaymentStatus.CREATED,
+                    PaymentStatus.PROCESSING,
+                    PaymentStatus.FAILED,
+                  ],
+                },
+              },
+              data: { status: PaymentStatus.CLOSED },
+            })
+          }
+
+          const refundRequests: Array<{
+            id: string
+            orderId: string
+            amountCents: number
+            status: RefundStatus
+          }> = []
+          for (const plan of refundPlans) {
+            const refundIdempotencyKey = `GAME_CANCEL:${gameId}:${plan.order.id}`
+            const refundReason = `球局取消：${reason}`
+            const existingRefund = await tx.refund.findUnique({
+              where: { idempotencyKey: refundIdempotencyKey },
+            })
+            if (
+              existingRefund &&
+              (existingRefund.orderId !== plan.order.id ||
+                existingRefund.requestedById !== actor.sub ||
+                existingRefund.amountCents !== plan.amountCents ||
+                existingRefund.reason !== refundReason)
+            ) {
+              throw new ConflictException('球局取消退款幂等键已用于不同退款命令')
+            }
+            const refund = existingRefund ?? await tx.refund.create({
+              data: {
+                refundNo: serial('RF'),
+                idempotencyKey: refundIdempotencyKey,
+                orderId: plan.order.id,
+                requestedById: actor.sub,
+                amountCents: plan.amountCents,
+                reason: refundReason,
+                status: RefundStatus.REQUESTED,
+                originalOrderStatus: plan.originalOrderStatus,
+              },
+            })
+            await tx.order.updateMany({
+              where: {
+                id: plan.order.id,
+                status: {
+                  in: [
+                    OrderStatus.PAID,
+                    OrderStatus.CHECKED_IN,
+                    OrderStatus.COMPLETED,
+                    OrderStatus.PARTIALLY_REFUNDED,
+                  ],
+                },
+              },
+              data: { status: OrderStatus.REFUND_PENDING },
+            })
+            await tx.auditLog.create({
+              data: {
+                actorId: actor.sub,
+                actorRole: actor.roles[0],
+                action: 'GAME_CANCELLATION_REFUND_REQUESTED',
+                objectType: 'Refund',
+                objectId: refund.id,
+                reason,
+                newValue: {
+                  gameId,
+                  gameRegistrationId: plan.registration.id,
+                  orderId: plan.order.id,
+                  amountCents: plan.amountCents,
+                  status: RefundStatus.REQUESTED,
+                  financeApprovalRequired: true,
+                } as never,
+              },
+            })
+            refundRequests.push(refund)
+          }
+
+          const game = await tx.game.findUniqueOrThrow({ where: { id: gameId } })
+          await tx.auditLog.create({
+            data: {
+              actorId: actor.sub,
+              actorRole: actor.roles[0],
+              action: 'GAME_CANCELLED',
+              objectType: 'Game',
+              objectId: gameId,
+              reason,
+              oldValue: { status: current.status } as never,
+              newValue: {
+                status: GameStatus.CANCELLED,
+                cancelPolicySnapshot,
+                cancelledBookingCount: cancelledBookings.count,
+                cancelledPendingOrders,
+                cancelledRegistrationIds,
+                refundRequestIds: refundRequests.map((refund) => refund.id),
+              } as never,
+            },
+          })
+          return {
+            game,
+            cancelledBookingCount: cancelledBookings.count,
+            cancelledPendingOrders,
+            cancelledRegistrationIds,
+            refundRequests,
+          }
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+    } catch (error) {
+      if (isPrismaErrorCode(error, 'P2002')) {
+        const concurrent = await replay()
+        if (concurrent) return concurrent
+      }
+      if (isPrismaErrorCode(error, 'P2034')) {
+        throw new ConflictException('球局取消发生并发冲突，请使用原命令重试')
+      }
+      throw error
+    }
+  }
+
   async register(gameId: string, dto: RegisterGameDto, actor: AuthUser) {
     return executeOrderCreation(this.prisma, {
       memberId: actor.sub,
@@ -715,12 +1056,19 @@ export class GamesService {
     )
   }
 
-  async checkIn(gameId: string, userId: string, actor: AuthUser) {
+  async checkIn(
+    gameId: string,
+    userId: string,
+    actor: AuthUser,
+    dto: GameCheckInDto = {},
+  ) {
     return this.prisma.$transaction(async (tx) => {
       const registration = await tx.gameRegistration.findUnique({
         where: { gameId_userId: { gameId, userId } },
         include: {
-          game: { select: { id: true, hostId: true, status: true } },
+          game: {
+            select: { id: true, hostId: true, status: true, startsAt: true },
+          },
           order: { select: { id: true, status: true, paidCents: true, refundedCents: true } },
         },
       })
@@ -737,6 +1085,9 @@ export class GamesService {
       if (registration.status !== RegistrationStatus.PAID) {
         throw new ConflictException('报名未支付或不存在')
       }
+      if (registration.order?.status === OrderStatus.REFUND_PENDING) {
+        throw new ConflictException('该报名正在等待退款审批，请先处理退款再签到')
+      }
       if (registration.order && ORDER_STATUSES_REFUNDED.includes(registration.order.status)) {
         throw new ConflictException('该报名已退款，不能签到')
       }
@@ -747,6 +1098,18 @@ export class GamesService {
         throw new ConflictException('球局已结束或取消，不能签到')
       }
       const checkedInAt = new Date()
+      const timeWindowPolicy = await assertOperationTimeWindow(tx, {
+        actor,
+        parameterKey: GAME_CHECK_IN_WINDOW_PARAMETER,
+        defaults: { earlyMinutes: 30, lateMinutes: 30 },
+        scheduledStartsAt: registration.game.startsAt,
+        scheduledEndsAt: registration.game.startsAt,
+        action: 'GAME_CHECK_IN',
+        objectType: 'GameRegistration',
+        objectId: registration.id,
+        overrideReason: dto.overrideReason,
+        observedAt: checkedInAt,
+      })
       const updated = await tx.gameRegistration.update({
         where: { id: registration.id },
         data: { status: RegistrationStatus.CHECKED_IN, checkedInAt },
@@ -759,7 +1122,11 @@ export class GamesService {
           objectType: 'GameRegistration',
           objectId: registration.id,
           oldValue: { status: registration.status } as never,
-          newValue: { status: RegistrationStatus.CHECKED_IN, checkedInAt: checkedInAt.toISOString() } as never,
+          newValue: {
+            status: RegistrationStatus.CHECKED_IN,
+            checkedInAt: checkedInAt.toISOString(),
+            timeWindowPolicy,
+          } as never,
         },
       })
       return updated
@@ -789,15 +1156,29 @@ export class GamesService {
           throw new ConflictException('当前球局状态不允许结束')
         }
         // A host may close an OPEN/FULL/IN_PROGRESS game only after its
-        // scheduled start.  Without this gate a mistaken tap (or a replayed
+        // scheduled end.  Without this gate a mistaken tap (or a replayed
         // request from the member client) could create a reward observation
         // window for a game that never happened.  Keep the COMPLETED branch
         // idempotent above this check so historical retries remain readable.
         if (game.status !== GameStatus.COMPLETED) {
-          const startsAt = game.startsAt instanceof Date ? game.startsAt : new Date(String(game.startsAt))
-          if (Number.isNaN(startsAt.getTime())) throw new ConflictException('球局开始时间无效，不能结束并结算')
-          if (startsAt > new Date()) throw new ConflictException('球局尚未开始，不能结束并结算')
+          if (
+            game.registrations.some(
+              (registration) =>
+                registration.order?.status === OrderStatus.REFUND_PENDING,
+            )
+          ) {
+            throw new ConflictException(
+              '球局存在待审退款报名，请先处理退款再完赛',
+            )
+          }
+          const endsAt = game.endsAt instanceof Date ? game.endsAt : new Date(String(game.endsAt))
+          if (Number.isNaN(endsAt.getTime())) throw new ConflictException('球局结束时间无效，不能结束并结算')
+          if (endsAt > new Date()) throw new ConflictException('球局尚未结束，不能结束并结算')
         }
+
+        const now = new Date()
+        const eligibility = this.rewardEligibility(game.registrations, game.hostId)
+        await this.finalizeGameFulfillment(tx, game, actor, now)
 
         // Read the existing unique reward first so a completed retry can
         // return the immutable result without touching the game or ledgers.
@@ -812,18 +1193,16 @@ export class GamesService {
           // Repair a legacy completed game that predates host reward rows.
           // The repair still uses the immutable check-in evidence and starts a
           // fresh observation window, so it cannot award recruitment alone.
-          const now = new Date()
-          const eligibility = this.rewardEligibility(game.registrations)
           const rule = this.rewardRuleSnapshot(game.rewardRule)
           const observationEndsAt = await this.observationEndsAt(tx, now)
+          await this.recordHostRewardRisk(tx, gameId, game.hostId, eligibility)
           const reward = await this.createHostReward(tx, game, gameId, eligibility, rule, observationEndsAt)
           await this.writeCompletionAudit(tx, actor, game, reward, eligibility, observationEndsAt, true)
           return { checkedIn: eligibility.eligible.length, reward }
         }
-        const now = new Date()
-        const eligibility = this.rewardEligibility(game.registrations)
         const rule = this.rewardRuleSnapshot(game.rewardRule)
         const observationEndsAt = await this.observationEndsAt(tx, now)
+        await this.recordHostRewardRisk(tx, gameId, game.hostId, eligibility)
         const reward = existingReward ?? await this.createHostReward(
           tx,
           game,
@@ -835,7 +1214,7 @@ export class GamesService {
 
         await tx.game.update({ where: { id: gameId }, data: { status: GameStatus.COMPLETED } })
         await tx.courtBooking.updateMany({
-          where: { gameId },
+          where: { gameId, status: { not: BookingStatus.CANCELLED } },
           data: { status: BookingStatus.COMPLETED },
         })
         await this.writeCompletionAudit(tx, actor, game, reward, eligibility, observationEndsAt, false)
@@ -843,6 +1222,107 @@ export class GamesService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     )
+  }
+
+  private async finalizeGameFulfillment(
+    tx: Prisma.TransactionClient,
+    game: {
+      id: string
+      registrations: Array<{
+        id: string
+        status: RegistrationStatus
+        orderId: string | null
+        order: {
+          id: string
+          status: OrderStatus
+          paidCents: number
+          refundedCents: number
+          completedAt?: Date | null
+        } | null
+      }>
+    },
+    actor: AuthUser,
+    completedAt: Date,
+  ): Promise<void> {
+    for (const registration of game.registrations) {
+      const previousStatus = registration.status
+      let outcome: RegistrationStatus | null = null
+      if (previousStatus === RegistrationStatus.CHECKED_IN) {
+        if (
+          !registration.order ||
+          !ORDER_STATUSES_WITHOUT_FULFILLMENT.has(registration.order.status)
+        ) {
+          outcome = RegistrationStatus.COMPLETED
+        }
+      } else if (previousStatus === RegistrationStatus.PAID) {
+        if (
+          !registration.order ||
+          !ORDER_STATUSES_WITHOUT_NO_SHOW.has(registration.order.status)
+        ) {
+          outcome = RegistrationStatus.NO_SHOW
+        }
+      } else if (
+        previousStatus === RegistrationStatus.REGISTERED ||
+        previousStatus === RegistrationStatus.WAITLISTED
+      ) {
+        outcome = RegistrationStatus.CANCELLED
+      }
+      if (!outcome) continue
+
+      const changed = await tx.gameRegistration.updateMany({
+        where: { id: registration.id, status: previousStatus },
+        data: { status: outcome },
+      })
+      if (changed.count !== 1) continue
+
+      if (
+        previousStatus === RegistrationStatus.REGISTERED &&
+        registration.order?.status === OrderStatus.PENDING
+      ) {
+        await tx.order.updateMany({
+          where: { id: registration.order.id, status: OrderStatus.PENDING },
+          data: { status: OrderStatus.CANCELLED, cancelledAt: completedAt },
+        })
+      } else if (
+        registration.order &&
+        (outcome === RegistrationStatus.COMPLETED || outcome === RegistrationStatus.NO_SHOW)
+      ) {
+        await completeOrderFulfillment(tx, {
+          orderId: registration.order.id,
+          actor,
+          objectType: 'GameRegistration',
+          objectId: registration.id,
+          outcome: outcome === RegistrationStatus.NO_SHOW ? 'NO_SHOW' : 'COMPLETED',
+          completedAt,
+          reason: outcome === RegistrationStatus.NO_SHOW
+            ? '球局结束时无签到记录'
+            : '球局结束且已有签到记录',
+          metadata: { gameId: game.id },
+        })
+      }
+
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.sub,
+          actorRole: actor.roles[0],
+          action: outcome === RegistrationStatus.COMPLETED
+            ? 'GAME_REGISTRATION_COMPLETED'
+            : outcome === RegistrationStatus.NO_SHOW
+              ? 'GAME_REGISTRATION_NO_SHOW'
+              : 'GAME_REGISTRATION_EXPIRED',
+          objectType: 'GameRegistration',
+          objectId: registration.id,
+          oldValue: { status: previousStatus } as never,
+          newValue: {
+            status: outcome,
+            gameId: game.id,
+            orderId: registration.order?.id ?? null,
+            orderCancelled: registration.order?.status === OrderStatus.PENDING,
+            completedAt: completedAt.toISOString(),
+          } as never,
+        },
+      })
+    }
   }
 
   /**
@@ -889,7 +1369,7 @@ export class GamesService {
           }
           if (!reward.availableAt || reward.availableAt > now) return reward
 
-          const eligibility = this.rewardEligibility(reward.game.registrations)
+          const eligibility = this.rewardEligibility(reward.game.registrations, reward.hostId)
           if (eligibility.pendingRefund.length) {
             // A refund request is not enough evidence to claw back a reward;
             // hold it in AVAILABLE until the refund reaches a terminal state.
@@ -932,6 +1412,7 @@ export class GamesService {
               basisCount: eligibility.eligible.length,
               rewardValue: recalculatedValue,
               excludedRefundedRegistrationIds: eligibility.excludedRefunded.map((item) => item.id),
+              excludedHostRegistrationIds: eligibility.excludedSelf.map((item) => item.id),
             })
           }
 
@@ -1009,6 +1490,7 @@ export class GamesService {
                 basisCount: eligibility.eligible.length,
                 checkedInRegistrationIds: eligibility.eligible.map((item) => item.id),
                 excludedRefundedRegistrationIds: eligibility.excludedRefunded.map((item) => item.id),
+                excludedHostRegistrationIds: eligibility.excludedSelf.map((item) => item.id),
                 observationEndsAt: currentReward.availableAt?.toISOString() ?? null,
               },
             } as never,
@@ -1053,20 +1535,53 @@ export class GamesService {
     }
   }
 
-  private rewardEligibility(registrations: ReadonlyArray<RegistrationForReward>): RewardEligibility {
-    const checkedIn = registrations.filter((item) => item.status === RegistrationStatus.CHECKED_IN)
+  private rewardEligibility(
+    registrations: ReadonlyArray<RegistrationForReward>,
+    hostId: string,
+  ): RewardEligibility {
+    const checkedIn = registrations.filter((item) =>
+      item.status === RegistrationStatus.CHECKED_IN ||
+      item.status === RegistrationStatus.COMPLETED)
+    const excludedSelf = checkedIn.filter((item) => item.userId === hostId)
     const excludedRefunded = checkedIn.filter((item) =>
       Boolean(item.order && ORDER_STATUSES_REFUNDED.includes(item.order.status)),
     )
     const pendingRefund = checkedIn.filter((item) =>
       Boolean(item.order && ORDER_STATUSES_REFUND_PENDING.includes(item.order.status)),
     )
-    const excludedIds = new Set(excludedRefunded.map((item) => item.id))
+    const excludedIds = new Set([
+      ...excludedRefunded.map((item) => item.id),
+      ...excludedSelf.map((item) => item.id),
+    ])
     return {
       eligible: checkedIn.filter((item) => !excludedIds.has(item.id)),
       excludedRefunded,
       pendingRefund,
+      excludedSelf,
     }
+  }
+
+  private async recordHostRewardRisk(
+    tx: Prisma.TransactionClient,
+    gameId: string,
+    hostId: string,
+    eligibility: RewardEligibility,
+  ): Promise<void> {
+    if (!eligibility.excludedSelf.length) return
+    await tx.riskEvent.create({
+      data: {
+        ruleCode: 'HOST_SELF_CHECKIN_REWARD',
+        severity: 'HIGH',
+        userId: hostId,
+        objectType: 'Game',
+        objectId: gameId,
+        summary: '主理人本人签到记录已从组织奖励基数中剔除',
+        evidence: {
+          checkedInRegistrationIds: eligibility.excludedSelf.map((item) => item.id),
+          checkedInAt: eligibility.excludedSelf.map((item) => item.checkedInAt?.toISOString() ?? null),
+        },
+      },
+    })
   }
 
   private rewardRuleSnapshot(value: unknown): RewardRuleSnapshot {
@@ -1169,6 +1684,7 @@ export class GamesService {
           checkedIn: eligibility.eligible.length,
           checkedInRegistrationIds: eligibility.eligible.map((item) => item.id),
           excludedRefundedRegistrationIds: eligibility.excludedRefunded.map((item) => item.id),
+          excludedHostRegistrationIds: eligibility.excludedSelf.map((item) => item.id),
           pendingRefundRegistrationIds: eligibility.pendingRefund.map((item) => item.id),
           observationEndsAt: observationEndsAt.toISOString(),
         } as never,

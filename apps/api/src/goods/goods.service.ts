@@ -5,6 +5,10 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import type { AuthUser } from '../common/auth/auth-user.js'
 import { PrismaService } from '../database/prisma.service.js'
 import { BusinessType, OrderStatus, SourceChannel, SubjectAccount } from '../generated/prisma/client.js'
+import {
+  buildGoodsOrderItemSnapshot,
+  ConsignmentOrderSnapshotError,
+} from '../inventory/consignment-order-snapshot.js'
 import type { CreateGoodsOrderDto } from './goods.dto.js'
 import { executeOrderCreation } from '../orders/order-creation-idempotency.js'
 
@@ -30,15 +34,24 @@ export class GoodsService {
       command: { kind: 'GOODS_ORDER', items: commandItems },
       loadExisting: (id) => this.prisma.order.findUniqueOrThrow({ where: { id }, include: { items: true } }),
       create: (creation) => this.prisma.$transaction(async (tx) => {
-        const products = await tx.inventoryItem.findMany({ where: { id: { in: [...quantities.keys()] }, enabled: true } })
+        const products = await tx.inventoryItem.findMany({
+          where: { id: { in: [...quantities.keys()] }, enabled: true },
+          include: { supplierRecord: true },
+        })
         if (products.length !== quantities.size) throw new NotFoundException('部分商品不存在或已下架')
         const items = products.map((product) => {
           const quantity = quantities.get(product.id)!
           if (product.stock < quantity) throw new BadRequestException(`${product.name} 库存不足`)
-          return {
-            itemType: 'INVENTORY_GOODS', itemId: product.id, name: product.name, quantity,
-            unitPriceCents: product.salePriceCents, amountCents: product.salePriceCents * quantity,
-            metadata: { sku: product.sku, mode: product.mode, supplier: product.supplier },
+          try {
+            return {
+              itemType: 'INVENTORY_GOODS', itemId: product.id, name: product.name, quantity,
+              unitPriceCents: product.salePriceCents, amountCents: product.salePriceCents * quantity,
+              metadata: buildGoodsOrderItemSnapshot(product),
+            }
+          } catch (error) {
+            if (error instanceof ConsignmentOrderSnapshotError)
+              throw new BadRequestException(error.message)
+            throw error
           }
         })
         const amount = items.reduce((sum, item) => sum + item.amountCents, 0)

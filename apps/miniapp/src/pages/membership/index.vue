@@ -7,11 +7,19 @@ import { money } from '../../utils/format'
 import { withPendingCreationKey } from '../../utils/pending-creation-key'
 
 const products = ref<any[]>([])
+const rechargePlans = ref<any[]>([])
 const loading = ref(false)
 const levelName: Record<string,string> = { REGULAR: '年度会员', GOLD: '金卡会员', BLACK: '黑金会员' }
 async function load() {
   loading.value = true
-  try { products.value = await endpoints.membershipProducts() }
+  try {
+    const [productResult, planResult] = await Promise.all([
+      endpoints.membershipProducts(),
+      endpoints.rechargePlans(),
+    ])
+    products.value = productResult
+    rechargePlans.value = planResult
+  }
   catch (cause: any) { uni.showToast({ title: cause.message, icon: 'none' }) }
   finally { loading.value = false }
 }
@@ -24,24 +32,32 @@ async function purchase(product: any) {
     uni.showModal({ title: '会员订单已创建', content: `${order.orderNo} 待支付，支付后权益立即生效。`, showCancel: false })
   } catch (cause: any) { uni.showToast({ title: cause.message, icon: 'none' }) }
 }
-async function recharge() {
-  const result = await uni.showModal({ title: '现金本金充值', editable: true, placeholderText: '请输入充值金额（元）' })
+async function recharge(plan: any) {
+  const result = await uni.showModal({
+    title: '确认充值计划',
+    content: `${plan.name}\n支付 ${money(plan.principalCents)}${plan.giftCents ? `，到账赠送 ${money(plan.giftCents)}` : ''}`,
+  })
   if (!result.confirm) return
-  const cents = Math.round(Number(result.content) * 100)
-  if (!Number.isSafeInteger(cents) || cents < 100) return uni.showToast({ title: '充值金额无效', icon: 'none' })
   try {
-    const command = { principalCents: cents, giftCents: 0 }
+    const command = { planId: plan.id }
     const order: any = await withPendingCreationKey('membership.recharge', command, (creationIdempotencyKey) =>
-      endpoints.recharge(cents, 0, creationIdempotencyKey),
+      endpoints.recharge(plan.id, creationIdempotencyKey),
     )
-    uni.showModal({ title: '充值订单已创建', content: `${order.orderNo} 仅可使用微信支付，到账后进入现金本金账户。`, showCancel: false })
+    uni.showModal({ title: '充值订单已创建', content: `${order.orderNo} 待支付。充值本金与赠送金额已按 v${plan.version} 计划锁定，不可由客户端修改。`, showCancel: false })
   } catch (cause: any) { uni.showToast({ title: cause.message, icon: 'none' }) }
 }
 onShow(load)
 </script>
 <template>
   <view class="page safe-bottom">
-    <view class="hero"><text class="eyebrow">GOLDEN FEATHER MEMBER</text><text class="hero-title">让每次到场更有价值</text><button class="recharge" @tap="recharge">充值现金本金</button></view>
+    <view class="hero"><text class="eyebrow">GOLDEN FEATHER MEMBER</text><text class="hero-title">让每次到场更有价值</text><text class="hero-note">充值金额与赠送权益均由场馆已生效计划确定</text></view>
+    <view class="section-title">余额充值</view>
+    <view v-for="plan in rechargePlans" :key="plan.id" class="card recharge-plan">
+      <view><text class="name">{{ plan.name }}</text><text class="muted">计划 {{ plan.code }} · v{{ plan.version }}{{ plan.giftCents ? ` · 赠送 ${money(plan.giftCents)}` : '' }}</text></view>
+      <button class="primary plan-button" @tap="recharge(plan)">支付 {{ money(plan.principalCents) }}</button>
+    </view>
+    <SectionEmpty v-if="!rechargePlans.length && !loading" title="暂无可用充值计划" />
+    <view class="section-title">会员权益</view>
     <view v-for="product in products" :key="product.id" class="card product" :class="product.level.toLowerCase()">
       <view class="row"><text class="pill">{{ levelName[product.level] || product.level }}</text><text class="muted">{{ product.durationDays }}天</text></view>
       <text class="name">{{ product.name }}</text>
@@ -52,6 +68,6 @@ onShow(load)
   </view>
 </template>
 <style scoped>
-.hero { padding: 38rpx; margin-bottom: 24rpx; color: #fff; background: linear-gradient(145deg,#181f1b,#315940); border-radius: 30rpx; }.eyebrow { opacity: .55; font-size: 18rpx; letter-spacing: 3rpx; }.hero-title { display: block; margin: 28rpx 0; font-size: 40rpx; font-weight: 800; }.recharge { width: 240rpx; margin: 0; color: #193d2b; background: #e5cd7f; font-size: 24rpx; }
+.hero { padding: 38rpx; margin-bottom: 24rpx; color: #fff; background: linear-gradient(145deg,#181f1b,#315940); border-radius: 30rpx; }.eyebrow { opacity: .55; font-size: 18rpx; letter-spacing: 3rpx; }.hero-title { display: block; margin: 28rpx 0 14rpx; font-size: 40rpx; font-weight: 800; }.hero-note { color: rgba(255,255,255,.72); font-size: 22rpx; }.recharge-plan { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; margin-bottom: 14rpx; }.recharge-plan .name { margin: 0 0 8rpx; font-size: 29rpx; }.plan-button { flex: 0 0 auto; margin: 0; font-size: 22rpx; }.section-title { margin: 28rpx 0 16rpx; font-size: 31rpx; font-weight: 800; }
 .name { display: block; margin: 25rpx 0; font-size: 35rpx; font-weight: 800; }.benefits { display: flex; flex-wrap: wrap; gap: 12rpx; margin-bottom: 28rpx; }.benefits text { padding: 9rpx 14rpx; color: #5f695f; background: #f3f6f2; border-radius: 999rpx; font-size: 21rpx; }.price { color: #17492f; font-size: 38rpx; font-weight: 800; }.buy { min-width: 180rpx; margin: 0; }.black { border-top: 8rpx solid #262d29; }.gold { border-top: 8rpx solid #c8aa51; }
 </style>

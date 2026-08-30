@@ -7,11 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AuthUser } from '../common/auth/auth-user.js';
 import { ROLES_KEY } from '../common/auth/auth.decorators.js';
-import {
-  AppRole,
-  ReconciliationPeriodStatus,
-  SettlementStatus,
-} from '../generated/prisma/enums.js';
+import { AppRole, SettlementStatus } from '../generated/prisma/enums.js';
 import { TrainingService } from './training.service.js';
 import { TrainingController } from './training.controller.js';
 
@@ -211,19 +207,20 @@ describe('TrainingService settlement state machine', () => {
     });
   });
 
-  it('rejects a real state change when any overlapping business day is locked', async () => {
+  it('allows periodic settlement after its source business days are locked', async () => {
     const { prisma, tx, current } = workflowPrisma();
     tx.reconciliationPeriod.findFirst.mockResolvedValue({
       businessDate: new Date('2026-08-01T16:00:00.000Z'),
-      status: ReconciliationPeriodStatus.LOCKED,
+      status: 'LOCKED',
     });
     const service = new TrainingService(prisma as never);
 
     await expect(
       service.submitSettlement(current.id, {}, finance),
-    ).rejects.toBeInstanceOf(ConflictException);
-    expect(tx.trainingSettlement.updateMany).not.toHaveBeenCalled();
-    expect(tx.auditLog.create).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ status: SettlementStatus.PENDING_CONFIRMATION });
+    expect(tx.trainingSettlement.updateMany).toHaveBeenCalledOnce();
+    expect(tx.auditLog.create).toHaveBeenCalledOnce();
+    expect(tx.reconciliationPeriod.findFirst).not.toHaveBeenCalled();
   });
 
   it('denies service-level access to non-finance roles', async () => {

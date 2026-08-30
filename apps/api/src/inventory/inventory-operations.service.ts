@@ -12,6 +12,7 @@ import type { AuthUser } from '../common/auth/auth-user.js';
 import { PrismaService } from '../database/prisma.service.js';
 import {
   AppRole,
+  InventoryMode,
   InventoryOperationStatus,
   InventoryOperationType,
   InventoryTxnType,
@@ -31,7 +32,16 @@ import type {
   PostInventoryOperationDto,
   PostStocktakeDto,
   ReceivePurchaseOrderDto,
+  SetMasterDataStatusDto,
+  UpdateInventoryLocationDto,
+  UpdateSupplierDto,
 } from './inventory.dto.js';
+import {
+  assertMasterDataVersion,
+  inventoryCommandHash,
+  normalizeMasterCommand,
+  requireTrimmedField,
+} from './inventory-master-data.js';
 
 const serial = (prefix: string) =>
   `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`;
@@ -42,20 +52,68 @@ const FRONT_ROLES: readonly AppRole[] = [
   AppRole.SUPER_ADMIN,
 ];
 const ADMIN_ROLES: readonly AppRole[] = [AppRole.ADMIN, AppRole.SUPER_ADMIN];
+const READ_ROLES: readonly AppRole[] = [
+  AppRole.FRONT_DESK,
+  AppRole.COACH,
+  AppRole.EVENT_MANAGER,
+  AppRole.FINANCE,
+  ...ADMIN_ROLES,
+];
+
+const SUPPLIER_CREATE_ACTION = 'SUPPLIER_CREATED';
+const SUPPLIER_UPDATE_ACTION = 'SUPPLIER_UPDATED';
+const SUPPLIER_STATUS_ACTION = 'SUPPLIER_STATUS_CHANGED';
+const LOCATION_CREATE_ACTION = 'INVENTORY_LOCATION_CREATED';
+const LOCATION_UPDATE_ACTION = 'INVENTORY_LOCATION_UPDATED';
+const LOCATION_STATUS_ACTION = 'INVENTORY_LOCATION_STATUS_CHANGED';
 
 @Injectable()
 export class InventoryOperationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  suppliers() {
+  suppliers(actor: AuthUser) {
+    this.requireRole(actor, READ_ROLES);
     return this.prisma.supplier.findMany({
+      include: {
+        _count: { select: { items: true, purchaseOrders: true } },
+      },
       orderBy: [{ enabled: 'desc' }, { name: 'asc' }],
     });
   }
 
-  locations() {
+  async supplierDetail(id: string, actor: AuthUser) {
+    this.requireRole(actor, READ_ROLES);
+    const supplier = await this.prisma.supplier.findUnique({
+      where: { id },
+      include: {
+        items: {
+          include: { defaultLocation: true },
+          orderBy: [{ enabled: 'desc' }, { name: 'asc' }],
+        },
+        purchaseOrders: {
+          include: { lines: { include: { item: true, location: true } } },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+        _count: { select: { items: true, purchaseOrders: true } },
+      },
+    });
+    if (!supplier) throw new NotFoundException('供应商不存在');
+    return supplier;
+  }
+
+  locations(actor: AuthUser) {
+    this.requireRole(actor, READ_ROLES);
     return this.prisma.inventoryLocation.findMany({
       include: {
+        _count: {
+          select: {
+            defaultItems: true,
+            stockBalances: true,
+            purchaseOrderLines: true,
+            stocktakes: true,
+          },
+        },
         stockBalances: {
           include: { item: true },
           orderBy: { item: { name: 'asc' } },
@@ -65,7 +123,43 @@ export class InventoryOperationsService {
     });
   }
 
-  purchaseOrders() {
+  async locationDetail(id: string, actor: AuthUser) {
+    this.requireRole(actor, READ_ROLES);
+    const location = await this.prisma.inventoryLocation.findUnique({
+      where: { id },
+      include: {
+        defaultItems: { orderBy: [{ enabled: 'desc' }, { name: 'asc' }] },
+        stockBalances: {
+          include: { item: true },
+          orderBy: [{ item: { name: 'asc' } }, { batchCode: 'asc' }],
+        },
+        stocktakes: { orderBy: { createdAt: 'desc' }, take: 10 },
+        sourceOperations: {
+          include: { item: true, targetLocation: true },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+        targetOperations: {
+          include: { item: true, sourceLocation: true },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+        _count: {
+          select: {
+            defaultItems: true,
+            stockBalances: true,
+            purchaseOrderLines: true,
+            stocktakes: true,
+          },
+        },
+      },
+    });
+    if (!location) throw new NotFoundException('库位不存在');
+    return location;
+  }
+
+  purchaseOrders(actor: AuthUser) {
+    this.requireRole(actor, READ_ROLES);
     return this.prisma.purchaseOrder.findMany({
       include: {
         supplier: true,
@@ -76,65 +170,591 @@ export class InventoryOperationsService {
     });
   }
 
-  stocktakes() {
+  stocktakes(actor: AuthUser) {
+    this.requireRole(actor, READ_ROLES);
     return this.prisma.stocktake.findMany({
       include: { location: true, lines: { include: { item: true } } },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  operations() {
+  operations(actor: AuthUser) {
+    this.requireRole(actor, READ_ROLES);
     return this.prisma.inventoryOperation.findMany({
       include: { item: true, sourceLocation: true, targetLocation: true },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  createSupplier(dto: CreateSupplierDto, actor: AuthUser) {
+  async createSupplier(dto: CreateSupplierDto, actor: AuthUser) {
     this.requireRole(actor, ADMIN_ROLES);
-    return this.prisma.$transaction(async (tx) => {
-      const supplier = await tx.supplier.create({
-        data: {
-          code: dto.code.trim().toUpperCase(),
-          name: dto.name.trim(),
-          type: dto.type,
-          contactName: dto.contactName?.trim() || null,
-          contactPhone: dto.contactPhone?.trim() || null,
-          settlementRule: dto.settlementRule as never,
-        },
-      });
-      await this.audit(
-        tx,
-        actor,
-        'SUPPLIER_CREATED',
-        'Supplier',
-        supplier.id,
-        'ABSENT',
-        'ENABLED',
-        `创建供应商 ${supplier.name}`,
-      );
-      return supplier;
+    const { reason, requestId } = normalizeMasterCommand(
+      dto.reason,
+      dto.idempotencyKey,
+    );
+    const code = requireTrimmedField(
+      dto.code,
+      '供应商编码',
+      2,
+      40,
+    ).toUpperCase();
+    const name = requireTrimmedField(dto.name, '供应商名称', 2, 120);
+    this.validateSettlementRule(dto.type, dto.settlementRule);
+    const hash = inventoryCommandHash({
+      action: 'create',
+      code,
+      name,
+      type: dto.type,
+      contactName: dto.contactName?.trim() || null,
+      contactPhone: dto.contactPhone?.trim() || null,
+      settlementRule: dto.settlementRule,
+      reason,
     });
+    const replayId = await this.masterReplay(
+      SUPPLIER_CREATE_ACTION,
+      requestId,
+      hash,
+      'Supplier',
+      actor,
+    );
+    if (replayId)
+      return this.prisma.supplier.findUniqueOrThrow({
+        where: { id: replayId },
+      });
+    return this.executeMasterCreate(
+      () =>
+        this.prisma.$transaction(
+          async (tx) => {
+            const duplicateId = await this.masterReplay(
+              SUPPLIER_CREATE_ACTION,
+              requestId,
+              hash,
+              'Supplier',
+              actor,
+              tx,
+            );
+            if (duplicateId)
+              return tx.supplier.findUniqueOrThrow({
+                where: { id: duplicateId },
+              });
+            const supplier = await tx.supplier.create({
+              data: {
+                code,
+                name,
+                type: dto.type,
+                contactName: dto.contactName?.trim() || null,
+                contactPhone: dto.contactPhone?.trim() || null,
+                settlementRule: dto.settlementRule as never,
+              },
+            });
+            await tx.auditLog.create({
+              data: {
+                actorId: actor.sub,
+                actorRole: actor.roles[0],
+                action: SUPPLIER_CREATE_ACTION,
+                objectType: 'Supplier',
+                objectId: supplier.id,
+                oldValue: Prisma.JsonNull,
+                newValue: {
+                  ...this.supplierSnapshot(supplier),
+                  commandHash: hash,
+                } as never,
+                reason,
+                requestId,
+              },
+            });
+            return supplier;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        ),
+      async () => {
+        const duplicateId = await this.masterReplay(
+          SUPPLIER_CREATE_ACTION,
+          requestId,
+          hash,
+          'Supplier',
+          actor,
+        );
+        return duplicateId
+          ? this.prisma.supplier.findUniqueOrThrow({
+              where: { id: duplicateId },
+            })
+          : null;
+      },
+    );
   }
 
-  createLocation(dto: CreateInventoryLocationDto, actor: AuthUser) {
+  async createLocation(dto: CreateInventoryLocationDto, actor: AuthUser) {
     this.requireRole(actor, ADMIN_ROLES);
-    return this.prisma.$transaction(async (tx) => {
-      const location = await tx.inventoryLocation.create({
-        data: { code: dto.code.trim().toUpperCase(), name: dto.name.trim() },
+    const { reason, requestId } = normalizeMasterCommand(
+      dto.reason,
+      dto.idempotencyKey,
+    );
+    const code = requireTrimmedField(dto.code, '库位编码', 2, 40).toUpperCase();
+    const name = requireTrimmedField(dto.name, '库位名称', 2, 80);
+    const hash = inventoryCommandHash({ action: 'create', code, name, reason });
+    const replayId = await this.masterReplay(
+      LOCATION_CREATE_ACTION,
+      requestId,
+      hash,
+      'InventoryLocation',
+      actor,
+    );
+    if (replayId)
+      return this.prisma.inventoryLocation.findUniqueOrThrow({
+        where: { id: replayId },
       });
-      await this.audit(
-        tx,
-        actor,
-        'INVENTORY_LOCATION_CREATED',
-        'InventoryLocation',
-        location.id,
-        'ABSENT',
-        'ENABLED',
-        `创建库位 ${location.name}`,
-      );
-      return location;
+    return this.executeMasterCreate(
+      () =>
+        this.prisma.$transaction(
+          async (tx) => {
+            const duplicateId = await this.masterReplay(
+              LOCATION_CREATE_ACTION,
+              requestId,
+              hash,
+              'InventoryLocation',
+              actor,
+              tx,
+            );
+            if (duplicateId)
+              return tx.inventoryLocation.findUniqueOrThrow({
+                where: { id: duplicateId },
+              });
+            const location = await tx.inventoryLocation.create({
+              data: { code, name },
+            });
+            await tx.auditLog.create({
+              data: {
+                actorId: actor.sub,
+                actorRole: actor.roles[0],
+                action: LOCATION_CREATE_ACTION,
+                objectType: 'InventoryLocation',
+                objectId: location.id,
+                oldValue: Prisma.JsonNull,
+                newValue: {
+                  ...this.locationSnapshot(location),
+                  commandHash: hash,
+                } as never,
+                reason,
+                requestId,
+              },
+            });
+            return location;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        ),
+      async () => {
+        const duplicateId = await this.masterReplay(
+          LOCATION_CREATE_ACTION,
+          requestId,
+          hash,
+          'InventoryLocation',
+          actor,
+        );
+        return duplicateId
+          ? this.prisma.inventoryLocation.findUniqueOrThrow({
+              where: { id: duplicateId },
+            })
+          : null;
+      },
+    );
+  }
+
+  async updateSupplier(id: string, dto: UpdateSupplierDto, actor: AuthUser) {
+    this.requireRole(actor, ADMIN_ROLES);
+    const { reason, requestId } = normalizeMasterCommand(
+      dto.reason,
+      dto.idempotencyKey,
+    );
+    const mutable = {
+      code:
+        dto.code === undefined
+          ? undefined
+          : requireTrimmedField(dto.code, '供应商编码', 2, 40).toUpperCase(),
+      name:
+        dto.name === undefined
+          ? undefined
+          : requireTrimmedField(dto.name, '供应商名称', 2, 120),
+      type: dto.type,
+      contactName:
+        dto.contactName === undefined
+          ? undefined
+          : dto.contactName.trim() || null,
+      contactPhone:
+        dto.contactPhone === undefined
+          ? undefined
+          : dto.contactPhone.trim() || null,
+      settlementRule: dto.settlementRule,
+    };
+    if (Object.values(mutable).every((value) => value === undefined))
+      throw new BadRequestException('至少填写一个需要修改的供应商字段');
+    const hash = inventoryCommandHash({
+      action: 'update',
+      id,
+      expectedUpdatedAt: dto.expectedUpdatedAt,
+      reason,
+      mutable,
     });
+    const replayId = await this.masterReplay(
+      SUPPLIER_UPDATE_ACTION,
+      requestId,
+      hash,
+      'Supplier',
+      actor,
+    );
+    if (replayId)
+      return this.prisma.supplier.findUniqueOrThrow({
+        where: { id: replayId },
+      });
+    return this.prisma.$transaction(
+      async (tx) => {
+        const duplicateId = await this.masterReplay(
+          SUPPLIER_UPDATE_ACTION,
+          requestId,
+          hash,
+          'Supplier',
+          actor,
+          tx,
+        );
+        if (duplicateId)
+          return tx.supplier.findUniqueOrThrow({ where: { id: duplicateId } });
+        const current = await tx.supplier.findUnique({ where: { id } });
+        if (!current) throw new NotFoundException('供应商不存在');
+        assertMasterDataVersion(current.updatedAt, dto.expectedUpdatedAt);
+        const nextType = mutable.type ?? current.type;
+        const currentRule =
+          current.settlementRule && typeof current.settlementRule === 'object'
+            ? (current.settlementRule as Record<string, unknown>)
+            : {};
+        const nextRule = mutable.settlementRule ?? currentRule;
+        this.validateSettlementRule(nextType, nextRule);
+        if (nextType !== current.type) {
+          const expectedMode =
+            nextType === SupplierType.CONSIGNMENT
+              ? InventoryMode.CONSIGNMENT
+              : InventoryMode.PURCHASE;
+          const incompatibleItems = await tx.inventoryItem.count({
+            where: { supplierId: id, mode: { not: expectedMode } },
+          });
+          if (incompatibleItems)
+            throw new ConflictException(
+              `仍有 ${incompatibleItems} 个 SKU 与新供应商类型不一致，请先调整 SKU`,
+            );
+        }
+        const changed = await tx.supplier.updateMany({
+          where: { id, updatedAt: new Date(dto.expectedUpdatedAt) },
+          data: {
+            ...(mutable.code !== undefined ? { code: mutable.code } : {}),
+            ...(mutable.name !== undefined ? { name: mutable.name } : {}),
+            ...(mutable.type !== undefined ? { type: mutable.type } : {}),
+            ...(mutable.contactName !== undefined
+              ? { contactName: mutable.contactName }
+              : {}),
+            ...(mutable.contactPhone !== undefined
+              ? { contactPhone: mutable.contactPhone }
+              : {}),
+            ...(mutable.settlementRule !== undefined
+              ? { settlementRule: mutable.settlementRule as never }
+              : {}),
+          },
+        });
+        if (changed.count !== 1)
+          throw new ConflictException('供应商资料已变化，请刷新后重试');
+        const updated = await tx.supplier.findUniqueOrThrow({ where: { id } });
+        if (mutable.name !== undefined && mutable.name !== current.name) {
+          await tx.inventoryItem.updateMany({
+            where: { supplierId: id },
+            data: { supplier: updated.name },
+          });
+        }
+        await this.masterAudit(
+          tx,
+          actor,
+          SUPPLIER_UPDATE_ACTION,
+          'Supplier',
+          id,
+          this.supplierSnapshot(current),
+          { ...this.supplierSnapshot(updated), commandHash: hash },
+          reason,
+          requestId,
+        );
+        return updated;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
+  async setSupplierStatus(
+    id: string,
+    dto: SetMasterDataStatusDto,
+    actor: AuthUser,
+  ) {
+    this.requireRole(actor, ADMIN_ROLES);
+    const { reason, requestId } = normalizeMasterCommand(
+      dto.reason,
+      dto.idempotencyKey,
+    );
+    const hash = inventoryCommandHash({
+      action: 'status',
+      id,
+      enabled: dto.enabled,
+      expectedUpdatedAt: dto.expectedUpdatedAt,
+      reason,
+    });
+    const replayId = await this.masterReplay(
+      SUPPLIER_STATUS_ACTION,
+      requestId,
+      hash,
+      'Supplier',
+      actor,
+    );
+    if (replayId)
+      return this.prisma.supplier.findUniqueOrThrow({
+        where: { id: replayId },
+      });
+    return this.prisma.$transaction(
+      async (tx) => {
+        const duplicateId = await this.masterReplay(
+          SUPPLIER_STATUS_ACTION,
+          requestId,
+          hash,
+          'Supplier',
+          actor,
+          tx,
+        );
+        if (duplicateId)
+          return tx.supplier.findUniqueOrThrow({ where: { id: duplicateId } });
+        const current = await tx.supplier.findUnique({ where: { id } });
+        if (!current) throw new NotFoundException('供应商不存在');
+        assertMasterDataVersion(current.updatedAt, dto.expectedUpdatedAt);
+        if (current.enabled === dto.enabled)
+          throw new ConflictException(
+            dto.enabled ? '供应商已经启用' : '供应商已经停用',
+          );
+        if (!dto.enabled) {
+          const [openOrders, enabledItems] = await Promise.all([
+            tx.purchaseOrder.count({
+              where: {
+                supplierId: id,
+                status: {
+                  in: [
+                    PurchaseOrderStatus.DRAFT,
+                    PurchaseOrderStatus.SUBMITTED,
+                    PurchaseOrderStatus.APPROVED,
+                    PurchaseOrderStatus.PARTIAL_RECEIVED,
+                  ],
+                },
+              },
+            }),
+            tx.inventoryItem.count({
+              where: { supplierId: id, enabled: true },
+            }),
+          ]);
+          const blockers = [
+            enabledItems ? `仍启用 SKU ${enabledItems}` : '',
+            openOrders ? `未完采购单 ${openOrders}` : '',
+          ].filter(Boolean);
+          if (blockers.length)
+            throw new ConflictException(
+              `供应商暂不能停用：${blockers.join('、')}`,
+            );
+        }
+        const changed = await tx.supplier.updateMany({
+          where: {
+            id,
+            enabled: current.enabled,
+            updatedAt: new Date(dto.expectedUpdatedAt),
+          },
+          data: { enabled: dto.enabled },
+        });
+        if (changed.count !== 1)
+          throw new ConflictException('供应商状态已变化，请刷新后重试');
+        const updated = await tx.supplier.findUniqueOrThrow({ where: { id } });
+        await this.masterAudit(
+          tx,
+          actor,
+          SUPPLIER_STATUS_ACTION,
+          'Supplier',
+          id,
+          this.supplierSnapshot(current),
+          { ...this.supplierSnapshot(updated), commandHash: hash },
+          reason,
+          requestId,
+        );
+        return updated;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
+  async updateLocation(
+    id: string,
+    dto: UpdateInventoryLocationDto,
+    actor: AuthUser,
+  ) {
+    this.requireRole(actor, ADMIN_ROLES);
+    const { reason, requestId } = normalizeMasterCommand(
+      dto.reason,
+      dto.idempotencyKey,
+    );
+    const mutable = {
+      code:
+        dto.code === undefined
+          ? undefined
+          : requireTrimmedField(dto.code, '库位编码', 2, 40).toUpperCase(),
+      name:
+        dto.name === undefined
+          ? undefined
+          : requireTrimmedField(dto.name, '库位名称', 2, 80),
+    };
+    if (Object.values(mutable).every((value) => value === undefined))
+      throw new BadRequestException('至少填写一个需要修改的库位字段');
+    const hash = inventoryCommandHash({
+      action: 'update',
+      id,
+      expectedUpdatedAt: dto.expectedUpdatedAt,
+      reason,
+      mutable,
+    });
+    const replayId = await this.masterReplay(
+      LOCATION_UPDATE_ACTION,
+      requestId,
+      hash,
+      'InventoryLocation',
+      actor,
+    );
+    if (replayId)
+      return this.prisma.inventoryLocation.findUniqueOrThrow({
+        where: { id: replayId },
+      });
+    return this.prisma.$transaction(
+      async (tx) => {
+        const duplicateId = await this.masterReplay(
+          LOCATION_UPDATE_ACTION,
+          requestId,
+          hash,
+          'InventoryLocation',
+          actor,
+          tx,
+        );
+        if (duplicateId)
+          return tx.inventoryLocation.findUniqueOrThrow({
+            where: { id: duplicateId },
+          });
+        const current = await tx.inventoryLocation.findUnique({
+          where: { id },
+        });
+        if (!current) throw new NotFoundException('库位不存在');
+        assertMasterDataVersion(current.updatedAt, dto.expectedUpdatedAt);
+        const changed = await tx.inventoryLocation.updateMany({
+          where: { id, updatedAt: new Date(dto.expectedUpdatedAt) },
+          data: {
+            ...(mutable.code !== undefined ? { code: mutable.code } : {}),
+            ...(mutable.name !== undefined ? { name: mutable.name } : {}),
+          },
+        });
+        if (changed.count !== 1)
+          throw new ConflictException('库位资料已变化，请刷新后重试');
+        const updated = await tx.inventoryLocation.findUniqueOrThrow({
+          where: { id },
+        });
+        await this.masterAudit(
+          tx,
+          actor,
+          LOCATION_UPDATE_ACTION,
+          'InventoryLocation',
+          id,
+          this.locationSnapshot(current),
+          { ...this.locationSnapshot(updated), commandHash: hash },
+          reason,
+          requestId,
+        );
+        return updated;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
+  async setLocationStatus(
+    id: string,
+    dto: SetMasterDataStatusDto,
+    actor: AuthUser,
+  ) {
+    this.requireRole(actor, ADMIN_ROLES);
+    const { reason, requestId } = normalizeMasterCommand(
+      dto.reason,
+      dto.idempotencyKey,
+    );
+    const hash = inventoryCommandHash({
+      action: 'status',
+      id,
+      enabled: dto.enabled,
+      expectedUpdatedAt: dto.expectedUpdatedAt,
+      reason,
+    });
+    const replayId = await this.masterReplay(
+      LOCATION_STATUS_ACTION,
+      requestId,
+      hash,
+      'InventoryLocation',
+      actor,
+    );
+    if (replayId)
+      return this.prisma.inventoryLocation.findUniqueOrThrow({
+        where: { id: replayId },
+      });
+    return this.prisma.$transaction(
+      async (tx) => {
+        const duplicateId = await this.masterReplay(
+          LOCATION_STATUS_ACTION,
+          requestId,
+          hash,
+          'InventoryLocation',
+          actor,
+          tx,
+        );
+        if (duplicateId)
+          return tx.inventoryLocation.findUniqueOrThrow({
+            where: { id: duplicateId },
+          });
+        const current = await tx.inventoryLocation.findUnique({
+          where: { id },
+        });
+        if (!current) throw new NotFoundException('库位不存在');
+        assertMasterDataVersion(current.updatedAt, dto.expectedUpdatedAt);
+        if (current.enabled === dto.enabled)
+          throw new ConflictException(
+            dto.enabled ? '库位已经启用' : '库位已经停用',
+          );
+        if (!dto.enabled) await this.assertLocationCanDisable(tx, id);
+        const changed = await tx.inventoryLocation.updateMany({
+          where: {
+            id,
+            enabled: current.enabled,
+            updatedAt: new Date(dto.expectedUpdatedAt),
+          },
+          data: { enabled: dto.enabled },
+        });
+        if (changed.count !== 1)
+          throw new ConflictException('库位状态已变化，请刷新后重试');
+        const updated = await tx.inventoryLocation.findUniqueOrThrow({
+          where: { id },
+        });
+        await this.masterAudit(
+          tx,
+          actor,
+          LOCATION_STATUS_ACTION,
+          'InventoryLocation',
+          id,
+          this.locationSnapshot(current),
+          { ...this.locationSnapshot(updated), commandHash: hash },
+          reason,
+          requestId,
+        );
+        return updated;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
   async createPurchaseOrder(dto: CreatePurchaseOrderDto, actor: AuthUser) {
@@ -167,6 +787,20 @@ export class InventoryOperationsService {
         locations.length !== locationIds.length
       ) {
         throw new NotFoundException('采购商品或收货库位不存在');
+      }
+      const expectedMode =
+        supplier.type === SupplierType.CONSIGNMENT
+          ? InventoryMode.CONSIGNMENT
+          : InventoryMode.PURCHASE;
+      if (
+        items.some(
+          (item) =>
+            item.supplierId !== supplier.id || item.mode !== expectedMode,
+        )
+      ) {
+        throw new BadRequestException(
+          '采购商品必须属于所选供应商且经营模式一致',
+        );
       }
       return tx.purchaseOrder.create({
         data: {
@@ -286,9 +920,14 @@ export class InventoryOperationsService {
       async (tx) => {
         const order = await tx.purchaseOrder.findUnique({
           where: { id },
-          include: { supplier: true, lines: { include: { item: true } } },
+          include: {
+            supplier: true,
+            lines: { include: { item: true, location: true } },
+          },
         });
         if (!order) throw new NotFoundException('采购单不存在');
+        if (order.supplier.enabled === false)
+          throw new ConflictException('供应商已停用，不能继续收货');
         if (
           order.status !== PurchaseOrderStatus.APPROVED &&
           order.status !== PurchaseOrderStatus.PARTIAL_RECEIVED
@@ -316,6 +955,8 @@ export class InventoryOperationsService {
         for (const [lineId, quantity] of receivedByLine) {
           const line = order.lines.find((entry) => entry.id === lineId);
           if (!line) throw new NotFoundException('采购收货明细不存在');
+          if (line.item.enabled === false || line.location?.enabled === false)
+            throw new ConflictException('采购商品或收货库位已停用');
           if (quantity > line.orderedQuantity - line.receivedQuantity) {
             throw new BadRequestException('收货数量超过采购未收数量');
           }
@@ -463,8 +1104,13 @@ export class InventoryOperationsService {
   startStocktake(id: string, actor: AuthUser) {
     this.requireRole(actor, FRONT_ROLES);
     return this.prisma.$transaction(async (tx) => {
-      const stocktake = await tx.stocktake.findUnique({ where: { id } });
+      const stocktake = await tx.stocktake.findUnique({
+        where: { id },
+        include: { location: true },
+      });
       if (!stocktake) throw new NotFoundException('盘点单不存在');
+      if (stocktake.location?.enabled === false)
+        throw new ConflictException('盘点库位已停用');
       if (stocktake.status === StocktakeStatus.COUNTING) return stocktake;
       if (stocktake.status !== StocktakeStatus.DRAFT)
         throw new ConflictException('当前盘点单不能开始盘点');
@@ -834,7 +1480,11 @@ export class InventoryOperationsService {
       async (tx) => {
         const operation = await tx.inventoryOperation.findUnique({
           where: { id },
-          include: { item: true },
+          include: {
+            item: true,
+            sourceLocation: true,
+            targetLocation: true,
+          },
         });
         if (!operation) throw new NotFoundException('库存业务单不存在');
         if (operation.status === InventoryOperationStatus.POSTED) {
@@ -844,6 +1494,13 @@ export class InventoryOperationsService {
         }
         if (operation.status !== InventoryOperationStatus.APPROVED)
           throw new ConflictException('库存业务单尚未审批');
+        if (
+          operation.item.enabled === false ||
+          operation.sourceLocation.enabled === false ||
+          operation.targetLocation?.enabled === false
+        ) {
+          throw new ConflictException('商品或库位已停用，不能过账');
+        }
         const source = await this.reconciledBalance(
           tx,
           operation.item,
@@ -1090,6 +1747,225 @@ export class InventoryOperationsService {
       }
     }
     return balance;
+  }
+
+  private async executeMasterCreate<T>(
+    execute: () => Promise<T>,
+    replay: () => Promise<T | null>,
+  ) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await execute();
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2034' &&
+          attempt === 0
+        ) {
+          continue;
+        }
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          (error.code === 'P2002' || error.code === 'P2034')
+        ) {
+          const duplicate = await replay();
+          if (duplicate) return duplicate;
+        }
+        throw error;
+      }
+    }
+    throw new ConflictException('库存主数据创建并发冲突，请重试');
+  }
+
+  private async masterReplay(
+    action: string,
+    requestId: string,
+    hash: string,
+    objectType: string,
+    actor: AuthUser,
+    transaction?: Prisma.TransactionClient,
+  ) {
+    const client = transaction ?? this.prisma;
+    const audit = await client.auditLog.findFirst({
+      where: { action, requestId, objectType },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!audit) return null;
+    if (audit.actorId !== actor.sub)
+      throw new ConflictException('库存主数据幂等键已由其他操作人使用');
+    const value =
+      audit.newValue && typeof audit.newValue === 'object'
+        ? (audit.newValue as Record<string, unknown>)
+        : null;
+    if (value?.commandHash !== hash)
+      throw new ConflictException('幂等键已用于其他库存主数据指令');
+    if (!audit.objectId)
+      throw new ConflictException('库存主数据幂等记录不完整，请联系管理员');
+    return audit.objectId;
+  }
+
+  private masterAudit(
+    tx: Prisma.TransactionClient,
+    actor: AuthUser,
+    action: string,
+    objectType: string,
+    objectId: string,
+    oldValue: Record<string, unknown>,
+    newValue: Record<string, unknown>,
+    reason: string,
+    requestId: string,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        actorId: actor.sub,
+        actorRole: actor.roles[0],
+        action,
+        objectType,
+        objectId,
+        oldValue: oldValue as never,
+        newValue: newValue as never,
+        reason,
+        requestId,
+      },
+    });
+  }
+
+  private validateSettlementRule(
+    type: SupplierType,
+    value: Record<string, unknown>,
+  ) {
+    const cycle = value.settlementCycle;
+    if (!['PER_ORDER', 'WEEKLY', 'MONTHLY'].includes(String(cycle ?? ''))) {
+      throw new BadRequestException('结算周期必须为逐单、周结或月结');
+    }
+    if (type === SupplierType.CONSIGNMENT) {
+      const commissionRateBps = Number(value.commissionRateBps);
+      if (
+        !Number.isInteger(commissionRateBps) ||
+        commissionRateBps < 0 ||
+        commissionRateBps > 10_000
+      ) {
+        throw new BadRequestException('寄售供应商必须配置 0-10000 的分成基点');
+      }
+      return;
+    }
+    const paymentTermsDays = Number(value.paymentTermsDays);
+    if (
+      !Number.isInteger(paymentTermsDays) ||
+      paymentTermsDays < 0 ||
+      paymentTermsDays > 365
+    ) {
+      throw new BadRequestException('自营采购供应商必须配置 0-365 天账期');
+    }
+  }
+
+  private async assertLocationCanDisable(
+    tx: Prisma.TransactionClient,
+    locationId: string,
+  ) {
+    const [balance, defaultItems, purchaseLines, stocktakes, operations] =
+      await Promise.all([
+        tx.inventoryStockBalance.aggregate({
+          where: { locationId },
+          _sum: { quantity: true },
+        }),
+        tx.inventoryItem.count({
+          where: { defaultLocationId: locationId, enabled: true },
+        }),
+        tx.purchaseOrderLine.count({
+          where: {
+            locationId,
+            purchaseOrder: {
+              status: {
+                in: [
+                  PurchaseOrderStatus.DRAFT,
+                  PurchaseOrderStatus.SUBMITTED,
+                  PurchaseOrderStatus.APPROVED,
+                  PurchaseOrderStatus.PARTIAL_RECEIVED,
+                ],
+              },
+            },
+          },
+        }),
+        tx.stocktake.count({
+          where: {
+            locationId,
+            status: {
+              in: [
+                StocktakeStatus.DRAFT,
+                StocktakeStatus.COUNTING,
+                StocktakeStatus.REVIEW,
+              ],
+            },
+          },
+        }),
+        tx.inventoryOperation.count({
+          where: {
+            OR: [
+              { sourceLocationId: locationId },
+              { targetLocationId: locationId },
+            ],
+            status: {
+              in: [
+                InventoryOperationStatus.DRAFT,
+                InventoryOperationStatus.SUBMITTED,
+                InventoryOperationStatus.APPROVED,
+              ],
+            },
+          },
+        }),
+      ]);
+    const blockers = [
+      Number(balance._sum.quantity || 0)
+        ? `现存数量 ${Number(balance._sum.quantity || 0)}`
+        : '',
+      defaultItems ? `启用商品默认库位 ${defaultItems}` : '',
+      purchaseLines ? `未完采购明细 ${purchaseLines}` : '',
+      stocktakes ? `未完盘点单 ${stocktakes}` : '',
+      operations ? `未过账库存单 ${operations}` : '',
+    ].filter(Boolean);
+    if (blockers.length)
+      throw new ConflictException(`库位暂不能停用：${blockers.join('、')}`);
+  }
+
+  private supplierSnapshot(supplier: {
+    id: string;
+    code: string;
+    name: string;
+    type: SupplierType;
+    contactName: string | null;
+    contactPhone: string | null;
+    settlementRule: Prisma.JsonValue | null;
+    enabled: boolean;
+    updatedAt: Date;
+  }) {
+    return {
+      id: supplier.id,
+      code: supplier.code,
+      name: supplier.name,
+      type: supplier.type,
+      contactName: supplier.contactName,
+      contactPhone: supplier.contactPhone,
+      settlementRule: supplier.settlementRule,
+      enabled: supplier.enabled,
+      updatedAt: supplier.updatedAt.toISOString(),
+    };
+  }
+
+  private locationSnapshot(location: {
+    id: string;
+    code: string;
+    name: string;
+    enabled: boolean;
+    updatedAt: Date;
+  }) {
+    return {
+      id: location.id,
+      code: location.code,
+      name: location.name,
+      enabled: location.enabled,
+      updatedAt: location.updatedAt.toISOString(),
+    };
   }
 
   private batch(value: string | null | undefined) {

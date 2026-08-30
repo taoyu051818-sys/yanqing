@@ -9,10 +9,11 @@
 | `orders` | Orders、OrderItems、Payments、Refunds |
 | `members` | Members、Accounts、AccountTransactions |
 | `training` | TrainingEnrollments、TrainingSessions、TrainingAttendances、TrainingRevenue、TrainingSettlements |
+| `events` | Orders、OrderItems、Payments、Refunds、Events、EventTeams、EventMatches、EventPrizeAwards |
 | `alliance` | Merchants、CouponTemplates、CouponCodes、AllianceSettlements |
-| `inventory` | InventoryItems、InventoryTransactions |
+| `inventory` | 商品 Orders/OrderItems/Payments/Refunds、Suppliers、InventoryLocations、InventoryItems、InventoryStockBalances、InventoryTransactions、PurchaseOrders/Lines/Receipts/ReceiptLines、Stocktakes/Lines、InventoryOperations、ConsignmentPayableEntries、ConsignmentSettlements/Lines/Transitions |
 | `audit` | AuditLogs、ReconciliationPeriods |
-| `finance` | Payments、Refunds、AccountTransactions、TrainingRevenue、TrainingSettlements、AllianceSettlements、ReconciliationPeriods |
+| `finance` | Payments、Refunds、AccountTransactions、TrainingRevenue、TrainingSettlements、AllianceSettlements、ConsignmentPayableEntries、ConsignmentSettlements/Lines/Transitions、ReconciliationPeriods |
 | `all` / `migration` | 上述全部业务工作表的去重合集 |
 
 每个文件第一张表固定为 `ExportManifest`，记录 scope、导出人、导出角色、导出时间、单表行数和是否触及 10,000 行上限。触及上限意味着应按后续批次或专用迁移工具继续提取，不能把该文件认定为完整数据库备份。
@@ -25,6 +26,7 @@
 - 会员表采用字段白名单，不导出微信 OpenID 等登录标识；所有名为 phone 的字段统一脱敏。
 - 支付表保留支付单号、渠道、金额、状态与第三方交易号，但不导出原始 provider payload。
 - 空数据集仍保留工作表和表头，写入“暂无数据”。
+- Excel 工作表名受 31 字符限制，`ConsignmentTransitions` 对应数据库 `ConsignmentSettlementTransition`；与应付、结算单、明细行一起可还原寄售对账证据链。
 
 ## 当前证据边界
 

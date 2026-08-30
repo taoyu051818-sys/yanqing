@@ -9,6 +9,7 @@ import { endpoints } from "../../../../services/api";
 import { useSessionStore } from "../../../../stores/session";
 import type { CourtAvailability } from "../../../../types/domain";
 import { money, shortDate } from "../../../../utils/format";
+import { withPendingCreationKey } from "../../../../utils/pending-creation-key";
 
 const session = useSessionStore();
 const games = ref<any[]>([]);
@@ -62,6 +63,11 @@ const seated = computed(() =>
 const checkedIn = computed(() =>
   registrations.value.filter((item: any) => item.status === "CHECKED_IN").length,
 );
+const hasPendingRegistrationRefund = computed(() =>
+  registrations.value.some(
+    (item: any) => item.order?.status === "REFUND_PENDING",
+  ),
+);
 const selectableCourts = computed(() =>
   (availability.value?.courts || []).filter(
     (court) => court.enabled && !["TRAINING", "MAINTENANCE"].includes(court.usage),
@@ -77,7 +83,13 @@ const metrics = computed(() => [
 const canCompleteSelectedGame = computed(() => Boolean(
   selectedGame.value &&
   ["OPEN", "FULL", "IN_PROGRESS"].includes(selectedGame.value.status) &&
-  new Date(selectedGame.value.startsAt).getTime() <= Date.now(),
+  !hasPendingRegistrationRefund.value &&
+  new Date(selectedGame.value.endsAt).getTime() <= Date.now(),
+));
+const canCancelSelectedGame = computed(() => Boolean(
+  selectedGame.value &&
+  ["DRAFT", "OPEN", "FULL"].includes(selectedGame.value.status) &&
+  new Date(selectedGame.value.startsAt).getTime() > Date.now(),
 ));
 
 function shanghaiDate(offsetDays = 0) {
@@ -257,14 +269,76 @@ async function checkIn(player: any) {
     content: `${player.user?.displayName || player.displayName || "报名球友"} · ${game.title}`,
   });
   if (!confirmed.confirm) return;
+  const startsAt = new Date(game.startsAt).getTime();
+  if (Number.isFinite(startsAt) && Date.now() < startsAt - 30 * 60_000) {
+    errorMessage.value = "未到签到窗口，不能提前签到。";
+    return;
+  }
+  let overrideReason: string | undefined;
+  if (Number.isFinite(startsAt) && Date.now() > startsAt + 30 * 60_000) {
+    if (!session.roles.some((role) => ["ADMIN", "SUPER_ADMIN"].includes(role))) {
+      errorMessage.value = "已过签到窗口，请由管理员历史补录。";
+      return;
+    }
+    const override = await uni.showModal({
+      title: "历史补录签到",
+      content: "",
+      editable: true,
+      placeholderText: "填写迟到补录原因（2-300字）",
+      confirmText: "确认补录",
+    });
+    overrideReason = String(override.content || "").trim();
+    if (!override.confirm || overrideReason.length < 2) return;
+  }
   actionKey.value = `checkin:${player.id}`;
   errorMessage.value = "";
   try {
-    await endpoints.checkInGame(game.id, player.userId || player.id);
+    await endpoints.checkInGame(
+      game.id,
+      player.userId || player.id,
+      overrideReason ? { overrideReason } : {},
+    );
     uni.showToast({ title: "已签到", icon: "success" });
     await load();
   } catch (cause: any) {
     errorMessage.value = cause?.message || "签到失败。";
+  } finally {
+    actionKey.value = "";
+  }
+}
+
+async function cancelGame() {
+  const game = selectedGame.value;
+  if (!game || !canCancelSelectedGame.value || actionKey.value) return;
+  const modal = await uni.showModal({
+    title: "取消球局",
+    content: "已支付报名只生成待财务审批的退款申请，不会直接退款。",
+    editable: true,
+    placeholderText: "填写取消原因（2-300字）",
+    confirmText: "确认取消",
+  });
+  const reason = String(modal.content || "").trim();
+  if (!modal.confirm || reason.length < 2 || reason.length > 300) {
+    if (modal.confirm) errorMessage.value = "取消原因需要 2-300 个字。";
+    return;
+  }
+  actionKey.value = `cancel:${game.id}`;
+  errorMessage.value = "";
+  const command = { reason };
+  try {
+    const result: any = await withPendingCreationKey(
+      `game.cancel.${game.id}`,
+      command,
+      (idempotencyKey) => endpoints.cancelGame(game.id, { reason, idempotencyKey }),
+    );
+    const refundCount = result?.refundRequests?.length || 0;
+    uni.showToast({
+      title: refundCount ? `已取消，${refundCount}笔退款待审` : "球局已取消",
+      icon: "success",
+    });
+    await load();
+  } catch (cause: any) {
+    errorMessage.value = cause?.message || "球局取消失败。";
   } finally {
     actionKey.value = "";
   }
@@ -338,8 +412,10 @@ onShow(load);
         <text class="muted summary-copy">{{ selectedGame.description || "按实际签到人数结算激励" }}</text>
         <button v-if="selectedGame.status === 'DRAFT'" class="primary" :loading="actionKey === `publish:${selectedGame.id}`" :disabled="Boolean(actionKey)" @tap="publishGame">确认发布球局</button>
         <button v-else-if="canCompleteSelectedGame" class="primary" :loading="actionKey === `complete:${selectedGame.id}`" :disabled="Boolean(actionKey)" @tap="completeGame">结束球局并结算</button>
-        <view v-else-if="['OPEN', 'FULL', 'IN_PROGRESS'].includes(selectedGame.status)" class="settled">尚未到开场时间，暂不能结束球局</view>
+        <view v-else-if="['OPEN', 'FULL', 'IN_PROGRESS'].includes(selectedGame.status)" class="settled">尚未到结束时间，暂不能结束球局</view>
         <view v-else-if="selectedGame.status === 'COMPLETED'" class="settled">已结束 · 激励按实际签到人数进入观察期</view>
+        <view v-else-if="selectedGame.status === 'CANCELLED'" class="settled">已取消 · 已支付报名退款进入财务审批队列</view>
+        <button v-if="canCancelSelectedGame" class="danger" :loading="actionKey === `cancel:${selectedGame.id}`" :disabled="Boolean(actionKey)" @tap="cancelGame">取消球局并发起退款</button>
       </view>
 
       <view class="section-title">候补队列 <text class="section-note">{{ waitlisted.length }} 人 · FIFO</text></view>
@@ -353,7 +429,7 @@ onShow(load);
       <view class="section-title">报名与现场签到 <text class="section-note">已到 {{ checkedIn }} / {{ seated.length }}</text></view>
       <view v-for="player in seated" :key="player.id" class="card player-row">
         <view><text class="player-name">{{ player.user?.displayName || player.displayName || "报名球友" }}</text><text class="muted">状态：{{ player.status }}</text></view>
-        <button v-if="player.status === 'PAID' && selectedGame.status !== 'COMPLETED'" class="secondary inline" :loading="actionKey === `checkin:${player.id}`" :disabled="Boolean(actionKey)" @tap="checkIn(player)">签到</button><StatusBadge v-else :value="player.status" />
+        <button v-if="player.status === 'PAID' && player.order?.status !== 'REFUND_PENDING' && selectedGame.status !== 'COMPLETED'" class="secondary inline" :loading="actionKey === `checkin:${player.id}`" :disabled="Boolean(actionKey)" @tap="checkIn(player)">签到</button><StatusBadge v-else :value="player.order?.status === 'REFUND_PENDING' ? 'REFUND_PENDING' : player.status" />
       </view>
       <view v-if="!seated.length" class="empty card">当前球局暂无有效报名。</view>
     </template>

@@ -10,6 +10,8 @@ import type { NextFunction, Request, Response } from 'express'
 import { AppModule } from './app.module.js'
 import { AllExceptionsFilter } from './common/http/all-exceptions.filter.js'
 import { ApiResponseInterceptor } from './common/http/api-response.interceptor.js'
+import { HttpMutationAuditInterceptor } from './common/http/http-mutation-audit.interceptor.js'
+import { PrismaService } from './database/prisma.service.js'
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: false, rawBody: true })
@@ -41,7 +43,10 @@ async function bootstrap() {
       stopAtFirstError: false,
     }),
   )
-  app.useGlobalInterceptors(new ApiResponseInterceptor())
+  app.useGlobalInterceptors(
+    new HttpMutationAuditInterceptor(app.get(PrismaService)),
+    new ApiResponseInterceptor(),
+  )
   app.useGlobalFilters(new AllExceptionsFilter())
 
   const swaggerConfig = new DocumentBuilder()

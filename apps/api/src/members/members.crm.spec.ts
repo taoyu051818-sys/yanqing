@@ -2,7 +2,7 @@ import { ConflictException, ForbiddenException, NotFoundException } from '@nestj
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
-import { AppRole, LeadStatus, SourceChannel } from '../generated/prisma/enums.js'
+import { AppRole, BusinessType, LeadStatus, OrderStatus, SourceChannel } from '../generated/prisma/enums.js'
 import { MembersService } from './members.service.js'
 
 const frontDesk: AuthUser = { sub: 'frontdesk-1', displayName: '前台', roles: [AppRole.FRONT_DESK] }
@@ -39,6 +39,8 @@ const makePrisma = () => {
       update: vi.fn(),
       updateMany: vi.fn(),
     },
+    memberProfile: { findMany: vi.fn().mockResolvedValue([]) },
+    order: { findMany: vi.fn().mockResolvedValue([]) },
     leadFollowUp: { create: vi.fn() },
     user: { findUnique: vi.fn() },
     auditLog: { create: vi.fn().mockResolvedValue({}) },
@@ -49,6 +51,8 @@ const makePrisma = () => {
       count: vi.fn().mockResolvedValue(0),
       findFirst: vi.fn().mockResolvedValue(null),
     },
+    memberProfile: { findMany: vi.fn().mockResolvedValue([]) },
+    order: { findMany: vi.fn().mockResolvedValue([]) },
     user: { findUnique: vi.fn() },
     trainingEnrollment: { findFirst: vi.fn() },
     $transaction: vi.fn(async (work: any) => Array.isArray(work) ? Promise.all(work) : work(tx)),
@@ -57,6 +61,73 @@ const makePrisma = () => {
 }
 
 describe('MembersService customer leads', () => {
+  it('builds an anonymous source/campaign funnel through paid and training conversion', async () => {
+    const { prisma, service } = makePrisma()
+    const periodStart = new Date('2026-08-01T00:00:00.000Z')
+    const periodEnd = new Date('2026-09-01T00:00:00.000Z')
+    prisma.memberProfile.findMany.mockResolvedValue([{
+      userId: 'member-1',
+      sourceChannel: SourceChannel.MINI_PROGRAM,
+      createdAt: new Date('2026-08-03T00:00:00.000Z'),
+      firstVisitAt: new Date('2026-08-06T00:00:00.000Z'),
+    }])
+    prisma.order.findMany.mockResolvedValue([
+      {
+        memberId: 'member-1', sourceChannel: SourceChannel.MINI_PROGRAM,
+        businessType: BusinessType.VENUE, status: OrderStatus.COMPLETED,
+        paidCents: 8_800, refundedCents: 0,
+      },
+      {
+        memberId: 'member-1', sourceChannel: SourceChannel.MINI_PROGRAM,
+        businessType: BusinessType.TRAINING, status: OrderStatus.PAID,
+        paidCents: 128_000, refundedCents: 8_000,
+      },
+    ])
+    prisma.customerLead.findMany.mockResolvedValue([{
+      sourceChannel: SourceChannel.DOUYIN,
+      campaign: '暑期体验',
+      status: LeadStatus.CONVERTED,
+      convertedMemberId: 'member-1',
+      createdAt: new Date('2026-08-01T12:00:00.000Z'),
+      convertedAt: new Date('2026-08-06T00:00:00.000Z'),
+      followUps: [
+        { statusAfter: LeadStatus.CONTACTING },
+        { statusAfter: LeadStatus.TRIAL_RESERVED },
+        { statusAfter: LeadStatus.ATTENDED },
+      ],
+    }])
+
+    const result = await service.leadFunnel({
+      from: periodStart.toISOString(),
+      to: periodEnd.toISOString(),
+    })
+
+    expect(result.privacy).toBe('AGGREGATED_NO_PII')
+    expect(result.sources).toEqual([expect.objectContaining({
+      sourceChannel: SourceChannel.DOUYIN,
+      leads: 1,
+      contacted: 1,
+      trialReserved: 1,
+      attended: 1,
+      converted: 1,
+      registeredMembers: 1,
+      firstVisits: 1,
+      payingCustomers: 1,
+      paidOrders: 2,
+      netGmvCents: 128_800,
+      trainingCustomers: 1,
+      trainingNetGmvCents: 120_000,
+      leadToPaidRate: 100,
+    })])
+    expect(result.campaigns).toEqual([expect.objectContaining({
+      sourceChannel: SourceChannel.DOUYIN,
+      campaign: '暑期体验',
+      netGmvCents: 128_800,
+    })])
+    expect(JSON.stringify(result)).not.toContain('member-1')
+    expect(JSON.stringify(result)).not.toContain('138')
+  })
+
   it('scopes coach lists to assigned or class-related leads and hides phone data', async () => {
     const { prisma, service } = makePrisma()
     prisma.customerLead.findMany.mockResolvedValue([{ ...lead(), owner: null, referrer: null, convertedMember: null, followUps: [] }])

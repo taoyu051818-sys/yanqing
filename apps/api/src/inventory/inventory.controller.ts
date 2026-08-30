@@ -17,6 +17,10 @@ import {
   PostInventoryOperationDto,
   PostStocktakeDto,
   ReceivePurchaseOrderDto,
+  SetMasterDataStatusDto,
+  UpdateInventoryItemDto,
+  UpdateInventoryLocationDto,
+  UpdateSupplierDto,
 } from './inventory.dto.js';
 import { InventoryOperationsService } from './inventory-operations.service.js';
 import { InventoryService } from './inventory.service.js';
@@ -39,18 +43,28 @@ export class InventoryController {
   ) {}
 
   @Get()
-  list() {
-    return this.inventory.list();
+  list(@CurrentUser() actor: AuthUser) {
+    return this.inventory.list(actor);
   }
 
   @Get('low-stock')
-  lowStock() {
-    return this.inventory.lowStock();
+  lowStock(@CurrentUser() actor: AuthUser) {
+    return this.inventory.lowStock(actor);
+  }
+
+  @Get('items/:id')
+  itemDetail(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
+    return this.inventory.detail(id, actor);
   }
 
   @Get('suppliers')
-  suppliers() {
-    return this.operations.suppliers();
+  suppliers(@CurrentUser() actor: AuthUser) {
+    return this.operations.suppliers(actor);
+  }
+
+  @Get('suppliers/:id')
+  supplierDetail(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
+    return this.operations.supplierDetail(id, actor);
   }
 
   @Post('suppliers')
@@ -62,9 +76,34 @@ export class InventoryController {
     return this.operations.createSupplier(dto, actor);
   }
 
+  @Post('suppliers/:id/update')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  updateSupplier(
+    @Param('id') id: string,
+    @Body() dto: UpdateSupplierDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.operations.updateSupplier(id, dto, actor);
+  }
+
+  @Post('suppliers/:id/status')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  setSupplierStatus(
+    @Param('id') id: string,
+    @Body() dto: SetMasterDataStatusDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.operations.setSupplierStatus(id, dto, actor);
+  }
+
   @Get('locations')
-  locations() {
-    return this.operations.locations();
+  locations(@CurrentUser() actor: AuthUser) {
+    return this.operations.locations(actor);
+  }
+
+  @Get('locations/:id')
+  locationDetail(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
+    return this.operations.locationDetail(id, actor);
   }
 
   @Post('locations')
@@ -76,9 +115,29 @@ export class InventoryController {
     return this.operations.createLocation(dto, actor);
   }
 
+  @Post('locations/:id/update')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  updateLocation(
+    @Param('id') id: string,
+    @Body() dto: UpdateInventoryLocationDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.operations.updateLocation(id, dto, actor);
+  }
+
+  @Post('locations/:id/status')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  setLocationStatus(
+    @Param('id') id: string,
+    @Body() dto: SetMasterDataStatusDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.operations.setLocationStatus(id, dto, actor);
+  }
+
   @Get('purchase-orders')
-  purchaseOrders() {
-    return this.operations.purchaseOrders();
+  purchaseOrders(@CurrentUser() actor: AuthUser) {
+    return this.operations.purchaseOrders(actor);
   }
 
   @Post('purchase-orders')
@@ -126,8 +185,8 @@ export class InventoryController {
   }
 
   @Get('stocktakes')
-  stocktakes() {
-    return this.operations.stocktakes();
+  stocktakes(@CurrentUser() actor: AuthUser) {
+    return this.operations.stocktakes(actor);
   }
 
   @Post('stocktakes')
@@ -173,8 +232,8 @@ export class InventoryController {
   }
 
   @Get('operations')
-  operationDocuments() {
-    return this.operations.operations();
+  operationDocuments(@CurrentUser() actor: AuthUser) {
+    return this.operations.operations(actor);
   }
 
   @Post('operations')
@@ -220,8 +279,28 @@ export class InventoryController {
 
   @Post()
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
-  create(@Body() dto: CreateInventoryItemDto) {
-    return this.inventory.create(dto);
+  create(@Body() dto: CreateInventoryItemDto, @CurrentUser() actor: AuthUser) {
+    return this.inventory.create(dto, actor);
+  }
+
+  @Post('items/:id/update')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  updateItem(
+    @Param('id') id: string,
+    @Body() dto: UpdateInventoryItemDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.inventory.update(id, dto, actor);
+  }
+
+  @Post('items/:id/status')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  setItemStatus(
+    @Param('id') id: string,
+    @Body() dto: SetMasterDataStatusDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.inventory.setStatus(id, dto, actor);
   }
 
   @Post(':id/transactions')

@@ -5,10 +5,14 @@ import { useSessionStore } from '../../stores/session'
 import { endpoints } from '../../services/api'
 import { money } from '../../utils/format'
 import { isMockMode } from '../../services/http'
+import { withPendingCreationKey } from '../../utils/pending-creation-key'
 
 const session = useSessionStore()
 const referrerId = ref('')
 const bindingReferral = ref(false)
+const erasureRequests = ref<any[]>([])
+const privacyLoading = ref(false)
+const privacyError = ref('')
 const accountLabel: Record<string, string> = {
   CASH_PRINCIPAL: '现金本金', GIFT_BALANCE: '赠送余额', BADMINTON_COIN: '羽毛球币',
   EVENT_POINTS: '成人赛事积分', GROWTH_POINTS: '青少年成长积分', YOUTH_GROWTH_POINTS: '青少年成长积分',
@@ -17,7 +21,13 @@ const roleLabel: Record<string, string> = {
   MEMBER: '会员', COACH: '教练', FRONT_DESK: '前台', HOST: '主理人', MERCHANT: '联盟商户',
   FINANCE: '财务', ADMIN: '管理员', SUPER_ADMIN: '超级管理员',
 }
+const privacyStatusLabel: Record<string, string> = {
+  REQUESTED: '待复核', CANCELLED: '已撤回', REJECTED: '已驳回', COMPLETED: '已匿名化',
+}
 const displayRoles = computed(() => session.roles.map((role) => roleLabel[role] || role).join(' · '))
+const hasMemberProfile = computed(() => Boolean(session.user?.memberProfile))
+const openErasureRequest = computed(() => erasureRequests.value.find((item) => item.status === 'REQUESTED'))
+const latestErasureRequest = computed(() => erasureRequests.value[0])
 const menus = computed(() => [
   ...(isMockMode ? [{ title: '管理员演示通道', subtitle: '切换会员、前台、教练、主理人、商户和管理端', url: '/packages/admin/pages/switch/index' }] : []),
   { title: '我的订单', subtitle: '支付、退款及消费记录', url: '/pages/order/index' },
@@ -68,7 +78,91 @@ async function bindReferral() {
     bindingReferral.value = false
   }
 }
-onShow(() => session.hydrate())
+
+async function loadPrivacyRequests() {
+  if (!session.user || !hasMemberProfile.value) {
+    erasureRequests.value = []
+    return
+  }
+  privacyLoading.value = true
+  privacyError.value = ''
+  try {
+    erasureRequests.value = await endpoints.myDataErasureRequests()
+  } catch (cause: any) {
+    privacyError.value = cause?.message || '注销申请状态暂时无法同步'
+  } finally {
+    privacyLoading.value = false
+  }
+}
+
+async function requestErasure() {
+  if (!session.user || openErasureRequest.value) return
+  const input = await uni.showModal({
+    title: '申请账号注销与匿名化',
+    content: '',
+    editable: true,
+    placeholderText: '请填写申请原因（至少2个字）',
+  })
+  const reason = input.content?.trim() || ''
+  if (!input.confirm) return
+  if (reason.length < 2) {
+    uni.showToast({ title: '请填写至少2个字的申请原因', icon: 'none' })
+    return
+  }
+  const confirmed = await uni.showModal({
+    title: '再次确认提交',
+    content: '提交不会立即删除数据。管理员会先核对余额、订单、退款、课包、报名和券；业务全部结清并停用账号后，才会做不可逆匿名化。',
+  })
+  if (!confirmed.confirm) return
+  privacyLoading.value = true
+  try {
+    const command = { reason }
+    await withPendingCreationKey('privacy.erasure.request', command, (idempotencyKey) =>
+      endpoints.createDataErasureRequest({ ...command, idempotencyKey }),
+    )
+    uni.showToast({ title: '注销申请已提交', icon: 'success' })
+    await loadPrivacyRequests()
+  } catch (cause: any) {
+    uni.showToast({ title: cause?.message || '注销申请提交失败', icon: 'none' })
+  } finally {
+    privacyLoading.value = false
+  }
+}
+
+async function cancelErasure() {
+  const request = openErasureRequest.value
+  if (!request) return
+  const input = await uni.showModal({
+    title: '撤回注销申请',
+    content: '',
+    editable: true,
+    placeholderText: '请填写撤回原因',
+  })
+  const reason = input.content?.trim() || ''
+  if (!input.confirm) return
+  if (reason.length < 2) {
+    uni.showToast({ title: '请填写至少2个字的撤回原因', icon: 'none' })
+    return
+  }
+  privacyLoading.value = true
+  try {
+    const command = { requestId: request.id, reason }
+    await withPendingCreationKey(`privacy.erasure.cancel.${request.id}`, command, (idempotencyKey) =>
+      endpoints.cancelDataErasureRequest(request.id, { reason, idempotencyKey }),
+    )
+    uni.showToast({ title: '注销申请已撤回', icon: 'success' })
+    await loadPrivacyRequests()
+  } catch (cause: any) {
+    uni.showToast({ title: cause?.message || '撤回失败', icon: 'none' })
+  } finally {
+    privacyLoading.value = false
+  }
+}
+
+onShow(async () => {
+  await session.hydrate()
+  await loadPrivacyRequests()
+})
 </script>
 
 <template>
@@ -92,7 +186,7 @@ onShow(() => session.hydrate())
       </view>
     </view>
 
-    <view v-if="session.user" class="referral card">
+    <view v-if="session.user && hasMemberProfile" class="referral card">
       <view class="referral-head">
         <view><text class="menu-title">一层直接推荐</text><text class="muted">奖励只来自直接推荐的有效首单，不发展下级</text></view>
         <button size="mini" class="copy" @tap="copyReferralCode">复制我的会员码</button>
@@ -110,6 +204,18 @@ onShow(() => session.hydrate())
     <view class="menu card">
       <view v-for="menu in menus" :key="menu.url" class="menu-item" @tap="openPage(menu.url)">
         <view><text class="menu-title">{{ menu.title }}</text><text class="muted">{{ menu.subtitle }}</text></view><text>›</text>
+      </view>
+    </view>
+    <view v-if="session.user && hasMemberProfile" class="privacy-card card">
+      <view class="privacy-head">
+        <view><text class="menu-title">隐私与账号注销</text><text class="muted">先结清业务，再由另一名超级管理员复核匿名化</text></view>
+        <text v-if="latestErasureRequest" class="privacy-status">{{ privacyStatusLabel[latestErasureRequest.status] || latestErasureRequest.status }}</text>
+      </view>
+      <text class="privacy-note">匿名化会移除微信标识、手机号、头像、姓名和监护学员身份信息；依法需保留的订单、支付、退款、账本和审计记录只保留匿名内部编号。</text>
+      <text v-if="privacyError" class="privacy-error">{{ privacyError }}</text>
+      <view class="privacy-actions">
+        <button v-if="!openErasureRequest" size="mini" :loading="privacyLoading" :disabled="privacyLoading" @tap="requestErasure">申请注销与匿名化</button>
+        <button v-else size="mini" class="cancel-erasure" :loading="privacyLoading" :disabled="privacyLoading" @tap="cancelErasure">撤回待处理申请</button>
       </view>
     </view>
     <button v-if="session.user" class="danger" @tap="logout">退出登录</button>
@@ -139,4 +245,12 @@ onShow(() => session.hydrate())
 .menu-item { display: flex; align-items: center; justify-content: space-between; padding: 28rpx 0; border-bottom: 1rpx solid #edf0ed; }
 .menu-item:last-child { border: none; }
 .menu-title { display: block; margin-bottom: 8rpx; font-weight: 700; }
+.privacy-card { margin-top: 22rpx; padding: 28rpx; }
+.privacy-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18rpx; }
+.privacy-status { flex: 0 0 auto; padding: 7rpx 12rpx; color: #765d24; background: #fff3c8; border-radius: 999rpx; font-size: 20rpx; }
+.privacy-note,.privacy-error { display: block; margin-top: 16rpx; color: #6b7770; font-size: 21rpx; line-height: 1.7; }
+.privacy-error { color: #a13b35; }
+.privacy-actions { display: flex; margin-top: 18rpx; }
+.privacy-actions button { margin: 0; color: #fff; background: #8e3d36; }
+.privacy-actions .cancel-erasure { color: #6b4f20; background: #fff3c8; }
 </style>

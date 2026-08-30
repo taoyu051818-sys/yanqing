@@ -91,6 +91,13 @@ export const endpoints = {
   workItems: (limit = 50) => api.get<WorkItem[]>("/work-items", { limit }),
   availability: (date: string) =>
     api.get<CourtAvailability>("/venues/availability", { date }),
+  venueTimeSlots: () => api.get<any[]>("/venues/time-slots/manage"),
+  managePriceRules: () => api.get<any[]>("/venues/price-rules/manage"),
+  createPriceRule: (data: object) => api.post("/venues/price-rules", data),
+  createPriceRuleVersion: (id: string, data: object) =>
+    api.post(`/venues/price-rules/${id}/versions`, data),
+  setPriceRuleStatus: (id: string, data: object) =>
+    api.post(`/venues/price-rules/${id}/status`, data),
   venueClosures: (params: Record<string, any> = {}) =>
     api.get<VenueClosure[]>("/venues/closures", params),
   createVenueClosure: (data: object) =>
@@ -118,6 +125,8 @@ export const endpoints = {
     api.post(`/games/hosts/${userId}/reject`, { reason }),
   publishGame: (id: string, data: object = {}) =>
     api.post(`/games/${id}/publish`, data),
+  cancelGame: (id: string, data: object) =>
+    api.post(`/games/${id}/cancel`, data),
   registerGame: (id: string, creationIdempotencyKey?: string) =>
     api.post(`/games/${id}/register`, {
       sourceChannel: "MINI_PROGRAM",
@@ -128,6 +137,8 @@ export const endpoints = {
   grantMaturedGameRewards: () => api.post("/games/rewards/grant-matured"),
   events: () => api.get<any[]>("/events"),
   event: (id: string) => api.get<Record<string, any>>(`/events/${id}`),
+  myEventRegistration: (id: string) =>
+    api.get<Record<string, any> | null>(`/events/${id}/registration/me`),
   createEvent: (data: object) => api.post("/events", data),
   publishEvent: (id: string, data: object = {}) =>
     api.post(`/events/${id}/publish`, data),
@@ -136,17 +147,55 @@ export const endpoints = {
       ...data,
       sourceChannel: "MINI_PROGRAM",
     }),
+  promoteEventWaitlist: (id: string) =>
+    api.post(`/events/${id}/promote-waitlist`),
+  cancelEventRegistration: (id: string, data: object) =>
+    api.post(`/events/${id}/registration/cancel`, data),
+  cancelEvent: (id: string, data: object) =>
+    api.post(`/events/${id}/cancel`, data),
   trainingProducts: () => api.get<any[]>("/training/products"),
-  createTrainingProduct: (data: object) =>
-    api.post("/training/products", data),
+  createTrainingProduct: (data: object) => api.post("/training/products", data),
+  updateTrainingProduct: (id: string, data: object) =>
+    api.patch(`/training/products/${id}`, data),
   createTrainingClass: (data: object) => api.post("/training/classes", data),
   trainingStudents: () => api.get<any[]>("/training/students"),
+  adminTrainingStudents: (guardianId?: string) =>
+    api.get<any[]>(
+      "/training/admin/students",
+      guardianId ? { guardianId } : {},
+    ),
   createTrainingStudent: (data: object) => api.post("/training/students", data),
   updateTrainingStudent: (studentId: string, data: object) =>
     api.patch(`/training/students/${studentId}`, data),
   trainingEnrollments: () => api.get<any[]>("/training/enrollments"),
   purchaseTraining: (data: object) => api.post("/training/purchase", data),
   createTrainingSession: (data: object) => api.post("/training/sessions", data),
+  trainingTrials: (params: Record<string, any> = {}) =>
+    api.get<any[]>("/training/trials", params),
+  myTrainingTrials: (params: Record<string, any> = {}) =>
+    api.get<any[]>("/training/trials/mine", params),
+  createTrainingTrial: (data: object) => api.post("/training/trials", data),
+  checkInTrainingTrial: (id: string, data: object) =>
+    api.post(`/training/trials/${id}/check-in`, data),
+  noShowTrainingTrial: (id: string, data: object) =>
+    api.post(`/training/trials/${id}/no-show`, data),
+  assessTrainingTrial: (id: string, data: object) =>
+    api.post(`/training/trials/${id}/assess`, data),
+  convertTrainingTrial: (id: string, data: object) =>
+    api.post(`/training/trials/${id}/convert`, data),
+  loseTrainingTrial: (id: string, data: object) =>
+    api.post(`/training/trials/${id}/lost`, data),
+  cancelTrainingTrial: (id: string, data: object) =>
+    api.post(`/training/trials/${id}/cancel`, data),
+  activeYouthTrainingRule: () => api.get<any>("/training/youth-rules/active"),
+  youthTrainingRules: (params: Record<string, any> = {}) =>
+    api.get<any[]>("/training/youth-rules", params),
+  createYouthTrainingRule: (data: object) =>
+    api.post("/training/youth-rules", data),
+  publishYouthTrainingRule: (id: string, data: object) =>
+    api.post(`/training/youth-rules/${id}/publish`, data),
+  rejectYouthTrainingRule: (id: string, data: object) =>
+    api.post(`/training/youth-rules/${id}/reject`, data),
   accountTransactions: () =>
     api.get<any[]>("/members/me/accounts/transactions"),
   referralRewards: () => api.get<any[]>("/referrals/me/rewards"),
@@ -185,8 +234,50 @@ export const endpoints = {
     api.post(`/alliance/settlements/${id}/settle`),
   inventory: () => api.get<any[]>("/inventory"),
   lowStock: () => api.get<any[]>("/inventory/low-stock"),
+  inventoryItemDetail: (id: string) => api.get<any>(`/inventory/items/${id}`),
+  createInventoryItem: (data: object) => api.post("/inventory", data),
+  updateInventoryItem: (id: string, data: object) =>
+    api.post(`/inventory/items/${id}/update`, data),
+  setInventoryItemStatus: (id: string, data: object) =>
+    api.post(`/inventory/items/${id}/status`, data),
   inventorySuppliers: () => api.get<any[]>("/inventory/suppliers"),
+  inventorySupplierDetail: (id: string) =>
+    api.get<any>(`/inventory/suppliers/${id}`),
+  createInventorySupplier: (data: object) =>
+    api.post("/inventory/suppliers", data),
+  updateInventorySupplier: (id: string, data: object) =>
+    api.post(`/inventory/suppliers/${id}/update`, data),
+  setInventorySupplierStatus: (id: string, data: object) =>
+    api.post(`/inventory/suppliers/${id}/status`, data),
+  consignmentPayables: (params: Record<string, any> = {}) =>
+    api.get<any>("/inventory/consignment/payables", params),
+  consignmentSettlements: (params: Record<string, any> = {}) =>
+    api.get<any>("/inventory/consignment/settlements", params),
+  consignmentSettlement: (id: string) =>
+    api.get<any>(`/inventory/consignment/settlements/${id}`),
+  createConsignmentSettlement: (data: object) =>
+    api.post("/inventory/consignment/settlements", data),
+  submitConsignmentSettlement: (id: string, data: object) =>
+    api.post(`/inventory/consignment/settlements/${id}/submit`, data),
+  confirmConsignmentSettlement: (id: string, data: object) =>
+    api.post(`/inventory/consignment/settlements/${id}/confirm`, data),
+  disputeConsignmentSettlement: (id: string, data: object) =>
+    api.post(`/inventory/consignment/settlements/${id}/dispute`, data),
+  returnConsignmentSettlement: (id: string, data: object) =>
+    api.post(`/inventory/consignment/settlements/${id}/return`, data),
+  settleConsignmentSettlement: (id: string, data: object) =>
+    api.post(`/inventory/consignment/settlements/${id}/settle`, data),
+  voidConsignmentSettlement: (id: string, data: object) =>
+    api.post(`/inventory/consignment/settlements/${id}/void`, data),
   inventoryLocations: () => api.get<any[]>("/inventory/locations"),
+  inventoryLocationDetail: (id: string) =>
+    api.get<any>(`/inventory/locations/${id}`),
+  createInventoryLocation: (data: object) =>
+    api.post("/inventory/locations", data),
+  updateInventoryLocation: (id: string, data: object) =>
+    api.post(`/inventory/locations/${id}/update`, data),
+  setInventoryLocationStatus: (id: string, data: object) =>
+    api.post(`/inventory/locations/${id}/status`, data),
   purchaseOrders: () => api.get<any[]>("/inventory/purchase-orders"),
   createPurchaseOrder: (data: object) =>
     api.post("/inventory/purchase-orders", data),
@@ -233,10 +324,12 @@ export const endpoints = {
     api.post(`/operations/shifts/${id}/review-variance`, data),
   adminEnrollments: () => api.get<any[]>("/training/admin/enrollments"),
   hostedGames: () => api.get<any[]>("/games/hosted/me"),
-  checkInVenueOrder: (orderId: string) =>
-    api.post(`/venues/orders/${orderId}/check-in`),
-  checkInGame: (gameId: string, userId: string) =>
-    api.post(`/games/${gameId}/check-in/${userId}`),
+  checkInVenueOrder: (orderId: string, data: object = {}) =>
+    api.post(`/venues/orders/${orderId}/check-in`, data),
+  fulfillVenueOrder: (orderId: string, data: object) =>
+    api.post(`/venues/orders/${orderId}/fulfillment`, data),
+  checkInGame: (gameId: string, userId: string, data: object = {}) =>
+    api.post(`/games/${gameId}/check-in/${userId}`, data),
   completeGame: (gameId: string) => api.post(`/games/${gameId}/complete`),
   members: () => api.get<any>("/members"),
   member360: (id: string) => api.get<any>(`/members/${id}/360`),
@@ -294,17 +387,19 @@ export const endpoints = {
     api.post(`/training/sessions/${sessionId}/attendance`, data),
   scheduleTrainingMakeup: (sessionId: string, data: object) =>
     api.post(`/training/sessions/${sessionId}/attendance/makeup`, data),
-  completeTrainingSession: (sessionId: string) =>
-    api.post(`/training/sessions/${sessionId}/complete`),
+  completeTrainingSession: (sessionId: string, data: object = {}) =>
+    api.post(`/training/sessions/${sessionId}/complete`, data),
   trainingSessions: () => api.get<any[]>("/training/sessions"),
   nextEventRound: (eventId: string) =>
     api.post(`/events/${eventId}/rounds/next`),
+  correctEventPairings: (eventId: string, round: number, data: object) =>
+    api.post(`/events/${eventId}/rounds/${round}/pairings/correct`, data),
   scoreEventMatch: (matchId: string, scoreA: number, scoreB: number) =>
     api.post(`/events/matches/${matchId}/score`, { scoreA, scoreB }),
   correctEventScore: (matchId: string, data: object) =>
     api.post(`/events/matches/${matchId}/correct`, data),
-  checkInEventTeam: (eventId: string, teamId: string) =>
-    api.post(`/events/${eventId}/teams/${teamId}/check-in`),
+  checkInEventTeam: (eventId: string, teamId: string, data: object = {}) =>
+    api.post(`/events/${eventId}/teams/${teamId}/check-in`, data),
   finishEvent: (eventId: string) => api.post(`/events/${eventId}/finish`),
   eventPrizes: (eventId: string) => api.get<any[]>(`/events/${eventId}/prizes`),
   issueEventPrize: (eventId: string, data: object) =>
@@ -314,16 +409,26 @@ export const endpoints = {
   inventoryTransaction: (itemId: string, data: object) =>
     api.post(`/inventory/${itemId}/transactions`, data),
   membershipProducts: () => api.get<any[]>("/memberships/products"),
+  manageMembershipProducts: () =>
+    api.get<any[]>("/memberships/products/manage"),
+  createMembershipProduct: (data: object) =>
+    api.post("/memberships/products", data),
+  createMembershipProductVersion: (id: string, data: object) =>
+    api.post(`/memberships/products/${id}/versions`, data),
+  setMembershipProductStatus: (id: string, data: object) =>
+    api.post(`/memberships/products/${id}/status`, data),
+  rechargePlans: () => api.get<any[]>("/memberships/recharge-plans"),
+  manageRechargePlans: () =>
+    api.get<any[]>("/memberships/recharge-plans/manage"),
+  createRechargePlan: (data: object) =>
+    api.post("/memberships/recharge-plans", data),
+  setRechargePlanStatus: (id: string, data: object) =>
+    api.post(`/memberships/recharge-plans/${id}/status`, data),
   purchaseMembership: (productId: string, creationIdempotencyKey?: string) =>
     api.post("/memberships/purchase", { productId, creationIdempotencyKey }),
-  recharge: (
-    principalCents: number,
-    giftCents = 0,
-    creationIdempotencyKey?: string,
-  ) =>
+  recharge: (planId: string, creationIdempotencyKey?: string) =>
     api.post("/memberships/recharge", {
-      principalCents,
-      giftCents,
+      planId,
       creationIdempotencyKey,
     }),
   goods: () => api.get<any[]>("/goods"),
@@ -349,5 +454,19 @@ export const endpoints = {
     action: "review" | "resolve" | "dismiss",
     data: object,
   ) => api.post(`/governance/risk-events/${id}/${action}`, data),
+  createDataErasureRequest: (data: object) =>
+    api.post<any>("/privacy/erasure-requests", data),
+  myDataErasureRequests: () => api.get<any[]>("/privacy/erasure-requests/me"),
+  cancelDataErasureRequest: (id: string, data: object) =>
+    api.post<any>(`/privacy/erasure-requests/${id}/cancel`, data),
+  dataErasureRequests: (params: Record<string, any> = {}) =>
+    api.get<any>("/privacy/erasure-requests", params),
+  dataErasureBlockers: (id: string) =>
+    api.get<any[]>(`/privacy/erasure-requests/${id}/blockers`),
+  decideDataErasureRequest: (
+    id: string,
+    action: "reject" | "complete",
+    data: object,
+  ) => api.post<any>(`/privacy/erasure-requests/${id}/${action}`, data),
   downloadReport: (scope: string) => download(`/reports/exports/${scope}.xlsx`),
 };

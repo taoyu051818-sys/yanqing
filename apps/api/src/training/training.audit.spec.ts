@@ -345,6 +345,7 @@ describe('TrainingService session audit', () => {
     const session = {
       id: 'session-audit-1',
       status: TrainingSessionStatus.SCHEDULED,
+      endsAt: new Date(Date.now() - 60_000),
       class: { coachId: 'coach-1', assistantId: null },
     };
     let storedAudit: Record<string, unknown> | null = null;

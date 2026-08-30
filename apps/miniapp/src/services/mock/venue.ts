@@ -1,5 +1,5 @@
 import type { CourtAvailability } from '../../types/domain'
-import { getVenueBookings, getVenueClosures, saveVenueBookings } from './state'
+import { getPriceRules, getVenueBookings, getVenueClosures, saveVenueBookings } from './state'
 
 const slotLabels = ['晨练', '上午一', '上午二', '午间', '下午一', '下午二', '晚场一', '晚场二']
 
@@ -26,14 +26,42 @@ export function availability(date: string): CourtAvailability {
     enabled: true,
   }))
   const starts = [420, 540, 660, 780, 900, 1020, 1140, 1260]
-  const slots = starts.map((startMinutes, index) => ({
-    id: `slot-${index + 1}`,
-    code: `S${index + 1}`,
-    label: slotLabels[index],
-    startMinutes,
-    endMinutes: startMinutes + 120,
-    price: { priceCents: index >= 6 ? 8800 : 6800, newcomerPriceCents: index === 0 ? 4800 : null },
-  }))
+  const pricingAt = new Date(`${date}T00:00:00+08:00`).getTime()
+  const weekdayBit = 1 << new Date(`${date}T00:00:00Z`).getUTCDay()
+  const priceRules = getPriceRules()
+  const slots = starts.map((startMinutes, index) => {
+    const period: NonNullable<CourtAvailability['slots'][number]['period']> =
+      index === 0 ? 'EARLY' : index < 6 ? 'DAYTIME' : 'PRIME'
+    const slotId = `slot-${index + 1}`
+    const rule = priceRules
+      .filter((candidate) =>
+        candidate.enabled === true &&
+        (candidate.timeSlotId === slotId || candidate.timeSlotId == null) &&
+        new Date(candidate.effectiveFrom).getTime() <= pricingAt &&
+        (!candidate.effectiveTo || new Date(candidate.effectiveTo).getTime() > pricingAt) &&
+        (Number(candidate.weekdayMask) & weekdayBit) !== 0,
+      )
+      .sort((left, right) =>
+        Number(Boolean(right.timeSlotId)) - Number(Boolean(left.timeSlotId)) ||
+        new Date(right.effectiveFrom).getTime() - new Date(left.effectiveFrom).getTime() ||
+        Number(right.version) - Number(left.version),
+      )[0]
+    return {
+      id: slotId,
+      code: `S${index + 1}`,
+      label: slotLabels[index],
+      startMinutes,
+      endMinutes: startMinutes + 120,
+      period,
+      price: rule ? {
+        id: rule.id,
+        code: rule.code,
+        version: rule.version,
+        priceCents: rule.priceCents,
+        newcomerPriceCents: rule.newcomerPriceCents,
+      } : undefined,
+    }
+  })
   const seedBookings: any[] = [
     { courtId: 'court-2', startsAt: `${date}T09:00:00+08:00`, endsAt: `${date}T11:00:00+08:00`, status: 'CONFIRMED', usage: 'PUBLIC' },
     { courtId: 'court-8', startsAt: `${date}T19:00:00+08:00`, endsAt: `${date}T21:00:00+08:00`, status: 'CONFIRMED', usage: 'PUBLIC' },

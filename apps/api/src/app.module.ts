@@ -27,6 +27,7 @@ import { GoodsModule } from './goods/goods.module.js'
 import { WorkItemsModule } from './work-items/work-items.module.js'
 import { ReconciliationModule } from './reconciliation/reconciliation.module.js'
 import { GovernanceModule } from './governance/governance.module.js'
+import { PrivacyModule } from './privacy/privacy.module.js'
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { GovernanceModule } from './governance/governance.module.js'
     WorkItemsModule,
     ReconciliationModule,
     GovernanceModule,
+    PrivacyModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -22,16 +22,29 @@ export const trainingProducts = [
   { id: 'training-youth', name: '青少年成长课包', audience: 'YOUTH', totalSessions: 20, validityDays: 180, priceCents: 198000, classes: [{ id: 'class-youth', name: '周末青少年班', capacity: 20 }] },
 ]
 
-export const enrollments = [{ id: 'enroll-1', enrollmentNo: 'EN202608001', classId: 'class-adult', status: 'ACTIVE', totalSessions: 12, usedSessions: 3, consumedSessions: 3, prepaidBalanceCents: 96_000, expiresAt: new Date(Date.now() + 90 * 86400000).toISOString(), product: trainingProducts[0], buyer: { displayName: '延庆会员小林' }, attendances: [{ id: 'attendance-1', sessionId: 'session-1', status: 'PENDING', consumedSessions: 0, operatorId: null, feedback: null }] }]
+export const enrollments = [{ id: 'enroll-1', enrollmentNo: 'EN202608001', classId: 'class-adult', status: 'ACTIVE', totalSessions: 12, usedSessions: 3, consumedSessions: 3, prepaidBalanceCents: 96_000, expiresAt: new Date(Date.now() + 90 * 86400000).toISOString(), product: trainingProducts[0], buyerId: 'user-member', studentId: null, buyer: { displayName: '延庆会员小林' }, attendances: [{ id: 'attendance-1', sessionId: 'session-1', status: 'PENDING', consumedSessions: 0, operatorId: null, feedback: null }] }]
 
-export const trainingSessions = [{ id: 'session-1', classId: 'class-adult', status: 'SCHEDULED', startsAt: new Date(Date.now() + 86400000).toISOString(), occupiedCourtHours: 2, class: { name: '周三晚进阶班' } }]
+const seededTrainingStartsAt = new Date(Date.now() + 86400000)
+export const trainingSessions = [{ id: 'session-1', classId: 'class-adult', status: 'SCHEDULED', startsAt: seededTrainingStartsAt.toISOString(), endsAt: new Date(seededTrainingStartsAt.getTime() + 2 * 3600000).toISOString(), courtIds: ['court-1'], occupiedCourtHours: 2, class: { name: '周三晚进阶班' } }]
 
 export const merchants = [{ id: 'merchant-coffee', name: '山脚咖啡', category: '餐饮', _count: { couponTemplates: 1, couponRedemptions: 12 } }, { id: 'merchant-outdoor', name: '延庆户外社', category: '户外', _count: { couponTemplates: 1, couponRedemptions: 4 } }]
 export const coupons = [{ id: 'coupon-1', code: 'YQ-COFFEE-2026', status: 'AVAILABLE', expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(), template: { merchant: merchants[0], benefitDescription: '羽毛球会员专享咖啡立减20元', faceValueCents: 2000 } }]
 
 export const membershipProducts = [
-  { id: 'member-regular', level: 'REGULAR', name: '年度会员', durationDays: 365, priceCents: 29900, benefits: { booking: '提前7天订场', discount: '场地95折' } },
-  { id: 'member-gold', level: 'GOLD', name: '金卡会员', durationDays: 365, priceCents: 69900, benefits: { booking: '提前14天订场', discount: '场地9折', guest: '每月同行券' } },
+  {
+    id: 'member-regular', code: 'MEMBER_REGULAR_YEAR', version: 1, level: 'REGULAR', name: '年度会员',
+    durationDays: 365, priceCents: 29900, benefits: { booking: '提前7天订场', discount: '场地95折' },
+    effectiveFrom: '2026-01-01T00:00:00+08:00', effectiveTo: '2099-01-01T00:00:00+08:00', enabled: true,
+    createdById: 'user-admin', createdBy: { id: 'user-admin', displayName: '金羽管理员' }, transitions: [],
+    createdAt: '2026-01-01T00:00:00+08:00', updatedAt: '2026-01-01T00:00:00+08:00',
+  },
+  {
+    id: 'member-gold', code: 'MEMBER_GOLD_YEAR', version: 1, level: 'GOLD', name: '金卡会员',
+    durationDays: 365, priceCents: 69900, benefits: { booking: '提前14天订场', discount: '场地9折', guest: '每月同行券' },
+    effectiveFrom: '2026-01-01T00:00:00+08:00', effectiveTo: '2099-01-01T00:00:00+08:00', enabled: true,
+    createdById: 'user-admin', createdBy: { id: 'user-admin', displayName: '金羽管理员' }, transitions: [],
+    createdAt: '2026-01-01T00:00:00+08:00', updatedAt: '2026-01-01T00:00:00+08:00',
+  },
 ]
 
 export const goods = [

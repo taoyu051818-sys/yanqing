@@ -14,6 +14,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 
 import { SourceChannel, TeamCategory } from '../generated/prisma/enums.js';
@@ -99,6 +100,34 @@ export class PublishEventDto {
   reason?: string;
 }
 
+export class CancelEventDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string;
+}
+
+/** A captain/operator command to withdraw one fixed-doubles registration. */
+export class CancelEventRegistrationDto extends CancelEventDto {
+  /** Event managers may identify the team they are assisting. */
+  @IsOptional()
+  @IsString()
+  teamId?: string;
+}
+
+export class EventTeamCheckInDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  overrideReason?: string;
+}
+
 export class RegisterEventTeamDto {
   @IsString()
   @IsNotEmpty()
@@ -155,6 +184,44 @@ export class CorrectScoreDto extends SubmitScoreDto {
   @MinLength(2)
   @MaxLength(300)
   reason: string;
+}
+
+export class CorrectEventPairingDto {
+  @IsString()
+  @IsNotEmpty()
+  teamAId: string;
+
+  @IsOptional()
+  @IsString()
+  teamBId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  courtLabel?: string;
+}
+
+/**
+ * Replace the current round's still-unplayed pairings as one audited command.
+ * Requiring the complete round prevents a partial edit from leaving a team
+ * duplicated, omitted or assigned both a match and a bye.
+ */
+export class CorrectEventPairingsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CorrectEventPairingDto)
+  pairings: CorrectEventPairingDto[];
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string;
 }
 
 export class IssueEventPrizeDto {

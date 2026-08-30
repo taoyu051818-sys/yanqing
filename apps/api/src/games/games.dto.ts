@@ -45,6 +45,26 @@ export class PublishGameDto {
   reason?: string
 }
 
+export class CancelGameDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string
+}
+
+export class GameCheckInDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  overrideReason?: string
+}
+
 export class CreateGameDto {
   @IsString()
   @MaxLength(120)

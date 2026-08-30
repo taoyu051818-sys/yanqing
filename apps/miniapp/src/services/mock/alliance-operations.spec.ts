@@ -102,6 +102,94 @@ describe("miniapp mock alliance operations", () => {
     });
   });
 
+  it("enforces the one-time seven-day non-prime newcomer experience and redacts member coupon data", async () => {
+    const merchant = await request("POST", "/alliance/merchants", {
+      code: "VENUE-SELF",
+      name: "金羽球馆",
+      category: "本馆权益",
+      level: "TRAFFIC_PARTNER",
+      contactName: "运营负责人",
+      contactPhone: "13800009999",
+      settlementRule: { mode: "NONE", internal: true },
+    });
+    const createTemplate = (code: string) => request("POST", "/alliance/coupon-templates", {
+      code,
+      merchantId: merchant.id,
+      name: "新客体验场",
+      activityName: "新客首次到店",
+      benefitDescription: "领取后7天内限非黄金时段使用",
+      faceValueCents: 0,
+      validFrom: new Date(Date.now() - 86_400_000).toISOString(),
+      validTo: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      claimLimitPerUser: 1,
+      issueLimit: 10,
+    });
+    const firstTemplate = await createTemplate("NEWCOMER-COURT-V1");
+    const firstBatch = await request(
+      "POST",
+      `/alliance/coupon-templates/${firstTemplate.id}/codes`,
+      { count: 1, idempotencyKey: "newcomer-batch-first-1" },
+    );
+
+    await login("MEMBER");
+    const beforeClaim = Date.now();
+    const claimed = await request(
+      "POST",
+      `/alliance/coupons/${firstBatch.codes[0]}/claim`,
+    );
+    expect(new Date(claimed.expiresAt).getTime()).toBeGreaterThanOrEqual(
+      beforeClaim + 7 * 86_400_000 - 1_000,
+    );
+    expect(new Date(claimed.expiresAt).getTime()).toBeLessThanOrEqual(
+      Date.now() + 7 * 86_400_000 + 1_000,
+    );
+    expect(getAuditLogs().filter(
+      (item) => item.action === "ALLIANCE_COUPON_CLAIMED" && item.objectId === claimed.id,
+    )).toHaveLength(1);
+
+    const mine = await request<any[]>("GET", "/alliance/coupons/me");
+    const myCoupon = mine.find((item) => item.id === claimed.id);
+    expect(myCoupon.template.merchant).toMatchObject({ id: merchant.id, name: "金羽球馆" });
+    expect(JSON.stringify(myCoupon)).not.toContain("13800009999");
+    expect(myCoupon.template.merchant).not.toHaveProperty("settlementRule");
+
+    const bookingDate = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10);
+    await expect(request("POST", "/venues/bookings", {
+      date: bookingDate,
+      courtId: "court-1",
+      slotId: "slot-7",
+      sourceChannel: "NEWCOMER_COUPON",
+      couponCode: claimed.code,
+      creationIdempotencyKey: "newcomer-prime-denied-1",
+    })).rejects.toThrow("新客体验权益仅限非黄金时段使用");
+    const experienceOrder = await request("POST", "/venues/bookings", {
+      date: bookingDate,
+      courtId: "court-1",
+      slotId: "slot-1",
+      sourceChannel: "NEWCOMER_COUPON",
+      couponCode: claimed.code,
+      creationIdempotencyKey: "newcomer-daytime-order-1",
+    });
+    expect(experienceOrder).toMatchObject({ payableCents: 4_800, discountCents: 2_000 });
+    expect(experienceOrder.parameterSnapshot.newcomerPolicy).toMatchObject({
+      allowedPeriodsParameterId: "parameter-newcomer-periods",
+      slotPeriod: "EARLY",
+    });
+
+    await login("ADMIN");
+    const secondTemplate = await createTemplate("NEWCOMER-COURT-V2");
+    const secondBatch = await request(
+      "POST",
+      `/alliance/coupon-templates/${secondTemplate.id}/codes`,
+      { count: 1, idempotencyKey: "newcomer-batch-second-1" },
+    );
+    await login("MEMBER");
+    await expect(request(
+      "POST",
+      `/alliance/coupons/${secondBatch.codes[0]}/claim`,
+    )).rejects.toThrow("新客体验权益每人仅限一次");
+  });
+
   it("lets a merchant confirm or dispute only its own pending settlements", async () => {
     const outdoorDraft = await request("POST", "/alliance/settlements", {
       merchantId: "merchant-outdoor",
@@ -196,6 +284,77 @@ describe("miniapp mock alliance operations", () => {
         { count: 1, idempotencyKey: "coupon-batch-outdoor-denied" },
       ),
     ).rejects.toThrow("只能操作本商户的券码");
+  });
+
+  it("requires an open venue shift for front-desk redemption but not for a merchant till", async () => {
+    const template = await request("POST", "/alliance/coupon-templates", {
+      code: "COFFEE-SHIFT-GATE",
+      merchantId: "merchant-coffee",
+      name: "核销班次验收券",
+      activityName: "前台班次验收",
+      benefitDescription: "验证球馆前台与商户独立收银台",
+      faceValueCents: 500,
+      validFrom: new Date(Date.now() - 86_400_000).toISOString(),
+      validTo: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      claimLimitPerUser: 2,
+      issueLimit: 2,
+    });
+    const issued = await request(
+      "POST",
+      `/alliance/coupon-templates/${template.id}/codes`,
+      { count: 2, idempotencyKey: "coupon-shift-gate-batch-1" },
+    );
+
+    await login("MEMBER");
+    await request("POST", `/alliance/coupons/${issued.codes[0]}/claim`);
+    await request("POST", `/alliance/coupons/${issued.codes[1]}/claim`);
+
+    await login("FRONT_DESK");
+    const frontDeskCommand = {
+      code: issued.codes[0],
+      merchantId: "merchant-coffee",
+      attributedAmountCents: 2_800,
+      idempotencyKey: "coupon-frontdesk-redeem-1",
+    };
+    await expect(
+      request("POST", "/alliance/coupons/redeem", frontDeskCommand),
+    ).rejects.toThrow("当前前台未开班或今日班次已关闭");
+    const shift = await request("POST", "/operations/shifts/open", {
+      openingCashCents: 10_000,
+    });
+    const frontDeskRedemption = await request(
+      "POST",
+      "/alliance/coupons/redeem",
+      frontDeskCommand,
+    );
+    expect(frontDeskRedemption).toMatchObject({
+      status: "REDEEMED",
+      frontDeskShiftId: shift.id,
+      adminEmergencyBypass: false,
+    });
+    expect(getAuditLogs().find(
+      (item) => item.requestId === frontDeskCommand.idempotencyKey,
+    )).toMatchObject({
+      action: "ALLIANCE_COUPON_REDEEMED",
+      newValue: { frontDeskShiftId: shift.id },
+    });
+
+    await login("MERCHANT");
+    const merchantRedemption = await request(
+      "POST",
+      "/alliance/coupons/redeem",
+      {
+        code: issued.codes[1],
+        merchantId: "merchant-coffee",
+        attributedAmountCents: 1_900,
+        idempotencyKey: "coupon-merchant-redeem-1",
+      },
+    );
+    expect(merchantRedemption).toMatchObject({
+      status: "REDEEMED",
+      frontDeskShiftId: null,
+      adminEmergencyBypass: false,
+    });
   });
 
   it("persists audited lifecycle changes and blocks operations for a disabled merchant", async () => {

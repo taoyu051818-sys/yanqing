@@ -1,12 +1,18 @@
-import { Module } from '@nestjs/common'
+import { Module } from '@nestjs/common';
 
-import { InventoryController } from './inventory.controller.js'
-import { InventoryOperationsService } from './inventory-operations.service.js'
-import { InventoryService } from './inventory.service.js'
+import { ConsignmentSettlementController } from './consignment-settlement.controller.js';
+import { ConsignmentSettlementService } from './consignment-settlement.service.js';
+import { InventoryController } from './inventory.controller.js';
+import { InventoryOperationsService } from './inventory-operations.service.js';
+import { InventoryService } from './inventory.service.js';
 
 @Module({
-  controllers: [InventoryController],
-  providers: [InventoryService, InventoryOperationsService],
-  exports: [InventoryService],
+  controllers: [InventoryController, ConsignmentSettlementController],
+  providers: [
+    InventoryService,
+    InventoryOperationsService,
+    ConsignmentSettlementService,
+  ],
+  exports: [InventoryService, ConsignmentSettlementService],
 })
 export class InventoryModule {}

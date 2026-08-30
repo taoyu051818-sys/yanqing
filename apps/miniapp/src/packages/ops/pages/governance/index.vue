@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import OperationsFrame from '../../../../components/OperationsFrame.vue'
 import SectionEmpty from '../../../../components/SectionEmpty.vue'
 import StatusBadge from '../../../../components/StatusBadge.vue'
@@ -11,7 +11,7 @@ import type { AppRole } from '../../../../types/domain'
 import { shortDate } from '../../../../utils/format'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
 
-type GovernanceTab = 'users' | 'parameters' | 'risks' | 'audit' | 'exports'
+type GovernanceTab = 'users' | 'parameters' | 'risks' | 'privacy' | 'audit' | 'exports'
 
 const session = useSessionStore()
 const loading = ref(false)
@@ -22,6 +22,9 @@ const users = ref<any[]>([])
 const parameters = ref<any[]>([])
 const risks = ref<any[]>([])
 const auditLogs = ref<any[]>([])
+const erasureRequests = ref<any[]>([])
+const erasureBlockers = reactive<Record<string, any[]>>({})
+const erasureReasons = reactive<Record<string, string>>({})
 const userKeyword = ref('')
 const selectedUserId = ref('')
 const selectedRoles = ref<AppRole[]>([])
@@ -56,6 +59,7 @@ const allTabs: Array<{ key: GovernanceTab; label: string; roles: AppRole[] }> = 
   { key: 'users', label: '组织权限', roles: ['ADMIN', 'SUPER_ADMIN'] },
   { key: 'parameters', label: '参数版本', roles: ['FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'risks', label: '风险事件', roles: ['FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
+  { key: 'privacy', label: '注销复核', roles: ['ADMIN', 'SUPER_ADMIN'] },
   { key: 'audit', label: '审计日志', roles: ['FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'exports', label: '数据导出', roles: ['FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
 ]
@@ -64,6 +68,7 @@ const exportScopes = [
   ['orders', '订单与支付'],
   ['members', '会员与五账户'],
   ['training', '培训运营'],
+  ['events', '赛事经营'],
   ['alliance', '联盟商户'],
   ['inventory', '商品库存'],
   ['finance', '财务结算'],
@@ -77,6 +82,7 @@ const visibleTabs = computed(() =>
 const canSuperviseUsers = computed(() => session.roles.includes('SUPER_ADMIN'))
 const canConfigure = computed(() => session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
 const canResolveRisk = computed(() => session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
+const canCompleteErasure = computed(() => session.roles.includes('SUPER_ADMIN'))
 const selectedUser = computed(() => users.value.find((item) => item.id === selectedUserId.value))
 const availablePrimaryRoles = computed(() => roleOptions.filter((item) => selectedRoles.value.includes(item.value)))
 
@@ -148,6 +154,8 @@ async function loadCurrentTab() {
       risks.value = unwrapItems(await endpoints.riskEvents({ page: 1, pageSize: 100 }))
     } else if (activeTab.value === 'audit') {
       auditLogs.value = unwrapItems(await endpoints.auditLogs({ page: 1, pageSize: 100, objectType: auditObjectType.value || undefined }))
+    } else if (activeTab.value === 'privacy') {
+      erasureRequests.value = unwrapItems(await endpoints.dataErasureRequests({ page: 1, pageSize: 100 }))
     }
   } catch (cause: any) {
     error.value = cause?.message || '治理数据加载失败'
@@ -268,6 +276,57 @@ async function actRisk(risk: any, action: 'review' | 'resolve' | 'dismiss') {
   }
 }
 
+async function inspectErasure(request: any) {
+  acting.value = `erasure:blockers:${request.id}`
+  try {
+    erasureBlockers[request.id] = await endpoints.dataErasureBlockers(request.id)
+    if (!erasureBlockers[request.id].length) uni.showToast({ title: '业务已结清，可进入复核', icon: 'success' })
+  } catch (cause: any) {
+    uni.showToast({ title: cause?.message || '注销阻断项检查失败', icon: 'none' })
+  } finally {
+    acting.value = ''
+  }
+}
+
+async function decideErasure(request: any, action: 'reject' | 'complete') {
+  if (!canCompleteErasure.value || request.status !== 'REQUESTED') return
+  const reason = (erasureReasons[request.id] || '').trim()
+  if (reason.length < 2) {
+    uni.showToast({ title: '请填写至少2个字的复核原因', icon: 'none' })
+    return
+  }
+  if (action === 'complete') {
+    await inspectErasure(request)
+    if ((erasureBlockers[request.id] || []).length) {
+      uni.showToast({ title: '仍有业务未结清，不能匿名化', icon: 'none' })
+      return
+    }
+  }
+  const confirm = await uni.showModal({
+    title: action === 'complete' ? '不可逆匿名化确认' : '驳回注销申请',
+    content: action === 'complete'
+      ? '将永久移除微信标识、手机号、头像、姓名与监护学员身份信息；财务和审计历史只保留内部编号。此操作不可撤销。'
+      : `将驳回 ${request.user?.displayName || request.userId} 的申请。`,
+  })
+  if (!confirm.confirm) return
+  acting.value = `erasure:${action}:${request.id}`
+  try {
+    const command = { requestId: request.id, action, reason }
+    await withPendingCreationKey(`privacy.erasure.${action}.${request.id}`, command, (idempotencyKey) =>
+      endpoints.decideDataErasureRequest(request.id, action, { reason, idempotencyKey }),
+    )
+    uni.showToast({ title: action === 'complete' ? '匿名化已完成' : '申请已驳回', icon: 'success' })
+    delete erasureBlockers[request.id]
+    await loadCurrentTab()
+  } catch (cause: any) {
+    const blockers = cause?.data?.blockers || cause?.blockers
+    if (Array.isArray(blockers)) erasureBlockers[request.id] = blockers
+    uni.showToast({ title: cause?.message || '注销复核失败', icon: 'none' })
+  } finally {
+    acting.value = ''
+  }
+}
+
 async function exportReport(scope: string) {
   if (isMockMode) {
     uni.showModal({ title: '需要远端模式', content: 'mock 模式不伪造 Excel。切换 remote 并登录财务/管理员后，导出会由服务端生成并写审计。', showCancel: false })
@@ -283,6 +342,12 @@ async function exportReport(scope: string) {
     acting.value = ''
   }
 }
+
+onLoad((options) => {
+  if (options?.focus === 'privacy' && visibleTabs.value.some((tab) => tab.key === 'privacy')) {
+    activeTab.value = 'privacy'
+  }
+})
 
 onShow(async () => {
   if (!visibleTabs.value.some((tab) => tab.key === activeTab.value)) activeTab.value = visibleTabs.value[0]?.key || 'risks'
@@ -350,6 +415,23 @@ onShow(async () => {
       <view v-for="item in auditLogs" :key="item.id" class="card data-card"><view class="row"><text class="strong">{{ item.action }}</text><StatusBadge :status="item.result || 'SUCCESS'" /></view><text class="muted small">{{ item.objectType }} / {{ item.objectId || '-' }} · {{ item.actor?.displayName || '系统' }} · {{ shortDate(item.createdAt) }}</text><text v-if="item.reason" class="reason">原因：{{ item.reason }}</text></view>
     </template>
 
+    <template v-else-if="activeTab === 'privacy'">
+      <view class="card notice">注销不是物理删除。先停用账号、移交岗位并结清余额/订单/退款/课包/报名/券，再由非申请人的超级管理员复核；历史财务凭证和审计仅保留匿名内部编号。</view>
+      <SectionEmpty v-if="!erasureRequests.length" title="暂无注销申请" description="会员从个人中心提交后会进入这里；管理员可检查阻断项，只有超级管理员可完成不可逆匿名化。" />
+      <view v-for="request in erasureRequests" :key="request.id" class="card data-card">
+        <view class="row"><view><text class="strong">{{ request.user?.displayName || request.userId }}</text><text class="muted small">{{ request.user?.phone || '手机号未登记/已去除' }} · 申请于 {{ shortDate(request.requestedAt) }}</text></view><StatusBadge :status="request.status" /></view>
+        <text class="reason">申请原因：{{ request.reason }}</text>
+        <text v-if="request.reviewReason" class="reason">复核原因：{{ request.reviewReason }}</text>
+        <view v-if="request.status === 'REQUESTED'" class="actions"><button size="mini" :loading="acting === `erasure:blockers:${request.id}`" @tap="inspectErasure(request)">检查结清条件</button></view>
+        <view v-if="erasureBlockers[request.id]?.length" class="blocker-list"><text v-for="item in erasureBlockers[request.id]" :key="item.code" class="blocker">{{ item.message }}（{{ item.count }}）</text></view>
+        <template v-if="request.status === 'REQUESTED' && canCompleteErasure">
+          <textarea v-model="erasureReasons[request.id]" class="textarea" maxlength="300" placeholder="复核原因（必填）" />
+          <view class="actions"><button size="mini" @tap="decideErasure(request, 'reject')">驳回</button><button size="mini" class="danger" :disabled="Boolean(erasureBlockers[request.id]?.length)" :loading="acting === `erasure:complete:${request.id}`" @tap="decideErasure(request, 'complete')">完成匿名化</button></view>
+        </template>
+        <text v-else-if="request.status === 'REQUESTED'" class="notice">管理员可检查；只有超级管理员可驳回或完成匿名化。</text>
+      </view>
+    </template>
+
     <template v-else>
       <view class="card notice">导出由 API 生成真实 XLSX 并写入审计。mock 模式不会伪造报表；remote 模式下可直接打开或转发。</view>
       <view class="export-grid"><button v-for="scope in exportScopes" :key="scope[0]" class="export" :loading="acting === `export:${scope[0]}`" @tap="exportReport(scope[0])">{{ scope[1] }}</button></view>
@@ -359,4 +441,5 @@ onShow(async () => {
 
 <style scoped>
 .tabs{margin:22rpx 0 16rpx}.tab-row{display:flex;gap:12rpx;white-space:nowrap}.tab{display:inline-flex;margin:0;padding:0 24rpx;height:64rpx;line-height:64rpx;border:0;border-radius:999rpx;background:#fff;color:#456255;font-size:23rpx}.tab::after{border:0}.tab.active{background:#17653d;color:#fff}.card{margin-top:16rpx;padding:24rpx;border-radius:22rpx;background:#fff;box-shadow:0 8rpx 22rpx rgba(18,61,39,.05)}.toolbar,.row,.actions{display:flex;align-items:center;gap:14rpx}.toolbar input{flex:1}.error{display:flex;align-items:center;justify-content:space-between;color:#9e2f2f;background:#fff1f0}.split{display:grid;gap:16rpx}.list{display:grid;gap:2rpx}.row-card{display:flex;justify-content:space-between;align-items:center;border:2rpx solid transparent}.row-card.selected{border-color:#c8a94f;background:#fffdf3}.right{text-align:right}.strong,.section-title{display:block;font-weight:800;color:#193d2b}.section-title{font-size:29rpx;margin-bottom:12rpx}.muted{color:#718078}.small{display:block;margin-top:7rpx;font-size:21rpx;line-height:1.5}.wechat{display:block;margin-top:7rpx;color:#a05b32;font-size:19rpx}.wechat.bound{color:#17653d}.chips{display:flex;flex-wrap:wrap;gap:10rpx;margin:20rpx 0}.chip{padding:10rpx 16rpx;border-radius:999rpx;background:#edf1ee;color:#627269;font-size:21rpx}.chip.on{background:#17653d;color:#fff}.field,.textarea{box-sizing:border-box;width:100%;margin-top:14rpx;padding:18rpx 20rpx;border:1rpx solid #dbe3de;border-radius:14rpx;background:#fbfcfb;font-size:23rpx}.textarea{height:128rpx}.actions{flex-wrap:wrap;margin-top:18rpx}.actions button{margin:0}.primary{background:#17653d;color:#fff}.danger{background:#a53a32;color:#fff}.notice{color:#6d5a24;background:#fff7df;font-size:22rpx;line-height:1.6}.check{display:flex;align-items:center;margin:16rpx 0;color:#5f6c65;font-size:22rpx}.data-card .row{justify-content:space-between;align-items:flex-start}.value{display:block;margin:12rpx 0;padding:12rpx;border-radius:10rpx;background:#f4f7f4;color:#365244;font-family:monospace;font-size:21rpx;word-break:break-all}.reason,.risk-level{display:block;margin-top:12rpx;color:#765d24;font-size:22rpx}.export-grid{display:grid;grid-template-columns:1fr 1fr;gap:14rpx;margin-top:16rpx}.export{margin:0;background:#fff;color:#17653d;font-size:23rpx}
+.blocker-list{display:grid;gap:8rpx;margin-top:14rpx;padding:16rpx;border-radius:12rpx;background:#fff1f0}.blocker{color:#9e2f2f;font-size:21rpx;line-height:1.5}
 </style>

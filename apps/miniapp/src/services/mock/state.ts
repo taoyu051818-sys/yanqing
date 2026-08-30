@@ -4,6 +4,7 @@ import {
   events as seedEvents,
   games as seedGames,
   goods as seedGoods,
+  membershipProducts as seedMembershipProducts,
   merchants as seedMerchants,
   trainingProducts as seedTrainingProducts,
   trainingSessions as seedTrainingSessions,
@@ -23,6 +24,8 @@ const KEYS = {
   trainingSessions: "yanqing_mock_training_sessions",
   trainingProducts: "yanqing_mock_training_products",
   trainingCreationCommands: "yanqing_mock_training_creation_commands",
+  trainingTrials: "yanqing_mock_training_trials",
+  youthTrainingRules: "yanqing_mock_youth_training_rules",
   merchants: "yanqing_mock_merchants",
   coupons: "yanqing_mock_coupons",
   couponTemplates: "yanqing_mock_coupon_templates",
@@ -41,16 +44,22 @@ const KEYS = {
   customerLeads: "yanqing_mock_customer_leads",
   hostApplications: "yanqing_mock_host_applications",
   orderCreations: "yanqing_mock_order_creations",
+  rechargePlans: "yanqing_mock_recharge_plans",
+  membershipProducts: "yanqing_mock_membership_products",
+  priceRules: "yanqing_mock_price_rules",
   memberAccounts: "yanqing_mock_member_accounts",
   memberAccountTransactions: "yanqing_mock_member_account_transactions",
   accountAdjustmentRequests: "yanqing_mock_account_adjustment_requests",
   frontDeskShifts: "yanqing_mock_front_desk_shifts",
   trainingConsumeCorrections: "yanqing_mock_training_consume_corrections",
   trainingSettlements: "yanqing_mock_training_settlements",
+  consignmentPayableEntries: "yanqing_mock_consignment_payable_entries",
+  consignmentSettlements: "yanqing_mock_consignment_settlements",
   governanceUsers: "yanqing_mock_governance_users",
   systemParameters: "yanqing_mock_system_parameters",
   riskEvents: "yanqing_mock_risk_events",
   auditLogs: "yanqing_mock_audit_logs",
+  dataErasureRequests: "yanqing_mock_data_erasure_requests",
 } as const;
 
 function read<T>(key: string, fallback: T): T {
@@ -130,6 +139,58 @@ const initialTrainingSettlements = (): JsonRecord[] => {
   ];
 };
 
+const initialConsignmentPayableEntries = (): JsonRecord[] => {
+  const occurredAt = `${new Date(Date.now() - 86_400_000)
+    .toISOString()
+    .slice(0, 10)}T04:00:00.000Z`;
+  return [
+    {
+      id: "consignment-payable-mock-1",
+      type: "SALE",
+      supplierId: "supplier-consignment",
+      supplier: {
+        id: "supplier-consignment",
+        code: "CONSIGN-01",
+        name: "合作品牌寄售",
+      },
+      itemId: "goods-grip",
+      item: {
+        id: "goods-grip",
+        sku: "GRIP-001",
+        name: "专业吸汗手胶",
+      },
+      orderId: "order-consignment-seed",
+      orderItemId: "order-item-consignment-seed",
+      order: {
+        id: "order-consignment-seed",
+        orderNo: "GD-MOCK-CONSIGN-001",
+        completedAt: occurredAt,
+      },
+      refundId: null,
+      refund: null,
+      reversalOfId: null,
+      quantity: 2,
+      unitSalePriceCents: 1_500,
+      grossSaleCents: 3_000,
+      commissionRateBps: 2_500,
+      commissionCents: 750,
+      payableCents: 2_250,
+      ruleSnapshot: {
+        supplierCode: "CONSIGN-01",
+        supplierName: "合作品牌寄售",
+        sku: "GRIP-001",
+        itemName: "专业吸汗手胶",
+        settlementCycle: "MONTHLY",
+        commissionRateBps: 2_500,
+        commissionMeaning: "VENUE_COMMISSION",
+      },
+      occurredAt,
+      idempotencyKey: "CONSIGNMENT-SALE:order-item-consignment-seed",
+      createdAt: occurredAt,
+    },
+  ];
+};
+
 const initialCustomerLeads = (): JsonRecord[] => [
   {
     id: "lead-mock-1",
@@ -184,13 +245,124 @@ const initialGovernanceUsers = (): JsonRecord[] => [
   { id: "user-event", displayName: "赛事管理员", phone: "13800000007", status: "ACTIVE", primaryRole: "EVENT_MANAGER", roles: [{ role: "MEMBER", merchantId: null }, { role: "EVENT_MANAGER", merchantId: null }], wechatBound: true },
   { id: "user-admin", displayName: "金羽管理员", phone: "13800000008", status: "ACTIVE", primaryRole: "ADMIN", roles: [{ role: "MEMBER", merchantId: null }, { role: "ADMIN", merchantId: null }], wechatBound: true },
   { id: "user-super", displayName: "超级管理员", phone: "13800000009", status: "ACTIVE", primaryRole: "SUPER_ADMIN", roles: [{ role: "MEMBER", merchantId: null }, { role: "SUPER_ADMIN", merchantId: null }], wechatBound: true },
+  { id: "user-privacy", displayName: "待注销演示会员", phone: "13800000010", status: "DISABLED", primaryRole: "MEMBER", roles: [{ role: "MEMBER", merchantId: null }], wechatBound: true },
 ];
+
+const initialDataErasureRequests = (): JsonRecord[] => [{
+  id: "erasure-mock-ready",
+  userId: "user-privacy",
+  user: { id: "user-privacy", displayName: "待注销演示会员", phone: "13800000010", status: "DISABLED" },
+  status: "REQUESTED",
+  reason: "不再使用场馆服务",
+  requestIdempotencyKey: "erasure-mock-ready-request",
+  requestCommandHash: "mock-ready-command",
+  decisionIdempotencyKey: null,
+  decisionCommandHash: null,
+  reviewedById: null,
+  reviewedBy: null,
+  reviewReason: null,
+  requestedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+  reviewedAt: null,
+  completedAt: null,
+  createdAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+  updatedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+}];
 
 const initialSystemParameters = (): JsonRecord[] => [
   { id: "parameter-training-rate", key: "training.contract_rate_bps", value: 2000, type: "INTEGER", description: "培训有效流水计入场馆合同收入比例", locked: true, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
   { id: "parameter-training-venue-fee", key: "training.venue_fee_cents", value: 0, type: "INTEGER", description: "培训场地费硬禁用", locked: true, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
+  { id: "parameter-newcomer-valid-days", key: "newcomer.experience.valid_days", value: 7, type: "INTEGER", description: "新客体验权益领取后有效天数", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
+  { id: "parameter-newcomer-periods", key: "newcomer.experience.allowed_slot_periods", value: ["EARLY", "DAYTIME"], type: "JSON", description: "新客体验权益允许使用的非黄金时段", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
   { id: "parameter-booking-hold", key: "booking.hold_minutes", value: 10, type: "INTEGER", description: "待支付订单占场分钟数", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
+  { id: "parameter-venue-check-in-window-v1", key: "operations.venue_check_in_window.v1", value: { version: 1, earlyMinutes: 30, lateMinutes: 30 }, type: "JSON", description: "场地签到窗口 v1（提前/延后均不超过240分钟）", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
+  { id: "parameter-game-check-in-window-v1", key: "operations.game_check_in_window.v1", value: { version: 1, earlyMinutes: 30, lateMinutes: 30 }, type: "JSON", description: "球局签到窗口 v1（提前/延后均不超过240分钟）", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
+  { id: "parameter-event-check-in-window-v1", key: "operations.event_check_in_window.v1", value: { version: 1, earlyMinutes: 30, lateMinutes: 30 }, type: "JSON", description: "赛事签到窗口 v1（提前/延后均不超过240分钟）", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
+  { id: "parameter-training-attendance-window-v1", key: "training.attendance_window.v1", value: { version: 1, earlyMinutes: 30, lateMinutes: 120 }, type: "JSON", description: "培训点名与试听签到窗口 v1（提前/延后均不超过240分钟）", locked: true, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
+  { id: "parameter-training-completion-window-v1", key: "training.completion_window.v1", value: { version: 1, earlyMinutes: 0, lateMinutes: 240 }, type: "JSON", description: "培训消课、结课与试听未到窗口 v1（提前/延后均不超过240分钟）", locked: true, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
 ];
+
+const initialRechargePlans = (): JsonRecord[] => [
+  {
+    id: "recharge-plan-mock-100",
+    code: "RECHARGE_100",
+    version: 1,
+    name: "充值100元",
+    principalCents: 10_000,
+    giftCents: 0,
+    effectiveFrom: "2026-01-01T00:00:00+08:00",
+    effectiveTo: "2099-01-01T00:00:00+08:00",
+    enabled: true,
+    createdById: "user-admin",
+    createdBy: { id: "user-admin", displayName: "金羽管理员" },
+    transitions: [],
+    createdAt: "2026-01-01T00:00:00+08:00",
+    updatedAt: "2026-01-01T00:00:00+08:00",
+  },
+  {
+    id: "recharge-plan-mock-500",
+    code: "RECHARGE_500",
+    version: 1,
+    name: "充值500元赠25元",
+    principalCents: 50_000,
+    giftCents: 2_500,
+    effectiveFrom: "2026-01-01T00:00:00+08:00",
+    effectiveTo: "2099-01-01T00:00:00+08:00",
+    enabled: true,
+    createdById: "user-admin",
+    createdBy: { id: "user-admin", displayName: "金羽管理员" },
+    transitions: [],
+    createdAt: "2026-01-01T00:00:00+08:00",
+    updatedAt: "2026-01-01T00:00:00+08:00",
+  },
+  {
+    id: "recharge-plan-mock-1000",
+    code: "RECHARGE_1000",
+    version: 1,
+    name: "充值1000元赠100元",
+    principalCents: 100_000,
+    giftCents: 10_000,
+    effectiveFrom: "2026-01-01T00:00:00+08:00",
+    effectiveTo: "2099-01-01T00:00:00+08:00",
+    enabled: true,
+    createdById: "user-admin",
+    createdBy: { id: "user-admin", displayName: "金羽管理员" },
+    transitions: [],
+    createdAt: "2026-01-01T00:00:00+08:00",
+    updatedAt: "2026-01-01T00:00:00+08:00",
+  },
+];
+
+const initialMembershipProducts = (): JsonRecord[] =>
+  seedMembershipProducts.map((product) => ({
+    ...product,
+    creationIdempotencyKey: `SEED:${product.code}:V${product.version}`,
+    creationCommandHash: "c".repeat(64),
+  }));
+
+const initialPriceRules = (): JsonRecord[] => {
+  const labels = ["晨练", "上午一", "上午二", "午间", "下午一", "下午二", "晚场一", "晚场二"];
+  const prices = [6_800, 6_800, 6_800, 6_800, 6_800, 6_800, 8_800, 8_800];
+  return labels.map((label, index) => ({
+    id: `price-rule-${index + 1}`,
+    code: `PRICE_S${index + 1}`,
+    version: 1,
+    name: `${label}基础价`,
+    timeSlotId: `slot-${index + 1}`,
+    weekdayMask: 127,
+    priceCents: prices[index],
+    newcomerPriceCents: index < 6 ? 4_800 : null,
+    effectiveFrom: "2026-01-01T00:00:00+08:00",
+    effectiveTo: "2099-01-01T00:00:00+08:00",
+    enabled: true,
+    creationIdempotencyKey: `SEED:PRICE_S${index + 1}:V1`,
+    creationCommandHash: "b".repeat(64),
+    createdById: "user-admin",
+    createdBy: { id: "user-admin", displayName: "金羽管理员" },
+    transitions: [],
+    createdAt: "2026-01-01T00:00:00+08:00",
+    updatedAt: "2026-01-01T00:00:00+08:00",
+  }));
+};
 
 const initialRiskEvents = (): JsonRecord[] => [
   { id: "risk-mock-1", ruleCode: "COUPON_DEVICE_BURST", severity: "HIGH", status: "OPEN", userId: "user-member", objectType: "CouponCode", objectId: "coupon-1002", summary: "同设备短时领取多张联盟券", evidence: { deviceClaims: 5 }, resolvedBy: null, resolvedAt: null, createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
@@ -444,6 +616,9 @@ export function saveEventDetail(value: JsonRecord) {
           ...item,
           status: value.status,
           currentRound: value.currentRound,
+          cancelReason: value.cancelReason,
+          cancelPolicySnapshot: value.cancelPolicySnapshot,
+          cancelledAt: value.cancelledAt,
           _count: {
             teams: (value.teams || []).filter(
               (team: JsonRecord) =>
@@ -502,7 +677,18 @@ export function saveEnrollments(value: JsonRecord[]) {
   return write(KEYS.enrollments, value);
 }
 export function getStudents(): JsonRecord[] {
-  return read<JsonRecord[]>(KEYS.students, []);
+  return read<JsonRecord[]>(KEYS.students, [
+    {
+      id: "student-youth-1",
+      guardianId: "user-member",
+      displayName: "小羽学员",
+      guardianConsentStatus: true,
+      authorizationNote: "监护人已在测试环境确认授权",
+      guardian: { id: "user-member", displayName: "延庆会员小林" },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  ]);
 }
 export function saveStudents(value: JsonRecord[]) {
   return write(KEYS.students, value);
@@ -539,6 +725,18 @@ export function getTrainingCreationCommands(): JsonRecord[] {
 }
 export function saveTrainingCreationCommands(value: JsonRecord[]) {
   return write(KEYS.trainingCreationCommands, value);
+}
+export function getTrainingTrials(): JsonRecord[] {
+  return read<JsonRecord[]>(KEYS.trainingTrials, []);
+}
+export function saveTrainingTrials(value: JsonRecord[]) {
+  return write(KEYS.trainingTrials, value);
+}
+export function getYouthTrainingRules(): JsonRecord[] {
+  return read<JsonRecord[]>(KEYS.youthTrainingRules, []);
+}
+export function saveYouthTrainingRules(value: JsonRecord[]) {
+  return write(KEYS.youthTrainingRules, value);
 }
 export function getMerchants(): JsonRecord[] {
   return read<JsonRecord[]>(KEYS.merchants, seedMerchants as JsonRecord[]);
@@ -580,7 +778,22 @@ export function saveCouponTemplates(value: JsonRecord[]) {
   return write(KEYS.couponTemplates, value);
 }
 export function getGoods(): JsonRecord[] {
-  return read<JsonRecord[]>(KEYS.goods, seedGoods as JsonRecord[]);
+  return read<JsonRecord[]>(
+    KEYS.goods,
+    (seedGoods as JsonRecord[]).map((item) => ({
+      ...item,
+      supplierId:
+        item.mode === "CONSIGNMENT"
+          ? "supplier-consignment"
+          : "supplier-owned",
+      defaultLocationId: "inventory-location-main",
+      batchCode: "DEFAULT",
+      expiresAt: null,
+      enabled: true,
+      createdAt: "2026-08-30T00:00:00.000Z",
+      updatedAt: "2026-08-30T00:00:00.000Z",
+    })),
+  );
 }
 export function saveGoods(value: JsonRecord[]) {
   return write(KEYS.goods, value);
@@ -598,14 +811,30 @@ export function getInventorySuppliers() {
       code: "OWNED-01",
       name: "金羽自营采购",
       type: "OWNED",
+      contactName: "采购经理",
+      contactPhone: "13800000001",
+      settlementRule: {
+        settlementCycle: "MONTHLY",
+        paymentTermsDays: 30,
+      },
       enabled: true,
+      createdAt: "2026-08-30T00:00:00.000Z",
+      updatedAt: "2026-08-30T00:00:00.000Z",
     },
     {
       id: "supplier-consignment",
       code: "CONSIGN-01",
       name: "合作品牌寄售",
       type: "CONSIGNMENT",
+      contactName: "品牌经理",
+      contactPhone: "13800000002",
+      settlementRule: {
+        settlementCycle: "MONTHLY",
+        commissionRateBps: 2500,
+      },
       enabled: true,
+      createdAt: "2026-08-30T00:00:00.000Z",
+      updatedAt: "2026-08-30T00:00:00.000Z",
     },
   ]);
 }
@@ -619,12 +848,16 @@ export function getInventoryLocations() {
       code: "MAIN",
       name: "主仓",
       enabled: true,
+      createdAt: "2026-08-30T00:00:00.000Z",
+      updatedAt: "2026-08-30T00:00:00.000Z",
     },
     {
       id: "inventory-location-front",
       code: "FRONT",
       name: "前台展示仓",
       enabled: true,
+      createdAt: "2026-08-30T00:00:00.000Z",
+      updatedAt: "2026-08-30T00:00:00.000Z",
     },
   ]);
 }
@@ -719,6 +952,30 @@ export function getOrderCreations(): JsonRecord[] {
   return read<JsonRecord[]>(KEYS.orderCreations, []);
 }
 
+export function getRechargePlans(): JsonRecord[] {
+  return read<JsonRecord[]>(KEYS.rechargePlans, initialRechargePlans());
+}
+
+export function getMembershipProducts(): JsonRecord[] {
+  return read<JsonRecord[]>(KEYS.membershipProducts, initialMembershipProducts());
+}
+
+export function saveMembershipProducts(value: JsonRecord[]) {
+  return write(KEYS.membershipProducts, value);
+}
+
+export function getPriceRules(): JsonRecord[] {
+  return read<JsonRecord[]>(KEYS.priceRules, initialPriceRules());
+}
+
+export function savePriceRules(value: JsonRecord[]) {
+  return write(KEYS.priceRules, value);
+}
+
+export function saveRechargePlans(value: JsonRecord[]) {
+  return write(KEYS.rechargePlans, value);
+}
+
 export function saveOrderCreations(value: JsonRecord[]) {
   return write(KEYS.orderCreations, value);
 }
@@ -777,6 +1034,25 @@ export function saveTrainingSettlements(value: JsonRecord[]) {
   return write(KEYS.trainingSettlements, value);
 }
 
+export function getConsignmentPayableEntries(): JsonRecord[] {
+  return read<JsonRecord[]>(
+    KEYS.consignmentPayableEntries,
+    initialConsignmentPayableEntries(),
+  );
+}
+
+export function saveConsignmentPayableEntries(value: JsonRecord[]) {
+  return write(KEYS.consignmentPayableEntries, value);
+}
+
+export function getConsignmentSettlements(): JsonRecord[] {
+  return read<JsonRecord[]>(KEYS.consignmentSettlements, []);
+}
+
+export function saveConsignmentSettlements(value: JsonRecord[]) {
+  return write(KEYS.consignmentSettlements, value);
+}
+
 export function getGovernanceUsers(): JsonRecord[] {
   return read<JsonRecord[]>(KEYS.governanceUsers, initialGovernanceUsers());
 }
@@ -791,6 +1067,14 @@ export function getSystemParameters(): JsonRecord[] {
 
 export function saveSystemParameters(value: JsonRecord[]) {
   return write(KEYS.systemParameters, value);
+}
+
+export function getDataErasureRequests(): JsonRecord[] {
+  return read<JsonRecord[]>(KEYS.dataErasureRequests, initialDataErasureRequests());
+}
+
+export function saveDataErasureRequests(value: JsonRecord[]) {
+  return write(KEYS.dataErasureRequests, value);
 }
 
 export function getRiskEvents(): JsonRecord[] {

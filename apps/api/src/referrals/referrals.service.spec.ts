@@ -21,11 +21,37 @@ const baseReward = (overrides: Record<string, unknown> = {}) => ({
   observationEndsAt: new Date('2026-08-01T00:00:00.000Z'),
   grantedAt: null,
   reversedAt: null,
-  triggerOrder: { id: 'order-1', status: OrderStatus.PAID },
+  triggerOrder: {
+    id: 'order-1',
+    status: OrderStatus.COMPLETED,
+    completedAt: new Date('2026-07-20T00:00:00.000Z'),
+    refundedCents: 0,
+  },
   ...overrides,
 })
 
 describe('ReferralsService reward release', () => {
+  it('returns only the minimum trigger-order state needed by the referrer', async () => {
+    const findMany = vi.fn().mockResolvedValue([])
+    const service = new ReferralsService({ referralReward: { findMany } } as never)
+
+    await service.myRewards(actor)
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { referrerId: actor.sub },
+      select: expect.objectContaining({
+        triggerOrder: {
+          select: expect.not.objectContaining({
+            payableCents: true,
+            paidCents: true,
+            paymentChannel: true,
+            parameterSnapshot: true,
+          }),
+        },
+      }),
+    }))
+  })
+
   it('credits a matured reward once and records an idempotent ledger entry', async () => {
     const reward = baseReward()
     const transactions = new Map<string, { id: string; amount: number }>()
@@ -76,7 +102,14 @@ describe('ReferralsService reward release', () => {
   })
 
   it('reverses a matured reward when the trigger order was refunded', async () => {
-    const reward = baseReward({ triggerOrder: { id: 'order-1', status: OrderStatus.PARTIALLY_REFUNDED } })
+    const reward = baseReward({
+      triggerOrder: {
+        id: 'order-1',
+        status: OrderStatus.PARTIALLY_REFUNDED,
+        completedAt: new Date('2026-07-20T00:00:00.000Z'),
+        refundedCents: 1_000,
+      },
+    })
     const update = vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
       Object.assign(reward, data)
       return reward
@@ -115,6 +148,34 @@ describe('ReferralsService reward release', () => {
     expect(result.processed).toBe(0)
     expect(tx.account.upsert).not.toHaveBeenCalled()
     expect(reward.status).toBe(RewardStatus.PENDING_OBSERVATION)
+  })
+
+  it('does not grant a matured reward until its trigger order is fulfilled', async () => {
+    const reward = baseReward({
+      triggerOrder: {
+        id: 'order-1',
+        status: OrderStatus.PAID,
+        completedAt: null,
+        refundedCents: 0,
+      },
+    })
+    const tx = {
+      referralReward: {
+        findUnique: vi.fn().mockResolvedValue(reward),
+        updateMany: vi.fn(),
+      },
+      account: { upsert: vi.fn() },
+    }
+    const prisma = {
+      referralReward: { findMany: vi.fn().mockResolvedValue([reward]) },
+      $transaction: runInTx(tx),
+    }
+
+    const result = await new ReferralsService(prisma as never).grantMatured(actor)
+
+    expect(result.processed).toBe(0)
+    expect(tx.referralReward.updateMany).not.toHaveBeenCalled()
+    expect(tx.account.upsert).not.toHaveBeenCalled()
   })
 
   it('does not credit an account when another worker claims the reward first', async () => {

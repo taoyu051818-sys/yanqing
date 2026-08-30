@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
-import { AppRole } from '../generated/prisma/enums.js'
+import {
+  AppRole,
+  InventoryMode,
+  SupplierType,
+} from '../generated/prisma/enums.js'
 import { GoodsService } from './goods.service.js'
 
 const member: AuthUser = {
@@ -25,8 +29,19 @@ describe('GoodsService order creator evidence', () => {
           id: 'goods-ball',
           sku: 'BALL-01',
           name: '羽毛球',
-          mode: 'PURCHASE',
-          supplier: null,
+          mode: InventoryMode.CONSIGNMENT,
+          supplier: '品牌寄售旧字段',
+          supplierId: 'supplier-consignment',
+          supplierRecord: {
+            id: 'supplier-consignment',
+            code: 'CONSIGN-01',
+            name: '品牌寄售',
+            type: SupplierType.CONSIGNMENT,
+            settlementRule: {
+              settlementCycle: 'MONTHLY',
+              commissionRateBps: 2_500,
+            },
+          },
           stock: 20,
           salePriceCents: 120,
         }]),
@@ -56,7 +71,30 @@ describe('GoodsService order creator evidence', () => {
 
     expect(orderCreate).toHaveBeenCalledOnce()
     expect(orderCreate).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ memberId: member.sub, createdById: member.sub }),
+      data: expect.objectContaining({
+        memberId: member.sub,
+        createdById: member.sub,
+        items: {
+          create: [
+            expect.objectContaining({
+              itemId: 'goods-ball',
+              metadata: {
+                inventorySnapshotVersion: 1,
+                sku: 'BALL-01',
+                mode: InventoryMode.CONSIGNMENT,
+                supplier: '品牌寄售',
+                supplierId: 'supplier-consignment',
+                supplierCode: 'CONSIGN-01',
+                supplierName: '品牌寄售',
+                settlementRule: {
+                  settlementCycle: 'MONTHLY',
+                  commissionRateBps: 2_500,
+                },
+              },
+            }),
+          ],
+        },
+      }),
     }))
     expect(auditCreate).toHaveBeenCalledOnce()
     expect(auditCreate).toHaveBeenCalledWith({

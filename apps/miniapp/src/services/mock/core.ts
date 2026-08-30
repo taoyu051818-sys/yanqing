@@ -45,6 +45,8 @@ function persistedProfile(userId: string) {
 export function mockUser(role = currentRole()): SessionUser {
   const profile = roleProfiles[role] || roleProfiles.MEMBER
   const persistedUser = persistedProfile(profile.id)
+  const persistedAccountBook = uni.getStorageSync('yanqing_mock_member_accounts')
+  const persistedAccounts = persistedAccountBook?.[profile.id]
   return {
     id: profile.id,
     displayName: persistedUser?.displayName || profile.name,
@@ -53,8 +55,15 @@ export function mockUser(role = currentRole()): SessionUser {
     roles: Array.isArray(persistedUser?.roles) && persistedUser.roles.length
       ? persistedUser.roles
       : profile.roles,
-    accounts: accounts.map((item) => ({ ...item })),
-    memberProfile: { level: role === 'MEMBER' ? 'GOLD' : 'STAFF', phone: '13800000005' },
+    accounts: Array.isArray(persistedAccounts)
+      ? persistedAccounts.map((item: any) => ({ ...item }))
+      : accounts.map((item) => ({ ...item })),
+    memberProfile: {
+      level: role === 'MEMBER' ? 'GOLD' : 'STAFF',
+      phone: '13800000005',
+      isNewCustomer: role === 'MEMBER',
+      ...(persistedUser?.memberProfile || {}),
+    },
   }
 }
 

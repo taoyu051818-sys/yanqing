@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mockRequest } from "./router";
 import {
   getEvents,
+  getEventDetail,
+  getAuditLogs,
   getGames,
   getHostApplications,
   saveGames,
+  saveEventDetail,
 } from "./state";
 
 const storage = new Map<string, unknown>();
@@ -134,5 +137,77 @@ describe("community host/game/event operation entrypoints", () => {
     expect(getEvents().find((item) => item.id === created.id)).toMatchObject({
       status: "OPEN",
     });
+  });
+
+  it("lets an event manager replace one complete unplayed pairing round with an idempotent audit", async () => {
+    await login("EVENT_MANAGER");
+    const detail = getEventDetail("event-golden");
+    const teams = detail.teams as any[];
+    const round = 3;
+    const current = Array.from({ length: 6 }, (_, index) => ({
+      id: `manual-source-${index + 1}`,
+      round,
+      teamAId: teams[index * 2].id,
+      teamBId: teams[index * 2 + 1].id,
+      courtLabel: `${index + 1}号场`,
+      startingScoreA: 0,
+      startingScoreB: 0,
+      scoreA: null,
+      scoreB: null,
+      status: "PENDING",
+    }));
+    detail.status = "IN_PROGRESS";
+    detail.currentRound = round;
+    detail.matches = [
+      ...(detail.matches as any[]).filter((match) => match.round < round),
+      ...current,
+    ];
+    saveEventDetail(detail);
+    const command = {
+      pairings: current.map((match, index) => ({
+        teamAId: match.teamAId,
+        teamBId:
+          index === 0
+            ? current[1].teamBId
+            : index === 1
+              ? current[0].teamBId
+              : match.teamBId,
+        courtLabel: match.courtLabel,
+      })),
+      reason: "同俱乐部队伍已相遇，现场调整对手",
+      idempotencyKey: "mock-pairing-correction-1",
+    };
+
+    const first = await request(
+      "POST",
+      `/events/event-golden/rounds/${round}/pairings/correct`,
+      command,
+    );
+    const replay = await request(
+      "POST",
+      `/events/event-golden/rounds/${round}/pairings/correct`,
+      command,
+    );
+
+    expect(first).toEqual(replay);
+    expect(first[0]).toMatchObject({
+      teamAId: current[0].teamAId,
+      teamBId: current[1].teamBId,
+      status: "PENDING",
+    });
+    expect(
+      getAuditLogs().filter(
+        (item) => item.action === "EVENT_PAIRINGS_CORRECTED",
+      ),
+    ).toHaveLength(1);
+
+    await login("MEMBER");
+    await expect(
+      request(
+        "POST",
+        `/events/event-golden/rounds/${round}/pairings/correct`,
+        { ...command, idempotencyKey: "mock-pairing-member-denied" },
+      ),
+    ).rejects.toThrow("无权");
   });
 });

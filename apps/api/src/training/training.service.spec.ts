@@ -9,6 +9,8 @@ import type { AuthUser } from '../common/auth/auth-user.js';
 import {
   AppRole,
   AttendanceStatus,
+  BusinessType,
+  OrderStatus,
   TrainingAudience,
   TrainingEnrollmentStatus,
   TrainingSessionStatus,
@@ -52,7 +54,8 @@ const attendanceFixture = (overrides: Record<string, unknown> = {}) => ({
   consumedAt: null,
   revenueRecognitions: [],
   session: {
-    startsAt: new Date('2026-08-29T10:00:00.000Z'),
+    startsAt: new Date(Date.now() - 60 * 60_000),
+    endsAt: new Date(Date.now() - 10 * 60_000),
     class: { name: '成人进阶班' },
   },
   enrollment: {
@@ -103,6 +106,9 @@ const consumePrisma = (attendance = attendanceFixture()) => {
     },
     systemParameter: {
       findFirst: vi.fn().mockResolvedValue({ value: 2_000 }),
+    },
+    reconciliationPeriod: {
+      findFirst: vi.fn().mockResolvedValue(null),
     },
     auditLog: {
       findFirst: vi.fn().mockResolvedValue(null),
@@ -355,6 +361,82 @@ describe('TrainingService class seat reservations', () => {
     );
   });
 
+  it('stores the exact effective youth-rule validation snapshot on the order', async () => {
+    const youthProduct = {
+      ...product,
+      id: 'product-youth-1',
+      audience: TrainingAudience.YOUTH,
+    };
+    const regulatoryValidation = {
+      ruleId: 'rule-1',
+      version: 'YTR-TEST-1',
+      effectiveFrom: '2026-08-30T00:00:00.000Z',
+      effectiveTo: null,
+      limits: {
+        maxTotalSessions: 20,
+        maxValidityDays: 180,
+        maxContractAmountCents: 300_000,
+        warningThresholdDays: 30,
+        hardBlock: true,
+      },
+      result: 'PASS',
+      violations: [],
+      warnings: [],
+      validatedAt: '2026-08-30T01:00:00.000Z',
+    };
+    const tx = {
+      order: {
+        create: vi.fn().mockResolvedValue({
+          id: 'order-youth-1',
+          orderNo: 'TRYOUTH001',
+          trainingEnrollment: { id: 'enrollment-youth-1' },
+          items: [],
+        }),
+      },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      trainingProduct: { findUnique: vi.fn().mockResolvedValue(youthProduct) },
+      student: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'student-1',
+          guardianId: guardian.sub,
+          guardianConsentStatus: true,
+        }),
+      },
+      $transaction: txRunner(tx),
+    };
+    const youthRules = {
+      validateProduct: vi.fn().mockResolvedValue(regulatoryValidation),
+    };
+    await expect(
+      new TrainingService(prisma as never, youthRules as never).purchase(
+        {
+          productId: youthProduct.id,
+          studentId: 'student-1',
+          sourceChannel: 'MINI_PROGRAM' as never,
+        },
+        guardian,
+      ),
+    ).resolves.toMatchObject({ id: 'order-youth-1' });
+    expect(tx.order.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          parameterSnapshot: expect.objectContaining({
+            youthRegulatoryValidation: regulatoryValidation,
+          }),
+        }),
+      }),
+    );
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        newValue: expect.objectContaining({
+          youthRegulatoryValidation: regulatoryValidation,
+        }),
+      }),
+    });
+  });
+
   it('rejects full classes and duplicate active reservations before creating an order', async () => {
     const full = purchasePrisma(trainingClass.capacity);
     await expect(
@@ -509,6 +591,63 @@ describe('TrainingService consumption workflow', () => {
     });
   });
 
+  it('completes the training enrollment and order only when the final prepaid lesson is consumed', async () => {
+    const base = attendanceFixture();
+    const { prisma, tx } = consumePrisma(
+      attendanceFixture({
+        operatorId: coach.sub,
+        enrollment: {
+          ...base.enrollment,
+          orderId: 'order-training-1',
+          consumedSessions: 9,
+          totalSessions: 10,
+          prepaidBalanceCents: 19_800,
+        },
+      }),
+    );
+    const order = {
+      id: 'order-training-1',
+      businessType: BusinessType.TRAINING,
+      status: OrderStatus.PAID,
+      completedAt: null as Date | null,
+      paidCents: 198_000,
+      refundedCents: 0,
+    };
+    const orderDelegate = {
+      findUnique: vi.fn().mockImplementation(async () => order),
+      updateMany: vi.fn().mockImplementation(async ({ data }) => {
+        Object.assign(order, data);
+        return { count: 1 };
+      }),
+    };
+    Object.assign(tx, { order: orderDelegate });
+    const service = new TrainingService(prisma as never);
+
+    await service.confirmConsume(
+      'session-1',
+      { enrollmentId: 'enrollment-1', reason: '确认最后一节课' },
+      administrator,
+    );
+
+    expect(tx.trainingEnrollment.update).toHaveBeenCalledWith({
+      where: { id: 'enrollment-1' },
+      data: expect.objectContaining({
+        consumedSessions: 10,
+        status: TrainingEnrollmentStatus.COMPLETED,
+      }),
+    });
+    expect(order).toMatchObject({
+      status: OrderStatus.COMPLETED,
+      completedAt: expect.any(Date),
+    });
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'ORDER_COMPLETED',
+        objectId: order.id,
+      }),
+    });
+  });
+
   it('rejects administrator confirmation when no coach proposal exists', async () => {
     const { prisma, tx } = consumePrisma();
     const service = new TrainingService(prisma as never);
@@ -641,6 +780,50 @@ describe('TrainingService consumption workflow', () => {
     expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled();
   });
 
+  it('does not confirm consumption before the scheduled lesson ends', async () => {
+    const base = attendanceFixture();
+    const { prisma, tx } = consumePrisma(
+      attendanceFixture({
+        operatorId: coach.sub,
+        session: {
+          ...base.session,
+          startsAt: new Date(Date.now() - 30 * 60_000),
+          endsAt: new Date(Date.now() + 30 * 60_000),
+        },
+      }),
+    );
+
+    await expect(
+      new TrainingService(prisma as never).confirmConsume(
+        'session-1',
+        { enrollmentId: 'enrollment-1', reason: '尝试提前消课' },
+        administrator,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.trainingEnrollment.update).not.toHaveBeenCalled();
+    expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled();
+  });
+
+  it('does not post training revenue into an already locked business day', async () => {
+    const { prisma, tx } = consumePrisma(
+      attendanceFixture({ operatorId: coach.sub }),
+    );
+    tx.reconciliationPeriod.findFirst.mockResolvedValue({
+      businessDate: new Date('2026-08-28T16:00:00.000Z'),
+    });
+
+    await expect(
+      new TrainingService(prisma as never).confirmConsume(
+        'session-1',
+        { enrollmentId: 'enrollment-1', reason: '锁账后尝试补消课' },
+        administrator,
+      ),
+    ).rejects.toThrow('不能确认消课入账');
+    expect(tx.trainingAttendance.update).not.toHaveBeenCalled();
+    expect(tx.trainingEnrollment.update).not.toHaveBeenCalled();
+    expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled();
+  });
+
   it.each([
     TrainingSessionStatus.COMPLETED,
     TrainingSessionStatus.CANCELLED,
@@ -730,6 +913,30 @@ describe('TrainingService consumption workflow', () => {
     });
     expect(tx.trainingSession.update).not.toHaveBeenCalled();
   });
+
+  it('does not complete a training session before its scheduled end', async () => {
+    const session = {
+      id: 'session-future',
+      status: TrainingSessionStatus.SCHEDULED,
+      endsAt: new Date(Date.now() + 30 * 60_000),
+      class: { coachId: coach.sub, assistantId: null },
+    };
+    const tx = {
+      trainingSession: {
+        findUnique: vi.fn().mockResolvedValue(session),
+        update: vi.fn(),
+      },
+      trainingAttendance: { count: vi.fn().mockResolvedValue(0) },
+      auditLog: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
+    };
+
+    await expect(
+      new TrainingService({ $transaction: txRunner(tx) } as never)
+        .completeSession(session.id, coach),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.trainingAttendance.count).not.toHaveBeenCalled();
+    expect(tx.trainingSession.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('TrainingService attendance workflow', () => {
@@ -744,7 +951,8 @@ describe('TrainingService attendance workflow', () => {
       status: AttendanceStatus.PENDING,
       checkedInAt: null,
       session: {
-        startsAt: new Date('2026-08-29T10:00:00.000Z'),
+        startsAt: new Date(Date.now() - 60 * 60_000),
+        endsAt: new Date(Date.now() + 10 * 60_000),
         classId: 'class-1',
         class: { name: '成人进阶班', coachId: coach.sub, assistantId: null },
       },
@@ -783,6 +991,26 @@ describe('TrainingService attendance workflow', () => {
     expect(tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ action: 'TRAINING_ATTENDANCE_MARKED' }),
     });
+  });
+
+  it('does not let any role mark attendance before the configured opening boundary', async () => {
+    const { prisma, tx } = attendancePrisma({
+      session: {
+        startsAt: new Date(Date.now() + 2 * 60 * 60_000),
+        endsAt: new Date(Date.now() + 3 * 60 * 60_000),
+        class: { name: '成人进阶班', coachId: coach.sub, assistantId: null },
+      },
+    });
+
+    await expect(
+      new TrainingService(prisma as never).markAttendance(
+        'session-1',
+        { ...attendanceAction, reason: '管理员也不能提前补录' },
+        administrator,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.trainingAttendance.update).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('turns an approved leave into a makeup-required record and requires a reason', async () => {

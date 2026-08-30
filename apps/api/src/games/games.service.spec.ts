@@ -9,6 +9,7 @@ import type { AuthUser } from '../common/auth/auth-user.js'
 import {
   AccountType,
   AppRole,
+  BusinessType,
   GameStatus,
   OrderStatus,
   RegistrationStatus,
@@ -49,8 +50,16 @@ const registration = (
   gameId: 'game-1',
   status,
   checkedInAt: status === RegistrationStatus.CHECKED_IN ? new Date('2026-08-29T10:00:00.000Z') : null,
+  orderId: orderStatus ? `order-${id}` : null,
   order: orderStatus
-    ? { id: `order-${id}`, status: orderStatus, paidCents: 6_800, refundedCents: orderStatus === OrderStatus.REFUNDED ? 6_800 : 0 }
+    ? {
+        id: `order-${id}`,
+        businessType: BusinessType.GAME,
+        status: orderStatus,
+        paidCents: 6_800,
+        refundedCents: orderStatus === OrderStatus.REFUNDED ? 6_800 : 0,
+        completedAt: null,
+      }
     : null,
 })
 
@@ -60,9 +69,40 @@ const game = (overrides: Record<string, unknown> = {}) => ({
   hostId: 'host-1',
   status: GameStatus.OPEN,
   startsAt: new Date(Date.now() - 60_000),
+  endsAt: new Date(Date.now() - 1_000),
   rewardRule: { type: AccountType.BADMINTON_COIN, perCheckedIn: 20, cap: 500 },
   registrations: [],
   ...overrides,
+})
+
+const fulfillmentDelegates = (storedGame: ReturnType<typeof game>) => ({
+  gameRegistration: {
+    updateMany: vi.fn().mockImplementation(async ({ where, data }: {
+      where: { id: string; status: RegistrationStatus }
+      data: { status: RegistrationStatus }
+    }) => {
+      const item = (storedGame.registrations as ReturnType<typeof registration>[])
+        .find((candidate) => candidate.id === where.id)
+      if (!item || item.status !== where.status) return { count: 0 }
+      item.status = data.status
+      return { count: 1 }
+    }),
+  },
+  order: {
+    findUnique: vi.fn().mockImplementation(async ({ where }: { where: { id: string } }) =>
+      (storedGame.registrations as ReturnType<typeof registration>[])
+        .find((candidate) => candidate.order?.id === where.id)?.order ?? null),
+    updateMany: vi.fn().mockImplementation(async ({ where, data }: {
+      where: { id: string; status: OrderStatus }
+      data: Record<string, unknown>
+    }) => {
+      const order = (storedGame.registrations as ReturnType<typeof registration>[])
+        .find((candidate) => candidate.order?.id === where.id)?.order
+      if (!order || order.status !== where.status) return { count: 0 }
+      Object.assign(order, data)
+      return { count: 1 }
+    }),
+  },
 })
 
 describe('GamesService host workflow', () => {
@@ -382,6 +422,8 @@ describe('GamesService host workflow', () => {
         registration('r-attended', RegistrationStatus.CHECKED_IN, OrderStatus.PAID),
         registration('r-refunded', RegistrationStatus.CHECKED_IN, OrderStatus.REFUNDED),
         registration('r-unpaid', RegistrationStatus.PAID, OrderStatus.PAID),
+        registration('r-pending-order', RegistrationStatus.REGISTERED, OrderStatus.PENDING),
+        registration('r-waitlisted', RegistrationStatus.WAITLISTED),
       ],
     })
     const rewardUpsert = vi.fn().mockImplementation(({ create }: { create: Record<string, unknown> }) =>
@@ -400,6 +442,7 @@ describe('GamesService host workflow', () => {
         upsert: rewardUpsert,
       },
       courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      ...fulfillmentDelegates(storedGame),
       systemParameter: {
         findFirst: vi.fn().mockResolvedValue({ value: 3 }),
       },
@@ -419,13 +462,102 @@ describe('GamesService host workflow', () => {
     expect(rewardUpsert).toHaveBeenCalledOnce()
     expect(rewardUpsert.mock.calls[0][0].create.availableAt.getTime()).toBeGreaterThan(Date.now() + 2 * 86_400_000)
     expect(storedGame.status).toBe(GameStatus.COMPLETED)
-    expect(auditCreate).toHaveBeenCalledOnce()
-    expect(auditCreate.mock.calls[0][0].data.newValue).toMatchObject({
+    expect(storedGame.registrations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'r-attended', status: RegistrationStatus.COMPLETED }),
+      expect.objectContaining({ id: 'r-unpaid', status: RegistrationStatus.NO_SHOW }),
+      expect.objectContaining({ id: 'r-pending-order', status: RegistrationStatus.CANCELLED }),
+      expect.objectContaining({ id: 'r-waitlisted', status: RegistrationStatus.CANCELLED }),
+    ]))
+    expect(storedGame.registrations.find((item) => item.id === 'r-pending-order')?.order)
+      .toMatchObject({ status: OrderStatus.CANCELLED, cancelledAt: expect.any(Date) })
+    const completionAudit = auditCreate.mock.calls.find((call) => call[0].data.action === 'GAME_COMPLETED')
+    expect(completionAudit?.[0].data.newValue).toMatchObject({
       checkedIn: 1,
       checkedInRegistrationIds: ['r-attended'],
       excludedRefundedRegistrationIds: ['r-refunded'],
       observationEndsAt: expect.any(String),
     })
+  })
+
+  it('does not finish a game while any registration refund is pending', async () => {
+    const storedGame = game({
+      registrations: [
+        registration('r-attended', RegistrationStatus.CHECKED_IN, OrderStatus.PAID),
+        registration('r-refund-pending', RegistrationStatus.PAID, OrderStatus.REFUND_PENDING),
+      ],
+    })
+    const tx = {
+      game: { findUnique: vi.fn().mockResolvedValue(storedGame), update: vi.fn() },
+      hostReward: { findFirst: vi.fn(), upsert: vi.fn() },
+      courtBooking: { updateMany: vi.fn() },
+      gameRegistration: { updateMany: vi.fn() },
+      auditLog: { create: vi.fn() },
+    }
+
+    await expect(
+      new GamesService({ $transaction: txRunner(tx) } as never).complete(
+        'game-1',
+        hostActor,
+      ),
+    ).rejects.toThrow('存在待审退款报名')
+    expect(tx.game.update).not.toHaveBeenCalled()
+    expect(tx.gameRegistration.updateMany).not.toHaveBeenCalled()
+    expect(tx.hostReward.upsert).not.toHaveBeenCalled()
+  })
+
+  it('excludes a host self-check-in from the reward basis and opens a fraud risk event', async () => {
+    const selfCheckIn = {
+      ...registration('r-host-self', RegistrationStatus.CHECKED_IN, OrderStatus.PAID),
+      userId: hostActor.sub,
+    }
+    const guestCheckIn = registration('r-guest', RegistrationStatus.CHECKED_IN, OrderStatus.PAID)
+    const storedGame = game({ registrations: [selfCheckIn, guestCheckIn] })
+    const rewardUpsert = vi.fn().mockImplementation(({ create }: { create: Record<string, unknown> }) =>
+      Promise.resolve({ id: 'reward-self-risk', createdAt: new Date(), ...create }))
+    const tx = {
+      game: {
+        findUnique: vi.fn().mockResolvedValue(storedGame),
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(storedGame, data)
+          return storedGame
+        }),
+      },
+      hostReward: { findFirst: vi.fn().mockResolvedValue(null), upsert: rewardUpsert },
+      courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      ...fulfillmentDelegates(storedGame),
+      systemParameter: { findFirst: vi.fn().mockResolvedValue({ value: 7 }) },
+      riskEvent: { create: vi.fn().mockResolvedValue({ id: 'risk-self-checkin' }) },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    }
+    const service = new GamesService({ $transaction: txRunner(tx) } as never)
+
+    const result = await service.complete('game-1', hostActor)
+
+    expect(result).toMatchObject({
+      checkedIn: 1,
+      reward: { basisCount: 1, rewardValue: 20 },
+    })
+    expect(tx.riskEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        ruleCode: 'HOST_SELF_CHECKIN_REWARD',
+        severity: 'HIGH',
+        userId: hostActor.sub,
+        objectType: 'Game',
+        objectId: 'game-1',
+        evidence: expect.objectContaining({
+          checkedInRegistrationIds: ['r-host-self'],
+        }),
+      }),
+    })
+    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'GAME_COMPLETED',
+        newValue: expect.objectContaining({
+          excludedHostRegistrationIds: ['r-host-self'],
+          checkedInRegistrationIds: ['r-guest'],
+        }),
+      }),
+    }))
   })
 
   it('makes complete idempotent and never creates a second reward or ledger operation', async () => {
@@ -448,6 +580,7 @@ describe('GamesService host workflow', () => {
         upsert: rewardUpsert,
       },
       courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      ...fulfillmentDelegates(storedGame),
       systemParameter: { findFirst: vi.fn().mockResolvedValue(null) },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
     }
@@ -460,7 +593,7 @@ describe('GamesService host workflow', () => {
     expect(rewardUpsert).toHaveBeenCalledOnce()
     expect(tx.game.update).toHaveBeenCalledOnce()
     expect(tx.courtBooking.updateMany).toHaveBeenCalledOnce()
-    expect(tx.auditLog.create).toHaveBeenCalledOnce()
+    expect(tx.auditLog.create).toHaveBeenCalledTimes(3)
   })
 
   it('rejects a non-owner host from checking in or completing another host game', async () => {
@@ -483,7 +616,12 @@ describe('GamesService host workflow', () => {
   it('treats a repeated check-in scan as a no-op', async () => {
     const storedRegistration = {
       ...registration('r-1', RegistrationStatus.CHECKED_IN, OrderStatus.PAID),
-      game: { id: 'game-1', hostId: 'host-1', status: GameStatus.OPEN },
+      game: {
+        id: 'game-1',
+        hostId: 'host-1',
+        status: GameStatus.OPEN,
+        startsAt: new Date(Date.now() + 10 * 60_000),
+      },
     }
     const tx = {
       gameRegistration: { findUnique: vi.fn().mockResolvedValue(storedRegistration), update: vi.fn() },
@@ -506,7 +644,12 @@ describe('GamesService host workflow', () => {
     }
     const storedRegistration = {
       ...registration('r-1', RegistrationStatus.PAID, OrderStatus.PAID),
-      game: { id: 'game-1', hostId: 'host-1', status: GameStatus.OPEN },
+      game: {
+        id: 'game-1',
+        hostId: 'host-1',
+        status: GameStatus.OPEN,
+        startsAt: new Date(Date.now() + 10 * 60_000),
+      },
     }
     const updatedRegistration = { ...storedRegistration, status: RegistrationStatus.CHECKED_IN }
     const tx = {
@@ -522,6 +665,35 @@ describe('GamesService host workflow', () => {
 
     expect(result.status).toBe(RegistrationStatus.CHECKED_IN)
     expect(tx.gameRegistration.update).toHaveBeenCalledOnce()
+  })
+
+  it('rejects game check-in before the configured opening boundary', async () => {
+    const storedRegistration = {
+      ...registration('r-early', RegistrationStatus.PAID, OrderStatus.PAID),
+      game: {
+        id: 'game-1',
+        hostId: hostActor.sub,
+        status: GameStatus.OPEN,
+        startsAt: new Date(Date.now() + 2 * 60 * 60_000),
+      },
+    }
+    const tx = {
+      gameRegistration: {
+        findUnique: vi.fn().mockResolvedValue(storedRegistration),
+        update: vi.fn(),
+      },
+      auditLog: { create: vi.fn() },
+    }
+
+    await expect(
+      new GamesService({ $transaction: txRunner(tx) } as never).checkIn(
+        'game-1',
+        'member-r-early',
+        hostActor,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException)
+    expect(tx.gameRegistration.update).not.toHaveBeenCalled()
+    expect(tx.auditLog.create).not.toHaveBeenCalled()
   })
 
   it('holds a matured reward while a refund is still pending', async () => {
@@ -800,11 +972,12 @@ describe('GamesService host workflow', () => {
     await expect(service.complete('game-1', hostActor)).rejects.toBeInstanceOf(ConflictException)
   })
 
-  it('does not allow a future game to be completed before it starts', async () => {
+  it('does not allow a future game to be completed before it ends', async () => {
     const tx = {
       game: {
         findUnique: vi.fn().mockResolvedValue(game({
           startsAt: new Date(Date.now() + 60_000),
+          endsAt: new Date(Date.now() + 120_000),
           status: GameStatus.OPEN,
         })),
       },
@@ -814,14 +987,14 @@ describe('GamesService host workflow', () => {
     await expect(service.complete('game-1', hostActor)).rejects.toBeInstanceOf(ConflictException)
   })
 
-  it('does not settle an active game whose start time is invalid', async () => {
+  it('does not settle an active game whose end time is invalid', async () => {
     const tx = {
       game: {
-        findUnique: vi.fn().mockResolvedValue(game({ startsAt: 'not-a-date' })),
+        findUnique: vi.fn().mockResolvedValue(game({ endsAt: 'not-a-date' })),
       },
     }
     const service = new GamesService({ $transaction: txRunner(tx) } as never)
 
-    await expect(service.complete('game-1', hostActor)).rejects.toThrow('开始时间无效')
+    await expect(service.complete('game-1', hostActor)).rejects.toThrow('结束时间无效')
   })
 })

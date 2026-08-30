@@ -7,11 +7,15 @@ import { AppRole } from '../generated/prisma/enums.js'
 import {
   AvailabilityQueryDto,
   CancelCourtClosureDto,
+  CompleteVenueBookingDto,
   CreateCourtClosureDto,
   CreatePriceRuleDto,
+  CreatePriceRuleVersionDto,
   CreateVenueBookingDto,
   ListCourtClosuresQueryDto,
+  SetPriceRuleStatusDto,
   UpdateCourtDto,
+  VenueCheckInDto,
 } from './venues.dto.js'
 import { VenuesService } from './venues.service.js'
 
@@ -61,8 +65,22 @@ export class VenuesController {
 
   @Post('orders/:orderId/check-in')
   @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
-  checkIn(@Param('orderId') orderId: string, @CurrentUser() actor: AuthUser) {
-    return this.venues.checkIn(orderId, actor)
+  checkIn(
+    @Param('orderId') orderId: string,
+    @Body() dto: VenueCheckInDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.venues.checkIn(orderId, actor, dto)
+  }
+
+  @Post('orders/:orderId/fulfillment')
+  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  fulfill(
+    @Param('orderId') orderId: string,
+    @Body() dto: CompleteVenueBookingDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.venues.completeBooking(orderId, dto, actor)
   }
 
   @Patch('courts/:id')
@@ -75,9 +93,41 @@ export class VenuesController {
     return this.venues.updateCourt(id, dto, actor)
   }
 
+  @Get('time-slots/manage')
+  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  timeSlots(@CurrentUser() actor: AuthUser) {
+    return this.venues.listTimeSlots(actor)
+  }
+
+  @Get('price-rules/manage')
+  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  priceRules(@CurrentUser() actor: AuthUser) {
+    return this.venues.listPriceRules(actor)
+  }
+
   @Post('price-rules')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   createPriceRule(@Body() dto: CreatePriceRuleDto, @CurrentUser() actor: AuthUser) {
     return this.venues.createPriceRule(dto, actor)
+  }
+
+  @Post('price-rules/:id/versions')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  createPriceRuleVersion(
+    @Param('id') id: string,
+    @Body() dto: CreatePriceRuleVersionDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.venues.createPriceRuleVersion(id, dto, actor)
+  }
+
+  @Post('price-rules/:id/status')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  setPriceRuleStatus(
+    @Param('id') id: string,
+    @Body() dto: SetPriceRuleStatusDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.venues.setPriceRuleStatus(id, dto, actor)
   }
 }

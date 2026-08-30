@@ -4,14 +4,20 @@ import { mockRequest } from "./router";
 import {
   getEventDetail,
   getEnrollments,
+  getGames,
   getMemberAccountTransactions,
   getTrainingSessions,
+  getVenueBookings,
   resetCatalogState,
   saveEnrollments,
   saveEventDetail,
   saveFrontDeskShifts,
+  saveGames,
   saveTrainingSessions,
+  saveVenueBookings,
+  saveYouthTrainingRules,
 } from "./state";
+import { getOrders, saveOrders } from "./venue";
 
 const storage = new Map<string, unknown>();
 
@@ -51,6 +57,22 @@ describe("miniapp mock acceptance journeys", () => {
   });
 
   it("runs guardian student → seat hold → payment → prepaid refund approval", async () => {
+    saveYouthTrainingRules([
+      {
+        id: "acceptance-youth-rule",
+        version: "TEST-RULE-PUBLISHED",
+        status: "PUBLISHED",
+        maxTotalSessions: 24,
+        maxValidityDays: 200,
+        maxContractAmountCents: 260_000,
+        warningThresholdDays: 30,
+        hardBlock: true,
+        effectiveFrom: new Date(Date.now() - 60_000).toISOString(),
+        effectiveTo: null,
+        requestedById: "user-admin",
+        reviewedById: "user-super",
+      },
+    ]);
     const student = await request("POST", "/training/students", {
       displayName: "小羽",
       birthMonth: "2014-05-01T00:00:00.000Z",
@@ -126,6 +148,11 @@ describe("miniapp mock acceptance journeys", () => {
       prepaid: enrollment.prepaidBalanceCents,
       revenue: enrollment.confirmedRevenueCents,
     };
+    const sessions = getTrainingSessions();
+    const session = sessions.find((item) => item.id === "session-1")!;
+    session.startsAt = new Date(Date.now() - 90 * 60_000).toISOString();
+    session.endsAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    saveTrainingSessions(sessions);
 
     await login("COACH");
     await request("POST", "/training/sessions/session-1/attendance", {
@@ -354,6 +381,19 @@ describe("miniapp mock acceptance journeys", () => {
       idempotencyKey: "venue-payment-request-0001",
     });
 
+    const startsAt = new Date(Date.now() + 15 * 60_000).toISOString();
+    const endsAt = new Date(Date.now() + 135 * 60_000).toISOString();
+    const orders = getOrders();
+    const storedOrder = orders.find((item) => item.id === order.id)!;
+    storedOrder.bookings[0].startsAt = startsAt;
+    storedOrder.bookings[0].endsAt = endsAt;
+    saveOrders(orders);
+    const bookings = getVenueBookings();
+    const booking = bookings.find((item) => item.orderId === order.id)!;
+    booking.startsAt = startsAt;
+    booking.endsAt = endsAt;
+    saveVenueBookings(bookings);
+
     await login("FRONT_DESK");
     await request("POST", "/operations/shifts/open", {
       openingCashCents: 10_000,
@@ -364,13 +404,73 @@ describe("miniapp mock acceptance journeys", () => {
     );
     expect(checkedIn.status).toBe("CHECKED_IN");
     const availability = await request<any>("GET", "/venues/availability", {
-      date,
+      date: shanghaiDate(),
     });
     expect(availability.bookings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ orderId: order.id, status: "CHECKED_IN" }),
       ]),
     );
+  });
+
+  it("cancels a hosted game and preserves refund origin evidence for an already pending order", async () => {
+    const games = getGames();
+    const game = games[0];
+    Object.assign(game, {
+      hostId: "user-host",
+      status: "OPEN",
+      startsAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+      registrations: [
+        {
+          id: "registration-refund-pending",
+          userId: "user-member",
+          status: "PAID",
+          orderId: "order-game-refund-pending",
+        },
+      ],
+    });
+    saveGames(games);
+    saveOrders([
+      {
+        id: "order-game-refund-pending",
+        orderNo: "GO-REFUND-PENDING",
+        title: game.title,
+        businessType: "GAME",
+        status: "REFUND_PENDING",
+        paidCents: 6_800,
+        refundedCents: 0,
+        refunds: [
+          {
+            id: "refund-existing",
+            status: "REQUESTED",
+            amountCents: 1_000,
+            originalOrderStatus: "CHECKED_IN",
+          },
+        ],
+      },
+      ...getOrders(),
+    ]);
+
+    await login("HOST");
+    const command = {
+      reason: "场地临时停电",
+      idempotencyKey: "game-cancel-refund-origin-001",
+    };
+    const result = await request("POST", `/games/${game.id}/cancel`, command);
+    expect(result).toMatchObject({
+      game: { status: "CANCELLED" },
+      refundRequests: [
+        {
+          orderId: "order-game-refund-pending",
+          amountCents: 5_800,
+          originalOrderStatus: "CHECKED_IN",
+          status: "REQUESTED",
+        },
+      ],
+    });
+    await expect(
+      request("POST", `/games/${game.id}/cancel`, command),
+    ).resolves.toMatchObject({ game: { id: game.id }, idempotent: true });
   });
 
   it("forces assisted bookings to select an active customer and keeps operator ownership separate", async () => {
@@ -503,8 +603,7 @@ describe("miniapp mock acceptance journeys", () => {
       {
         url: "/memberships/recharge",
         data: {
-          principalCents: 10_000,
-          giftCents: 0,
+          planId: "recharge-plan-mock-100",
           creationIdempotencyKey: "mock-create-recharge-1",
         },
       },

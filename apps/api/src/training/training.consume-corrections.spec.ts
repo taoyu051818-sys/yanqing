@@ -6,6 +6,7 @@ import {
   AccountType,
   AppRole,
   AttendanceStatus,
+  OrderStatus,
   TrainingAudience,
   TrainingConsumeCorrectionStatus,
   TrainingEnrollmentStatus,
@@ -25,7 +26,12 @@ const admin: AuthUser = {
   roles: [AppRole.ADMIN],
 };
 const transaction = (tx: Record<string, unknown>) =>
-  vi.fn(async (work: (client: Record<string, unknown>) => unknown) => work(tx));
+  vi.fn(async (work: (client: Record<string, unknown>) => unknown) =>
+    work({
+      reconciliationPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
+      ...tx,
+    }),
+  );
 
 const positiveRecognition = {
   id: 'recognition-1',
@@ -38,7 +44,7 @@ const positiveRecognition = {
   venueContributionCents: 3_960,
   venueFeeCents: 0,
   trainingPayableVenueCents: 0,
-  settlementId: 'settlement-closed-1',
+  settlementId: null,
   idempotencyKey: 'consume-original-1',
   reversedBy: null,
 };
@@ -63,6 +69,10 @@ const correctionFixture = (overrides: Record<string, unknown> = {}) => ({
     confirmedRevenueCents: 19_800,
     growthPointsAwarded: 1,
     checkedInAt: new Date('2026-08-20T10:00:00Z'),
+    session: {
+      startsAt: new Date('2026-08-20T09:00:00Z'),
+      endsAt: new Date('2026-08-20T10:00:00Z'),
+    },
     enrollment: {
       id: 'enrollment-1',
       buyerId: 'member-1',
@@ -380,6 +390,162 @@ describe('Training consume corrections', () => {
     });
   });
 
+  it('rejects a correction after its recognition entered a settlement', async () => {
+    const correction = correctionFixture({
+      recognition: {
+        ...positiveRecognition,
+        settlementId: 'settlement-closed-1',
+      },
+    });
+    const tx = {
+      trainingConsumeCorrection: {
+        findUnique: vi.fn().mockResolvedValue(correction),
+      },
+      trainingRevenueRecognition: {
+        aggregate: vi.fn(),
+        create: vi.fn(),
+      },
+    };
+    const service = new TrainingService({
+      trainingConsumeCorrection: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: transaction(tx),
+    } as never);
+
+    await expect(
+      service.approveConsumeCorrection(
+        correction.id,
+        { idempotencyKey: 'correction-settled-decision-1' },
+        admin,
+      ),
+    ).rejects.toThrow('已进入结算单')
+    expect(tx.trainingRevenueRecognition.aggregate).not.toHaveBeenCalled()
+    expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled()
+  });
+
+  it('rejects a correction in a locked business day before writing reversal', async () => {
+    const correction = correctionFixture();
+    const tx = {
+      trainingConsumeCorrection: {
+        findUnique: vi.fn().mockResolvedValue(correction),
+      },
+      reconciliationPeriod: {
+        findFirst: vi.fn().mockResolvedValue({
+          businessDate: new Date('2026-08-19T16:00:00.000Z'),
+        }),
+      },
+      trainingRevenueRecognition: {
+        aggregate: vi.fn(),
+        create: vi.fn(),
+      },
+    };
+    const service = new TrainingService({
+      trainingConsumeCorrection: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: transaction(tx),
+    } as never);
+
+    await expect(
+      service.approveConsumeCorrection(
+        correction.id,
+        { idempotencyKey: 'correction-locked-decision-1' },
+        admin,
+      ),
+    ).rejects.toThrow('不能批准消课冲正')
+    expect(tx.trainingRevenueRecognition.aggregate).not.toHaveBeenCalled()
+    expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled()
+  });
+
+  it.each([
+    [OrderStatus.COMPLETED, OrderStatus.PAID],
+    [OrderStatus.PARTIALLY_REFUNDED, OrderStatus.PARTIALLY_REFUNDED],
+    [OrderStatus.REFUND_PENDING, OrderStatus.REFUND_PENDING],
+  ])(
+    'reopens a completed training order from %s as %s when the final consume is reversed',
+    async (orderStatus, expectedStatus) => {
+      const base = correctionFixture();
+      const completedAt = new Date('2026-08-20T12:00:00.000Z');
+      const correction = correctionFixture({
+        attendance: {
+          ...base.attendance,
+          growthPointsAwarded: 0,
+          enrollment: {
+            ...base.attendance.enrollment,
+            refundedCents:
+              orderStatus === OrderStatus.COMPLETED ? 0 : 1_000,
+            product: { audience: TrainingAudience.ADULT },
+            order: {
+              id: 'order-training-1',
+              status: orderStatus,
+              completedAt,
+            },
+          },
+        },
+      });
+      const reversal = {
+        id: 'recognition-reversal-1',
+        effectiveRevenueCents: -19_800,
+        venueContributionCents: -3_960,
+      };
+      const orderUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+      const auditCreate = vi.fn().mockResolvedValue({});
+      const tx = {
+        trainingConsumeCorrection: {
+          findUnique: vi.fn().mockResolvedValue(correction),
+          update: vi.fn().mockResolvedValue({
+            ...correction,
+            status: TrainingConsumeCorrectionStatus.APPROVED,
+          }),
+        },
+        trainingRevenueRecognition: {
+          aggregate: vi.fn().mockResolvedValue({ _max: { sequence: 1 } }),
+          create: vi.fn().mockResolvedValue(reversal),
+        },
+        trainingEnrollment: {
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        trainingAttendance: {
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        order: {
+          updateMany: orderUpdateMany,
+          findUnique: vi.fn(),
+        },
+        auditLog: { create: auditCreate },
+      };
+      const service = new TrainingService({
+        trainingConsumeCorrection: {
+          findUnique: vi.fn().mockResolvedValue(null),
+        },
+        $transaction: transaction(tx),
+      } as never);
+
+      await service.approveConsumeCorrection(
+        correction.id,
+        {
+          reason: '复核确认最后一节误消',
+          idempotencyKey: `correction-reopen-${orderStatus}`,
+        },
+        admin,
+      );
+
+      expect(orderUpdateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'order-training-1',
+          status: orderStatus,
+          completedAt,
+        },
+        data: {
+          status: expectedStatus,
+          completedAt: null,
+        },
+      });
+      expect(
+        auditCreate.mock.calls.filter(
+          ([call]) => call.data.action === 'ORDER_FULFILLMENT_REOPENED',
+        ),
+      ).toHaveLength(1);
+    },
+  );
+
   it('rejects a correction without creating any reversal ledger row', async () => {
     const correction = correctionFixture();
     const rejected = {
@@ -556,7 +722,11 @@ describe('Training consume corrections', () => {
       growthPointsAwarded: 0,
       feedback: null,
       operatorId: coach.sub,
-      session: { startsAt: new Date('2026-09-10T10:00:00Z'), class: {} },
+      session: {
+        startsAt: new Date(Date.now() - 60 * 60_000),
+        endsAt: new Date(Date.now() - 10 * 60_000),
+        class: {},
+      },
       enrollment: {
         id: 'enrollment-1',
         buyerId: 'member-1',
@@ -597,6 +767,9 @@ describe('Training consume corrections', () => {
       },
       systemParameter: {
         findFirst: vi.fn().mockResolvedValue({ value: 2_000 }),
+      },
+      reconciliationPeriod: {
+        findFirst: vi.fn().mockResolvedValue(null),
       },
       account: {
         upsert: vi

@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 
 import {
   AccountTxnKind,
@@ -6,30 +10,66 @@ import {
   AppRole,
   BookingStatus,
   BusinessType,
+  EventStatus,
   InventoryTxnType,
   MembershipStatus,
   OrderStatus,
   PaymentChannel,
   Prisma,
   RewardStatus,
+  RegistrationStatus,
   TrainingEnrollmentStatus,
-} from '../generated/prisma/client.js'
-import { applyInventoryDelta } from '../inventory/inventory-balance.js'
+} from '../generated/prisma/client.js';
+import { applyInventoryDelta } from '../inventory/inventory-balance.js';
+import { ConsignmentSettlementService } from '../inventory/consignment-settlement.service.js';
+import { completeOrderFulfillment } from '../orders/order-fulfillment.js';
+
+const INSTANT_FULFILLMENT_TYPES: ReadonlySet<BusinessType> = new Set([
+  BusinessType.MEMBERSHIP,
+  BusinessType.GOODS,
+  BusinessType.RECHARGE,
+]);
+
+const REPAIRABLE_FULFILLMENT_STATUSES: ReadonlySet<OrderStatus> = new Set([
+  OrderStatus.PAID,
+  OrderStatus.CHECKED_IN,
+  OrderStatus.COMPLETED,
+  OrderStatus.REFUND_PENDING,
+  OrderStatus.PARTIALLY_REFUNDED,
+]);
 
 export type PayableOrder = Prisma.OrderGetPayload<{
-  include: { items: true; membership: { include: { product: true } }; member: { select: { openId: true } } }
-}>
+  include: {
+    items: true;
+    membership: { include: { product: true } };
+    member: { select: { openId: true } };
+  };
+}>;
 
 @Injectable()
 export class OrderFinalizerService {
+  constructor(
+    private readonly consignmentSettlements: ConsignmentSettlementService,
+  ) {}
+
   async finalize(
     tx: Prisma.TransactionClient,
     order: PayableOrder,
-    payment: { id: string; paymentNo: string; channel: PaymentChannel; amountCents?: number },
+    payment: {
+      id: string;
+      paymentNo: string;
+      channel: PaymentChannel;
+      amountCents?: number;
+      operatorId?: string;
+    },
     actorId: string,
     actorRole: AppRole,
     now = new Date(),
   ): Promise<void> {
+    const paymentActorId = payment.operatorId ?? actorId;
+    if (payment.operatorId && payment.operatorId !== actorId) {
+      throw new ConflictException('支付操作人与终结器审计主体不一致');
+    }
     // Payment notifications and client retries can arrive more than once.  A
     // successful finalisation is the commit boundary for every downstream
     // side effect, so a retry must return without touching balances, stock,
@@ -37,9 +77,58 @@ export class OrderFinalizerService {
     // the race between two workers handling the same provider callback.
     const current = await tx.order.findUnique({
       where: { id: order.id },
-      select: { status: true, paidCents: true, paymentChannel: true },
-    })
-    if (current && current.status !== OrderStatus.PENDING) return
+      select: {
+        status: true,
+        paidCents: true,
+        refundedCents: true,
+        paymentChannel: true,
+        completedAt: true,
+        businessType: true,
+      },
+    });
+    if (current && current.status !== OrderStatus.PENDING) {
+      if (
+        order.businessType === BusinessType.EVENT &&
+        current.status === OrderStatus.CANCELLED
+      ) {
+        throw new ConflictException('赛事报名订单已取消，不能完成支付');
+      }
+      if (
+        INSTANT_FULFILLMENT_TYPES.has(order.businessType) &&
+        !current.completedAt &&
+        REPAIRABLE_FULFILLMENT_STATUSES.has(current.status)
+      ) {
+        await this.completeInstantOrder(
+          tx,
+          order,
+          payment,
+          paymentActorId,
+          actorRole,
+          now,
+        );
+      }
+      return;
+    }
+    if (order.businessType === BusinessType.EVENT) {
+      const eventTeam = await tx.eventTeam.findUnique({
+        where: { orderId: order.id },
+        include: { event: true },
+      });
+      if (!eventTeam) throw new ConflictException('赛事订单缺少报名队伍');
+      if (eventTeam.status !== RegistrationStatus.REGISTERED) {
+        throw new ConflictException('赛事报名席位当前不可支付');
+      }
+      if (!eventTeam.paymentDueAt || eventTeam.paymentDueAt <= now) {
+        throw new ConflictException('赛事报名支付保留期已过期');
+      }
+      if (
+        (eventTeam.event.status !== EventStatus.OPEN &&
+          eventTeam.event.status !== EventStatus.FULL) ||
+        eventTeam.event.startsAt <= now
+      ) {
+        throw new ConflictException('赛事已关闭报名或已开赛');
+      }
+    }
     const changed = await tx.order.updateMany({
       where: { id: order.id, status: OrderStatus.PENDING },
       data: {
@@ -48,25 +137,32 @@ export class OrderFinalizerService {
         paidCents: order.payableCents,
         paidAt: now,
       },
-    })
-    if (changed.count !== 1) return
+    });
+    if (changed.count !== 1) return;
 
-    if (payment.amountCents !== undefined && payment.amountCents !== order.payableCents) {
-      throw new ConflictException('支付金额与订单应付金额不一致')
+    if (
+      payment.amountCents !== undefined &&
+      payment.amountCents !== order.payableCents
+    ) {
+      throw new ConflictException('支付金额与订单应付金额不一致');
     }
     await tx.courtBooking.updateMany({
       where: { orderId: order.id, status: BookingStatus.HELD },
       data: { status: BookingStatus.CONFIRMED, holdExpiresAt: null },
-    })
+    });
     const enrollment = await tx.trainingEnrollment.findUnique({
       where: { orderId: order.id },
       include: { class: true },
-    })
+    });
     if (enrollment?.status === TrainingEnrollmentStatus.PENDING_PAYMENT) {
       if (enrollment.classId) {
-        if (!enrollment.class?.active) throw new ConflictException('培训班已停用，不能完成支付')
-        if (!enrollment.seatReservedUntil || enrollment.seatReservedUntil <= now) {
-          throw new ConflictException('培训班名额保留已过期，请重新报名')
+        if (!enrollment.class?.active)
+          throw new ConflictException('培训班已停用，不能完成支付');
+        if (
+          !enrollment.seatReservedUntil ||
+          enrollment.seatReservedUntil <= now
+        ) {
+          throw new ConflictException('培训班名额保留已过期，请重新报名');
         }
         const occupiedSeats = await tx.trainingEnrollment.count({
           where: {
@@ -79,9 +175,9 @@ export class OrderFinalizerService {
               ],
             },
           },
-        })
+        });
         if (occupiedSeats >= enrollment.class.capacity) {
-          throw new ConflictException('培训班名额已满，支付未完成')
+          throw new ConflictException('培训班名额已满，支付未完成');
         }
       }
       await tx.trainingEnrollment.update({
@@ -91,85 +187,168 @@ export class OrderFinalizerService {
           prepaidBalanceCents: enrollment.totalAmountCents,
           seatReservedUntil: null,
         },
-      })
+      });
     }
-    await tx.gameRegistration.updateMany({ where: { orderId: order.id, status: 'REGISTERED' }, data: { status: 'PAID' } })
-    await tx.eventTeam.updateMany({ where: { orderId: order.id, status: 'REGISTERED' }, data: { status: 'PAID' } })
+    await tx.gameRegistration.updateMany({
+      where: { orderId: order.id, status: 'REGISTERED' },
+      data: { status: 'PAID' },
+    });
+    if (order.businessType === BusinessType.EVENT) {
+      const paidTeam = await tx.eventTeam.updateMany({
+        where: {
+          orderId: order.id,
+          status: RegistrationStatus.REGISTERED,
+          paymentDueAt: { gt: now },
+        },
+        data: { status: RegistrationStatus.PAID, paymentDueAt: null },
+      });
+      if (paidTeam.count !== 1) {
+        throw new ConflictException('赛事报名席位已过期或被其他操作更新');
+      }
+    }
 
     if (order.membership) {
-      await tx.memberSubscription.update({ where: { id: order.membership.id }, data: { status: MembershipStatus.ACTIVE } })
+      await tx.memberSubscription.update({
+        where: { id: order.membership.id },
+        data: { status: MembershipStatus.ACTIVE },
+      });
       await tx.memberProfile.update({
         where: { id: order.membership.memberId },
-        data: { level: order.membership.product.level, membershipExpiresAt: order.membership.endsAt },
-      })
+        data: {
+          level: order.membership.product.level,
+          membershipExpiresAt: order.membership.endsAt,
+        },
+      });
     }
 
     if (order.businessType === BusinessType.RECHARGE) {
-      const snapshot = order.parameterSnapshot as { principalCents?: number; giftCents?: number }
+      const snapshot = order.parameterSnapshot as {
+        principalCents?: number;
+        giftCents?: number;
+      };
       const credits: Array<[AccountType, number]> = [
-        [AccountType.CASH_PRINCIPAL, Math.max(0, Number(snapshot.principalCents) || 0)],
-        [AccountType.GIFT_BALANCE, Math.max(0, Number(snapshot.giftCents) || 0)],
-      ]
+        [
+          AccountType.CASH_PRINCIPAL,
+          Math.max(0, Number(snapshot.principalCents) || 0),
+        ],
+        [
+          AccountType.GIFT_BALANCE,
+          Math.max(0, Number(snapshot.giftCents) || 0),
+        ],
+      ];
       for (const [type, amount] of credits) {
-        if (!amount) continue
-        const account = await tx.account.findUniqueOrThrow({ where: { userId_type: { userId: order.memberId, type } } })
-        const idempotencyKey = `RECHARGE:${payment.id}:${type}`
-        const existing = await tx.accountTransaction.findUnique({ where: { idempotencyKey } })
-        if (existing) continue
+        if (!amount) continue;
+        const account = await tx.account.findUniqueOrThrow({
+          where: { userId_type: { userId: order.memberId, type } },
+        });
+        const idempotencyKey = `RECHARGE:${payment.id}:${type}`;
+        const existing = await tx.accountTransaction.findUnique({
+          where: { idempotencyKey },
+        });
+        if (existing) continue;
         const changedAccount = await tx.account.updateMany({
           where: { id: account.id, version: account.version },
           data: { balance: { increment: amount }, version: { increment: 1 } },
-        })
-        if (changedAccount.count !== 1) throw new ConflictException('账户余额已变化，请重试支付回调')
-        await tx.accountTransaction.create({ data: {
-          accountId: account.id, kind: AccountTxnKind.CREDIT, amount,
-          balanceBefore: account.balance, balanceAfter: account.balance + amount,
-          reasonCode: 'MEMBER_RECHARGE', reason: order.title, orderId: order.id,
-          operatorId: actorId, idempotencyKey,
-        } })
+        });
+        if (changedAccount.count !== 1)
+          throw new ConflictException('账户余额已变化，请重试支付回调');
+        await tx.accountTransaction.create({
+          data: {
+            accountId: account.id,
+            kind: AccountTxnKind.CREDIT,
+            amount,
+            balanceBefore: account.balance,
+            balanceAfter: account.balance + amount,
+            reasonCode: 'MEMBER_RECHARGE',
+            reason: order.title,
+            orderId: order.id,
+            operatorId: paymentActorId,
+            idempotencyKey,
+          },
+        });
       }
     }
 
     if (order.businessType === BusinessType.GOODS) {
       for (const item of order.items) {
-        if (!item.itemId) continue
-        const inventory = await tx.inventoryItem.findUnique({ where: { id: item.itemId } })
-        if (!inventory) throw new NotFoundException(`商品 ${item.name} 不存在`)
-        const idempotencyKey = `GOODS:${payment.id}:${item.id}`
-        const existing = await tx.inventoryTransaction.findUnique({ where: { idempotencyKey } })
-        if (existing) continue
-        const { stockAfter } = await applyInventoryDelta(tx, inventory, -item.quantity)
-        await tx.inventoryTransaction.create({ data: {
-          itemId: inventory.id, type: InventoryTxnType.SALE_OUT, quantity: -item.quantity,
-          stockBefore: inventory.stock, stockAfter,
-          unitCostCents: inventory.purchasePriceCents, orderItemId: item.id, operatorId: actorId,
-          reason: `订单 ${order.orderNo} 销售出库`, idempotencyKey,
-        } })
+        if (!item.itemId) continue;
+        const inventory = await tx.inventoryItem.findUnique({
+          where: { id: item.itemId },
+        });
+        if (!inventory) throw new NotFoundException(`商品 ${item.name} 不存在`);
+        const idempotencyKey = `GOODS:${payment.id}:${item.id}`;
+        const existing = await tx.inventoryTransaction.findUnique({
+          where: { idempotencyKey },
+        });
+        if (existing) continue;
+        const { stockAfter } = await applyInventoryDelta(
+          tx,
+          inventory,
+          -item.quantity,
+        );
+        await tx.inventoryTransaction.create({
+          data: {
+            itemId: inventory.id,
+            type: InventoryTxnType.SALE_OUT,
+            quantity: -item.quantity,
+            stockBefore: inventory.stock,
+            stockAfter,
+            unitCostCents: inventory.purchasePriceCents,
+            orderItemId: item.id,
+            operatorId: paymentActorId,
+            reason: `订单 ${order.orderNo} 销售出库`,
+            idempotencyKey,
+          },
+        });
       }
     }
 
-    const member = await tx.user.findUnique({ where: { id: order.memberId }, select: { referrerId: true } })
+    const member = await tx.user.findUnique({
+      where: { id: order.memberId },
+      select: { referrerId: true },
+    });
     if (member?.referrerId) {
       const previousPaidOrders = await tx.order.count({
         where: {
           memberId: order.memberId,
           id: { not: order.id },
-          status: { in: [OrderStatus.PAID, OrderStatus.CHECKED_IN, OrderStatus.COMPLETED, OrderStatus.PARTIALLY_REFUNDED] },
+          status: {
+            in: [
+              OrderStatus.PAID,
+              OrderStatus.CHECKED_IN,
+              OrderStatus.COMPLETED,
+              OrderStatus.PARTIALLY_REFUNDED,
+            ],
+          },
         },
-      })
+      });
       if (previousPaidOrders === 0) {
         const [rewardParameter, observationParameter] = await Promise.all([
           tx.systemParameter.findFirst({
-            where: { key: 'referral.first_payment.coin_reward', effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] },
+            where: {
+              key: 'referral.first_payment.coin_reward',
+              effectiveFrom: { lte: now },
+              OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+            },
             orderBy: { effectiveFrom: 'desc' },
           }),
           tx.systemParameter.findFirst({
-            where: { key: 'referral.refund_observation_days', effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] },
+            where: {
+              key: 'referral.refund_observation_days',
+              effectiveFrom: { lte: now },
+              OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+            },
             orderBy: { effectiveFrom: 'desc' },
           }),
-        ])
-        const rewardValue = typeof rewardParameter?.value === 'number' ? Math.max(0, Math.round(rewardParameter.value)) : 100
-        const observationDays = typeof observationParameter?.value === 'number' ? Math.max(0, Math.round(observationParameter.value)) : 7
+        ]);
+        const rewardValue =
+          typeof rewardParameter?.value === 'number'
+            ? Math.max(0, Math.round(rewardParameter.value))
+            : 100;
+        const observationDays =
+          typeof observationParameter?.value === 'number'
+            ? Math.max(0, Math.round(observationParameter.value))
+            : 7;
         // The reward is unique per new member and trigger type.  Use the
         // compound unique key as the database concurrency boundary instead of
         // a read-then-create sequence.  In particular, do not catch P2002
@@ -194,26 +373,32 @@ export class OrderFinalizerService {
             rewardType: 'BADMINTON_COIN',
             rewardValue,
             status: RewardStatus.PENDING_OBSERVATION,
-            observationEndsAt: new Date(now.getTime() + observationDays * 86_400_000),
+            observationEndsAt: new Date(
+              now.getTime() + observationDays * 86_400_000,
+            ),
           },
-        })
+        });
       }
     }
 
     if (order.consumedCouponCode) {
-      const coupon = await tx.couponCode.findUnique({ where: { code: order.consumedCouponCode }, include: { template: true } })
-      if (!coupon) throw new ConflictException('订单优惠券不存在')
+      const coupon = await tx.couponCode.findUnique({
+        where: { code: order.consumedCouponCode },
+        include: { template: true },
+      });
+      if (!coupon) throw new ConflictException('订单优惠券不存在');
       if (coupon.status !== 'CLAIMED') {
         // The discount is part of the order snapshot, but the coupon itself
         // is a one-time resource.  Without this guard two orders created with
         // the same claimed code could both be paid and silently receive the
         // same benefit.  Failing the payment finalisation rolls the whole
         // transaction back, leaving the second order pending for a safe retry.
-        throw new ConflictException('订单优惠券已被使用或已失效')
+        throw new ConflictException('订单优惠券已被使用或已失效');
       }
-      if (coupon.expiresAt <= now) throw new ConflictException('订单优惠券已过期')
+      if (coupon.expiresAt <= now)
+        throw new ConflictException('订单优惠券已过期');
       if (coupon.attributionOrderId && coupon.attributionOrderId !== order.id) {
-        throw new ConflictException('订单优惠券已锁定到其他订单')
+        throw new ConflictException('订单优惠券已锁定到其他订单');
       }
       const redeemed = await tx.couponCode.updateMany({
         where: {
@@ -224,18 +409,108 @@ export class OrderFinalizerService {
         data: {
           status: 'REDEEMED',
           redeemedAt: now,
-          redeemedById: actorId,
+          redeemedById: paymentActorId,
           redeemedMerchantId: coupon.template.merchantId,
           attributionOrderId: order.id,
           attributedAmountCents: order.payableCents,
         },
-      })
-      if (redeemed.count !== 1) throw new ConflictException('订单优惠券已被并发使用，请重新下单')
-      await tx.couponTemplate.update({ where: { id: coupon.templateId }, data: { redeemedCount: { increment: 1 } } })
+      });
+      if (redeemed.count !== 1)
+        throw new ConflictException('订单优惠券已被并发使用，请重新下单');
+      await tx.couponTemplate.update({
+        where: { id: coupon.templateId },
+        data: { redeemedCount: { increment: 1 } },
+      });
     }
-    await tx.auditLog.create({ data: {
-      actorId, actorRole, action: 'ORDER_PAID', objectType: 'Order', objectId: order.id,
-      newValue: { paymentNo: payment.paymentNo, channel: payment.channel } as never,
-    } })
+    await tx.auditLog.create({
+      data: {
+        actorId: paymentActorId,
+        actorRole,
+        action: 'ORDER_PAID',
+        objectType: 'Order',
+        objectId: order.id,
+        newValue: {
+          paymentNo: payment.paymentNo,
+          channel: payment.channel,
+        } as never,
+      },
+    });
+    if (INSTANT_FULFILLMENT_TYPES.has(order.businessType)) {
+      await this.completeInstantOrder(
+        tx,
+        order,
+        payment,
+        paymentActorId,
+        actorRole,
+        now,
+      );
+    }
+  }
+
+  recordSucceededGoodsRefund(
+    tx: Prisma.TransactionClient,
+    refundId: string,
+    actorId: string,
+    actorRole: AppRole,
+  ) {
+    return this.consignmentSettlements.recordSucceededGoodsRefund(
+      tx,
+      refundId,
+      actorId,
+      actorRole,
+    );
+  }
+
+  private async completeInstantOrder(
+    tx: Prisma.TransactionClient,
+    order: PayableOrder,
+    payment: {
+      id: string;
+      paymentNo: string;
+      channel: PaymentChannel;
+    },
+    actorId: string,
+    actorRole: AppRole,
+    completedAt: Date,
+  ): Promise<void> {
+    const outcome =
+      order.businessType === BusinessType.GOODS
+        ? ('FULFILLED' as const)
+        : ('ACTIVATED' as const);
+    const reason =
+      order.businessType === BusinessType.MEMBERSHIP
+        ? '会员权益已激活'
+        : order.businessType === BusinessType.GOODS
+          ? '商品销售已完成出库'
+          : '充值本金与赠送账户已入账';
+    await completeOrderFulfillment(tx, {
+      orderId: order.id,
+      actor: {
+        sub: actorId,
+        displayName: '支付操作人',
+        roles: [actorRole],
+      },
+      objectType: 'Payment',
+      objectId: payment.id,
+      outcome,
+      completedAt,
+      reason,
+      metadata: {
+        paymentNo: payment.paymentNo,
+        channel: payment.channel,
+        accountingTreatment:
+          order.businessType === BusinessType.RECHARGE
+            ? 'PREPAID_LIABILITY'
+            : 'REALIZED_ON_FULFILLMENT',
+      },
+    });
+    if (order.businessType === BusinessType.GOODS) {
+      await this.consignmentSettlements.recordCompletedGoodsSale(
+        tx,
+        order.id,
+        actorId,
+        actorRole,
+      );
+    }
   }
 }
