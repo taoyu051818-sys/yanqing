@@ -10,7 +10,7 @@
 - 构建后配置：`dist/*/mp-weixin/project.config.json` 的 `compileType` 为 `miniprogram`，因此项目按“微信小程序”打开，不是“小游戏”。
 - 默认数据模式：`VITE_DATA_MODE=mock`。模拟模式不会访问 API，订单、身份和演示操作保存在当前微信开发者工具的本地缓存。
 
-本机构建核验（2026-08-30）：已生成并检查 `dist/build/mp-weixin/project.config.json`，其中 `compileType=miniprogram` 且使用测试 AppID；已在微信开发者工具 Stable 2.01.2510290 导入、重新编译并渲染首页，问题面板为 0，最终预览包约 606 KB 且已成功生成二维码。点击“上传”时工具明确提示“测试号不支持上传”，因此该 AppID 只能用于预览/开发版实机检查；要上传开发版本或设置体验版，必须换成管理员授权且支持上传的正式小程序 AppID 后重新构建。mock 构建仍只能计作开发演示。
+本机构建核验（2026-08-30）：已生成并检查 `dist/build/mp-weixin/project.config.json`，其中 `compileType=miniprogram` 且使用测试 AppID；已在微信开发者工具 Stable 2.01.2510290 导入、重新编译并渲染首页，问题面板为 0，最终预览包约 761 KB 且已成功刷新二维码。点击“上传”时工具明确提示“测试号不支持上传”，因此该 AppID 只能用于预览/开发版实机检查；要上传开发版本或设置体验版，必须换成管理员授权且支持上传的正式小程序 AppID 后重新构建。mock 构建仍只能计作开发演示。
 
 测试 AppID 只用于本地开发和预览验收，不支持上传体验版。若开发者工具提示“无权限”“AppID 不存在”或账号未加入项目，请让小程序管理员把当前微信号加入开发成员，或在 `manifest.json` 换成你有权限的 AppID 后重新构建；不要把别人的 AppID 用于正式发布。后端 `WECHAT_APP_ID` 必须与前端构建使用的 AppID 一致，`WECHAT_APP_SECRET` 只能放在 API 服务端。
 
