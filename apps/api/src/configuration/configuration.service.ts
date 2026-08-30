@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
 import { PrismaService } from '../database/prisma.service.js'
@@ -36,6 +36,9 @@ export class ConfigurationService {
   }
 
   async createVersion(dto: CreateParameterDto, actor: AuthUser) {
+    if (!actor.roles.some((role) => ([AppRole.ADMIN, AppRole.SUPER_ADMIN] as AppRole[]).includes(role))) {
+      throw new ForbiddenException('仅管理员可创建参数版本')
+    }
     const effectiveFrom = new Date(dto.effectiveFrom)
     if (Number.isNaN(effectiveFrom.getTime())) throw new BadRequestException('生效时间无效')
     if (dto.key === 'training.contract_rate_bps' && dto.value !== 2_000) {
@@ -49,6 +52,16 @@ export class ConfigurationService {
       where: { key: dto.key },
       orderBy: { effectiveFrom: 'desc' },
     })
+    const locked = dto.locked || dto.key.startsWith('training.')
+    if (existing && effectiveFrom.getTime() === existing.effectiveFrom.getTime()) {
+      const sameCommand =
+        JSON.stringify(existing.value) === JSON.stringify(dto.value) &&
+        existing.type === dto.type &&
+        existing.description === dto.description &&
+        existing.locked === locked
+      if (sameCommand) return existing
+      throw new ConflictException('同一参数与生效时间已被其他命令占用')
+    }
     if (existing?.locked && !actor.roles.includes(AppRole.SUPER_ADMIN)) {
       throw new ConflictException('锁定参数仅超级管理员可变更')
     }
@@ -69,7 +82,7 @@ export class ConfigurationService {
           value: dto.value as never,
           type: dto.type,
           description: dto.description,
-          locked: dto.locked || dto.key.startsWith('training.'),
+          locked,
           effectiveFrom,
           createdById: actor.sub,
         },
@@ -83,6 +96,7 @@ export class ConfigurationService {
           objectId: created.id,
           oldValue: existing ? ({ id: existing.id, value: existing.value } as never) : undefined,
           newValue: { key: dto.key, value: dto.value, effectiveFrom: dto.effectiveFrom } as never,
+          reason: dto.reason.trim(),
         },
       })
       return created

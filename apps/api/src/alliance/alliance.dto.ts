@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer'
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -12,18 +13,21 @@ import {
   MinLength,
 } from 'class-validator'
 
-import { MerchantLevel } from '../generated/prisma/enums.js'
+import { MerchantLevel, UserStatus } from '../generated/prisma/enums.js'
 
 export class CreateMerchantDto {
   @IsString()
+  @MinLength(2)
   @MaxLength(40)
   code: string
 
   @IsString()
+  @MinLength(2)
   @MaxLength(120)
   name: string
 
   @IsString()
+  @MinLength(2)
   @MaxLength(80)
   category: string
 
@@ -44,6 +48,7 @@ export class CreateMerchantDto {
 
 export class CreateCouponTemplateDto {
   @IsString()
+  @MinLength(2)
   @MaxLength(40)
   code: string
 
@@ -51,14 +56,17 @@ export class CreateCouponTemplateDto {
   merchantId: string
 
   @IsString()
+  @MinLength(2)
   @MaxLength(120)
   name: string
 
   @IsString()
+  @MinLength(2)
   @MaxLength(120)
   activityName: string
 
   @IsString()
+  @MinLength(2)
   @MaxLength(300)
   benefitDescription: string
 
@@ -92,6 +100,41 @@ export class GenerateCouponCodesDto {
   @Min(1)
   @Max(2000)
   count: number
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string
+}
+
+export class SetMerchantStatusDto {
+  @IsEnum(UserStatus)
+  status: UserStatus
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string
+}
+
+export class SetCouponTemplateStatusDto {
+  @IsBoolean()
+  enabled: boolean
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string
 }
 
 export class RedeemCouponDto {

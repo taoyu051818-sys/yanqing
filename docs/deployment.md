@@ -6,7 +6,7 @@
 
 - `DATABASE_URL`：PostgreSQL 连接串。
 - `JWT_SECRET`：不少于 32 个随机字符，生产环境使用密钥管理服务。
-- `CORS_ORIGINS`：仅列出真实 Web 管理端域名。
+- `CORS_ORIGINS`：仅列出确需浏览器访问 API 的受信调试或运维来源；微信小程序 request 合法域名仍在微信公众平台单独配置。
 - `WECHAT_APP_ID`、`WECHAT_APP_SECRET`：微信小程序登录凭据。
 - `PAYMENT_PROVIDER`：默认 `mock` 用于联调；正式收费设置为 `wechat`。
 - `WECHAT_PAY_*`：微信支付商户号、证书序列号、商户私钥、平台证书、API v3 Key 与支付/退款通知地址。真实模式已实现 JSAPI 下单、小程序 RSA 调起参数、通知验签、AES-GCM 解密、金额校验、幂等入账、退款申请和退款成功通知回账；上线仍须用实际商户资料完成微信侧验收。

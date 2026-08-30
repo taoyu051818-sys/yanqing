@@ -178,6 +178,12 @@ const centerDefinitions: Array<{
     route: "/packages/ops/pages/finance/index",
     roles: ["FINANCE", "ADMIN", "SUPER_ADMIN"],
   },
+  {
+    title: "治理与审计",
+    description: "员工微信身份、岗位权限、参数版本、风险与导出",
+    route: "/packages/ops/pages/governance/index",
+    roles: ["FINANCE", "ADMIN", "SUPER_ADMIN"],
+  },
 ];
 
 const roleLabel = computed(() => {

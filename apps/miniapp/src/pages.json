@@ -34,7 +34,8 @@
         { "path": "pages/finance/index", "style": { "navigationBarTitleText": "财务结算" } },
         { "path": "pages/inventory/index", "style": { "navigationBarTitleText": "商品库存" } },
         { "path": "pages/members/index", "style": { "navigationBarTitleText": "会员服务" } },
-        { "path": "pages/venue/index", "style": { "navigationBarTitleText": "场馆维护日历" } }
+        { "path": "pages/venue/index", "style": { "navigationBarTitleText": "场馆维护日历" } },
+        { "path": "pages/governance/index", "style": { "navigationBarTitleText": "治理与审计" } }
       ]
     }
   ],

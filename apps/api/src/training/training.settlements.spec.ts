@@ -64,9 +64,12 @@ function workflowPrisma(initialStatus = SettlementStatus.DRAFT) {
   ];
   const tx = {
     trainingSettlement: {
-      findUnique: vi.fn().mockImplementation(() => Promise.resolve({ ...current })),
+      findUnique: vi
+        .fn()
+        .mockImplementation(() => Promise.resolve({ ...current })),
       updateMany: vi.fn().mockImplementation(({ where, data }) => {
-        if (where.status !== current.status) return Promise.resolve({ count: 0 });
+        if (where.status !== current.status)
+          return Promise.resolve({ count: 0 });
         Object.assign(current, data, { updatedAt: new Date() });
         return Promise.resolve({ count: 1 });
       }),
@@ -76,17 +79,19 @@ function workflowPrisma(initialStatus = SettlementStatus.DRAFT) {
     },
     reconciliationPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
     auditLog: {
-      findFirst: vi.fn().mockImplementation(({ where }) =>
-        Promise.resolve(
-          audits.find(
-            (audit) =>
-              audit.objectType === where.objectType &&
-              audit.objectId === where.objectId &&
-              (!where.action || audit.action === where.action) &&
-              (!where.requestId || audit.requestId === where.requestId),
-          ) ?? null,
+      findFirst: vi
+        .fn()
+        .mockImplementation(({ where }) =>
+          Promise.resolve(
+            audits.find(
+              (audit) =>
+                audit.objectType === where.objectType &&
+                audit.objectId === where.objectId &&
+                (!where.action || audit.action === where.action) &&
+                (!where.requestId || audit.requestId === where.requestId),
+            ) ?? null,
+          ),
         ),
-      ),
       create: vi.fn().mockImplementation(({ data }) => {
         const audit = {
           id: `audit-${audits.length + 1}`,
@@ -103,8 +108,8 @@ function workflowPrisma(initialStatus = SettlementStatus.DRAFT) {
     audits,
     tx,
     prisma: {
-      $transaction: vi.fn(
-        async (work: (client: typeof tx) => unknown) => work(tx),
+      $transaction: vi.fn(async (work: (client: typeof tx) => unknown) =>
+        work(tx),
       ),
     },
   };
@@ -139,6 +144,16 @@ describe('TrainingService settlement state machine', () => {
         admin,
       ),
     ).resolves.toMatchObject({ status: SettlementStatus.SETTLED });
+    await expect(
+      service.settleSettlement(
+        current.id,
+        {
+          reason: '同一幂等键却更换付款结论',
+          idempotencyKey: 'training-settle-1',
+        },
+        admin,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
     await expect(
       service.settleSettlement(
         current.id,
@@ -290,14 +305,19 @@ describe('TrainingController settlement contract', () => {
   it('delegates list and lifecycle commands behind finance/admin roles', async () => {
     const training = {
       listSettlements: vi.fn().mockResolvedValue([]),
-      submitSettlement: vi.fn().mockResolvedValue({ status: 'PENDING_CONFIRMATION' }),
+      submitSettlement: vi
+        .fn()
+        .mockResolvedValue({ status: 'PENDING_CONFIRMATION' }),
       confirmSettlement: vi.fn().mockResolvedValue({ status: 'CONFIRMED' }),
       settleSettlement: vi.fn().mockResolvedValue({ status: 'SETTLED' }),
       returnSettlement: vi.fn().mockResolvedValue({ status: 'DRAFT' }),
       voidSettlement: vi.fn().mockResolvedValue({ status: 'VOID' }),
     };
     const controller = new TrainingController(training as never);
-    const command = { reason: '核对凭证', idempotencyKey: 'settlement-command-1' };
+    const command = {
+      reason: '核对凭证',
+      idempotencyKey: 'settlement-command-1',
+    };
 
     await controller.settlements({ status: SettlementStatus.DRAFT }, finance);
     await controller.submitSettlement('settlement-1', command, finance);

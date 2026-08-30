@@ -367,6 +367,15 @@ describe('GamesService host workflow', () => {
     expect(tx.auditLog.create).toHaveBeenCalledOnce()
   })
 
+  it('blocks one host from promoting another host\'s waitlist', async () => {
+    const tx = {
+      game: { findUnique: vi.fn().mockResolvedValue({ id: 'game-1', hostId: 'host-1' }) },
+    }
+    const service = new GamesService({ $transaction: txRunner(tx) } as never)
+
+    await expect(service.promoteWaitlist('game-1', otherHostActor)).rejects.toBeInstanceOf(ForbiddenException)
+  })
+
   it('ends a game once and snapshots only real, non-refunded check-ins', async () => {
     const storedGame = game({
       registrations: [

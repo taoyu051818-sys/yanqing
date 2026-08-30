@@ -18,6 +18,7 @@ import {
   AttendanceStatus,
   BookingStatus,
   BusinessType,
+  CourtClosureStatus,
   CourtUsage,
   OrderStatus,
   Prisma,
@@ -45,11 +46,13 @@ import type {
   ListTrainingSettlementsDto,
   MakeupAttendanceDto,
   PurchaseTrainingDto,
+  TrainingSessionActionDto,
   TrainingSettlementActionDto,
   UpdateStudentDto,
 } from './training.dto.js';
 import {
   executeOrderCreation,
+  orderCreationCommandHash,
   type OrderCreationFields,
 } from '../orders/order-creation-idempotency.js';
 
@@ -84,6 +87,15 @@ const TRAINING_ATTENDING_STATUSES: readonly TrainingEnrollmentStatus[] = [
 
 const TRAINING_SETTLEMENT_ROLES: readonly AppRole[] = [
   AppRole.FINANCE,
+  AppRole.ADMIN,
+  AppRole.SUPER_ADMIN,
+];
+const TRAINING_CONFIGURATION_ROLES: readonly AppRole[] = [
+  AppRole.ADMIN,
+  AppRole.SUPER_ADMIN,
+];
+const TRAINING_SESSION_OPERATOR_ROLES: readonly AppRole[] = [
+  AppRole.COACH,
   AppRole.ADMIN,
   AppRole.SUPER_ADMIN,
 ];
@@ -182,23 +194,207 @@ export class TrainingService {
     });
   }
 
-  createProduct(dto: CreateTrainingProductDto) {
-    return this.prisma.trainingProduct.create({
-      data: {
-        ...dto,
-        unitRevenueCents: Math.round(dto.priceCents / dto.totalSessions),
-        refundRule: dto.refundRule as never,
-      },
+  async createProduct(dto: CreateTrainingProductDto, actor: AuthUser) {
+    this.assertTrainingRole(
+      actor,
+      TRAINING_CONFIGURATION_ROLES,
+      '仅管理员可创建培训产品',
+    );
+    const requestId = dto.creationIdempotencyKey?.trim() || undefined;
+    const reason = dto.reason?.trim() || '创建培训产品';
+    const unitRevenueCents = Math.round(dto.priceCents / dto.totalSessions);
+    const commandHash = orderCreationCommandHash({
+      kind: 'TRAINING_PRODUCT_CREATE',
+      code: dto.code,
+      name: dto.name,
+      audience: dto.audience,
+      totalSessions: dto.totalSessions,
+      validityDays: dto.validityDays,
+      priceCents: dto.priceCents,
+      refundRule: dto.refundRule,
+      reason,
     });
+    const replay = await this.findTrainingCommandReplay(this.prisma, requestId);
+    if (replay) {
+      const objectId = this.assertTrainingCommandReplay(replay, {
+        actor,
+        action: 'TRAINING_PRODUCT_CREATED',
+        objectType: 'TrainingProduct',
+        commandHash,
+      });
+      const existing = await this.prisma.trainingProduct.findUnique({
+        where: { id: objectId },
+      });
+      if (!existing)
+        throw new ConflictException('培训产品幂等记录对应的对象不存在');
+      return existing;
+    }
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const concurrentReplay = await this.findTrainingCommandReplay(
+          tx,
+          requestId,
+        );
+        if (concurrentReplay) {
+          const objectId = this.assertTrainingCommandReplay(concurrentReplay, {
+            actor,
+            action: 'TRAINING_PRODUCT_CREATED',
+            objectType: 'TrainingProduct',
+            commandHash,
+          });
+          return tx.trainingProduct.findUniqueOrThrow({
+            where: { id: objectId },
+          });
+        }
+        const created = await tx.trainingProduct.create({
+          data: {
+            code: dto.code,
+            name: dto.name,
+            audience: dto.audience,
+            totalSessions: dto.totalSessions,
+            validityDays: dto.validityDays,
+            priceCents: dto.priceCents,
+            unitRevenueCents,
+            refundRule: dto.refundRule as never,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.sub,
+            actorRole: this.trainingActorRole(
+              actor,
+              TRAINING_CONFIGURATION_ROLES,
+            ),
+            action: 'TRAINING_PRODUCT_CREATED',
+            objectType: 'TrainingProduct',
+            objectId: created.id,
+            oldValue: { exists: false } as never,
+            newValue: {
+              commandHash,
+              code: created.code,
+              name: created.name,
+              audience: created.audience,
+              totalSessions: created.totalSessions,
+              validityDays: created.validityDays,
+              priceCents: created.priceCents,
+              unitRevenueCents: created.unitRevenueCents,
+              refundRule: created.refundRule,
+              enabled: created.enabled,
+            } as never,
+            reason,
+            requestId,
+          },
+        });
+        return created;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
-  createClass(dto: CreateTrainingClassDto) {
-    return this.prisma.trainingClass.create({
-      data: {
-        ...dto,
-        schedule: dto.schedule as never,
-      },
+  async createClass(dto: CreateTrainingClassDto, actor: AuthUser) {
+    this.assertTrainingRole(
+      actor,
+      TRAINING_CONFIGURATION_ROLES,
+      '仅管理员可创建培训班级',
+    );
+    const requestId = dto.creationIdempotencyKey?.trim() || undefined;
+    const reason = dto.reason?.trim() || '创建培训班级';
+    const costs = {
+      coachCostCents: dto.coachCostCents ?? 0,
+      assistantCostCents: dto.assistantCostCents ?? 0,
+      materialCostCents: dto.materialCostCents ?? 0,
+    };
+    const commandHash = orderCreationCommandHash({
+      kind: 'TRAINING_CLASS_CREATE',
+      code: dto.code,
+      productId: dto.productId,
+      name: dto.name,
+      coachId: dto.coachId ?? null,
+      assistantId: dto.assistantId ?? null,
+      schedule: dto.schedule,
+      capacity: dto.capacity,
+      ...costs,
+      reason,
     });
+    const replay = await this.findTrainingCommandReplay(this.prisma, requestId);
+    if (replay) {
+      const objectId = this.assertTrainingCommandReplay(replay, {
+        actor,
+        action: 'TRAINING_CLASS_CREATED',
+        objectType: 'TrainingClass',
+        commandHash,
+      });
+      const existing = await this.prisma.trainingClass.findUnique({
+        where: { id: objectId },
+      });
+      if (!existing)
+        throw new ConflictException('培训班级幂等记录对应的对象不存在');
+      return existing;
+    }
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const concurrentReplay = await this.findTrainingCommandReplay(
+          tx,
+          requestId,
+        );
+        if (concurrentReplay) {
+          const objectId = this.assertTrainingCommandReplay(concurrentReplay, {
+            actor,
+            action: 'TRAINING_CLASS_CREATED',
+            objectType: 'TrainingClass',
+            commandHash,
+          });
+          return tx.trainingClass.findUniqueOrThrow({
+            where: { id: objectId },
+          });
+        }
+        const created = await tx.trainingClass.create({
+          data: {
+            code: dto.code,
+            productId: dto.productId,
+            name: dto.name,
+            coachId: dto.coachId,
+            assistantId: dto.assistantId,
+            schedule: dto.schedule as never,
+            capacity: dto.capacity,
+            ...costs,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.sub,
+            actorRole: this.trainingActorRole(
+              actor,
+              TRAINING_CONFIGURATION_ROLES,
+            ),
+            action: 'TRAINING_CLASS_CREATED',
+            objectType: 'TrainingClass',
+            objectId: created.id,
+            oldValue: { exists: false } as never,
+            newValue: {
+              commandHash,
+              code: created.code,
+              productId: created.productId,
+              name: created.name,
+              coachId: created.coachId,
+              assistantId: created.assistantId,
+              schedule: created.schedule,
+              capacity: created.capacity,
+              coachCostCents: created.coachCostCents,
+              assistantCostCents: created.assistantCostCents,
+              materialCostCents: created.materialCostCents,
+              active: created.active,
+            } as never,
+            reason,
+            requestId,
+          },
+        });
+        return created;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
   async listStudents(actor: AuthUser, all = false, guardianId?: string) {
@@ -268,7 +464,8 @@ export class TrainingService {
           action: 'TRAINING_STUDENT_CREATED',
           objectType: 'Student',
           objectId: student.id,
-          reason: authorizationNote,
+          reason: authorizationNote || '创建培训学员档案',
+          oldValue: { exists: false } as never,
           newValue: {
             guardianId,
             displayName,
@@ -340,7 +537,7 @@ export class TrainingService {
           action: 'TRAINING_STUDENT_UPDATED',
           objectType: 'Student',
           objectId: studentId,
-          reason: authorizationNote,
+          reason: authorizationNote || '更新培训学员档案',
           oldValue: {
             displayName: current.displayName,
             birthMonth: current.birthMonth?.toISOString(),
@@ -509,12 +706,16 @@ export class TrainingService {
             action: 'TRAINING_ORDER_CREATED',
             objectType: 'Order',
             objectId: created.id,
+            oldValue: { exists: false } as never,
             newValue: {
+              commandHash: creation.creationCommandHash,
               productId: product.id,
               classId: dto.classId,
               studentId: dto.studentId,
               seatReservedUntil: seatReservedUntil?.toISOString(),
             } as never,
+            reason: '创建培训购买订单',
+            requestId: creation.creationIdempotencyKey,
           },
         });
         return created;
@@ -524,40 +725,100 @@ export class TrainingService {
   }
 
   async createSession(dto: CreateTrainingSessionDto, actor: AuthUser) {
+    this.assertTrainingRole(
+      actor,
+      TRAINING_SESSION_OPERATOR_ROLES,
+      '仅教练或管理员可创建培训课次',
+    );
     const startsAt = new Date(dto.startsAt);
     const endsAt = new Date(dto.endsAt);
     if (endsAt <= startsAt)
       throw new BadRequestException('结束时间必须晚于开始时间');
     if (new Set(dto.courtIds).size !== dto.courtIds.length)
       throw new BadRequestException('场地不能重复');
-    const trainingClass = await this.prisma.trainingClass.findUnique({
-      where: { id: dto.classId },
-      include: {
-        enrollments: {
-          where: { status: { in: [...TRAINING_ATTENDING_STATUSES] } },
-        },
-      },
+    const courtIds = [...dto.courtIds].sort();
+    const note = dto.note?.trim() || undefined;
+    const requestId = dto.creationIdempotencyKey?.trim() || undefined;
+    const reason = dto.reason?.trim() || note || '创建培训课次';
+    const commandHash = orderCreationCommandHash({
+      kind: 'TRAINING_SESSION_CREATE',
+      classId: dto.classId,
+      startsAt,
+      endsAt,
+      courtIds,
+      note: note ?? null,
+      reason,
     });
-    if (!trainingClass?.active) throw new NotFoundException('培训班不存在');
-    if (
-      actor.roles.includes(AppRole.COACH) &&
-      !actor.roles.some((role) =>
-        [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never),
-      ) &&
-      trainingClass.coachId !== actor.sub &&
-      trainingClass.assistantId !== actor.sub
-    ) {
-      throw new ForbiddenException('教练只能为自己负责的班级排课');
+    const replay = await this.findTrainingCommandReplay(this.prisma, requestId);
+    if (replay) {
+      const objectId = this.assertTrainingCommandReplay(replay, {
+        actor,
+        action: 'TRAINING_SESSION_CREATED',
+        objectType: 'TrainingSession',
+        commandHash,
+      });
+      const existing = await this.prisma.trainingSession.findUnique({
+        where: { id: objectId },
+        include: { attendances: true },
+      });
+      if (!existing)
+        throw new ConflictException('培训课次幂等记录对应的对象不存在');
+      return existing;
     }
     const occupiedCourtHours =
-      dto.courtIds.length *
-      ((endsAt.getTime() - startsAt.getTime()) / 3_600_000);
+      courtIds.length * ((endsAt.getTime() - startsAt.getTime()) / 3_600_000);
 
     return this.prisma.$transaction(
       async (tx) => {
+        const concurrentReplay = await this.findTrainingCommandReplay(
+          tx,
+          requestId,
+        );
+        if (concurrentReplay) {
+          const objectId = this.assertTrainingCommandReplay(concurrentReplay, {
+            actor,
+            action: 'TRAINING_SESSION_CREATED',
+            objectType: 'TrainingSession',
+            commandHash,
+          });
+          return tx.trainingSession.findUniqueOrThrow({
+            where: { id: objectId },
+            include: { attendances: true },
+          });
+        }
+        const trainingClass = await tx.trainingClass.findUnique({
+          where: { id: dto.classId },
+          include: {
+            enrollments: {
+              where: { status: { in: [...TRAINING_ATTENDING_STATUSES] } },
+            },
+          },
+        });
+        if (!trainingClass?.active) throw new NotFoundException('培训班不存在');
+        if (
+          actor.roles.includes(AppRole.COACH) &&
+          !actor.roles.some((role) =>
+            [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never),
+          ) &&
+          trainingClass.coachId !== actor.sub &&
+          trainingClass.assistantId !== actor.sub
+        ) {
+          throw new ForbiddenException('教练只能为自己负责的班级排课');
+        }
+        const closure = await tx.courtClosure.findFirst({
+          where: {
+            courtId: { in: courtIds },
+            status: CourtClosureStatus.ACTIVE,
+            startsAt: { lt: endsAt },
+            endsAt: { gt: startsAt },
+          },
+          select: { id: true, courtId: true, reason: true },
+        });
+        if (closure)
+          throw new ConflictException(`所选场地已封场：${closure.reason}`);
         const conflict = await tx.courtBooking.findFirst({
           where: {
-            courtId: { in: dto.courtIds },
+            courtId: { in: courtIds },
             status: { not: BookingStatus.CANCELLED },
             startsAt: { lt: endsAt },
             endsAt: { gt: startsAt },
@@ -569,12 +830,12 @@ export class TrainingService {
             classId: dto.classId,
             startsAt,
             endsAt,
-            courtCount: dto.courtIds.length,
+            courtCount: courtIds.length,
             occupiedCourtHours,
             coachCostCents: trainingClass.coachCostCents,
             assistantCostCents: trainingClass.assistantCostCents,
             materialCostCents: trainingClass.materialCostCents,
-            note: dto.note,
+            note,
             attendances: {
               create: trainingClass.enrollments.map((enrollment) => ({
                 enrollmentId: enrollment.id,
@@ -585,7 +846,7 @@ export class TrainingService {
           include: { attendances: true },
         });
         await tx.courtBooking.createMany({
-          data: dto.courtIds.map((courtId) => ({
+          data: courtIds.map((courtId) => ({
             courtId,
             status: BookingStatus.CONFIRMED,
             startsAt,
@@ -598,15 +859,31 @@ export class TrainingService {
         await tx.auditLog.create({
           data: {
             actorId: actor.sub,
-            actorRole: actor.roles[0],
+            actorRole: this.trainingActorRole(
+              actor,
+              TRAINING_SESSION_OPERATOR_ROLES,
+            ),
             action: 'TRAINING_SESSION_CREATED',
             objectType: 'TrainingSession',
             objectId: session.id,
+            oldValue: { exists: false } as never,
             newValue: {
-              courtIds: dto.courtIds,
+              commandHash,
+              classId: session.classId,
+              startsAt: session.startsAt,
+              endsAt: session.endsAt,
+              status: session.status,
+              courtIds,
+              courtCount: session.courtCount,
               occupiedCourtHours,
+              coachCostCents: session.coachCostCents,
+              assistantCostCents: session.assistantCostCents,
+              materialCostCents: session.materialCostCents,
+              note: session.note,
               venueFeeCents: 0,
             } as never,
+            reason,
+            requestId,
           },
         });
         return session;
@@ -670,6 +947,12 @@ export class TrainingService {
           },
         });
         if (!attendance) throw new NotFoundException('课次签到记录不存在');
+        if (
+          attendance.session.status === TrainingSessionStatus.COMPLETED ||
+          attendance.session.status === TrainingSessionStatus.CANCELLED
+        ) {
+          throw new ConflictException('已结束或已取消的课次不能继续消课');
+        }
         const classAssignmentPresent =
           Object.prototype.hasOwnProperty.call(
             attendance.session.class,
@@ -735,6 +1018,12 @@ export class TrainingService {
             action: 'TRAINING_CONSUME_PROPOSED',
             objectType: 'TrainingAttendance',
             objectId: attendance.id,
+            reason: feedback || '教练提交消课建议',
+            oldValue: {
+              workflowStatus: 'UNSUBMITTED',
+              proposedById: null,
+              feedback: attendance.feedback,
+            } as never,
             newValue: {
               workflowStatus: 'PENDING_CONFIRMATION',
               requestedAttendanceStatus: dto.attendanceStatus ?? 'PRESENT',
@@ -767,7 +1056,17 @@ export class TrainingService {
     this.assertTrainingApprover(actor);
     const auditAction = options.auditAction ?? 'TRAINING_CONSUME_CONFIRMED';
     const reason =
-      'reason' in dto ? dto.reason?.trim() || undefined : undefined;
+      ('reason' in dto ? dto.reason?.trim() : undefined) ||
+      '培训主管确认消课入账';
+    const requestedIdempotencyKey =
+      'idempotencyKey' in dto ? dto.idempotencyKey?.trim() : undefined;
+    const commandHash = orderCreationCommandHash({
+      kind: auditAction,
+      sessionId,
+      enrollmentId: dto.enrollmentId,
+      feedback: dto.feedback?.trim() || null,
+      reason,
+    });
 
     return this.prisma.$transaction(
       async (tx) => {
@@ -791,15 +1090,36 @@ export class TrainingService {
         const activeRecognition = this.activeConsumeRecognition(
           attendance.revenueRecognitions,
         );
+        const replay = await this.findTrainingCommandReplay(
+          tx,
+          requestedIdempotencyKey,
+        );
+        if (replay) {
+          this.assertTrainingCommandReplay(replay, {
+            actor,
+            action: auditAction,
+            objectType: 'TrainingAttendance',
+            objectId: attendance.id,
+            commandHash,
+          });
+          if (!activeRecognition) {
+            throw new ConflictException('消课幂等审计与确认流水不一致');
+          }
+          return activeRecognition;
+        }
         if (activeRecognition) {
-          const requestedKey =
-            'idempotencyKey' in dto ? dto.idempotencyKey?.trim() : undefined;
           if (
-            !requestedKey ||
-            requestedKey === activeRecognition?.idempotencyKey
+            !requestedIdempotencyKey ||
+            requestedIdempotencyKey === activeRecognition?.idempotencyKey
           )
             return activeRecognition;
           throw new ConflictException('该课次已经消课，禁止重复确认');
+        }
+        if (
+          attendance.session.status === TrainingSessionStatus.COMPLETED ||
+          attendance.session.status === TrainingSessionStatus.CANCELLED
+        ) {
+          throw new ConflictException('已结束或已取消的课次不能继续消课');
         }
         if (attendance.consumedSessions > 0) {
           throw new ConflictException('考勤消课状态与确认流水不一致');
@@ -808,7 +1128,9 @@ export class TrainingService {
           throw new ConflictException('当前考勤状态不能确认消课');
         }
         if (!attendance.operatorId) {
-          throw new ConflictException('必须先由教练提交消课建议，再由培训主管确认入账');
+          throw new ConflictException(
+            '必须先由教练提交消课建议，再由培训主管确认入账',
+          );
         }
         if (attendance.operatorId === actor.sub) {
           throw new ForbiddenException('消课建议提交人与确认人不能是同一账号');
@@ -847,8 +1169,6 @@ export class TrainingService {
             (maximum, item) => Math.max(maximum, item.sequence),
             0,
           ) + 1;
-        const requestedIdempotencyKey =
-          'idempotencyKey' in dto ? dto.idempotencyKey?.trim() : undefined;
         const recognitionIdempotencyKey =
           requestedIdempotencyKey || `CONSUME:${attendance.id}:${nextSequence}`;
         if (requestedIdempotencyKey) {
@@ -969,6 +1289,7 @@ export class TrainingService {
               proposedById,
             } as never,
             newValue: {
+              commandHash,
               workflowStatus: 'CONFIRMED',
               confirmedRevenueCents,
               contractRateBps: rateBps,
@@ -976,6 +1297,7 @@ export class TrainingService {
               venueFeeCents: 0,
               trainingPayableVenueCents: 0,
             } as never,
+            requestId: requestedIdempotencyKey,
           },
         });
         return recognition;
@@ -1096,7 +1418,7 @@ export class TrainingService {
             action: 'TRAINING_ATTENDANCE_MARKED',
             objectType: 'TrainingAttendance',
             objectId: attendance.id,
-            reason: dto.reason?.trim() || undefined,
+            reason: dto.reason?.trim() || '登记培训出勤',
             oldValue: { status: attendance.status } as never,
             newValue: {
               status: nextStatus,
@@ -1215,7 +1537,7 @@ export class TrainingService {
             action: 'TRAINING_MAKEUP_SCHEDULED',
             objectType: 'TrainingAttendance',
             objectId: original.id,
-            reason: dto.reason?.trim() || undefined,
+            reason: dto.reason?.trim() || '安排培训补课',
             oldValue: { status: original.status } as never,
             newValue: {
               status: AttendanceStatus.MADE_UP,
@@ -1264,7 +1586,23 @@ export class TrainingService {
     }
   }
 
-  async completeSession(sessionId: string, actor: AuthUser) {
+  async completeSession(
+    sessionId: string,
+    actor: AuthUser,
+    dto: TrainingSessionActionDto = {},
+  ) {
+    this.assertTrainingRole(
+      actor,
+      TRAINING_SESSION_OPERATOR_ROLES,
+      '仅教练或管理员可结束培训课次',
+    );
+    const requestId = dto.idempotencyKey?.trim() || undefined;
+    const reason = dto.reason?.trim() || '课次出勤已全部处理，确认结课';
+    const commandHash = orderCreationCommandHash({
+      kind: 'TRAINING_SESSION_COMPLETE',
+      sessionId,
+      reason,
+    });
     return this.prisma.$transaction(async (tx) => {
       // The fallback keeps the command compatible with older lightweight
       // adapters used by the first mini-app release; Prisma always exposes
@@ -1280,6 +1618,17 @@ export class TrainingService {
             class: {},
           } as never);
       if (!session) throw new NotFoundException('培训课次不存在');
+      const replay = await this.findTrainingCommandReplay(tx, requestId);
+      if (replay) {
+        this.assertTrainingCommandReplay(replay, {
+          actor,
+          action: 'TRAINING_SESSION_COMPLETED',
+          objectType: 'TrainingSession',
+          objectId: sessionId,
+          commandHash,
+        });
+        return session;
+      }
       const classAssignmentPresent =
         Object.prototype.hasOwnProperty.call(session.class, 'coachId') ||
         Object.prototype.hasOwnProperty.call(session.class, 'assistantId');
@@ -1300,17 +1649,25 @@ export class TrainingService {
       const pending = await tx.trainingAttendance.count({
         where: {
           sessionId,
-          status: {
-            in: [
-              AttendanceStatus.PENDING,
-              AttendanceStatus.LEAVE,
-              AttendanceStatus.MAKEUP_REQUIRED,
-            ],
-          },
+          OR: [
+            {
+              status: {
+                in: [
+                  AttendanceStatus.PENDING,
+                  AttendanceStatus.LEAVE,
+                  AttendanceStatus.MAKEUP_REQUIRED,
+                ],
+              },
+            },
+            {
+              status: AttendanceStatus.ATTENDED,
+              consumedSessions: 0,
+            },
+          ],
         },
       });
       if (pending > 0)
-        throw new ConflictException('仍有学员未处理签到/请假状态');
+        throw new ConflictException('仍有学员未完成点名或消课');
       const updated = await tx.trainingSession.update({
         where: { id: sessionId },
         data: { status: TrainingSessionStatus.COMPLETED },
@@ -1318,10 +1675,20 @@ export class TrainingService {
       await tx.auditLog.create({
         data: {
           actorId: actor.sub,
-          actorRole: actor.roles[0],
+          actorRole: this.trainingActorRole(
+            actor,
+            TRAINING_SESSION_OPERATOR_ROLES,
+          ),
           action: 'TRAINING_SESSION_COMPLETED',
           objectType: 'TrainingSession',
           objectId: sessionId,
+          oldValue: { status: session.status } as never,
+          newValue: {
+            commandHash,
+            status: TrainingSessionStatus.COMPLETED,
+          } as never,
+          reason,
+          requestId,
         },
       });
       return updated;
@@ -1451,6 +1818,7 @@ export class TrainingService {
                 status: TrainingConsumeCorrectionStatus.REQUESTED,
                 recognitionId: recognition.id,
               } as never,
+              requestId: dto.idempotencyKey,
             },
           });
           return correction;
@@ -1504,13 +1872,13 @@ export class TrainingService {
         include: { recognition: true, reversalRecognition: true },
       });
     if (decisionReplay) {
-      if (
-        decisionReplay.id === id &&
-        decisionReplay.status === TrainingConsumeCorrectionStatus.APPROVED
-      ) {
-        return decisionReplay;
-      }
-      throw new ConflictException('冲正决策幂等键已用于其他申请或动作');
+      return this.assertCorrectionDecisionReplay(
+        decisionReplay,
+        id,
+        TrainingConsumeCorrectionStatus.APPROVED,
+        actor,
+        reviewReason,
+      );
     }
     return this.prisma.$transaction(
       async (tx) => {
@@ -1529,7 +1897,13 @@ export class TrainingService {
           if (correction.decisionIdempotencyKey !== dto.idempotencyKey) {
             throw new ConflictException('冲正申请已使用其他幂等键批准');
           }
-          return correction;
+          return this.assertCorrectionDecisionReplay(
+            correction,
+            id,
+            TrainingConsumeCorrectionStatus.APPROVED,
+            actor,
+            reviewReason,
+          );
         }
         if (correction.status !== TrainingConsumeCorrectionStatus.REQUESTED) {
           throw new ConflictException('只有待复核申请可以批准');
@@ -1713,6 +2087,7 @@ export class TrainingService {
                 consumedAt: null,
               },
             } as never,
+            requestId: dto.idempotencyKey,
           },
         });
         return approved;
@@ -1735,13 +2110,13 @@ export class TrainingService {
         where: { decisionIdempotencyKey: dto.idempotencyKey },
       });
     if (decisionReplay) {
-      if (
-        decisionReplay.id === id &&
-        decisionReplay.status === TrainingConsumeCorrectionStatus.REJECTED
-      ) {
-        return decisionReplay;
-      }
-      throw new ConflictException('冲正决策幂等键已用于其他申请或动作');
+      return this.assertCorrectionDecisionReplay(
+        decisionReplay,
+        id,
+        TrainingConsumeCorrectionStatus.REJECTED,
+        actor,
+        reviewReason,
+      );
     }
     return this.prisma.$transaction(async (tx) => {
       const correction = await tx.trainingConsumeCorrection.findUnique({
@@ -1752,7 +2127,13 @@ export class TrainingService {
         if (correction.decisionIdempotencyKey !== dto.idempotencyKey) {
           throw new ConflictException('冲正申请已使用其他幂等键驳回');
         }
-        return correction;
+        return this.assertCorrectionDecisionReplay(
+          correction,
+          id,
+          TrainingConsumeCorrectionStatus.REJECTED,
+          actor,
+          reviewReason,
+        );
       }
       if (correction.status !== TrainingConsumeCorrectionStatus.REQUESTED) {
         throw new ConflictException('只有待复核申请可以驳回');
@@ -1782,6 +2163,7 @@ export class TrainingService {
           newValue: {
             status: TrainingConsumeCorrectionStatus.REJECTED,
           } as never,
+          requestId: dto.idempotencyKey,
         },
       });
       return rejected;
@@ -1898,11 +2280,7 @@ export class TrainingService {
     try {
       return await this.prisma.$transaction(
         async (tx) => {
-          await this.assertSettlementPeriodUnlocked(
-            tx,
-            periodStart,
-            periodEnd,
-          );
+          await this.assertSettlementPeriodUnlocked(tx, periodStart, periodEnd);
           const duplicate = await tx.trainingSettlement.findUnique({
             where: uniqueWhere,
           });
@@ -1943,6 +2321,7 @@ export class TrainingService {
               action: 'TRAINING_SETTLEMENT_CREATED',
               objectType: 'TrainingSettlement',
               objectId: settlement.id,
+              oldValue: { exists: false } as never,
               newValue: {
                 status: SettlementStatus.DRAFT,
                 effectiveRevenueCents: settlement.effectiveRevenueCents,
@@ -1951,6 +2330,7 @@ export class TrainingService {
                 marketingCostCents: settlement.marketingCostCents,
                 venueFeeCents: 0,
               } as never,
+              reason: '生成培训结算单',
             },
           });
           return settlement;
@@ -1971,10 +2351,7 @@ export class TrainingService {
     }
   }
 
-  async listSettlements(
-    query: ListTrainingSettlementsDto,
-    actor: AuthUser,
-  ) {
+  async listSettlements(query: ListTrainingSettlementsDto, actor: AuthUser) {
     this.assertTrainingSettlementRole(actor);
     const periodStart = query.periodStart
       ? new Date(query.periodStart)
@@ -2120,10 +2497,23 @@ export class TrainingService {
     data?: Record<string, unknown>;
   }) {
     this.assertTrainingSettlementRole(input.actor);
-    const reason = input.dto.reason?.trim();
-    if (input.requireReason && (!reason || reason.length < 2)) {
+    const submittedReason = input.dto.reason?.trim();
+    if (
+      input.requireReason &&
+      (!submittedReason || submittedReason.length < 2)
+    ) {
       throw new BadRequestException('退回或作废结算单必须填写原因');
     }
+    const reason =
+      submittedReason || this.trainingSettlementActionReason(input.action);
+    const requestId = input.dto.idempotencyKey?.trim() || undefined;
+    const commandHash = orderCreationCommandHash({
+      kind: input.action,
+      settlementId: input.id,
+      from: input.from,
+      to: input.to,
+      reason,
+    });
 
     return this.prisma.$transaction(
       async (tx) => {
@@ -2141,20 +2531,35 @@ export class TrainingService {
           orderBy: { createdAt: 'asc' },
         });
         if (input.forbidCreator && creator?.actorId === input.actor.sub) {
-          throw new ForbiddenException('制单人不能确认、结算或退回自己的培训结算单');
+          throw new ForbiddenException(
+            '制单人不能确认、结算或退回自己的培训结算单',
+          );
         }
 
-        if (input.dto.idempotencyKey) {
+        if (requestId) {
           const replay = await tx.auditLog.findFirst({
             where: {
               objectType: 'TrainingSettlement',
               objectId: input.id,
-              requestId: input.dto.idempotencyKey,
+              requestId,
             },
           });
           if (replay) {
-            if (replay.action !== input.action) {
-              throw new ConflictException('幂等键已用于其他培训结算动作');
+            const replayValue =
+              replay.newValue !== null &&
+              typeof replay.newValue === 'object' &&
+              !Array.isArray(replay.newValue)
+                ? (replay.newValue as Record<string, unknown>)
+                : null;
+            if (
+              replay.action !== input.action ||
+              replay.actorId !== input.actor.sub ||
+              replay.reason !== reason ||
+              replayValue?.commandHash !== commandHash
+            ) {
+              throw new ConflictException(
+                '培训结算幂等键已用于其他操作人或命令',
+              );
             }
             return current;
           }
@@ -2181,7 +2586,9 @@ export class TrainingService {
             where: { id: input.id },
           });
           if (latest?.status === input.to) return latest;
-          throw new ConflictException('培训结算单已被其他操作更新，请刷新后重试');
+          throw new ConflictException(
+            '培训结算单已被其他操作更新，请刷新后重试',
+          );
         }
         const updated = await tx.trainingSettlement.findUniqueOrThrow({
           where: { id: input.id },
@@ -2199,12 +2606,13 @@ export class TrainingService {
               confirmedAt: current.confirmedAt,
             } as never,
             newValue: {
+              commandHash,
               status: input.to,
               confirmedById: updated.confirmedById,
               confirmedAt: updated.confirmedAt,
             } as never,
             reason,
-            requestId: input.dto.idempotencyKey,
+            requestId,
           },
         });
         return updated;
@@ -2214,11 +2622,96 @@ export class TrainingService {
   }
 
   private assertTrainingSettlementRole(actor: AuthUser): void {
-    if (
-      !actor.roles.some((role) => TRAINING_SETTLEMENT_ROLES.includes(role))
-    ) {
+    if (!actor.roles.some((role) => TRAINING_SETTLEMENT_ROLES.includes(role))) {
       throw new ForbiddenException('仅财务或管理员可操作培训结算');
     }
+  }
+
+  private trainingSettlementActionReason(action: string): string {
+    const labels: Record<string, string> = {
+      TRAINING_SETTLEMENT_SUBMITTED: '提交培训结算复核',
+      TRAINING_SETTLEMENT_CONFIRMED: '确认培训结算',
+      TRAINING_SETTLEMENT_SETTLED: '完成培训结算付款',
+      TRAINING_SETTLEMENT_RETURNED: '退回培训结算修改',
+      TRAINING_SETTLEMENT_VOIDED: '作废培训结算',
+    };
+    return labels[action] ?? '执行培训结算状态动作';
+  }
+
+  private assertTrainingRole(
+    actor: AuthUser,
+    allowed: readonly AppRole[],
+    message: string,
+  ): void {
+    if (!actor.roles.some((role) => allowed.includes(role))) {
+      throw new ForbiddenException(message);
+    }
+  }
+
+  private trainingActorRole(
+    actor: AuthUser,
+    allowed: readonly AppRole[],
+  ): AppRole | undefined {
+    return actor.roles.find((role) => allowed.includes(role)) ?? actor.roles[0];
+  }
+
+  private findTrainingCommandReplay(
+    client: Pick<Prisma.TransactionClient, 'auditLog'>,
+    requestId?: string,
+  ) {
+    if (!requestId) return Promise.resolve(null);
+    return client.auditLog.findFirst({
+      where: {
+        requestId,
+        action: { startsWith: 'TRAINING_' },
+      },
+      select: {
+        actorId: true,
+        action: true,
+        objectType: true,
+        objectId: true,
+        newValue: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  private assertTrainingCommandReplay(
+    replay: {
+      actorId: string | null;
+      action: string;
+      objectType: string;
+      objectId: string | null;
+      newValue: unknown;
+    },
+    expected: {
+      actor: AuthUser;
+      action: string;
+      objectType: string;
+      objectId?: string;
+      commandHash: string;
+    },
+  ): string {
+    const payload =
+      replay.newValue !== null &&
+      typeof replay.newValue === 'object' &&
+      !Array.isArray(replay.newValue)
+        ? (replay.newValue as Record<string, unknown>)
+        : null;
+    if (
+      replay.actorId !== expected.actor.sub ||
+      replay.action !== expected.action ||
+      replay.objectType !== expected.objectType ||
+      (expected.objectId !== undefined &&
+        replay.objectId !== expected.objectId) ||
+      payload?.commandHash !== expected.commandHash
+    ) {
+      throw new ConflictException('培训操作幂等键已用于不同命令');
+    }
+    if (!replay.objectId) {
+      throw new ConflictException('培训操作幂等记录缺少业务对象');
+    }
+    return replay.objectId;
   }
 
   private assertSettlementDraftMatches(
@@ -2308,6 +2801,33 @@ export class TrainingService {
       existing.reason !== reason
     ) {
       throw new ConflictException('冲正申请幂等键已用于其他操作人或命令');
+    }
+    return existing;
+  }
+
+  private assertCorrectionDecisionReplay<
+    T extends {
+      id: string;
+      status: TrainingConsumeCorrectionStatus;
+      reviewedById?: string | null;
+      reviewReason?: string | null;
+    },
+  >(
+    existing: T,
+    id: string,
+    status: TrainingConsumeCorrectionStatus,
+    actor: AuthUser,
+    reason: string,
+  ): T {
+    if (
+      existing.id !== id ||
+      existing.status !== status ||
+      existing.reviewedById !== actor.sub ||
+      existing.reviewReason !== reason
+    ) {
+      throw new ConflictException(
+        '冲正决策幂等键已用于其他申请或动作，或操作人/命令不一致',
+      );
     }
     return existing;
   }

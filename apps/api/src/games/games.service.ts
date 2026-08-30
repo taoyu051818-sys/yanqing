@@ -244,6 +244,9 @@ export class GamesService {
   }
 
   async applyHost(actor: AuthUser) {
+    if (!actor.roles.includes(AppRole.MEMBER)) {
+      throw new ForbiddenException('仅会员可申请成为球局主理人')
+    }
     const existing = await this.prisma.hostProfile.findUnique({ where: { userId: actor.sub } })
     if (existing?.status === HostStatus.APPROVED) throw new ConflictException('已经是球局主理人')
     if (existing?.status === HostStatus.APPLIED) return existing
@@ -340,6 +343,9 @@ export class GamesService {
   }
 
   async create(dto: CreateGameDto, actor: AuthUser) {
+    if (!actor.roles.some((role) => [AppRole.HOST, AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never))) {
+      throw new ForbiddenException('仅已授权主理人或管理员可创建球局')
+    }
     const host = await this.prisma.hostProfile.findUnique({ where: { userId: actor.sub } })
     if (host?.status !== HostStatus.APPROVED && !actor.roles.some((role) => [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never))) {
       throw new ConflictException('主理人申请尚未通过')
@@ -371,6 +377,16 @@ export class GamesService {
         if (courts.some((court) => court.usage === CourtUsage.MAINTENANCE || court.usage === CourtUsage.TRAINING)) {
           throw new ConflictException('球局不能使用维护场或培训专用场')
         }
+        const closure = await tx.courtClosure.findFirst({
+          where: {
+            courtId: { in: dto.courtIds },
+            status: 'ACTIVE',
+            startsAt: { lt: endsAt },
+            endsAt: { gt: startsAt },
+          },
+          select: { id: true, reason: true },
+        })
+        if (closure) throw new ConflictException(`所选场地时段已封场：${closure.reason}`)
         const conflict = await tx.courtBooking.findFirst({
           where: {
             courtId: { in: dto.courtIds },
@@ -409,6 +425,24 @@ export class GamesService {
             note: `主理人球局 ${game.code}`,
           })),
         })
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.sub,
+            actorRole: actor.roles[0],
+            action: 'GAME_CREATED',
+            objectType: 'Game',
+            objectId: game.id,
+            newValue: {
+              status: GameStatus.DRAFT,
+              title,
+              startsAt,
+              endsAt,
+              courtIds: dto.courtIds,
+              capacity: dto.capacity,
+              feeCents: dto.feeCents,
+            } as never,
+          },
+        })
         return game
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -417,6 +451,9 @@ export class GamesService {
 
   /** Move a reviewed draft into the member-facing registration period. */
   async publish(gameId: string, dto: PublishGameDto | undefined, actor: AuthUser) {
+    if (!actor.roles.some((role) => [AppRole.HOST, AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never))) {
+      throw new ForbiddenException('仅本局主理人或管理员可发布球局')
+    }
     const reason = dto?.reason?.trim() || undefined
     return this.prisma.$transaction(
       async (tx) => {
@@ -425,6 +462,7 @@ export class GamesService {
           include: { host: { include: { hostProfile: true } }, courtBookings: { include: { court: true } } },
         })
         if (!game) throw new NotFoundException('球局不存在')
+        this.assertGameOperator(game.hostId, actor)
         if (game.status === GameStatus.OPEN) return game
         if (GAME_STATUSES_NOT_PUBLISHABLE.includes(game.status)) {
           throw new ConflictException(`球局当前状态为 ${game.status}，不能发布`)
@@ -652,15 +690,27 @@ export class GamesService {
   /** Manually retry a waitlist promotion from the operations workbench. */
   async promoteWaitlist(gameId: string, actor: AuthUser) {
     if (!actor.roles.some((role) => [
+      AppRole.HOST,
       AppRole.FRONT_DESK,
       AppRole.FINANCE,
       AppRole.ADMIN,
       AppRole.SUPER_ADMIN,
     ].includes(role as never))) {
-      throw new ForbiddenException('仅前台、财务或管理员可处理球局候补')
+      throw new ForbiddenException('仅本局主理人、前台、财务或管理员可处理球局候补')
     }
     return this.prisma.$transaction(
-      (tx) => promoteNextGameWaitlist(tx, gameId, actor.sub, actor.roles[0]),
+      async (tx) => {
+        const game = await tx.game.findUnique({ where: { id: gameId }, select: { id: true, hostId: true } })
+        if (!game) throw new NotFoundException('球局不存在')
+        const hostOnly = actor.roles.includes(AppRole.HOST) && !actor.roles.some((role) => [
+          AppRole.FRONT_DESK,
+          AppRole.FINANCE,
+          AppRole.ADMIN,
+          AppRole.SUPER_ADMIN,
+        ].includes(role as never))
+        if (hostOnly) this.assertGameOperator(game.hostId, actor)
+        return promoteNextGameWaitlist(tx, gameId, actor.sub, actor.roles[0])
+      },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     )
   }

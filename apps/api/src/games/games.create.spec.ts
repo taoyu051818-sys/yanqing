@@ -28,10 +28,12 @@ const createFixture = () => {
       findFirst: vi.fn().mockResolvedValue(null),
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    courtClosure: { findFirst: vi.fn().mockResolvedValue(null) },
     game: {
       create: vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) =>
         Promise.resolve({ id: 'game-1', ...data })),
     },
+    auditLog: { create: vi.fn().mockResolvedValue({}) },
   }
   const transaction = vi.fn(async (work: (value: typeof tx) => unknown) => work(tx))
   const prisma = {

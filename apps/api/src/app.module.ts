@@ -26,6 +26,7 @@ import { MembershipsModule } from './memberships/memberships.module.js'
 import { GoodsModule } from './goods/goods.module.js'
 import { WorkItemsModule } from './work-items/work-items.module.js'
 import { ReconciliationModule } from './reconciliation/reconciliation.module.js'
+import { GovernanceModule } from './governance/governance.module.js'
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { ReconciliationModule } from './reconciliation/reconciliation.module.js'
     GoodsModule,
     WorkItemsModule,
     ReconciliationModule,
+    GovernanceModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { ConflictException, NotFoundException } from '@nestjs/common'
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
 import { AppRole, EventStatus, TeamCategory } from '../generated/prisma/enums.js'
@@ -20,6 +20,11 @@ const actor: AuthUser = {
   sub: 'reviewer-1',
   displayName: '赛事审核员',
   roles: [AppRole.ADMIN],
+}
+const memberActor: AuthUser = {
+  sub: 'member-1',
+  displayName: '会员',
+  roles: [AppRole.MEMBER],
 }
 
 const txRunner = (tx: Record<string, unknown>) =>
@@ -58,16 +63,30 @@ const validCreateDto = (overrides: Partial<CreateEventDto> = {}): CreateEventDto
 
 describe('EventsService publish workflow', () => {
   it('creates an event as DRAFT until an explicit publish action', async () => {
-    const create = vi.fn().mockResolvedValue({ id: 'event-draft-1', status: EventStatus.DRAFT })
-    const service = new EventsService({ event: { create } } as never)
+    const created = { id: 'event-draft-1', status: EventStatus.DRAFT }
+    const tx = {
+      event: { create: vi.fn().mockResolvedValue(created) },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    }
+    const service = new EventsService({ $transaction: txRunner(tx) } as never)
 
-    await service.create(validCreateDto())
+    await expect(service.create(validCreateDto(), actor)).resolves.toEqual(created)
 
-    expect(create).toHaveBeenCalledWith(
+    expect(tx.event.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: EventStatus.DRAFT }),
       }),
     )
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ actorId: actor.sub, action: 'EVENT_CREATED' }),
+    })
+  })
+
+  it('rejects create and publish when called directly by a non-event operator', async () => {
+    const service = new EventsService({} as never)
+
+    expect(() => service.create(validCreateDto(), memberActor)).toThrow(ForbiddenException)
+    await expect(service.publish('event-1', {}, memberActor)).rejects.toBeInstanceOf(ForbiddenException)
   })
 
   it('publishes a valid draft exactly once and records an audit entry', async () => {

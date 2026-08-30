@@ -1,4 +1,4 @@
-import { api } from "./http";
+import { api, download } from "./http";
 import type { CourtAvailability, SessionUser } from "../types/domain";
 
 /**
@@ -137,6 +137,9 @@ export const endpoints = {
       sourceChannel: "MINI_PROGRAM",
     }),
   trainingProducts: () => api.get<any[]>("/training/products"),
+  createTrainingProduct: (data: object) =>
+    api.post("/training/products", data),
+  createTrainingClass: (data: object) => api.post("/training/classes", data),
   trainingStudents: () => api.get<any[]>("/training/students"),
   createTrainingStudent: (data: object) => api.post("/training/students", data),
   updateTrainingStudent: (studentId: string, data: object) =>
@@ -147,12 +150,21 @@ export const endpoints = {
   accountTransactions: () =>
     api.get<any[]>("/members/me/accounts/transactions"),
   referralRewards: () => api.get<any[]>("/referrals/me/rewards"),
+  bindReferral: (referrerId: string) =>
+    api.post<{ id: string; referrerId: string }>("/members/me/referrer", {
+      referrerId,
+    }),
   grantMaturedReferralRewards: () =>
     api.post("/referrals/rewards/grant-matured"),
   merchants: () => api.get<any[]>("/alliance/merchants"),
   createMerchant: (data: object) => api.post("/alliance/merchants", data),
+  setMerchantStatus: (merchantId: string, data: object) =>
+    api.post(`/alliance/merchants/${merchantId}/status`, data),
+  couponTemplates: () => api.get<any[]>("/alliance/coupon-templates"),
   createCouponTemplate: (data: object) =>
     api.post("/alliance/coupon-templates", data),
+  setCouponTemplateStatus: (templateId: string, data: object) =>
+    api.post(`/alliance/coupon-templates/${templateId}/status`, data),
   generateCouponCodes: (templateId: string, data: object) =>
     api.post(`/alliance/coupon-templates/${templateId}/codes`, data),
   claimCoupon: (code: string) => api.post(`/alliance/coupons/${code}/claim`),
@@ -319,4 +331,23 @@ export const endpoints = {
     items: Array<{ itemId: string; quantity: number }>,
     creationIdempotencyKey?: string,
   ) => api.post("/goods/orders", { items, creationIdempotencyKey }),
+  parameters: (params: Record<string, any> = {}) =>
+    api.get<any[]>("/parameters", params),
+  createParameter: (data: object) => api.post("/parameters", data),
+  auditLogs: (params: Record<string, any> = {}) =>
+    api.get<any>("/audit-logs", params),
+  governanceUsers: (params: Record<string, any> = {}) =>
+    api.get<any>("/governance/users", params),
+  setGovernanceUserRoles: (id: string, data: object) =>
+    api.post(`/governance/users/${id}/roles`, data),
+  setGovernanceUserStatus: (id: string, data: object) =>
+    api.post(`/governance/users/${id}/status`, data),
+  riskEvents: (params: Record<string, any> = {}) =>
+    api.get<any>("/governance/risk-events", params),
+  transitionRiskEvent: (
+    id: string,
+    action: "review" | "resolve" | "dismiss",
+    data: object,
+  ) => api.post(`/governance/risk-events/${id}/${action}`, data),
+  downloadReport: (scope: string) => download(`/reports/exports/${scope}.xlsx`),
 };

@@ -10,6 +10,7 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
 } from 'class-validator'
 
 import { ParameterType } from '../generated/prisma/enums.js'
@@ -39,6 +40,11 @@ export class CreateParameterDto {
   @IsString()
   @MaxLength(300)
   description: string
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason: string
 
   @IsOptional()
   @Transform(({ value }) => value === true || value === 'true')

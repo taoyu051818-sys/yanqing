@@ -5,7 +5,6 @@
 ```mermaid
 flowchart LR
   M["uni-app 微信小程序"] -->|HTTPS / JWT| A["NestJS API"]
-  W["Next.js Web 运营台"] -->|HTTPS / JWT| A
   A --> G["全局认证与角色守卫"]
   G --> D["Prisma 事务与领域服务"]
   D --> P[("PostgreSQL")]
@@ -15,6 +14,8 @@ flowchart LR
 ```
 
 `packages/shared` 保存不依赖框架的业务规则，API 与自动化测试共同使用。金额统一使用整数分；比例使用基点，2000 基点即 20%。
+
+仓库根目录保留的 Next.js 页面是上游视觉原型，使用本地演示状态，未接入 NestJS API。正式会员端与 B 端经营中心均位于同一 uni-app 微信小程序内，并按角色与数据范围呈现；部署和验收不得把 Next.js 原型当作已联调的 Web 管理后台。
 
 ## 业务账本
 

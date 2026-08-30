@@ -6,6 +6,7 @@ import type { AuthUser } from '../common/auth/auth-user.js';
 import { ROLES_KEY } from '../common/auth/auth.decorators.js';
 import { AppRole } from '../generated/prisma/enums.js';
 import type {
+  CreateEventDto,
   IssueEventPrizeDto,
   PublishEventDto,
   ReceiveEventPrizeDto,
@@ -19,6 +20,25 @@ const actor: AuthUser = {
 };
 
 describe('EventsController publish command', () => {
+  it('delegates event creation with the authenticated operator', async () => {
+    const events = { create: vi.fn().mockResolvedValue({ id: 'event-1', status: 'DRAFT' }) };
+    const controller = new EventsController(events as never);
+    const dto = {
+      code: 'EV-01',
+      name: '测试赛事',
+      startsAt: '2099-08-30T10:00:00.000Z',
+      registrationEndsAt: '2099-08-30T09:00:00.000Z',
+      capacityPeople: 48,
+      minimumPeople: 24,
+      totalRounds: 5,
+      feeCents: 9_900,
+    } as CreateEventDto;
+
+    await controller.create(dto, actor);
+
+    expect(events.create).toHaveBeenCalledWith(dto, actor);
+  });
+
   it('delegates publish with the event id, body and actor', async () => {
     const events = {
       publish: vi.fn().mockResolvedValue({ id: 'event-1', status: 'OPEN' }),

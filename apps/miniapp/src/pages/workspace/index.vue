@@ -30,6 +30,7 @@ const modules: Module[] = [
   { key: 'alliance', title: '联盟商户', description: '券码核销、消费归因与周期结算', route: '/packages/ops/pages/merchant/index', roles: ['MERCHANT', 'FRONT_DESK', 'FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'inventory', title: '商品库存', description: '库存台账、低库存与出入库', route: '/packages/ops/pages/inventory/index', roles: ['FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'] },
   { key: 'finance', title: '财务结算', description: '经营收入、培训分成、对账与导出', route: '/packages/ops/pages/finance/index', roles: ['FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
+  { key: 'governance', title: '治理与审计', description: '员工微信身份、岗位权限、参数版本、风险与导出', route: '/packages/ops/pages/governance/index', roles: ['FINANCE', 'ADMIN', 'SUPER_ADMIN'] },
 ]
 
 const isOperator = computed(() => session.isOperator)

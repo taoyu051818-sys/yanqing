@@ -44,8 +44,8 @@ export class EventsController {
 
   @Post()
   @Roles(AppRole.EVENT_MANAGER, AppRole.ADMIN, AppRole.SUPER_ADMIN)
-  create(@Body() dto: CreateEventDto) {
-    return this.events.create(dto);
+  create(@Body() dto: CreateEventDto, @CurrentUser() actor: AuthUser) {
+    return this.events.create(dto, actor);
   }
 
   @Post(':id/publish')

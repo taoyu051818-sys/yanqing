@@ -119,6 +119,16 @@ const selectedPrizeTeamId = ref('')
 const selectedPrizeItemId = ref('')
 const prizeAwardName = ref('冠军奖')
 const prizeQuantity = ref(1)
+const eventName = ref('')
+const eventCode = ref(`EV-${Date.now().toString().slice(-8)}`)
+const eventDate = ref(shanghaiDate(7))
+const eventTime = ref('09:00')
+const registrationEndDate = ref(shanghaiDate(6))
+const registrationEndTime = ref('20:00')
+const eventFeeYuan = ref('99')
+const eventSponsor = ref('')
+const capacityOptions = Array.from({ length: 13 }, (_, index) => 24 + index * 2)
+const eventCapacityIndex = ref(capacityOptions.length - 1)
 
 const hasAnyRole = (roles: readonly AppRole[]) => roles.some((role) => session.roles.includes(role))
 const mayManageEvent = computed(() => hasAnyRole(EVENT_MANAGEMENT_ROLES))
@@ -213,6 +223,15 @@ const workflowHint = computed(() => {
 
 function causeMessage(cause: unknown, fallback: string) {
   return cause instanceof Error && cause.message ? cause.message : fallback
+}
+
+function shanghaiDate(offsetDays = 0) {
+  const value = new Date(Date.now() + offsetDays * 86_400_000)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(value)
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
 }
 
 function statusLabel(status?: string) {
@@ -339,6 +358,72 @@ async function publishEvent() {
     '赛事已发布',
     () => endpoints.publishEvent(event.id, reason ? { reason } : {}),
   )
+}
+
+async function createEvent() {
+  if (!mayManageEvent.value || loading.value || actionKey.value) return
+  errorMessage.value = ''
+  const code = eventCode.value.trim()
+  const name = eventName.value.trim()
+  const startsAt = `${eventDate.value}T${eventTime.value}:00+08:00`
+  const registrationEndsAt = `${registrationEndDate.value}T${registrationEndTime.value}:00+08:00`
+  const fee = Number(eventFeeYuan.value)
+  const capacityPeople = capacityOptions[eventCapacityIndex.value]
+  if (!code || code.length > 40 || !name || name.length > 120) {
+    errorMessage.value = '赛事编码和名称不能为空，且不能超过规定长度。'
+    return
+  }
+  if (new Date(startsAt) <= new Date() || new Date(registrationEndsAt) <= new Date()) {
+    errorMessage.value = '开赛与报名截止时间都必须晚于当前时间。'
+    return
+  }
+  if (new Date(registrationEndsAt) >= new Date(startsAt)) {
+    errorMessage.value = '报名截止时间必须早于开赛时间。'
+    return
+  }
+  if (
+    !Number.isFinite(fee) ||
+    fee < 0 ||
+    Math.abs(Math.round(fee * 100) - fee * 100) > 1e-6
+  ) {
+    errorMessage.value = '报名费必须是非负金额，最多两位小数。'
+    return
+  }
+  const confirmed = await uni.showModal({
+    title: '确认创建赛事草稿',
+    content: `${name}\n${eventDate.value} ${eventTime.value} 开赛\n${capacityPeople} 人封顶 · 24 人成赛 · 固定五轮\n创建后仍需复核并发布。`,
+    confirmText: '创建草稿',
+  })
+  if (!confirmed.confirm) return
+  actionKey.value = 'create-event'
+  uni.showLoading({ title: '创建中', mask: true })
+  try {
+    const created: any = await endpoints.createEvent({
+      code,
+      name,
+      startsAt,
+      registrationEndsAt,
+      capacityPeople,
+      minimumPeople: 24,
+      totalRounds: 5,
+      feeCents: Math.round(fee * 100),
+      sponsor: eventSponsor.value.trim() || undefined,
+      rules: [
+        '固定搭档双打，男双、女双、混双同场',
+        '每场一局21分，20平后不加分',
+        '五轮瑞士积分制，尽量避免重复对手',
+      ],
+    })
+    eventName.value = ''
+    eventCode.value = `EV-${Date.now().toString().slice(-8)}`
+    await load(created.id, undefined, false)
+    uni.showToast({ title: '赛事草稿已创建', icon: 'success' })
+  } catch (cause) {
+    errorMessage.value = causeMessage(cause, '赛事创建失败')
+  } finally {
+    uni.hideLoading()
+    actionKey.value = ''
+  }
 }
 
 async function nextRound() {
@@ -584,6 +669,31 @@ onShow(loadFromPage)
       <button class="secondary inline" :disabled="loading" @tap="refresh">重试</button>
     </view>
 
+    <template v-if="mayManageEvent">
+      <view class="section-title">创建赛事</view>
+      <view class="card create-event-form">
+        <view class="form-grid">
+          <view><text class="field-label">赛事编码</text><input v-model="eventCode" class="text-input" maxlength="40" /></view>
+          <view><text class="field-label">赛事名称</text><input v-model="eventName" class="text-input" maxlength="120" placeholder="例如：延庆周末积分赛" /></view>
+        </view>
+        <view class="form-grid">
+          <picker mode="date" :value="eventDate" :start="shanghaiDate()" @change="eventDate = ($event.detail as any).value"><view><text class="field-label">开赛日期</text><view class="picker-value">{{ eventDate }} ›</view></view></picker>
+          <picker mode="time" :value="eventTime" @change="eventTime = ($event.detail as any).value"><view><text class="field-label">开赛时间</text><view class="picker-value">{{ eventTime }} ›</view></view></picker>
+        </view>
+        <view class="form-grid">
+          <picker mode="date" :value="registrationEndDate" :start="shanghaiDate()" @change="registrationEndDate = ($event.detail as any).value"><view><text class="field-label">报名截止日期</text><view class="picker-value">{{ registrationEndDate }} ›</view></view></picker>
+          <picker mode="time" :value="registrationEndTime" @change="registrationEndTime = ($event.detail as any).value"><view><text class="field-label">报名截止时间</text><view class="picker-value">{{ registrationEndTime }} ›</view></view></picker>
+        </view>
+        <view class="form-grid">
+          <picker :range="capacityOptions" :value="eventCapacityIndex" @change="eventCapacityIndex = Number(($event.detail as any).value)"><view><text class="field-label">人数上限</text><view class="picker-value">{{ capacityOptions[eventCapacityIndex] }} 人 ›</view></view></picker>
+          <view><text class="field-label">报名费（元）</text><input v-model="eventFeeYuan" class="text-input" type="digit" /></view>
+        </view>
+        <view><text class="field-label">赞助方（选填）</text><input v-model="eventSponsor" class="text-input" maxlength="100" placeholder="无赞助可留空" /></view>
+        <text class="create-guardrail">赛制锁定为固定双打、24 人成赛、24-48 人双数容量、五轮瑞士制。创建得到草稿，必须二次确认发布才开放报名。</text>
+        <button class="primary" :loading="actionKey === 'create-event'" :disabled="loading || Boolean(actionKey)" @tap="createEvent">创建赛事草稿</button>
+      </view>
+    </template>
+
     <view class="queue-header">
       <view>
         <text class="section-title queue-title">赛事队列</text>
@@ -771,6 +881,7 @@ onShow(loadFromPage)
 
 <style scoped>
 .metric-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14rpx; margin-top:22rpx; }
+.create-event-form { display:grid; gap:16rpx; }.form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; }.create-event-form .text-input,.create-event-form .picker-value { min-height:68rpx; box-sizing:border-box; padding:16rpx 18rpx; color:#244c37; background:#f2f6f3; border:1rpx solid #dfe9e2; border-radius:16rpx; font-size:23rpx; }.create-event-form .field-label { display:block; margin-bottom:8rpx; color:#68756d; font-size:21rpx; }.create-guardrail { color:#7b6940; font-size:22rpx; line-height:1.6; }.create-event-form .primary { width:100%; margin:0; }
 .error-panel { display:flex; align-items:center; justify-content:space-between; gap:16rpx; margin-top:22rpx; color:#8a3636; background:#fff4f2; }
 .panel-title,.boundary-title { display:block; margin-bottom:8rpx; font-size:28rpx; font-weight:800; }
 .queue-header,.round-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:18rpx; margin-top:30rpx; }

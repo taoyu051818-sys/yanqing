@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useSessionStore } from '../../stores/session'
+import { endpoints } from '../../services/api'
 import { money } from '../../utils/format'
 import { isMockMode } from '../../services/http'
 
 const session = useSessionStore()
+const referrerId = ref('')
+const bindingReferral = ref(false)
 const accountLabel: Record<string, string> = {
   CASH_PRINCIPAL: '现金本金', GIFT_BALANCE: '赠送余额', BADMINTON_COIN: '羽毛球币',
   EVENT_POINTS: '成人赛事积分', GROWTH_POINTS: '青少年成长积分', YOUTH_GROWTH_POINTS: '青少年成长积分',
@@ -32,6 +35,39 @@ function logout() {
 }
 const openLogin = () => uni.navigateTo({ url: '/pages/login/index' })
 const openPage = (url: string) => uni.navigateTo({ url })
+
+function copyReferralCode() {
+  if (!session.user?.id) return
+  uni.setClipboardData({ data: session.user.id })
+}
+
+async function bindReferral() {
+  const requested = referrerId.value.trim()
+  if (!session.user || !requested) {
+    uni.showToast({ title: '请填写推荐人会员码', icon: 'none' })
+    return
+  }
+  if (requested === session.user.id) {
+    uni.showToast({ title: '不能绑定自己为推荐人', icon: 'none' })
+    return
+  }
+  const confirmed = await uni.showModal({
+    title: '确认直接推荐人',
+    content: '推荐关系仅允许一层且绑定后不能更换，请确认会员码无误。',
+  })
+  if (!confirmed.confirm) return
+  bindingReferral.value = true
+  try {
+    await endpoints.bindReferral(requested)
+    await session.hydrate()
+    referrerId.value = ''
+    uni.showToast({ title: '推荐关系已绑定', icon: 'success' })
+  } catch (cause: any) {
+    uni.showToast({ title: cause?.message || '推荐关系绑定失败', icon: 'none' })
+  } finally {
+    bindingReferral.value = false
+  }
+}
 onShow(() => session.hydrate())
 </script>
 
@@ -56,6 +92,21 @@ onShow(() => session.hydrate())
       </view>
     </view>
 
+    <view v-if="session.user" class="referral card">
+      <view class="referral-head">
+        <view><text class="menu-title">一层直接推荐</text><text class="muted">奖励只来自直接推荐的有效首单，不发展下级</text></view>
+        <button size="mini" class="copy" @tap="copyReferralCode">复制我的会员码</button>
+      </view>
+      <text class="code">{{ session.user.id }}</text>
+      <view v-if="session.user.referrerId" class="bound-referrer">
+        <text class="bound-title">已绑定推荐人</text><text class="muted">{{ session.user.referrerId }} · 不可更换</text>
+      </view>
+      <view v-else class="bind-row">
+        <input v-model="referrerId" maxlength="100" placeholder="粘贴推荐人的会员码" />
+        <button :loading="bindingReferral" :disabled="bindingReferral" class="bind" @tap="bindReferral">确认绑定</button>
+      </view>
+    </view>
+
     <view class="menu card">
       <view v-for="menu in menus" :key="menu.url" class="menu-item" @tap="openPage(menu.url)">
         <view><text class="menu-title">{{ menu.title }}</text><text class="muted">{{ menu.subtitle }}</text></view><text>›</text>
@@ -75,6 +126,15 @@ onShow(() => session.hydrate())
 .account-strip { display: flex; gap: 14rpx; overflow-x: auto; padding: 6rpx 0 24rpx; }
 .account { flex: 0 0 200rpx; padding: 24rpx; background: #fff; border-radius: 22rpx; }
 .account-value { display: block; margin-bottom: 10rpx; color: #184c30; font-size: 29rpx; font-weight: 800; }
+.referral { margin-bottom: 22rpx; padding: 28rpx; }
+.referral-head { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; }
+.copy { flex: 0 0 auto; margin: 0; color: #17653d; background: #edf7f1; }
+.code { display: block; margin-top: 18rpx; padding: 14rpx 18rpx; color: #365244; background: #f4f7f4; border-radius: 14rpx; font-family: monospace; font-size: 21rpx; word-break: break-all; }
+.bound-referrer { margin-top: 18rpx; padding: 18rpx; background: #fff8df; border-radius: 14rpx; }
+.bound-title { display: block; margin-bottom: 8rpx; color: #705921; font-weight: 700; }
+.bind-row { display: flex; align-items: center; gap: 12rpx; margin-top: 18rpx; }
+.bind-row input { box-sizing: border-box; flex: 1; min-width: 0; height: 72rpx; padding: 0 18rpx; background: #f6f8f6; border: 1rpx solid #dbe3de; border-radius: 14rpx; font-size: 22rpx; }
+.bind { flex: 0 0 auto; margin: 0; color: #fff; background: #17653d; font-size: 22rpx; }
 .menu { padding: 0 28rpx; }
 .menu-item { display: flex; align-items: center; justify-content: space-between; padding: 28rpx 0; border-bottom: 1rpx solid #edf0ed; }
 .menu-item:last-child { border: none; }

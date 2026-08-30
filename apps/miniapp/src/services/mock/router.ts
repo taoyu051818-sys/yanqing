@@ -1,7 +1,7 @@
 import type { AppRole } from "../../types/domain";
 import { mockLogin, mockUser } from "./core";
 import { availability, getOrders, saveOrders } from "./venue";
-import { membershipProducts, trainingProducts } from "./catalog";
+import { membershipProducts } from "./catalog";
 import {
   getAccountAdjustmentRequests,
   getCoupons,
@@ -29,8 +29,14 @@ import {
   getSettlements,
   getStudents,
   getTrainingSessions,
+  getTrainingProducts,
+  getTrainingCreationCommands,
   getTrainingConsumeCorrections,
   getTrainingSettlements,
+  getGovernanceUsers,
+  getSystemParameters,
+  getRiskEvents,
+  getAuditLogs,
   getVenueBookings,
   getVenueClosures,
   recomputeEventStandings,
@@ -58,8 +64,14 @@ import {
   saveSettlements,
   saveStudents,
   saveTrainingSessions,
+  saveTrainingProducts,
+  saveTrainingCreationCommands,
   saveTrainingConsumeCorrections,
   saveTrainingSettlements,
+  saveGovernanceUsers,
+  saveSystemParameters,
+  saveRiskEvents,
+  saveAuditLogs,
   saveVenueBookings,
   saveVenueClosures,
 } from "./state";
@@ -92,22 +104,24 @@ const requireInventoryRead = () =>
     "SUPER_ADMIN",
   );
 
-const privilegedRoles: AppRole[] = [
-  "ADMIN",
-  "SUPER_ADMIN",
-  "FINANCE",
-  "FRONT_DESK",
-];
-const merchantOnly = () =>
-  hasMockRole("MERCHANT") && !hasMockRole(...privilegedRoles);
-const merchantCanAccess = (merchantId: unknown) => {
+const assignedMerchant = (merchantId: unknown) =>
+  Boolean(merchantId) && String(merchantId) === "merchant-coffee";
+const merchantDirectoryIsScoped = () =>
+  hasMockRole("MERCHANT") && !hasMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
+const templateDirectoryIsScoped = () => !hasMockRole("ADMIN", "SUPER_ADMIN");
+const settlementDirectoryIsScoped = () =>
+  !hasMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
+const merchantCanManage = (merchantId: unknown) => {
   if (!merchantId) return false;
-  if (!merchantOnly()) return true;
+  if (hasMockRole("ADMIN", "SUPER_ADMIN")) return true;
   // The fixture merchant account represents 山脚咖啡.  In production this is
   // resolved from UserRole.merchantId; keeping the same boundary in the mock
   // prevents a role switch from exposing another merchant's ledger.
-  return String(merchantId) === "merchant-coffee";
+  return hasMockRole("MERCHANT") && assignedMerchant(merchantId);
 };
+const merchantCanRedeem = (merchantId: unknown) =>
+  hasMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN") ||
+  merchantCanManage(merchantId);
 
 const assertTrainingSettlementPeriodUnlocked = (
   periodStart: Date,
@@ -180,6 +194,12 @@ const requireIdempotencyKey = (value: unknown, label = "幂等键") => {
   if (key.length < 8 || key.length > 100)
     throw new Error(`${label}长度必须为8-100个字符`);
   return key;
+};
+const requireTrainingCreationReason = (value: unknown) => {
+  const reason = text(value);
+  if (reason.length < 2 || reason.length > 300)
+    throw new Error("创建原因长度必须为2-300个字符");
+  return reason;
 };
 const newId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -282,6 +302,99 @@ const finishMockOrderCreation = (
     ]);
   }
   return ok(response);
+};
+
+type MockTrainingCreationAttempt = {
+  replayed: boolean;
+  key: string;
+  actorId: string;
+  action: string;
+  objectType: string;
+  commandHash: string;
+  response?: any;
+};
+
+const beginMockTrainingCreation = (
+  creationIdempotencyKey: unknown,
+  action: string,
+  objectType: string,
+  command: unknown,
+): MockTrainingCreationAttempt => {
+  const key = requireIdempotencyKey(
+    creationIdempotencyKey,
+    "培训创建幂等键",
+  );
+  const actorId = mockUser().id;
+  const commandHash = creationCommandHash(command);
+  const existing = getTrainingCreationCommands().find(
+    (item) => item.key === key,
+  );
+  if (existing) {
+    if (
+      existing.actorId !== actorId ||
+      existing.action !== action ||
+      existing.objectType !== objectType ||
+      existing.commandHash !== commandHash
+    ) {
+      throw new Error("培训操作幂等键已用于不同命令");
+    }
+    return {
+      replayed: true,
+      key,
+      actorId,
+      action,
+      objectType,
+      commandHash,
+      response: existing.response,
+    };
+  }
+  return {
+    replayed: false,
+    key,
+    actorId,
+    action,
+    objectType,
+    commandHash,
+  };
+};
+
+const finishMockTrainingCreation = (
+  attempt: MockTrainingCreationAttempt,
+  response: any,
+  reason: string,
+): any => {
+  if (attempt.replayed) return ok(attempt.response);
+  const snapshot = ok(response);
+  saveTrainingCreationCommands([
+    {
+      key: attempt.key,
+      actorId: attempt.actorId,
+      action: attempt.action,
+      objectType: attempt.objectType,
+      objectId: response.id,
+      commandHash: attempt.commandHash,
+      response: snapshot,
+      createdAt: new Date().toISOString(),
+    },
+    ...getTrainingCreationCommands(),
+  ]);
+  saveAuditLogs([
+    {
+      id: newId("audit"),
+      actorId: attempt.actorId,
+      actorRole: mockUser().primaryRole,
+      action: attempt.action,
+      objectType: attempt.objectType,
+      objectId: response.id,
+      oldValue: { exists: false },
+      newValue: { ...snapshot, commandHash: attempt.commandHash },
+      reason,
+      requestId: attempt.key,
+      createdAt: new Date().toISOString(),
+    },
+    ...getAuditLogs(),
+  ]);
+  return snapshot;
 };
 
 const mockMemberIdentity = (userId: string) => {
@@ -758,6 +871,229 @@ export async function mockRequest<T>(
   if (url === "/auth/dev-login")
     return ok(mockLogin((data.role || "MEMBER") as AppRole));
   if (url === "/auth/me") return ok(mockUser());
+  if (url === "/parameters" && method === "GET") {
+    requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
+    const prefix = text(data.prefix);
+    return ok(getSystemParameters().filter((item) =>
+      !prefix || String(item.key).startsWith(prefix),
+    ));
+  }
+  if (url === "/parameters" && method === "POST") {
+    requireMockRole("ADMIN", "SUPER_ADMIN");
+    const key = text(data.key);
+    const description = text(data.description);
+    const effectiveFrom = new Date(String(data.effectiveFrom || ""));
+    if (!key || key.length > 120) throw new Error("参数键不能为空且不能超过120字符");
+    if (description.length < 2 || description.length > 300) throw new Error("参数说明长度必须为2-300字符");
+    if (!Number.isFinite(effectiveFrom.getTime())) throw new Error("生效时间无效");
+    if (key === "training.contract_rate_bps" && Number(data.value) !== 2000)
+      throw new Error("培训计入场馆合同收入比例锁定为20%");
+    if (key === "training.venue_fee_cents" && Number(data.value) !== 0)
+      throw new Error("培训不得另收场地费");
+    const parameters = getSystemParameters();
+    const current = parameters
+      .filter((item) => item.key === key)
+      .sort((a, b) => String(b.effectiveFrom).localeCompare(String(a.effectiveFrom)))[0];
+    const locked = Boolean(data.locked) || key.startsWith("training.");
+    if (current && effectiveFrom.getTime() === new Date(current.effectiveFrom).getTime()) {
+      const sameCommand =
+        JSON.stringify(current.value) === JSON.stringify(data.value) &&
+        current.type === (text(data.type) || "STRING") &&
+        current.description === description &&
+        current.locked === locked;
+      if (sameCommand) return ok(current);
+      throw new Error("同一参数与生效时间已被其他命令占用");
+    }
+    if (current && effectiveFrom.getTime() <= new Date(current.effectiveFrom).getTime())
+      throw new Error("新版本生效时间必须晚于上一版本");
+    if (current?.locked && !hasMockRole("SUPER_ADMIN"))
+      throw new Error("锁定参数仅超级管理员可变更");
+    if (current && !current.effectiveTo) current.effectiveTo = effectiveFrom.toISOString();
+    const now = new Date().toISOString();
+    const created = {
+      id: newId("parameter"), key, value: data.value,
+      type: text(data.type) || "STRING", description,
+      locked,
+      effectiveFrom: effectiveFrom.toISOString(), effectiveTo: null,
+      createdById: mockUser().id, createdAt: now,
+    };
+    saveSystemParameters([created, ...parameters]);
+    saveAuditLogs([{
+      id: newId("audit"), actorId: mockUser().id,
+      actor: { id: mockUser().id, displayName: mockUser().displayName },
+      actorRole: mockRoles()[0], action: "PARAMETER_VERSION_CREATED",
+      objectType: "SystemParameter", objectId: created.id,
+      oldValue: current ? { id: current.id, value: current.value } : null,
+      newValue: { key, value: data.value, effectiveFrom: created.effectiveFrom },
+      reason: text(data.reason) || description,
+      result: "SUCCESS", createdAt: now,
+    }, ...getAuditLogs()]);
+    return ok(created);
+  }
+  if (url === "/audit-logs" && method === "GET") {
+    requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
+    const objectType = text(data.objectType);
+    const items = getAuditLogs().filter((item) =>
+      !objectType || item.objectType === objectType,
+    );
+    return ok({ items, total: items.length, page: 1, pageSize: 100 });
+  }
+  if (url === "/governance/users" && method === "GET") {
+    requireMockRole("ADMIN", "SUPER_ADMIN");
+    const keyword = text(data.keyword).toLowerCase();
+    const role = text(data.role);
+    const status = text(data.status);
+    const items = getGovernanceUsers().filter((item) =>
+      (!keyword || `${item.displayName} ${item.phone || ""}`.toLowerCase().includes(keyword)) &&
+      (!status || item.status === status) &&
+      (!role || item.primaryRole === role || item.roles?.some((entry: any) => entry.role === role)),
+    );
+    return ok({ items, total: items.length, page: 1, pageSize: 100 });
+  }
+  const governanceRolesMatch = url.match(/^\/governance\/users\/([^/]+)\/roles$/);
+  if (governanceRolesMatch && method === "POST") {
+    requireMockRole("SUPER_ADMIN");
+    const users = getGovernanceUsers();
+    const user = users.find((item) => item.id === governanceRolesMatch[1]);
+    if (!user) throw new Error("用户不存在");
+    const roles = [...new Set((Array.isArray(data.roles) ? data.roles : []).map(text))].sort();
+    const primaryRole = text(data.primaryRole);
+    const reason = text(data.reason);
+    if (!roles.length || !roles.includes(primaryRole)) throw new Error("主角色必须包含在角色集合中");
+    if (reason.length < 2) throw new Error("请填写角色变更原因");
+    if (user.id === mockUser().id && !roles.includes("SUPER_ADMIN"))
+      throw new Error("超级管理员不能移除自己的超级管理员角色");
+    const merchantId = text(data.merchantId);
+    if (roles.includes("MERCHANT") && !merchantId) throw new Error("商户角色必须关联商户");
+    if (!roles.includes("MERCHANT") && merchantId) throw new Error("仅商户角色可以关联商户");
+    const requestId = data.idempotencyKey
+      ? requireIdempotencyKey(data.idempotencyKey, "治理角色幂等键")
+      : "";
+    const action = "USER_ROLES_SET";
+    const commandHash = creationCommandHash({
+      kind: action,
+      userId: user.id,
+      primaryRole,
+      roles,
+      merchantId: merchantId || null,
+      reason,
+    });
+    const replay = requestId
+      ? getAuditLogs().find((item) => item.requestId === requestId)
+      : null;
+    if (replay) {
+      if (
+        replay.actorId !== mockUser().id ||
+        replay.action !== action ||
+        replay.objectType !== "User" ||
+        replay.objectId !== user.id ||
+        replay.newValue?.commandHash !== commandHash
+      )
+        throw new Error("治理操作幂等键已用于不同命令");
+      return ok(user);
+    }
+    if (user.status !== "ACTIVE") throw new Error("停用用户不能配置角色");
+    const merchant = merchantId
+      ? getMerchants().find((item) => item.id === merchantId)
+      : null;
+    if (
+      merchantId &&
+      (!merchant || (merchant.status && merchant.status !== "ACTIVE"))
+    )
+      throw new Error("有效商户不存在");
+    const oldValue = { primaryRole: user.primaryRole, roles: user.roles };
+    const nextRoles = roles.map((role) => ({
+      role,
+      merchantId: role === "MERCHANT" ? merchantId : null,
+      ...(role === "MERCHANT" ? { merchant } : {}),
+    }));
+    const unchanged =
+      user.primaryRole === primaryRole &&
+      JSON.stringify(user.roles) === JSON.stringify(nextRoles);
+    if (!unchanged) {
+      user.primaryRole = primaryRole;
+      user.roles = nextRoles;
+      user.updatedAt = new Date().toISOString();
+      saveGovernanceUsers(users);
+    }
+    if (!unchanged || requestId) {
+      const createdAt = user.updatedAt || new Date().toISOString();
+      saveAuditLogs([{
+        id: newId("audit"), actorId: mockUser().id,
+        actor: { id: mockUser().id, displayName: mockUser().displayName }, actorRole: "SUPER_ADMIN",
+        action, objectType: "User", objectId: user.id,
+        oldValue,
+        newValue: { primaryRole, roles: nextRoles, commandHash },
+        reason, ...(requestId ? { requestId } : {}),
+        result: "SUCCESS", createdAt,
+      }, ...getAuditLogs()]);
+    }
+    return ok(user);
+  }
+  const governanceStatusMatch = url.match(/^\/governance\/users\/([^/]+)\/status$/);
+  if (governanceStatusMatch && method === "POST") {
+    requireMockRole("SUPER_ADMIN");
+    const users = getGovernanceUsers();
+    const user = users.find((item) => item.id === governanceStatusMatch[1]);
+    if (!user) throw new Error("用户不存在");
+    const status = text(data.status);
+    const reason = text(data.reason);
+    if (!["ACTIVE", "DISABLED"].includes(status)) throw new Error("用户状态无效");
+    if (reason.length < 2) throw new Error("请填写状态变更原因");
+    if (user.id === mockUser().id && status !== "ACTIVE") throw new Error("不能停用当前登录的超级管理员");
+    if (user.status === status) return ok(user);
+    const oldStatus = user.status;
+    user.status = status;
+    user.updatedAt = new Date().toISOString();
+    saveGovernanceUsers(users);
+    saveAuditLogs([{
+      id: newId("audit"), actorId: mockUser().id,
+      actor: { id: mockUser().id, displayName: mockUser().displayName }, actorRole: "SUPER_ADMIN",
+      action: "USER_STATUS_SET", objectType: "User", objectId: user.id,
+      oldValue: { status: oldStatus }, newValue: { status }, reason,
+      result: "SUCCESS", createdAt: user.updatedAt,
+    }, ...getAuditLogs()]);
+    return ok(user);
+  }
+  if (url === "/governance/risk-events" && method === "GET") {
+    requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
+    const status = text(data.status);
+    const severity = text(data.severity);
+    const items = getRiskEvents().filter((item) =>
+      (!status || item.status === status) && (!severity || item.severity === severity),
+    );
+    return ok({ items, total: items.length, page: 1, pageSize: 100 });
+  }
+  const riskActionMatch = url.match(/^\/governance\/risk-events\/([^/]+)\/(review|resolve|dismiss)$/);
+  if (riskActionMatch && method === "POST") {
+    const action = riskActionMatch[2];
+    requireMockRole(...(action === "review"
+      ? ["FINANCE", "ADMIN", "SUPER_ADMIN"] as AppRole[]
+      : ["ADMIN", "SUPER_ADMIN"] as AppRole[]));
+    const reason = text(data.reason);
+    if (reason.length < 2) throw new Error("请填写风险处理原因");
+    const risks = getRiskEvents();
+    const risk = risks.find((item) => item.id === riskActionMatch[1]);
+    if (!risk) throw new Error("风险事件不存在");
+    const target = action === "review" ? "REVIEWING" : action === "resolve" ? "RESOLVED" : "DISMISSED";
+    if (risk.status === target) return ok(risk);
+    if (["RESOLVED", "DISMISSED"].includes(risk.status)) throw new Error("终态风险事件不能再次处理");
+    if (action === "review" && risk.status !== "OPEN") throw new Error("只有待处理风险可以进入复核");
+    const oldStatus = risk.status;
+    risk.status = target;
+    risk.evidence = { ...(risk.evidence || {}), lastAction: action, lastReason: reason, lastActorId: mockUser().id };
+    risk.resolvedBy = target === "REVIEWING" ? null : mockUser().id;
+    risk.resolvedAt = target === "REVIEWING" ? null : new Date().toISOString();
+    saveRiskEvents(risks);
+    saveAuditLogs([{
+      id: newId("audit"), actorId: mockUser().id,
+      actor: { id: mockUser().id, displayName: mockUser().displayName }, actorRole: mockRoles()[0],
+      action: `RISK_EVENT_${target}`, objectType: "RiskEvent", objectId: risk.id,
+      oldValue: { status: oldStatus }, newValue: { status: target }, reason,
+      result: "SUCCESS", createdAt: new Date().toISOString(),
+    }, ...getAuditLogs()]);
+    return ok(risk);
+  }
   if (url === "/operations/shifts/current" && method === "GET") {
     requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
     const businessDate = mockShanghaiBusinessDate();
@@ -1695,7 +2031,7 @@ export async function mockRequest<T>(
       if (trainingEnrollmentToActivate.status !== "PENDING_PAYMENT")
         throw new Error("培训报名状态不可支付");
       if (trainingEnrollmentToActivate.classId) {
-        const selectedClass = trainingProducts
+        const selectedClass = getTrainingProducts()
           .flatMap((item) => item.classes || [])
           .find(
             (item: any) => item.id === trainingEnrollmentToActivate.classId,
@@ -2023,6 +2359,35 @@ export async function mockRequest<T>(
       : [];
     if (new Set(courtIds).size !== courtIds.length)
       throw new Error("场地不能重复");
+    if (!courtIds.length) throw new Error("至少选择一个场地");
+    const calendar = availability(mockShanghaiBusinessDate(startsAt));
+    const selectedCourts = calendar.courts.filter((court: any) =>
+      courtIds.includes(court.id),
+    );
+    if (selectedCourts.length !== courtIds.length)
+      throw new Error("部分场地不存在或已停用");
+    if (
+      selectedCourts.some((court: any) =>
+        ["MAINTENANCE", "TRAINING"].includes(court.usage),
+      )
+    )
+      throw new Error("球局不能使用维护场或培训专用场");
+    const closure = (calendar.closures || []).find(
+      (item: any) =>
+        courtIds.includes(item.courtId) &&
+        item.status === "ACTIVE" &&
+        new Date(item.startsAt).getTime() < endsAt.getTime() &&
+        new Date(item.endsAt).getTime() > startsAt.getTime(),
+    );
+    if (closure) throw new Error(`所选场地时段已封场：${closure.reason}`);
+    const occupied = (calendar.bookings || []).find(
+      (item: any) =>
+        courtIds.includes(item.courtId) &&
+        item.status !== "CANCELLED" &&
+        new Date(item.startsAt).getTime() < endsAt.getTime() &&
+        new Date(item.endsAt).getTime() > startsAt.getTime(),
+    );
+    if (occupied) throw new Error("所选场地时段已被占用");
     const created = {
       ...data,
       id: newId("game"),
@@ -2053,10 +2418,15 @@ export async function mockRequest<T>(
     );
   }
   if (url === "/games/hosts/apply" && method === "POST") {
+    requireMockRole("MEMBER");
     const applications = getHostApplications();
     const existing = applications.find((item) => item.userId === mockUser().id);
     if (existing?.status === "APPROVED") throw new Error("已经是球局主理人");
-    if (existing?.status === "APPLIED") return ok(existing);
+    if (existing?.status === "APPLIED") {
+      // 首次读取可能来自动态种子；落盘后重放必须返回同一份申请。
+      saveHostApplications(applications);
+      return ok(existing);
+    }
     const profile = existing || {
       id: newId("host-profile"),
       userId: mockUser().id,
@@ -2097,10 +2467,13 @@ export async function mockRequest<T>(
   }
   const publishGameMatch = url.match(/^\/games\/([^/]+)\/publish$/);
   if (publishGameMatch && method === "POST") {
-    requireMockRole("ADMIN", "SUPER_ADMIN");
+    requireMockRole("HOST", "ADMIN", "SUPER_ADMIN");
     const list = getGames();
     const game = list.find((item) => item.id === publishGameMatch[1]);
     if (!game) throw new Error("球局不存在");
+    const hostOnly = hasMockRole("HOST") && !hasMockRole("ADMIN", "SUPER_ADMIN");
+    if (hostOnly && game.hostId && game.hostId !== mockUser().id)
+      throw new Error("只有本局主理人或管理员可操作该球局");
     if (game.status === "OPEN") return ok(game);
     if (
       ["FULL", "IN_PROGRESS", "COMPLETED", "CANCELLED"].includes(game.status)
@@ -2231,10 +2604,18 @@ export async function mockRequest<T>(
     /^\/games\/([^/]+)\/promote-waitlist$/,
   );
   if (promoteGameWaitlistMatch && method === "POST") {
-    requireMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
+    requireMockRole("HOST", "FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
     const games = getGames();
     const game = games.find((item) => item.id === promoteGameWaitlistMatch[1]);
     if (!game) throw new Error("球局不存在");
+    const hostOnly = hasMockRole("HOST") && !hasMockRole(
+      "FRONT_DESK",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN",
+    );
+    if (hostOnly && game.hostId && game.hostId !== mockUser().id)
+      throw new Error("只有本局主理人或管理员可操作该球局");
     const promoted = promoteMockGameWaitlist(game);
     saveGames(games);
     if (!promoted) return ok(null);
@@ -2284,8 +2665,8 @@ export async function mockRequest<T>(
   if (url === "/events" && method === "POST") {
     requireMockRole("EVENT_MANAGER", "ADMIN", "SUPER_ADMIN");
     const name = text(data.name);
-    const code = text(data.code) || `EV-${Date.now()}`;
-    if (!name) throw new Error("赛事编码和名称不能为空");
+    const code = text(data.code);
+    if (!code || !name) throw new Error("赛事编码和名称不能为空");
     const startsAt = new Date(String(data.startsAt || ""));
     const registrationEndsAt = new Date(String(data.registrationEndsAt || ""));
     if (
@@ -2295,6 +2676,8 @@ export async function mockRequest<T>(
     ) {
       throw new Error("报名截止时间必须早于开赛时间");
     }
+    if (startsAt <= new Date()) throw new Error("赛事开始时间必须晚于当前时间");
+    if (registrationEndsAt <= new Date()) throw new Error("报名截止时间必须晚于当前时间");
     const capacityPeople = integer(data.capacityPeople)
       ? Number(data.capacityPeople)
       : 48;
@@ -2885,7 +3268,164 @@ export async function mockRequest<T>(
     if (detail) saveEventDetail(recomputeEventStandings(detail));
     return ok(match || { id: correctEventMatch[1], status: "CORRECTED" });
   }
-  if (url === "/training/products") return ok(trainingProducts);
+  if (url === "/training/products" && method === "GET")
+    return ok(
+      getTrainingProducts()
+        .filter((product) => product.enabled !== false)
+        .map((product) => ({
+          ...product,
+          classes: (product.classes || []).filter(
+            (trainingClass: any) => trainingClass.active !== false,
+          ),
+        })),
+    );
+  if (url === "/training/products" && method === "POST") {
+    requireMockRole("ADMIN", "SUPER_ADMIN");
+    const code = text(data.code).toUpperCase();
+    const name = text(data.name);
+    const audience = text(data.audience);
+    const totalSessions = integer(data.totalSessions);
+    const validityDays = integer(data.validityDays);
+    const priceCents = integer(data.priceCents);
+    const refundRule = data.refundRule;
+    const reason = requireTrainingCreationReason(data.reason);
+    if (!code || code.length > 40 || !name || name.length > 100)
+      throw new Error("课程产品编码和名称不能为空且不能超过规定长度");
+    if (!['ADULT', 'YOUTH'].includes(audience))
+      throw new Error("课程产品适用人群无效");
+    if (totalSessions < 1 || totalSessions > 200)
+      throw new Error("课程总课次必须为1-200");
+    if (validityDays < 1 || validityDays > 730)
+      throw new Error("课程有效期必须为1-730天");
+    if (priceCents < 1) throw new Error("课程售价必须大于0");
+    if (!refundRule || typeof refundRule !== "object" || Array.isArray(refundRule))
+      throw new Error("退费规则必须为对象");
+    const command = {
+      code,
+      name,
+      audience,
+      totalSessions,
+      validityDays,
+      priceCents,
+      refundRule,
+      reason,
+    };
+    const attempt = beginMockTrainingCreation(
+      data.creationIdempotencyKey,
+      "TRAINING_PRODUCT_CREATED",
+      "TrainingProduct",
+      command,
+    );
+    if (attempt.replayed) return finishMockTrainingCreation(attempt, attempt.response, reason);
+    const products = getTrainingProducts();
+    if (products.some((product) => text(product.code).toUpperCase() === code))
+      throw new Error("课程产品编码已存在");
+    const product = {
+      id: newId("training-product"),
+      code,
+      name,
+      audience,
+      totalSessions,
+      validityDays,
+      priceCents,
+      unitRevenueCents: Math.round(priceCents / totalSessions),
+      refundRule,
+      enabled: true,
+      classes: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    saveTrainingProducts([product, ...products]);
+    return finishMockTrainingCreation(attempt, product, reason);
+  }
+  if (url === "/training/classes" && method === "POST") {
+    requireMockRole("ADMIN", "SUPER_ADMIN");
+    const code = text(data.code).toUpperCase();
+    const productId = text(data.productId);
+    const name = text(data.name);
+    const coachId = text(data.coachId) || null;
+    const assistantId = text(data.assistantId) || null;
+    const schedule = data.schedule as Record<string, unknown> | undefined;
+    const capacity = integer(data.capacity);
+    const coachCostCents = integer(data.coachCostCents ?? 0);
+    const assistantCostCents = integer(data.assistantCostCents ?? 0);
+    const materialCostCents = integer(data.materialCostCents ?? 0);
+    const reason = requireTrainingCreationReason(data.reason);
+    if (!code || code.length > 40 || !name || name.length > 100)
+      throw new Error("培训班级编码和名称不能为空且不能超过规定长度");
+    if (!productId) throw new Error("必须选择课程产品");
+    if (!schedule || typeof schedule !== "object" || Array.isArray(schedule))
+      throw new Error("班级课表配置不能为空");
+    const weekday = integer(schedule.weekday);
+    const scheduleStartsAt = text(schedule.startsAt);
+    const scheduleEndsAt = text(schedule.endsAt);
+    if (
+      weekday < 1 ||
+      weekday > 7 ||
+      !/^\d{2}:\d{2}$/.test(scheduleStartsAt) ||
+      !/^\d{2}:\d{2}$/.test(scheduleEndsAt) ||
+      scheduleEndsAt <= scheduleStartsAt
+    )
+      throw new Error("班级课表时间设置无效");
+    if (capacity < 1 || capacity > 100)
+      throw new Error("班级容量必须为1-100");
+    if ([coachCostCents, assistantCostCents, materialCostCents].some((value) => value < 0))
+      throw new Error("班级成本必须为非负整数分");
+    const normalizedSchedule = {
+      ...schedule,
+      weekday,
+      startsAt: scheduleStartsAt,
+      endsAt: scheduleEndsAt,
+    };
+    const command = {
+      code,
+      productId,
+      name,
+      coachId,
+      assistantId,
+      schedule: normalizedSchedule,
+      capacity,
+      coachCostCents,
+      assistantCostCents,
+      materialCostCents,
+      reason,
+    };
+    const attempt = beginMockTrainingCreation(
+      data.creationIdempotencyKey,
+      "TRAINING_CLASS_CREATED",
+      "TrainingClass",
+      command,
+    );
+    if (attempt.replayed) return finishMockTrainingCreation(attempt, attempt.response, reason);
+    const products = getTrainingProducts();
+    const product = products.find((item) => item.id === productId && item.enabled !== false);
+    if (!product) throw new Error("培训产品不存在或已停用");
+    if (
+      products
+        .flatMap((item) => item.classes || [])
+        .some((item: any) => text(item.code).toUpperCase() === code)
+    )
+      throw new Error("培训班级编码已存在");
+    const trainingClass = {
+      id: newId("training-class"),
+      code,
+      productId,
+      name,
+      coachId,
+      assistantId,
+      schedule: normalizedSchedule,
+      capacity,
+      coachCostCents,
+      assistantCostCents,
+      materialCostCents,
+      active: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    product.classes = [trainingClass, ...(product.classes || [])];
+    saveTrainingProducts(products);
+    return finishMockTrainingCreation(attempt, trainingClass, reason);
+  }
   if (url === "/training/students" && method === "GET") {
     return ok(
       getStudents().filter((student) => student.guardianId === mockUser().id),
@@ -3015,11 +3555,21 @@ export async function mockRequest<T>(
     const ownClassOnly =
       roles.includes("COACH") &&
       !hasMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
+    const ownedClassIds = ownClassOnly
+      ? getTrainingProducts()
+          .flatMap((product) => product.classes || [])
+          .filter(
+            (trainingClass: any) =>
+              trainingClass.active !== false &&
+              (trainingClass.coachId === mockUser().id ||
+                trainingClass.assistantId === mockUser().id),
+          )
+          .map((trainingClass: any) => trainingClass.id)
+      : [];
     return ok(
       ownClassOnly
         ? getEnrollments().filter(
-            (enrollment) =>
-              !enrollment.classId || enrollment.classId === "class-adult",
+            (enrollment) => ownedClassIds.includes(enrollment.classId),
           )
         : getEnrollments(),
     );
@@ -3030,10 +3580,21 @@ export async function mockRequest<T>(
     const ownClassOnly =
       roles.includes("COACH") &&
       !hasMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
+    const ownedClassIds = ownClassOnly
+      ? getTrainingProducts()
+          .flatMap((product) => product.classes || [])
+          .filter(
+            (trainingClass: any) =>
+              trainingClass.active !== false &&
+              (trainingClass.coachId === mockUser().id ||
+                trainingClass.assistantId === mockUser().id),
+          )
+          .map((trainingClass: any) => trainingClass.id)
+      : [];
     return ok(
       ownClassOnly
         ? getTrainingSessions().filter(
-            (session) => !session.classId || session.classId === "class-adult",
+            (trainingSession) => ownedClassIds.includes(trainingSession.classId),
           )
         : getTrainingSessions(),
     );
@@ -3043,6 +3604,7 @@ export async function mockRequest<T>(
     const classId = text(data.classId);
     const startsAt = new Date(String(data.startsAt || ""));
     const endsAt = new Date(String(data.endsAt || ""));
+    const note = text(data.note) || undefined;
     const courtIds = Array.isArray(data.courtIds)
       ? data.courtIds.map((id: unknown) => text(id)).filter(Boolean)
       : [];
@@ -3057,20 +3619,67 @@ export async function mockRequest<T>(
       throw new Error("培训课次至少需要一个不重复场地");
     if (startsAt <= new Date())
       throw new Error("培训课次开始时间必须晚于当前时间");
+    const sortedCourtIds = [...courtIds].sort();
+    const reason = requireTrainingCreationReason(data.reason);
+    const command = {
+      classId,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      courtIds: sortedCourtIds,
+      note: note || null,
+      reason,
+    };
+    const attempt = beginMockTrainingCreation(
+      data.creationIdempotencyKey,
+      "TRAINING_SESSION_CREATED",
+      "TrainingSession",
+      command,
+    );
+    if (attempt.replayed) return finishMockTrainingCreation(attempt, attempt.response, reason);
+    const trainingClass = getTrainingProducts()
+      .flatMap((product) => product.classes || [])
+      .find((item: any) => item.id === classId && item.active !== false);
+    if (!trainingClass) throw new Error("培训班不存在");
     const actorIsCoach =
       hasMockRole("COACH") && !hasMockRole("ADMIN", "SUPER_ADMIN");
-    if (actorIsCoach && classId !== "class-adult")
+    if (
+      actorIsCoach &&
+      trainingClass.coachId !== mockUser().id &&
+      trainingClass.assistantId !== mockUser().id
+    )
       throw new Error("教练只能为自己负责的班级排课");
-    const conflict = getTrainingSessions().some(
+    const calendar = availability(mockShanghaiBusinessDate(startsAt));
+    const selectedCourts = calendar.courts.filter((court: any) =>
+      sortedCourtIds.includes(court.id),
+    );
+    if (selectedCourts.length !== sortedCourtIds.length || selectedCourts.some((court: any) => !court.enabled))
+      throw new Error("部分场地不存在或已停用");
+    const closure = (calendar.closures || []).find(
+      (item: any) =>
+        sortedCourtIds.includes(item.courtId) &&
+        item.status === "ACTIVE" &&
+        new Date(item.startsAt).getTime() < endsAt.getTime() &&
+        new Date(item.endsAt).getTime() > startsAt.getTime(),
+    );
+    if (closure) throw new Error(`所选场地时段已封场：${closure.reason}`);
+    const bookingConflict = (calendar.bookings || []).some(
+      (existing: any) =>
+        existing.status !== "CANCELLED" &&
+        sortedCourtIds.includes(existing.courtId) &&
+        new Date(existing.startsAt).getTime() < endsAt.getTime() &&
+        new Date(existing.endsAt).getTime() > startsAt.getTime(),
+    );
+    const sessionConflict = getTrainingSessions().some(
       (existing: any) =>
         existing.status !== "CANCELLED" &&
         new Date(existing.startsAt).getTime() < endsAt.getTime() &&
         new Date(existing.endsAt).getTime() > startsAt.getTime() &&
         (existing.courtIds || []).some((courtId: string) =>
-          courtIds.includes(courtId),
+          sortedCourtIds.includes(courtId),
         ),
     );
-    if (conflict) throw new Error("所选场地与已有预订冲突");
+    if (bookingConflict || sessionConflict)
+      throw new Error("所选场地与已有预订冲突");
     const enrollmentList = getEnrollments().filter(
       (enrollment) =>
         enrollment.classId === classId &&
@@ -3085,23 +3694,37 @@ export async function mockRequest<T>(
       consumedSessions: 0,
       operatorId: null,
     }));
-    const trainingClass = trainingProducts
-      .flatMap((product) => product.classes || [])
-      .find((item: any) => item.id === classId);
     const session = {
       id: sessionId,
       classId,
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
-      courtIds,
+      courtIds: sortedCourtIds,
+      courtCount: sortedCourtIds.length,
       occupiedCourtHours:
-        courtIds.length * ((endsAt.getTime() - startsAt.getTime()) / 3_600_000),
-      ...data,
-      class: { id: classId, name: trainingClass?.name || classId },
+        sortedCourtIds.length * ((endsAt.getTime() - startsAt.getTime()) / 3_600_000),
+      coachCostCents: Number(trainingClass.coachCostCents || 0),
+      assistantCostCents: Number(trainingClass.assistantCostCents || 0),
+      materialCostCents: Number(trainingClass.materialCostCents || 0),
+      note,
+      class: { id: classId, name: trainingClass.name || classId },
       status: "SCHEDULED",
       attendances: attendanceRows,
     };
     saveTrainingSessions([session, ...getTrainingSessions()]);
+    saveVenueBookings([
+      ...sortedCourtIds.map((courtId) => ({
+        id: newId("training-booking"),
+        courtId,
+        status: "CONFIRMED",
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+        usage: "TRAINING",
+        trainingClassId: classId,
+        note: `培训课次 ${session.id}，仅记录资源占用，不生成培训场地费`,
+      })),
+      ...getVenueBookings(),
+    ]);
     // Keep the enrollment attendance ledger in sync with the new session.
     const allEnrollments = getEnrollments();
     enrollmentList.forEach((enrollment) => {
@@ -3111,7 +3734,7 @@ export async function mockRequest<T>(
       enrollment.attendances = [...(enrollment.attendances || []), row];
     });
     saveEnrollments(allEnrollments);
-    return ok(session);
+    return finishMockTrainingCreation(attempt, session, reason);
   }
   if (url === "/training/purchase") {
     const creation = beginMockOrderCreation(data.creationIdempotencyKey, {
@@ -3122,7 +3745,7 @@ export async function mockRequest<T>(
       sourceChannel: text(data.sourceChannel) || "MINI_PROGRAM",
     });
     if (creation.tracked && creation.replayed) return ok(creation.response);
-    const product = trainingProducts.find((item) => item.id === data.productId);
+    const product = getTrainingProducts().find((item) => item.id === data.productId);
     if (!product) throw new Error("培训产品不存在或已下架");
     if (product.audience === "YOUTH" && !data.studentId)
       throw new Error("青少年课程必须选择学员");
@@ -3391,6 +4014,8 @@ export async function mockRequest<T>(
         venueFeeCents: 0,
       });
     }
+    if (["COMPLETED", "CANCELLED"].includes(lesson.status))
+      throw new Error("已结束或已取消的课次不能继续消课");
     if (attendance.status !== "ATTENDED")
       throw new Error("学员完成到场登记后才能提交消课建议");
     if (
@@ -3461,6 +4086,8 @@ export async function mockRequest<T>(
         venueFeeCents: 0,
       });
     }
+    if (["COMPLETED", "CANCELLED"].includes(lesson.status))
+      throw new Error("已结束或已取消的课次不能继续消课");
     if (attendance?.operatorId === mockUser().id)
       throw new Error("消课建议提交人与确认人不能是同一账号");
     if (!attendance?.operatorId)
@@ -3755,10 +4382,12 @@ export async function mockRequest<T>(
       (enrollment.attendances || []).some(
         (attendance: any) =>
           attendance.sessionId === completeSessionMatch[1] &&
-          ["PENDING", "MAKEUP_REQUIRED", "LEAVE"].includes(attendance.status),
+          (["PENDING", "MAKEUP_REQUIRED", "LEAVE"].includes(attendance.status) ||
+            (attendance.status === "ATTENDED" &&
+              Number(attendance.consumedSessions || 0) === 0)),
       ),
     );
-    if (pending) throw new Error("仍有学员未处理签到/请假状态");
+    if (pending) throw new Error("仍有学员未完成点名或消课");
     trainingSession.status = "COMPLETED";
     saveTrainingSessions(list);
     return ok(trainingSession);
@@ -3780,6 +4409,49 @@ export async function mockRequest<T>(
         account: { type: "BADMINTON_COIN" },
       },
     ]);
+  if (url === "/members/me/referrer" && method === "POST") {
+    const referrerId = text(data.referrerId);
+    if (!referrerId) throw new Error("推荐人不能为空");
+    const actor = mockUser();
+    if (referrerId === actor.id) throw new Error("不能推荐自己");
+    const users = getGovernanceUsers();
+    const user = users.find((item) => item.id === actor.id);
+    const referrer = users.find((item) => item.id === referrerId);
+    const hasMemberIdentity = (item: any) =>
+      Array.isArray(item?.roles) &&
+      item.roles.some(
+        (role: any) => (typeof role === "string" ? role : role?.role) === "MEMBER",
+      );
+    if (!user || user.status !== "ACTIVE" || !hasMemberIdentity(user))
+      throw new Error("会员不存在或已停用");
+    if (!referrer || referrer.status !== "ACTIVE" || !hasMemberIdentity(referrer))
+      throw new Error("推荐人不存在或已停用");
+    const visited = new Set<string>();
+    let ancestor: any = referrer;
+    while (ancestor) {
+      if (ancestor.id === actor.id || visited.has(String(ancestor.id)))
+        throw new Error("推荐关系不能形成闭环");
+      visited.add(String(ancestor.id));
+      ancestor = ancestor.referrerId
+        ? users.find((item) => item.id === ancestor.referrerId)
+        : null;
+    }
+    if (user.referrerId === referrerId)
+      return ok({ id: actor.id, referrerId });
+    if (user.referrerId) throw new Error("直接推荐人已绑定，不能更换");
+    user.referrerId = referrerId;
+    user.updatedAt = new Date().toISOString();
+    saveGovernanceUsers(users);
+    saveAuditLogs([{
+      id: newId("audit"), actorId: actor.id,
+      actor: { id: actor.id, displayName: actor.displayName }, actorRole: "MEMBER",
+      action: "DIRECT_REFERRAL_BOUND", objectType: "User", objectId: actor.id,
+      oldValue: { referrerId: null }, newValue: { referrerId },
+      reason: "会员本人确认一层直接推荐关系",
+      result: "SUCCESS", createdAt: user.updatedAt,
+    }, ...getAuditLogs()]);
+    return ok({ id: actor.id, referrerId });
+  }
   if (url === "/referrals/me/rewards") return ok([]);
   if (url === "/referrals/rewards/grant-matured" && method === "POST") {
     requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
@@ -3787,15 +4459,71 @@ export async function mockRequest<T>(
   }
   if (url === "/alliance/merchants" && method === "POST") {
     requireMockRole("ADMIN", "SUPER_ADMIN");
+    const code = text(data.code).toUpperCase();
     const name = text(data.name);
-    if (!name) throw new Error("商户名称不能为空");
+    const category = text(data.category);
+    const level = text(data.level);
+    if (code.length < 2 || name.length < 2 || category.length < 2)
+      throw new Error("商户编码、名称和分类至少需要2个字符");
+    if (!["TRAFFIC_PARTNER", "MEMBER_BENEFIT", "SPONSOR"].includes(level))
+      throw new Error("商户等级无效");
+    if (getMerchants().some((item) => text(item.code).toUpperCase() === code))
+      throw new Error("商户编码已存在");
+    if (!data.settlementRule || typeof data.settlementRule !== "object")
+      throw new Error("商户结算规则不能为空");
     const merchant = {
       ...data,
       id: newId("merchant"),
+      code,
       name,
-      status: data.status || "ACTIVE",
+      category,
+      level,
+      status: "ACTIVE",
+      _count: { couponTemplates: 0, couponRedemptions: 0 },
+      createdAt: new Date().toISOString(),
     };
     saveMerchants([merchant, ...getMerchants()]);
+    return ok(merchant);
+  }
+  const merchantStatusMatch = url.match(/^\/alliance\/merchants\/([^/]+)\/status$/);
+  if (merchantStatusMatch && method === "POST") {
+    requireMockRole("ADMIN", "SUPER_ADMIN");
+    const status = text(data.status);
+    const reason = text(data.reason);
+    const requestId = requireIdempotencyKey(data.idempotencyKey, "商户状态幂等键");
+    if (!["ACTIVE", "DISABLED"].includes(status))
+      throw new Error("商户仅允许启用或停用，不允许删除");
+    if (reason.length < 2 || reason.length > 300)
+      throw new Error("状态变更原因需要2-300个字符");
+    const merchants = getMerchants();
+    const merchant = merchants.find((item) => item.id === merchantStatusMatch[1]);
+    if (!merchant) throw new Error("商户不存在");
+    if (!["ACTIVE", "DISABLED"].includes(merchant.status || "ACTIVE"))
+      throw new Error("已删除商户不能重新启用或停用");
+    const action = "ALLIANCE_MERCHANT_STATUS_SET";
+    const commandSignature = JSON.stringify({ action, merchantId: merchant.id, status, reason });
+    const replay = getAuditLogs().find((item) => item.requestId === requestId);
+    if (replay) {
+      if (
+        replay.actorId !== mockUser().id || replay.action !== action ||
+        replay.objectType !== "Merchant" || replay.objectId !== merchant.id ||
+        replay.newValue?.commandSignature !== commandSignature
+      )
+        throw new Error("幂等键已用于其他联盟状态操作");
+      return ok(merchant);
+    }
+    const oldStatus = merchant.status || "ACTIVE";
+    merchant.status = status;
+    merchant.updatedAt = new Date().toISOString();
+    saveMerchants(merchants);
+    saveAuditLogs([{
+      id: newId("audit"), actorId: mockUser().id,
+      actor: { id: mockUser().id, displayName: mockUser().displayName },
+      actorRole: hasMockRole("SUPER_ADMIN") ? "SUPER_ADMIN" : "ADMIN",
+      action, objectType: "Merchant", objectId: merchant.id,
+      oldValue: { status: oldStatus }, newValue: { status, commandSignature },
+      reason, requestId, result: "SUCCESS", createdAt: merchant.updatedAt,
+    }, ...getAuditLogs()]);
     return ok(merchant);
   }
   if (url === "/alliance/merchants") {
@@ -3804,7 +4532,7 @@ export async function mockRequest<T>(
     // members only need the public partner catalogue.
     const roles = mockRoles();
     const visible = getMerchants().filter((merchant) =>
-      merchantOnly()
+      merchantDirectoryIsScoped()
         ? merchant.id === "merchant-coffee"
         : !merchant.status ||
           merchant.status === "ACTIVE" ||
@@ -3822,7 +4550,26 @@ export async function mockRequest<T>(
             const { phone, contactName, settlementRule, ...catalogue } =
               merchant;
             return catalogue;
-          }),
+      }),
+    );
+  }
+  if (url === "/alliance/coupon-templates" && method === "GET") {
+    requireMockRole("MERCHANT", "ADMIN", "SUPER_ADMIN");
+    const templates = templateDirectoryIsScoped()
+      ? getCouponTemplates().filter((item) => item.merchantId === "merchant-coffee")
+      : getCouponTemplates();
+    return ok(
+      templates
+        .map((item: any) => ({
+          ...item,
+          merchant:
+            item.merchant || getMerchants().find((merchant) => merchant.id === item.merchantId),
+        }))
+        .sort(
+          (left: any, right: any) =>
+            Number(Boolean(right.enabled)) - Number(Boolean(left.enabled)) ||
+            new Date(right.validTo).getTime() - new Date(left.validTo).getTime(),
+        ),
     );
   }
   if (url === "/alliance/coupon-templates" && method === "POST") {
@@ -3830,6 +4577,21 @@ export async function mockRequest<T>(
     const merchantId = text(data.merchantId);
     const merchant = getMerchants().find((item) => item.id === merchantId);
     if (!merchant) throw new Error("商户不存在");
+    if (merchant.status && merchant.status !== "ACTIVE")
+      throw new Error("停用商户不能创建券模板");
+    const code = text(data.code).toUpperCase();
+    const name = text(data.name);
+    const activityName = text(data.activityName);
+    const benefitDescription = text(data.benefitDescription);
+    if (
+      code.length < 2 ||
+      name.length < 2 ||
+      activityName.length < 2 ||
+      benefitDescription.length < 2
+    )
+      throw new Error("券模板编码、名称、活动和权益说明至少需要2个字符");
+    if (getCouponTemplates().some((item) => text(item.code).toUpperCase() === code))
+      throw new Error("券模板编码已存在");
     const validFrom = new Date(String(data.validFrom || ""));
     const validTo = new Date(String(data.validTo || ""));
     if (
@@ -3838,24 +4600,79 @@ export async function mockRequest<T>(
       validTo <= validFrom
     )
       throw new Error("券有效期设置无效");
+    const faceValueCents = integer(data.faceValueCents ?? 0);
+    const claimLimitPerUser = integer(data.claimLimitPerUser ?? 1);
     const issueLimit =
       integer(data.issueLimit) && Number(data.issueLimit) > 0
-        ? Number(data.issueLimit)
-        : 2000;
+        ? Number(data.issueLimit) : NaN;
+    if (faceValueCents < 0) throw new Error("券面值不能为负数");
+    if (claimLimitPerUser < 1 || claimLimitPerUser > 100)
+      throw new Error("每人领取上限必须为1-100");
+    if (issueLimit < 1 || issueLimit > 100000)
+      throw new Error("发行上限必须为1-100000");
     const template = {
       ...data,
       id: newId("coupon-template"),
+      code,
+      name,
+      activityName,
+      benefitDescription,
       merchantId,
       merchant,
       enabled: data.enabled !== false,
       validFrom: validFrom.toISOString(),
       validTo: validTo.toISOString(),
+      faceValueCents,
+      claimLimitPerUser,
       issueLimit,
       issuedCount: 0,
       claimedCount: 0,
       redeemedCount: 0,
     };
     saveCouponTemplates([template, ...getCouponTemplates()]);
+    return ok(template);
+  }
+  const templateStatusMatch = url.match(
+    /^\/alliance\/coupon-templates\/([^/]+)\/status$/,
+  );
+  if (templateStatusMatch && method === "POST") {
+    requireMockRole("ADMIN", "SUPER_ADMIN");
+    if (typeof data.enabled !== "boolean") throw new Error("券模板启停状态无效");
+    const enabled = data.enabled;
+    const reason = text(data.reason);
+    const requestId = requireIdempotencyKey(data.idempotencyKey, "券模板状态幂等键");
+    if (reason.length < 2 || reason.length > 300)
+      throw new Error("状态变更原因需要2-300个字符");
+    const templates = getCouponTemplates();
+    const template = templates.find((item) => item.id === templateStatusMatch[1]);
+    if (!template) throw new Error("券模板不存在");
+    const merchant = getMerchants().find((item) => item.id === template.merchantId);
+    const action = "ALLIANCE_COUPON_TEMPLATE_STATUS_SET";
+    const commandSignature = JSON.stringify({ action, templateId: template.id, enabled, reason });
+    const replay = getAuditLogs().find((item) => item.requestId === requestId);
+    if (replay) {
+      if (
+        replay.actorId !== mockUser().id || replay.action !== action ||
+        replay.objectType !== "CouponTemplate" || replay.objectId !== template.id ||
+        replay.newValue?.commandSignature !== commandSignature
+      )
+        throw new Error("幂等键已用于其他联盟状态操作");
+      return ok(template);
+    }
+    if (enabled && merchant?.status && merchant.status !== "ACTIVE")
+      throw new Error("停用商户的券模板不能启用");
+    const oldEnabled = template.enabled !== false;
+    template.enabled = enabled;
+    template.updatedAt = new Date().toISOString();
+    saveCouponTemplates(templates);
+    saveAuditLogs([{
+      id: newId("audit"), actorId: mockUser().id,
+      actor: { id: mockUser().id, displayName: mockUser().displayName },
+      actorRole: hasMockRole("SUPER_ADMIN") ? "SUPER_ADMIN" : "ADMIN",
+      action, objectType: "CouponTemplate", objectId: template.id,
+      oldValue: { enabled: oldEnabled }, newValue: { enabled, commandSignature },
+      reason, requestId, result: "SUCCESS", createdAt: template.updatedAt,
+    }, ...getAuditLogs()]);
     return ok(template);
   }
   const generateCodesMatch = url.match(
@@ -3867,26 +4684,58 @@ export async function mockRequest<T>(
     const template = templates.find(
       (item) => item.id === generateCodesMatch[1],
     );
-    if (!template || template.enabled === false)
-      throw new Error("券模板不存在或已下线");
-    if (!merchantCanAccess(template.merchantId))
+    if (!template) throw new Error("券模板不存在");
+    if (!merchantCanManage(template.merchantId))
       throw new Error("只能操作本商户的券码");
-    const requested = integer(data.quantity ?? data.count)
-      ? Number(data.quantity ?? data.count)
-      : 1;
+    const requested = integer(data.quantity ?? data.count);
     if (!Number.isInteger(requested) || requested < 1 || requested > 2000)
       throw new Error("生成数量必须为1-2000");
+    const requestId = requireIdempotencyKey(data.idempotencyKey, "批量发券幂等键");
+    const action = "COUPON_CODES_GENERATED";
+    const commandHash = creationCommandHash({
+      kind: action,
+      templateId: template.id,
+      count: requested,
+    });
+    const replay = getAuditLogs().find((item) => item.requestId === requestId);
+    if (replay) {
+      if (
+        replay.actorId !== mockUser().id || replay.action !== action ||
+        replay.objectType !== "CouponTemplate" || replay.objectId !== template.id ||
+        replay.newValue?.commandHash !== commandHash
+      )
+        throw new Error("幂等键已用于其他联盟操作");
+      const replayCodes = Array.isArray(replay.newValue?.codes)
+        ? replay.newValue.codes.filter((code: unknown) => typeof code === "string")
+        : [];
+      if (replayCodes.length !== requested)
+        throw new Error("发行命令回放数据不完整，请联系管理员");
+      return ok({
+        templateId: template.id,
+        generated: requested,
+        count: requested,
+        codes: replayCodes,
+      });
+    }
+    if (template.enabled === false)
+      throw new Error("券模板不存在或已下线");
+    const templateMerchant = getMerchants().find(
+      (item) => item.id === template.merchantId,
+    );
+    if (templateMerchant?.status && templateMerchant.status !== "ACTIVE")
+      throw new Error("商户已停用");
+    if (isExpired(template.validTo)) throw new Error("券模板已过期");
     if (
       Number(template.issuedCount || 0) + requested >
       Number(template.issueLimit || 2000)
     )
       throw new Error("生成数量超过模板发行上限");
     const existingCodes = new Set(getCoupons().map((item) => item.code));
+    const batchToken = creationCommandHash({ requestId }).toUpperCase();
     const generated = Array.from({ length: requested }, (_, index) => {
-      let code = "";
-      do {
-        code = `YQ-${template.code || generateCodesMatch[1]}-${Date.now()}-${index + 1}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
-      } while (existingCodes.has(code));
+      const code = `YQ-${batchToken}-${String(index + 1).padStart(4, "0")}`;
+      if (existingCodes.has(code))
+        throw new Error("发行命令与已有券码冲突，请刷新后重试");
       existingCodes.add(code);
       return {
         id: newId("coupon"),
@@ -3906,10 +4755,21 @@ export async function mockRequest<T>(
     template.issuedCount = Number(template.issuedCount || 0) + requested;
     saveCouponTemplates(templates);
     saveCoupons([...generated, ...getCoupons()]);
+    const generatedCodes = generated.map((item) => item.code);
+    saveAuditLogs([{
+      id: newId("audit"), actorId: mockUser().id,
+      actor: { id: mockUser().id, displayName: mockUser().displayName },
+      actorRole: mockRoles()[0], action, objectType: "CouponTemplate",
+      objectId: template.id,
+      oldValue: { issuedCount: Number(template.issuedCount) - requested },
+      newValue: { commandHash, count: requested, codes: generatedCodes },
+      requestId, result: "SUCCESS", createdAt: new Date().toISOString(),
+    }, ...getAuditLogs()]);
     return ok({
-      templateId: generateCodesMatch[1],
+      templateId: template.id,
       generated: requested,
-      codes: generated.map((item) => item.code),
+      count: requested,
+      codes: generatedCodes,
     });
   }
   if (url === "/alliance/coupons/me")
@@ -3961,7 +4821,7 @@ export async function mockRequest<T>(
     const coupon = list.find((item) => item.code === data.code);
     if (!coupon) throw new Error("券码不存在");
     const merchantId = text(data.merchantId);
-    if (!merchantId || !merchantCanAccess(merchantId))
+    if (!merchantId || !merchantCanRedeem(merchantId))
       throw new Error("只能操作本商户的券码");
     const idempotencyKey = requireIdempotencyKey(
       data.idempotencyKey,
@@ -3989,6 +4849,10 @@ export async function mockRequest<T>(
       coupon.status === "REDEEMED"
     )
       return ok(coupon);
+    const merchant = getMerchants().find((item) => item.id === merchantId);
+    if (!merchant) throw new Error("商户不存在");
+    if (merchant.status && merchant.status !== "ACTIVE")
+      throw new Error("商户已停用，不能核销券码");
     if (coupon.status !== "CLAIMED")
       throw new Error("券码未领取、已核销或已失效");
     if (
@@ -4008,7 +4872,6 @@ export async function mockRequest<T>(
       idempotencyKey,
     });
     coupon.merchantId = ownedMerchantId || merchantId;
-    const merchant = getMerchants().find((item) => item.id === merchantId);
     if (merchant?._count)
       merchant._count.couponRedemptions =
         Number(merchant._count.couponRedemptions || 0) + 1;
@@ -4023,7 +4886,7 @@ export async function mockRequest<T>(
     if (
       coupon.holderId !== mockUser().id &&
       !hasMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN") &&
-      !merchantCanAccess(couponMerchantId(coupon))
+      !merchantCanManage(couponMerchantId(coupon))
     )
       throw new Error("无权查看该券码");
     return ok({
@@ -5468,7 +6331,7 @@ export async function mockRequest<T>(
   }
   if (url === "/alliance/settlements" && method === "GET") {
     requireMockRole("MERCHANT", "FINANCE", "ADMIN", "SUPER_ADMIN");
-    if (merchantOnly()) {
+    if (settlementDirectoryIsScoped()) {
       return ok(
         getSettlements().filter(
           (settlement) => settlement.merchantId === "merchant-coffee",
@@ -5491,7 +6354,10 @@ export async function mockRequest<T>(
       dispute: { from: "PENDING_CONFIRMATION", to: "DRAFT" },
       settle: { from: "CONFIRMED", to: "SETTLED" },
     };
-    if (merchantOnly() && settlement.merchantId !== "merchant-coffee")
+    if (
+      ["confirm", "dispute"].includes(settlementAction[2]) &&
+      !merchantCanManage(settlement.merchantId)
+    )
       throw new Error("只能操作本商户的结算单");
     const transition = transitions[action];
     if (["confirm", "dispute"].includes(action))

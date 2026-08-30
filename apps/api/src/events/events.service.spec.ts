@@ -91,20 +91,24 @@ describe('EventsService tournament invariants', () => {
       const service = new EventsService({ event: { create: eventCreate } } as never)
 
       expect(() =>
-        service.create(validCreateDto({ [field]: value } as Partial<CreateEventDto>)),
+        service.create(validCreateDto({ [field]: value } as Partial<CreateEventDto>), actor),
       ).toThrow(BadRequestException)
       expect(() =>
-        service.create(validCreateDto({ [field]: value } as Partial<CreateEventDto>)),
+        service.create(validCreateDto({ [field]: value } as Partial<CreateEventDto>), actor),
       ).toThrow(message)
       expect(eventCreate).not.toHaveBeenCalled()
     })
 
     it('accepts only the locked 24-48 people range and five rounds', async () => {
       const eventCreate = vi.fn().mockResolvedValue({ id: 'event-1' })
-      const service = new EventsService({ event: { create: eventCreate } as never } as never)
+      const tx = {
+        event: { create: eventCreate },
+        auditLog: { create: vi.fn().mockResolvedValue({}) },
+      }
+      const service = new EventsService({ $transaction: txRunner(tx) } as never)
 
-      await service.create(validCreateDto({ capacityPeople: 24 }))
-      await service.create(validCreateDto({ capacityPeople: 48 }))
+      await service.create(validCreateDto({ capacityPeople: 24 }), actor)
+      await service.create(validCreateDto({ capacityPeople: 48 }), actor)
 
       expect(eventCreate).toHaveBeenCalledTimes(2)
       expect(eventCreate.mock.calls[0][0].data).toMatchObject({
@@ -117,6 +121,14 @@ describe('EventsService tournament invariants', () => {
         minimumPeople: 24,
         totalRounds: 5,
       })
+    })
+
+    it('rejects a draft whose registration or start time has already passed', () => {
+      const service = new EventsService({} as never)
+      expect(() => service.create(validCreateDto({
+        startsAt: '2020-08-30T10:00:00.000Z',
+        registrationEndsAt: '2020-08-30T09:00:00.000Z',
+      }), actor)).toThrow('赛事开始时间必须晚于当前时间')
     })
 
     it('rejects a stored event whose locked configuration was corrupted', async () => {

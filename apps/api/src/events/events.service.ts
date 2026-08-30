@@ -88,6 +88,12 @@ const EVENT_STATUSES_NOT_FINISHABLE: readonly EventStatus[] = [
   EventStatus.CANCELLED,
 ];
 
+const EVENT_MANAGER_ROLES: readonly AppRole[] = [
+  AppRole.EVENT_MANAGER,
+  AppRole.ADMIN,
+  AppRole.SUPER_ADMIN,
+];
+
 // FRONT_DESK is the current inventory-custodian role used by the stock
 // centre.  Prize hand-over is shared with event operations, while members,
 // coaches and finance cannot mutate prize inventory.
@@ -698,7 +704,8 @@ export class EventsService {
     }
   }
 
-  create(dto: CreateEventDto) {
+  create(dto: CreateEventDto, actor: AuthUser) {
+    this.assertEventManager(actor);
     const capacityPeople = dto.capacityPeople ?? EVENT_MAX_CAPACITY_PEOPLE;
     const minimumPeople = dto.minimumPeople ?? EVENT_MINIMUM_PEOPLE;
     const totalRounds = dto.totalRounds ?? EVENT_TOTAL_ROUNDS;
@@ -718,6 +725,13 @@ export class EventsService {
     if (registrationEndsAt >= startsAt) {
       throw new BadRequestException('报名截止时间必须早于开赛时间');
     }
+    const now = new Date();
+    if (startsAt <= now) {
+      throw new BadRequestException('赛事开始时间必须晚于当前时间');
+    }
+    if (registrationEndsAt <= now) {
+      throw new BadRequestException('报名截止时间必须晚于当前时间');
+    }
     if (!Number.isSafeInteger(dto.feeCents) || dto.feeCents < 0) {
       throw new BadRequestException('报名费用必须为非负整数');
     }
@@ -728,27 +742,53 @@ export class EventsService {
       throw new BadRequestException('会员报名费用必须为非负整数');
     }
 
-    return this.prisma.event.create({
-      data: {
-        code,
-        name,
-        startsAt,
-        registrationEndsAt,
-        capacityPeople,
-        minimumPeople,
-        totalRounds,
-        feeCents: dto.feeCents,
-        memberFeeCents: dto.memberFeeCents ?? null,
-        rules: (dto.rules?.map((rule) => normaliseText(rule)).filter(Boolean) ??
-          DEFAULT_RULES) as never,
-        prizePool: dto.prizePool as never,
-        sponsor: normaliseOptionalText(dto.sponsor) ?? null,
-        // Events are deliberately not open for registration on creation.
-        // Publishing is a separate, audited state transition so an operator
-        // cannot accidentally expose an incomplete configuration.
-        status: EventStatus.DRAFT,
+    return this.prisma.$transaction(
+      async (tx) => {
+        const event = await tx.event.create({
+          data: {
+            code,
+            name,
+            startsAt,
+            registrationEndsAt,
+            capacityPeople,
+            minimumPeople,
+            totalRounds,
+            feeCents: dto.feeCents,
+            memberFeeCents: dto.memberFeeCents ?? null,
+            rules: (dto.rules?.map((rule) => normaliseText(rule)).filter(Boolean) ??
+              DEFAULT_RULES) as never,
+            prizePool: dto.prizePool as never,
+            sponsor: normaliseOptionalText(dto.sponsor) ?? null,
+            // Events are deliberately not open for registration on creation.
+            // Publishing is a separate, audited state transition so an operator
+            // cannot accidentally expose an incomplete configuration.
+            status: EventStatus.DRAFT,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.sub,
+            actorRole: actor.roles[0],
+            action: 'EVENT_CREATED',
+            objectType: 'Event',
+            objectId: event.id,
+            newValue: {
+              status: EventStatus.DRAFT,
+              code,
+              name,
+              startsAt: startsAt.toISOString(),
+              registrationEndsAt: registrationEndsAt.toISOString(),
+              capacityPeople,
+              minimumPeople,
+              totalRounds,
+              feeCents: dto.feeCents,
+            } as never,
+          },
+        });
+        return event;
       },
-    });
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
   /**
@@ -762,6 +802,7 @@ export class EventsService {
     dto: PublishEventDto | undefined,
     actor: AuthUser,
   ) {
+    this.assertEventManager(actor);
     const reason = normaliseOptionalText(dto?.reason);
     return this.prisma.$transaction(
       async (tx) => {
@@ -781,6 +822,13 @@ export class EventsService {
         this.assertEventConfiguration(current);
         if (current.registrationEndsAt >= current.startsAt) {
           throw new ConflictException('报名截止时间必须早于开赛时间');
+        }
+        const now = new Date();
+        if (current.startsAt <= now) {
+          throw new ConflictException('赛事开始时间必须晚于当前时间');
+        }
+        if (current.registrationEndsAt <= now) {
+          throw new ConflictException('报名截止时间必须晚于当前时间');
         }
         if (!normaliseText(current.code) || !normaliseText(current.name)) {
           throw new ConflictException('赛事编码和名称不能为空');
@@ -1579,6 +1627,12 @@ export class EventsService {
       !actor.roles.some((role) => EVENT_PRIZE_OPERATOR_ROLES.includes(role))
     ) {
       throw new ForbiddenException('当前角色无权发放或签收赛事奖品');
+    }
+  }
+
+  private assertEventManager(actor: AuthUser): void {
+    if (!actor.roles.some((role) => EVENT_MANAGER_ROLES.includes(role))) {
+      throw new ForbiddenException('仅赛事管理员或管理员可创建、发布赛事');
     }
   }
 

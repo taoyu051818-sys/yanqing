@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash } from 'node:crypto'
 
 import {
   BadRequestException,
@@ -26,14 +26,19 @@ import type {
   CreateMerchantDto,
   GenerateCouponCodesDto,
   RedeemCouponDto,
+  SetCouponTemplateStatusDto,
+  SetMerchantStatusDto,
   SettlementActionDto,
 } from './alliance.dto.js'
 
-const couponCode = (prefix: string) =>
-  `${prefix}-${randomBytes(5).toString('hex').toUpperCase()}`
-
 const isPrismaErrorCode = (error: unknown, code: string): boolean =>
   error instanceof Prisma.PrismaClientKnownRequestError && error.code === code
+
+const lifecycleCommandHash = (command: Record<string, unknown>) =>
+  createHash('sha256').update(JSON.stringify(command)).digest('hex')
+
+const couponBatchCode = (requestId: string, index: number) =>
+  `YQ-${createHash('sha256').update(requestId).digest('hex').toUpperCase()}-${String(index + 1).padStart(4, '0')}`
 
 @Injectable()
 export class AllianceService {
@@ -85,23 +90,293 @@ export class AllianceService {
     })
   }
 
-  createMerchant(dto: CreateMerchantDto) {
-    return this.prisma.merchant.create({
-      data: { ...dto, settlementRule: dto.settlementRule as never },
+  async createMerchant(dto: CreateMerchantDto, actor: AuthUser) {
+    const code = dto.code.trim().toUpperCase()
+    const name = dto.name.trim()
+    const category = dto.category.trim()
+    if (code.length < 2 || name.length < 2 || category.length < 2) {
+      throw new BadRequestException('商户编码、名称和分类至少需要2个字符')
+    }
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const created = await tx.merchant.create({
+          data: {
+            ...dto,
+            code,
+            name,
+            category,
+            contactName: dto.contactName?.trim() || undefined,
+            contactPhone: dto.contactPhone?.trim() || undefined,
+            settlementRule: dto.settlementRule as never,
+          },
+        })
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.sub,
+            actorRole: actor.roles[0],
+            action: 'ALLIANCE_MERCHANT_CREATED',
+            objectType: 'Merchant',
+            objectId: created.id,
+            newValue: { code: created.code, name: created.name, level: created.level } as never,
+          },
+        })
+        return created
+      })
+    } catch (error) {
+      if (isPrismaErrorCode(error, 'P2002')) throw new ConflictException('商户编码已存在')
+      throw error
+    }
+  }
+
+  async setMerchantStatus(merchantId: string, dto: SetMerchantStatusDto, actor: AuthUser) {
+    this.assertAllianceAdministrator(actor)
+    if (dto.status !== UserStatus.ACTIVE && dto.status !== UserStatus.DISABLED) {
+      throw new BadRequestException('商户仅允许启用或停用，不允许删除')
+    }
+    const reason = this.lifecycleReason(dto.reason)
+    const requestId = this.allianceRequestId(dto.idempotencyKey)
+    const action = 'ALLIANCE_MERCHANT_STATUS_SET'
+    const commandHash = lifecycleCommandHash({
+      kind: action,
+      merchantId,
+      status: dto.status,
+      reason,
+    })
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const replay = await tx.auditLog.findFirst({
+          where: { requestId },
+          select: { actorId: true, action: true, objectType: true, objectId: true, newValue: true },
+        })
+        if (replay) {
+          this.assertAllianceCommandReplay(replay, {
+            actor,
+            action,
+            objectType: 'Merchant',
+            objectId: merchantId,
+            commandHash,
+          })
+          return tx.merchant.findUniqueOrThrow({ where: { id: merchantId } })
+        }
+        const merchant = await tx.merchant.findUnique({ where: { id: merchantId } })
+        if (!merchant) throw new NotFoundException('商户不存在')
+        if (merchant.status !== UserStatus.ACTIVE && merchant.status !== UserStatus.DISABLED) {
+          throw new ConflictException('已删除商户不能重新启用或停用')
+        }
+        const changed = await tx.merchant.updateMany({
+          where: { id: merchantId, status: merchant.status, updatedAt: merchant.updatedAt },
+          data: { status: dto.status },
+        })
+        if (changed.count !== 1) throw new ConflictException('商户状态已由其他管理员变更')
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.sub,
+            actorRole: this.allianceAdministratorRole(actor),
+            action,
+            objectType: 'Merchant',
+            objectId: merchantId,
+            oldValue: { status: merchant.status } as never,
+            newValue: { status: dto.status, commandHash } as never,
+            reason,
+            requestId,
+          },
+        })
+        return tx.merchant.findUniqueOrThrow({ where: { id: merchantId } })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      const concurrentChange = error instanceof ConflictException &&
+        error.message === '商户状态已由其他管理员变更'
+      if (!isPrismaErrorCode(error, 'P2034') && !concurrentChange) throw error
+      const replay = await this.prisma.auditLog.findFirst({
+        where: { requestId },
+        select: { actorId: true, action: true, objectType: true, objectId: true, newValue: true },
+      })
+      if (replay) {
+        this.assertAllianceCommandReplay(replay, {
+          actor,
+          action,
+          objectType: 'Merchant',
+          objectId: merchantId,
+          commandHash,
+        })
+        return this.prisma.merchant.findUniqueOrThrow({ where: { id: merchantId } })
+      }
+      if (concurrentChange) throw error
+      throw new ConflictException('商户状态刚刚发生变化，请刷新后重试')
+    }
+  }
+
+  async listTemplates(actor: AuthUser) {
+    const administrator = actor.roles.some((role) =>
+      [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never),
+    )
+    if (!administrator && !actor.roles.includes(AppRole.MERCHANT)) {
+      throw new ForbiddenException('当前角色无权查看联盟券模板')
+    }
+    const merchantIds = administrator
+      ? undefined
+      : (await this.prisma.userRole.findMany({
+          where: { userId: actor.sub, role: AppRole.MERCHANT },
+          select: { merchantId: true },
+        })).map((role) => role.merchantId).filter(Boolean) as string[]
+
+    return this.prisma.couponTemplate.findMany({
+      where: merchantIds ? { merchantId: { in: merchantIds } } : undefined,
+      include: {
+        merchant: { select: { id: true, code: true, name: true, status: true } },
+      },
+      orderBy: [{ enabled: 'desc' }, { validTo: 'desc' }, { createdAt: 'desc' }],
     })
   }
 
-  createTemplate(dto: CreateCouponTemplateDto) {
-    if (new Date(dto.validTo) <= new Date(dto.validFrom)) {
+  async createTemplate(dto: CreateCouponTemplateDto, actor: AuthUser) {
+    const validFrom = new Date(dto.validFrom)
+    const validTo = new Date(dto.validTo)
+    if (!Number.isFinite(validFrom.getTime()) || !Number.isFinite(validTo.getTime()) || validTo <= validFrom) {
       throw new BadRequestException('券有效期设置无效')
     }
-    return this.prisma.couponTemplate.create({
-      data: {
-        ...dto,
-        validFrom: new Date(dto.validFrom),
-        validTo: new Date(dto.validTo),
-      },
+    const code = dto.code.trim().toUpperCase()
+    const name = dto.name.trim()
+    const activityName = dto.activityName.trim()
+    const benefitDescription = dto.benefitDescription.trim()
+    if ([code, name, activityName, benefitDescription].some((value) => value.length < 2)) {
+      throw new BadRequestException('券模板编码、名称、活动和权益说明至少需要2个字符')
+    }
+    const merchant = await this.prisma.merchant.findUnique({
+      where: { id: dto.merchantId },
+      select: { id: true, status: true },
     })
+    if (!merchant) throw new NotFoundException('商户不存在')
+    if (merchant.status !== UserStatus.ACTIVE) throw new ConflictException('停用商户不能创建券模板')
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const created = await tx.couponTemplate.create({
+          data: {
+            ...dto,
+            code,
+            name,
+            activityName,
+            benefitDescription,
+            validFrom,
+            validTo,
+          },
+          include: { merchant: { select: { id: true, code: true, name: true, status: true } } },
+        })
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.sub,
+            actorRole: actor.roles[0],
+            action: 'ALLIANCE_COUPON_TEMPLATE_CREATED',
+            objectType: 'CouponTemplate',
+            objectId: created.id,
+            newValue: {
+              merchantId: created.merchantId,
+              code: created.code,
+              issueLimit: created.issueLimit,
+              validFrom: created.validFrom,
+              validTo: created.validTo,
+            } as never,
+          },
+        })
+        return created
+      })
+    } catch (error) {
+      if (isPrismaErrorCode(error, 'P2002')) throw new ConflictException('券模板编码已存在')
+      throw error
+    }
+  }
+
+  async setTemplateStatus(
+    templateId: string,
+    dto: SetCouponTemplateStatusDto,
+    actor: AuthUser,
+  ) {
+    this.assertAllianceAdministrator(actor)
+    const reason = this.lifecycleReason(dto.reason)
+    const requestId = this.allianceRequestId(dto.idempotencyKey)
+    const action = 'ALLIANCE_COUPON_TEMPLATE_STATUS_SET'
+    const commandHash = lifecycleCommandHash({
+      kind: action,
+      templateId,
+      enabled: dto.enabled,
+      reason,
+    })
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const replay = await tx.auditLog.findFirst({
+          where: { requestId },
+          select: { actorId: true, action: true, objectType: true, objectId: true, newValue: true },
+        })
+        if (replay) {
+          this.assertAllianceCommandReplay(replay, {
+            actor,
+            action,
+            objectType: 'CouponTemplate',
+            objectId: templateId,
+            commandHash,
+          })
+          return tx.couponTemplate.findUniqueOrThrow({
+            where: { id: templateId },
+            include: { merchant: { select: { id: true, code: true, name: true, status: true } } },
+          })
+        }
+        const template = await tx.couponTemplate.findUnique({
+          where: { id: templateId },
+          include: { merchant: { select: { status: true } } },
+        })
+        if (!template) throw new NotFoundException('券模板不存在')
+        if (dto.enabled && template.merchant.status !== UserStatus.ACTIVE) {
+          throw new ConflictException('停用商户的券模板不能启用')
+        }
+        const changed = await tx.couponTemplate.updateMany({
+          where: { id: templateId, enabled: template.enabled, updatedAt: template.updatedAt },
+          data: { enabled: dto.enabled },
+        })
+        if (changed.count !== 1) throw new ConflictException('券模板状态已由其他管理员变更')
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.sub,
+            actorRole: this.allianceAdministratorRole(actor),
+            action,
+            objectType: 'CouponTemplate',
+            objectId: templateId,
+            oldValue: { enabled: template.enabled } as never,
+            newValue: { enabled: dto.enabled, commandHash } as never,
+            reason,
+            requestId,
+          },
+        })
+        return tx.couponTemplate.findUniqueOrThrow({
+          where: { id: templateId },
+          include: { merchant: { select: { id: true, code: true, name: true, status: true } } },
+        })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      const concurrentChange = error instanceof ConflictException &&
+        error.message === '券模板状态已由其他管理员变更'
+      if (!isPrismaErrorCode(error, 'P2034') && !concurrentChange) throw error
+      const replay = await this.prisma.auditLog.findFirst({
+        where: { requestId },
+        select: { actorId: true, action: true, objectType: true, objectId: true, newValue: true },
+      })
+      if (replay) {
+        this.assertAllianceCommandReplay(replay, {
+          actor,
+          action,
+          objectType: 'CouponTemplate',
+          objectId: templateId,
+          commandHash,
+        })
+        return this.prisma.couponTemplate.findUniqueOrThrow({
+          where: { id: templateId },
+          include: { merchant: { select: { id: true, code: true, name: true, status: true } } },
+        })
+      }
+      if (concurrentChange) throw error
+      throw new ConflictException('券模板状态刚刚发生变化，请刷新后重试')
+    }
   }
 
   listMyCoupons(actor: AuthUser) {
@@ -113,44 +388,116 @@ export class AllianceService {
   }
 
   async generateCodes(templateId: string, dto: GenerateCouponCodesDto, actor: AuthUser) {
+    const requestId = this.allianceRequestId(dto.idempotencyKey)
+    const action = 'COUPON_CODES_GENERATED'
+    const commandHash = lifecycleCommandHash({
+      kind: action,
+      templateId,
+      count: dto.count,
+    })
     const ownedTemplate = await this.prisma.couponTemplate.findUnique({
       where: { id: templateId },
-      select: { merchantId: true },
+      select: {
+        merchantId: true,
+        enabled: true,
+        validTo: true,
+        merchant: { select: { status: true } },
+      },
     })
     if (!ownedTemplate) throw new NotFoundException('券模板不存在')
-    await this.assertMerchantAccess(ownedTemplate.merchantId, actor)
+    await this.assertMerchantAccess(ownedTemplate.merchantId, actor, '只能操作本商户的券码')
+    const replay = await this.prisma.auditLog.findFirst({
+      where: { requestId },
+      select: { actorId: true, action: true, objectType: true, objectId: true, newValue: true },
+    })
+    if (replay) {
+      return this.couponBatchReplay(replay, {
+        actor,
+        action,
+        objectType: 'CouponTemplate',
+        objectId: templateId,
+        commandHash,
+        count: dto.count,
+      })
+    }
+    if (!ownedTemplate.enabled) throw new ConflictException('券模板已下线')
+    if (ownedTemplate.merchant.status !== UserStatus.ACTIVE) throw new ConflictException('商户已停用')
+    if (ownedTemplate.validTo <= new Date()) throw new ConflictException('券模板已过期')
 
-    return this.prisma.$transaction(
-      async (tx) => {
-        const template = await tx.couponTemplate.findUnique({ where: { id: templateId } })
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const committed = await tx.auditLog.findFirst({
+          where: { requestId },
+          select: { actorId: true, action: true, objectType: true, objectId: true, newValue: true },
+        })
+        if (committed) {
+          return this.couponBatchReplay(committed, {
+            actor,
+            action,
+            objectType: 'CouponTemplate',
+            objectId: templateId,
+            commandHash,
+            count: dto.count,
+          })
+        }
+        const template = await tx.couponTemplate.findUnique({
+          where: { id: templateId },
+          include: { merchant: { select: { status: true } } },
+        })
         if (!template?.enabled) throw new NotFoundException('券模板不存在或已下线')
+        if (template.merchant.status !== UserStatus.ACTIVE) throw new ConflictException('商户已停用')
+        if (template.validTo <= new Date()) throw new ConflictException('券模板已过期')
         if (template.issuedCount + dto.count > template.issueLimit) {
           throw new BadRequestException('生成数量超过模板发行上限')
         }
-        const codes = Array.from({ length: dto.count }, () => ({
+        const codes = Array.from({ length: dto.count }, (_, index) => ({
           templateId,
-          code: couponCode(template.code),
+          code: couponBatchCode(requestId, index),
           expiresAt: template.validTo,
         }))
         await tx.couponCode.createMany({ data: codes })
-        await tx.couponTemplate.update({
-          where: { id: templateId },
+        const changed = await tx.couponTemplate.updateMany({
+          where: {
+            id: templateId,
+            enabled: true,
+            issuedCount: template.issuedCount,
+            updatedAt: template.updatedAt,
+          },
           data: { issuedCount: { increment: dto.count } },
         })
+        if (changed.count !== 1) throw new ConflictException('券模板发行额度已由其他操作更新')
+        const generatedCodes = codes.map((item) => item.code)
         await tx.auditLog.create({
           data: {
             actorId: actor.sub,
             actorRole: actor.roles[0],
-            action: 'COUPON_CODES_GENERATED',
+            action,
             objectType: 'CouponTemplate',
             objectId: templateId,
-            newValue: { count: dto.count } as never,
+            newValue: { commandHash, count: dto.count, codes: generatedCodes } as never,
+            requestId,
           },
         })
-        return { count: dto.count, codes: codes.map((item) => item.code) }
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    )
+        return { count: dto.count, codes: generatedCodes }
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      if (!isPrismaErrorCode(error, 'P2002') && !isPrismaErrorCode(error, 'P2034')) throw error
+      const committed = await this.prisma.auditLog.findFirst({
+        where: { requestId },
+        select: { actorId: true, action: true, objectType: true, objectId: true, newValue: true },
+      })
+      if (committed) {
+        return this.couponBatchReplay(committed, {
+          actor,
+          action,
+          objectType: 'CouponTemplate',
+          objectId: templateId,
+          commandHash,
+          count: dto.count,
+        })
+      }
+      throw new ConflictException('发行命令与已有券码冲突，请刷新后重试')
+    }
   }
 
   async claim(code: string, actor: AuthUser) {
@@ -206,7 +553,7 @@ export class AllianceService {
   }
 
   async redeem(dto: RedeemCouponDto, actor: AuthUser) {
-    await this.assertMerchantAccess(dto.merchantId, actor)
+    await this.assertRedemptionAccess(dto.merchantId, actor)
     const idempotent = await this.prisma.couponCode.findUnique({
       where: { idempotencyKey: dto.idempotencyKey },
     })
@@ -226,6 +573,13 @@ export class AllianceService {
       }
       return idempotent
     }
+
+    const redeemMerchant = await this.prisma.merchant.findUnique({
+      where: { id: dto.merchantId },
+      select: { status: true },
+    })
+    if (!redeemMerchant) throw new NotFoundException('商户不存在')
+    if (redeemMerchant.status !== UserStatus.ACTIVE) throw new ConflictException('商户已停用，不能核销券码')
 
     const preflight = await this.prisma.couponCode.findUnique({
       where: { code: dto.code },
@@ -512,7 +866,11 @@ export class AllianceService {
       const current = await tx.allianceSettlement.findUnique({ where: { id: input.id } })
       if (!current) throw new NotFoundException('联盟结算单不存在')
       if (input.requireMerchantScope) {
-        await this.assertMerchantAccess(current.merchantId, input.actor)
+        await this.assertMerchantAccess(
+          current.merchantId,
+          input.actor,
+          '只能操作本商户的结算单',
+        )
       }
       // A retried request is safe and returns the already-posted state.  This
       // is important for mobile clients that retry after a weak-network
@@ -610,12 +968,107 @@ export class AllianceService {
     return new Date(`${fields.year}-${fields.month}-${fields.day}T00:00:00+08:00`)
   }
 
-  private async assertMerchantAccess(merchantId: string, actor: AuthUser): Promise<void> {
-    if (actor.roles.some((role) => [AppRole.ADMIN, AppRole.SUPER_ADMIN, AppRole.FRONT_DESK].includes(role as never))) return
+  private async assertMerchantAccess(
+    merchantId: string,
+    actor: AuthUser,
+    message = '只能操作本商户的数据',
+  ): Promise<void> {
+    if (actor.roles.some((role) => [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never))) return
     const role = await this.prisma.userRole.findFirst({
       where: { userId: actor.sub, role: AppRole.MERCHANT, merchantId },
     })
-    if (!role) throw new ForbiddenException('只能操作本商户的券码')
+    if (!role) throw new ForbiddenException(message)
+  }
+
+  private async assertRedemptionAccess(merchantId: string, actor: AuthUser): Promise<void> {
+    if (actor.roles.includes(AppRole.FRONT_DESK)) return
+    await this.assertMerchantAccess(merchantId, actor, '只能操作本商户的券码')
+  }
+
+  private assertAllianceAdministrator(actor: AuthUser) {
+    if (!actor.roles.some((role) => [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never))) {
+      throw new ForbiddenException('仅联盟管理员可以变更启停状态')
+    }
+  }
+
+  private allianceAdministratorRole(actor: AuthUser): AppRole {
+    return actor.roles.includes(AppRole.SUPER_ADMIN) ? AppRole.SUPER_ADMIN : AppRole.ADMIN
+  }
+
+  private lifecycleReason(value: string): string {
+    const reason = value.trim()
+    if (reason.length < 2 || reason.length > 300) {
+      throw new BadRequestException('状态变更原因需要2-300个字符')
+    }
+    return reason
+  }
+
+  private allianceRequestId(value: string): string {
+    const requestId = value.trim()
+    if (requestId.length < 8 || requestId.length > 100) {
+      throw new BadRequestException('联盟操作幂等键需要8-100个字符')
+    }
+    return requestId
+  }
+
+  private assertAllianceCommandReplay(
+    replay: {
+      actorId: string | null
+      action: string
+      objectType: string
+      objectId: string | null
+      newValue: Prisma.JsonValue
+    },
+    expected: {
+      actor: AuthUser
+      action: string
+      objectType: string
+      objectId: string
+      commandHash: string
+    },
+  ) {
+    const newValue = replay.newValue && typeof replay.newValue === 'object' && !Array.isArray(replay.newValue)
+      ? replay.newValue as Record<string, unknown>
+      : {}
+    if (
+      replay.actorId !== expected.actor.sub ||
+      replay.action !== expected.action ||
+      replay.objectType !== expected.objectType ||
+      replay.objectId !== expected.objectId ||
+      newValue.commandHash !== expected.commandHash
+    ) {
+      throw new ConflictException('幂等键已用于其他联盟操作')
+    }
+  }
+
+  private couponBatchReplay(
+    replay: {
+      actorId: string | null
+      action: string
+      objectType: string
+      objectId: string | null
+      newValue: Prisma.JsonValue
+    },
+    expected: {
+      actor: AuthUser
+      action: string
+      objectType: string
+      objectId: string
+      commandHash: string
+      count: number
+    },
+  ) {
+    this.assertAllianceCommandReplay(replay, expected)
+    const newValue = replay.newValue && typeof replay.newValue === 'object' && !Array.isArray(replay.newValue)
+      ? replay.newValue as Record<string, unknown>
+      : {}
+    const codes = Array.isArray(newValue.codes)
+      ? newValue.codes.filter((code): code is string => typeof code === 'string')
+      : []
+    if (newValue.count !== expected.count || codes.length !== expected.count) {
+      throw new ConflictException('发行命令回放数据不完整，请联系管理员')
+    }
+    return { count: expected.count, codes }
   }
 
   private recordDuplicateRedemption(coupon: { id: string; code: string; status: CouponStatus; holderId: string | null }) {

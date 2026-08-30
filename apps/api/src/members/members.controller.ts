@@ -141,6 +141,6 @@ export class MembersController {
 
   @Post('me/referrer')
   bindReferral(@Body() dto: BindReferralDto, @CurrentUser() actor: AuthUser) {
-    return this.members.bindReferral(actor.sub, dto)
+    return this.members.bindReferral(dto, actor)
   }
 }

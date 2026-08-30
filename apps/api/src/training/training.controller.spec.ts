@@ -9,9 +9,13 @@ import type {
   AttendanceActionDto,
   ConfirmTrainingConsumeDto,
   ConsumeTrainingDto,
+  CreateTrainingClassDto,
   CreateTrainingConsumeCorrectionDto,
+  CreateTrainingProductDto,
+  CreateTrainingSessionDto,
   DecideTrainingConsumeCorrectionDto,
   MakeupAttendanceDto,
+  TrainingSessionActionDto,
 } from './training.dto.js';
 import { TrainingController } from './training.controller.js';
 
@@ -22,6 +26,70 @@ const actor: AuthUser = {
 };
 
 describe('TrainingController consumption commands', () => {
+  it('passes the authenticated actor into audited product, class, session and completion commands', async () => {
+    const training = {
+      createProduct: vi.fn().mockResolvedValue({ id: 'product-1' }),
+      createClass: vi.fn().mockResolvedValue({ id: 'class-1' }),
+      createSession: vi.fn().mockResolvedValue({ id: 'session-1' }),
+      completeSession: vi
+        .fn()
+        .mockResolvedValue({ id: 'session-1', status: 'COMPLETED' }),
+    };
+    const controller = new TrainingController(training as never);
+    const product: CreateTrainingProductDto = {
+      code: 'PRODUCT-1',
+      name: '培训产品',
+      audience: 'ADULT' as never,
+      totalSessions: 10,
+      validityDays: 120,
+      priceCents: 100_000,
+      refundRule: {},
+    };
+    const trainingClass: CreateTrainingClassDto = {
+      code: 'CLASS-1',
+      productId: 'product-1',
+      name: '培训班',
+      schedule: {},
+      capacity: 10,
+      coachCostCents: 0,
+      assistantCostCents: 0,
+      materialCostCents: 0,
+    };
+    const session: CreateTrainingSessionDto = {
+      classId: 'class-1',
+      startsAt: '2099-01-01T01:00:00.000Z',
+      endsAt: '2099-01-01T02:00:00.000Z',
+      courtIds: ['court-1'],
+    };
+    const completion: TrainingSessionActionDto = {
+      reason: '全部出勤已处理',
+      idempotencyKey: 'session-complete-1',
+    };
+
+    await controller.createProduct(product, actor);
+    await controller.createClass(trainingClass, actor);
+    await controller.createSession(session, actor);
+    await controller.complete('session-1', actor, completion);
+
+    expect(training.createProduct).toHaveBeenCalledWith(product, actor);
+    expect(training.createClass).toHaveBeenCalledWith(trainingClass, actor);
+    expect(training.createSession).toHaveBeenCalledWith(session, actor);
+    expect(training.completeSession).toHaveBeenCalledWith(
+      'session-1',
+      actor,
+      completion,
+    );
+    expect(
+      Reflect.getMetadata(
+        ROLES_KEY,
+        TrainingController.prototype.createProduct,
+      ),
+    ).toEqual([AppRole.ADMIN, AppRole.SUPER_ADMIN]);
+    expect(
+      Reflect.getMetadata(ROLES_KEY, TrainingController.prototype.createClass),
+    ).toEqual([AppRole.ADMIN, AppRole.SUPER_ADMIN]);
+  });
+
   it('exposes guardian self-service and staff-scoped student records', async () => {
     const training = {
       listStudents: vi.fn().mockResolvedValue([]),

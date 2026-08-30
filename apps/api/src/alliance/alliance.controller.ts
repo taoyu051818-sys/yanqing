@@ -10,6 +10,8 @@ import {
   CreateMerchantDto,
   GenerateCouponCodesDto,
   RedeemCouponDto,
+  SetCouponTemplateStatusDto,
+  SetMerchantStatusDto,
   SettlementActionDto,
 } from './alliance.dto.js'
 import { AllianceService } from './alliance.service.js'
@@ -27,14 +29,40 @@ export class AllianceController {
 
   @Post('merchants')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
-  createMerchant(@Body() dto: CreateMerchantDto) {
-    return this.alliance.createMerchant(dto)
+  createMerchant(@Body() dto: CreateMerchantDto, @CurrentUser() actor: AuthUser) {
+    return this.alliance.createMerchant(dto, actor)
+  }
+
+  @Post('merchants/:id/status')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  setMerchantStatus(
+    @Param('id') id: string,
+    @Body() dto: SetMerchantStatusDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.alliance.setMerchantStatus(id, dto, actor)
+  }
+
+  @Get('coupon-templates')
+  @Roles(AppRole.MERCHANT, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  templates(@CurrentUser() actor: AuthUser) {
+    return this.alliance.listTemplates(actor)
   }
 
   @Post('coupon-templates')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
-  createTemplate(@Body() dto: CreateCouponTemplateDto) {
-    return this.alliance.createTemplate(dto)
+  createTemplate(@Body() dto: CreateCouponTemplateDto, @CurrentUser() actor: AuthUser) {
+    return this.alliance.createTemplate(dto, actor)
+  }
+
+  @Post('coupon-templates/:id/status')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  setTemplateStatus(
+    @Param('id') id: string,
+    @Body() dto: SetCouponTemplateStatusDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.alliance.setTemplateStatus(id, dto, actor)
   }
 
   @Post('coupon-templates/:id/codes')

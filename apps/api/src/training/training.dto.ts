@@ -68,7 +68,27 @@ export class UpdateStudentDto {
   authorizationNote?: string;
 }
 
-export class CreateTrainingProductDto {
+class AuditedTrainingCreationDto {
+  /** Business justification stored on the immutable audit entry. */
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason?: string;
+
+  /**
+   * A client-generated key makes a retried creation command return the
+   * original object.  Reusing the key with a different normalized command is
+   * rejected instead of silently accepting different data.
+   */
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  creationIdempotencyKey?: string;
+}
+
+export class CreateTrainingProductDto extends AuditedTrainingCreationDto {
   @IsString()
   @MaxLength(40)
   code: string;
@@ -101,7 +121,7 @@ export class CreateTrainingProductDto {
   refundRule: Record<string, unknown>;
 }
 
-export class CreateTrainingClassDto {
+export class CreateTrainingClassDto extends AuditedTrainingCreationDto {
   @IsString()
   @MaxLength(40)
   code: string;
@@ -168,7 +188,7 @@ export class PurchaseTrainingDto {
   creationIdempotencyKey?: string;
 }
 
-export class CreateTrainingSessionDto {
+export class CreateTrainingSessionDto extends AuditedTrainingCreationDto {
   @IsString()
   classId: string;
 
@@ -187,6 +207,21 @@ export class CreateTrainingSessionDto {
   @IsString()
   @MaxLength(300)
   note?: string;
+}
+
+/** Audited command metadata for a training-session status transition. */
+export class TrainingSessionActionDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey?: string;
 }
 
 export class ConsumeTrainingDto {

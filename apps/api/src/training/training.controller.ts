@@ -26,6 +26,7 @@ import {
   ListTrainingSettlementsDto,
   MakeupAttendanceDto,
   PurchaseTrainingDto,
+  TrainingSessionActionDto,
   TrainingSettlementActionDto,
   UpdateStudentDto,
 } from './training.dto.js';
@@ -44,14 +45,20 @@ export class TrainingController {
 
   @Post('products')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
-  createProduct(@Body() dto: CreateTrainingProductDto) {
-    return this.training.createProduct(dto);
+  createProduct(
+    @Body() dto: CreateTrainingProductDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.training.createProduct(dto, actor);
   }
 
   @Post('classes')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
-  createClass(@Body() dto: CreateTrainingClassDto) {
-    return this.training.createClass(dto);
+  createClass(
+    @Body() dto: CreateTrainingClassDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.training.createClass(dto, actor);
   }
 
   @Get('students')
@@ -211,8 +218,9 @@ export class TrainingController {
   complete(
     @Param('sessionId') sessionId: string,
     @CurrentUser() actor: AuthUser,
+    @Body() dto: TrainingSessionActionDto = {},
   ) {
-    return this.training.completeSession(sessionId, actor);
+    return this.training.completeSession(sessionId, actor, dto);
   }
 
   @Get('financial-summary')

@@ -808,44 +808,92 @@ export class MembersService {
     })
   }
 
-  async bindReferral(userId: string, dto: BindReferralDto) {
+  async bindReferral(dto: BindReferralDto, actor: AuthUser) {
+    const userId = actor.sub
     // Binding is an immutable, single-write relationship.  Perform the
     // validation and conditional update in one serializable transaction so
     // two first-login requests cannot race and silently choose different
     // direct referrers.  Repeating the same binding remains idempotent.
-    return this.prisma.$transaction(
-      async (tx) => {
-        const [user, referrer] = await Promise.all([
-          tx.user.findUnique({ where: { id: userId }, select: { id: true, referrerId: true } }),
-          tx.user.findUnique({ where: { id: dto.referrerId }, select: { id: true, referrerId: true } }),
-        ])
-        if (!user || !referrer) throw new NotFoundException('会员或推荐人不存在')
-        try {
-          validateDirectReferral({
-            userId,
-            requestedReferrerId: dto.referrerId,
-            existingReferrerId: user.referrerId,
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const [user, referrer] = await Promise.all([
+            tx.user.findUnique({
+              where: { id: userId },
+              select: {
+                id: true,
+                referrerId: true,
+                status: true,
+                deletedAt: true,
+                memberProfile: { select: { id: true } },
+              },
+            }),
+            tx.user.findUnique({
+              where: { id: dto.referrerId },
+              select: {
+                id: true,
+                referrerId: true,
+                status: true,
+                deletedAt: true,
+                memberProfile: { select: { id: true } },
+              },
+            }),
+          ])
+          if (!user || user.status !== UserStatus.ACTIVE || user.deletedAt || !user.memberProfile) {
+            throw new NotFoundException('会员不存在或已停用')
+          }
+          if (!referrer || referrer.status !== UserStatus.ACTIVE || referrer.deletedAt || !referrer.memberProfile) {
+            throw new NotFoundException('推荐人不存在或已停用')
+          }
+          try {
+            validateDirectReferral({
+              userId,
+              requestedReferrerId: dto.referrerId,
+              existingReferrerId: user.referrerId,
+            })
+          } catch (error) {
+            throw new BadRequestException(error instanceof Error ? error.message : '推荐关系无效')
+          }
+          await this.assertReferralAcyclic(tx, userId, referrer)
+
+          const changed = await tx.user.updateMany({
+            where: { id: userId, referrerId: null, status: UserStatus.ACTIVE, deletedAt: null },
+            data: { referrerId: dto.referrerId },
           })
-        } catch (error) {
-          throw new BadRequestException(error instanceof Error ? error.message : '推荐关系无效')
-        }
-        if (referrer.referrerId === userId) throw new BadRequestException('推荐关系不能形成闭环')
+          if (changed.count === 1) {
+            await tx.auditLog.create({
+              data: {
+                actorId: userId,
+                actorRole: actor.roles.find((role) => role === AppRole.MEMBER) ?? actor.roles[0],
+                action: 'DIRECT_REFERRAL_BOUND',
+                objectType: 'User',
+                objectId: userId,
+                oldValue: { referrerId: null } as never,
+                newValue: { referrerId: dto.referrerId } as never,
+                reason: '会员本人确认一层直接推荐关系',
+              },
+            })
+            return { id: userId, referrerId: dto.referrerId }
+          }
 
-        const changed = await tx.user.updateMany({
-          where: { id: userId, referrerId: null },
-          data: { referrerId: dto.referrerId },
-        })
-        if (changed.count === 1) return { id: userId, referrerId: dto.referrerId }
-
-        // A concurrent request may have won the conditional write.  Return
-        // success only when it chose the same referrer; a different choice is
-        // an immutable-binding conflict and must be visible to the caller.
-        const latest = await tx.user.findUnique({ where: { id: userId }, select: { id: true, referrerId: true } })
-        if (latest?.referrerId === dto.referrerId) return latest
-        throw new ConflictException('直接推荐人已绑定，不能更换')
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    )
+          // A concurrent request may have won the conditional write.  Return
+          // success only when it chose the same referrer; a different choice is
+          // an immutable-binding conflict and must be visible to the caller.
+          const latest = await tx.user.findUnique({ where: { id: userId }, select: { id: true, referrerId: true } })
+          if (latest?.referrerId === dto.referrerId) return latest
+          throw new ConflictException('直接推荐人已绑定，不能更换')
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+    } catch (error) {
+      if (!this.isPrismaErrorCode(error, 'P2034')) throw error
+      const latest = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, referrerId: true },
+      })
+      if (latest?.referrerId === dto.referrerId) return latest
+      throw new ConflictException('推荐关系刚刚发生变化，请刷新后重试')
+    }
   }
 
   private isCoachOnly(actor: AuthUser) {
@@ -906,5 +954,29 @@ export class MembersService {
         reason,
       },
     })
+  }
+
+  private async assertReferralAcyclic(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    initialReferrer: { id: string; referrerId: string | null },
+  ) {
+    const visited = new Set<string>()
+    let current: { id: string; referrerId: string | null } | null = initialReferrer
+    while (current) {
+      if (current.id === userId || visited.has(current.id)) {
+        throw new BadRequestException('推荐关系不能形成闭环')
+      }
+      visited.add(current.id)
+      if (!current.referrerId) return
+      current = await tx.user.findUnique({
+        where: { id: current.referrerId },
+        select: { id: true, referrerId: true },
+      })
+    }
+  }
+
+  private isPrismaErrorCode(error: unknown, code: string) {
+    return Boolean(error && typeof error === 'object' && 'code' in error && error.code === code)
   }
 }

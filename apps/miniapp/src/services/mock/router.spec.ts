@@ -5,10 +5,12 @@ import {
   getEventDetail,
   getEnrollments,
   getMemberAccountTransactions,
+  getTrainingSessions,
   resetCatalogState,
   saveEnrollments,
   saveEventDetail,
   saveFrontDeskShifts,
+  saveTrainingSessions,
 } from "./state";
 
 const storage = new Map<string, unknown>();
@@ -299,6 +301,44 @@ describe("miniapp mock acceptance journeys", () => {
       getEnrollments().find((item) => item.id === enrollment.id)!.attendances[0]
         .revenueRecognitions,
     ).toHaveLength(3);
+  });
+
+  it("blocks consume after completion and blocks completion while attended work is unconsumed", async () => {
+    const enrollments = getEnrollments();
+    const attendance = enrollments[0].attendances[0];
+    Object.assign(attendance, {
+      status: "ATTENDED",
+      consumedSessions: 0,
+      consumedAt: null,
+      operatorId: "user-coach",
+    });
+    saveEnrollments(enrollments);
+    const sessions = getTrainingSessions();
+    sessions[0].status = "COMPLETED";
+    saveTrainingSessions(sessions);
+
+    await login("COACH");
+    await expect(
+      request("POST", "/training/sessions/session-1/consume", {
+        enrollmentId: enrollments[0].id,
+        feedback: "结课后错误重试",
+      }),
+    ).rejects.toThrow("已结束或已取消的课次不能继续消课");
+    await login("ADMIN");
+    await expect(
+      request("POST", "/training/sessions/session-1/consume/confirm", {
+        enrollmentId: enrollments[0].id,
+        reason: "结课后错误确认",
+      }),
+    ).rejects.toThrow("已结束或已取消的课次不能继续消课");
+
+    const reopened = getTrainingSessions();
+    reopened[0].status = "SCHEDULED";
+    saveTrainingSessions(reopened);
+    await expect(
+      request("POST", "/training/sessions/session-1/complete"),
+    ).rejects.toThrow("仍有学员未完成点名或消课");
+    expect(getTrainingSessions()[0].status).toBe("SCHEDULED");
   });
 
   it("runs member booking/payment and a front-desk check-in without losing the court hold", async () => {

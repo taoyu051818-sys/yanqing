@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common'
+import { ConflictException, ForbiddenException } from '@nestjs/common'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
@@ -50,6 +50,12 @@ describe('GamesService host application review', () => {
     prisma.hostProfile.findUnique.mockResolvedValueOnce(applied)
     await expect(service.applyHost(member)).resolves.toEqual(applied)
     expect(tx.hostProfile.upsert).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a host application from a non-member before reading the profile', async () => {
+    const { service, prisma } = setup()
+    await expect(service.applyHost(admin)).rejects.toBeInstanceOf(ForbiddenException)
+    expect(prisma.hostProfile.findUnique).not.toHaveBeenCalled()
   })
 
   it('approves only a pending application and grants the HOST role with audit', async () => {

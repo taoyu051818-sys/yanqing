@@ -24,6 +24,7 @@ export class GamesController {
   }
 
   @Post('hosts/apply')
+  @Roles(AppRole.MEMBER)
   apply(@CurrentUser() actor: AuthUser) {
     return this.games.applyHost(actor)
   }
@@ -67,7 +68,7 @@ export class GamesController {
   }
 
   @Post(':id/publish')
-  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.HOST, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   publish(
     @Param('id') id: string,
     @Body() dto: PublishGameDto,
@@ -86,7 +87,7 @@ export class GamesController {
   }
 
   @Post(':id/promote-waitlist')
-  @Roles(AppRole.FRONT_DESK, AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.HOST, AppRole.FRONT_DESK, AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   promoteWaitlist(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
     return this.games.promoteWaitlist(id, actor)
   }

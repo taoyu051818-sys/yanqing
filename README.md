@@ -1,6 +1,6 @@
 # 延庆金羽羽毛球会员生态系统
 
-面向延庆羽毛球馆的全栈业务系统，覆盖会员及前台、教练、球局主理人、赛事、联盟商户、财务和管理员等运营角色。会员主端采用 uni-app + Vue 3，可编译为微信小程序；后端采用 NestJS + Prisma + PostgreSQL；仓库原有 Next.js 界面作为 Web 运营台保留。
+面向延庆羽毛球馆的全栈业务系统，覆盖会员及前台、教练、球局主理人、赛事、联盟商户、财务和管理员等运营角色。唯一正式客户端采用 uni-app + Vue 3，可编译为微信小程序；后端采用 NestJS + Prisma + PostgreSQL。仓库根目录的 Next.js 界面是上游原型参考，不连接本系统 API，不属于生产运行路径或业务验收范围。
 
 ## 已实现范围
 
@@ -23,7 +23,7 @@
 apps/api       NestJS API、Prisma 模型、迁移与种子数据
 apps/miniapp   uni-app 微信小程序
 packages/shared 可测试的金额、账户、瑞士制、让分等领域规则
-app            原仓库 Next.js Web 运营台
+app            上游 Next.js 视觉原型（非生产客户端、非验收对象）
 docs           架构、接口、部署、安全和验收文档
 ```
 
@@ -66,10 +66,12 @@ pnpm dev:miniapp
 
 ```bash
 pnpm verify        # 领域规则、API 单元/E2E、API 构建、小程序类型与微信构建
-pnpm verify:full   # 额外构建 Next.js Web 运营台
+pnpm verify:full   # 额外确认上游 Next.js 视觉原型仍可构建
+pnpm build         # 只构建正式 NestJS API 与 uni-app 微信小程序
+pnpm build:legacy-web # 单独构建非生产的上游视觉原型
 ```
 
-当前自动化基线为 shared 13 项、API 单元 293 项、小程序 19 项、健康接口 E2E 1 项（2026-08-30 最近一次整合运行）；用例持续增加时以命令实际输出为准。微信开发者工具和真机验收不由 CI 模拟，须按 [docs/acceptance.md](docs/acceptance.md) 和 [docs/wechat-devtools.md](docs/wechat-devtools.md) 逐项记录。
+当前自动化基线为 shared 13 项、API 单元 339 项、小程序 39 项、健康接口 E2E 1 项（2026-08-30 最近一次整合运行）；用例持续增加时以命令实际输出为准。微信开发者工具和真机验收不由 CI 模拟，须按 [docs/acceptance.md](docs/acceptance.md) 和 [docs/wechat-devtools.md](docs/wechat-devtools.md) 逐项记录。
 
 ## 生产部署
 

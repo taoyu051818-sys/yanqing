@@ -2,7 +2,7 @@ import 'reflect-metadata'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { ConflictException, NotFoundException } from '@nestjs/common'
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
 import { AppRole, BookingStatus, GameStatus, HostStatus } from '../generated/prisma/enums.js'
@@ -10,6 +10,8 @@ import type { PublishGameDto } from './games.dto.js'
 import { GamesService } from './games.service.js'
 
 const actor: AuthUser = { sub: 'admin-1', displayName: '管理员', roles: [AppRole.ADMIN] }
+const owningHost: AuthUser = { sub: 'host-1', displayName: '本局主理人', roles: [AppRole.HOST] }
+const otherHost: AuthUser = { sub: 'host-2', displayName: '其他主理人', roles: [AppRole.HOST] }
 
 const draft = (overrides: Record<string, unknown> = {}) => ({
   id: 'game-1',
@@ -62,6 +64,24 @@ describe('GamesService publish workflow', () => {
     await expect(service.publish('game-1', undefined, actor)).resolves.toEqual(current)
     expect(tx.game.updateMany).not.toHaveBeenCalled()
     expect(tx.auditLog.create).not.toHaveBeenCalled()
+  })
+
+  it('lets the owning host publish but blocks a different host', async () => {
+    const current = draft()
+    const published = { ...current, status: GameStatus.OPEN }
+    const tx = {
+      game: {
+        findUnique: vi.fn().mockResolvedValue(current),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue(published),
+      },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    }
+    const service = new GamesService({ $transaction: runner(tx) } as never)
+
+    await expect(service.publish('game-1', {}, otherHost)).rejects.toBeInstanceOf(ForbiddenException)
+    expect(tx.game.updateMany).not.toHaveBeenCalled()
+    await expect(service.publish('game-1', {}, owningHost)).resolves.toEqual(published)
   })
 
   it.each([GameStatus.CANCELLED, GameStatus.FULL, GameStatus.IN_PROGRESS, GameStatus.COMPLETED])(

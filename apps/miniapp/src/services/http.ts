@@ -44,3 +44,22 @@ export const api = {
   post: <T>(url: string, data?: object) => request<T>({ url, method: 'POST', data }),
   patch: <T>(url: string, data?: object) => request<T>({ url, method: 'PATCH' as any, data }),
 }
+
+export const download = (url: string): Promise<{ tempFilePath: string; statusCode: number }> => {
+  if (isMockMode) return Promise.reject(new ApiError('mock 模式不生成伪造报表', 400))
+  return new Promise((resolve, reject) => {
+    const token = uni.getStorageSync('yanqing_access_token') as string
+    uni.downloadFile({
+      url: `${apiBase}${url}`,
+      header: token ? { authorization: `Bearer ${token}` } : {},
+      success: (response) => {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resolve({ tempFilePath: response.tempFilePath, statusCode: response.statusCode })
+          return
+        }
+        reject(new ApiError('报表生成失败', response.statusCode))
+      },
+      fail: () => reject(new ApiError('报表下载失败，请检查网络', 0)),
+    })
+  })
+}

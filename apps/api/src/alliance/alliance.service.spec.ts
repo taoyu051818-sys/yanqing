@@ -3,12 +3,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
-import { AppRole, CouponStatus, ReconciliationPeriodStatus, SettlementStatus, UserStatus } from '../generated/prisma/enums.js'
+import { Prisma } from '../generated/prisma/client.js'
+import { AppRole, CouponStatus, MerchantLevel, ReconciliationPeriodStatus, SettlementStatus, UserStatus } from '../generated/prisma/enums.js'
 import { AllianceService } from './alliance.service.js'
 
 const finance: AuthUser = { sub: 'finance-1', displayName: '财务', roles: [AppRole.FINANCE] }
 const merchant: AuthUser = { sub: 'merchant-user', displayName: '商户', roles: [AppRole.MERCHANT] }
 const member: AuthUser = { sub: 'member-1', displayName: '会员', roles: [AppRole.MEMBER] }
+const admin: AuthUser = { sub: 'admin-1', displayName: '管理员', roles: [AppRole.ADMIN] }
 
 const statement = (status: SettlementStatus = SettlementStatus.DRAFT) => ({
   id: 'statement-1',
@@ -254,5 +256,351 @@ describe('AllianceService coupon claim workflow', () => {
 
     await expect(service.claim(coupon.code, member)).resolves.toMatchObject({ status: CouponStatus.CLAIMED, holderId: member.sub })
     expect(templateUpdate).not.toHaveBeenCalled()
+  })
+})
+
+describe('AllianceService merchant campaign operations', () => {
+  it('scopes coupon-template listings to the merchant assignment and rejects unrelated roles', async () => {
+    const findMany = vi.fn().mockResolvedValue([])
+    const prisma = {
+      userRole: { findMany: vi.fn().mockResolvedValue([{ merchantId: 'merchant-1' }]) },
+      couponTemplate: { findMany },
+    }
+    const service = new AllianceService(prisma as never)
+
+    await service.listTemplates(merchant)
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { merchantId: { in: ['merchant-1'] } },
+      include: { merchant: { select: { id: true, code: true, name: true, status: true } } },
+    }))
+
+    await service.listTemplates(admin)
+    expect(findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: undefined }))
+    await expect(service.listTemplates(member)).rejects.toBeInstanceOf(ForbiddenException)
+  })
+
+  it('normalizes and audits merchant creation', async () => {
+    const created = {
+      id: 'merchant-new', code: 'CAFE-NEW', name: '新咖啡', category: '餐饮',
+      level: MerchantLevel.MEMBER_BENEFIT,
+    }
+    const tx = {
+      merchant: { create: vi.fn().mockResolvedValue(created) },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    }
+    const service = new AllianceService({ $transaction: runner(tx) } as never)
+
+    await expect(service.createMerchant({
+      code: ' cafe-new ',
+      name: ' 新咖啡 ',
+      category: ' 餐饮 ',
+      level: MerchantLevel.MEMBER_BENEFIT,
+      settlementRule: { mode: 'PER_REDEMPTION', amountCents: 1000 },
+    }, admin)).resolves.toEqual(created)
+    expect(tx.merchant.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ code: 'CAFE-NEW', name: '新咖啡', category: '餐饮' }),
+    }))
+    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ action: 'ALLIANCE_MERCHANT_CREATED', objectId: created.id }),
+    }))
+  })
+
+  it('creates an audited template only for an active merchant', async () => {
+    const created = {
+      id: 'template-new', merchantId: 'merchant-1', code: 'COFFEE-NEW', name: '咖啡权益',
+      issueLimit: 100, validFrom: new Date('2026-08-01T00:00:00.000Z'),
+      validTo: new Date('2026-09-01T00:00:00.000Z'),
+    }
+    const tx = {
+      couponTemplate: { create: vi.fn().mockResolvedValue(created) },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    }
+    const merchantFind = vi.fn().mockResolvedValue({ id: 'merchant-1', status: UserStatus.ACTIVE })
+    const service = new AllianceService({
+      merchant: { findUnique: merchantFind },
+      $transaction: runner(tx),
+    } as never)
+    const dto = {
+      code: 'coffee-new', merchantId: 'merchant-1', name: '咖啡权益', activityName: '秋季联盟',
+      benefitDescription: '会员咖啡立减', faceValueCents: 2000,
+      validFrom: '2026-08-01T00:00:00.000Z', validTo: '2026-09-01T00:00:00.000Z',
+      claimLimitPerUser: 1, issueLimit: 100,
+    }
+
+    await expect(service.createTemplate(dto, admin)).resolves.toEqual(created)
+    expect(tx.couponTemplate.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ code: 'COFFEE-NEW', merchantId: 'merchant-1' }),
+    }))
+    expect(tx.auditLog.create).toHaveBeenCalledOnce()
+
+    merchantFind.mockResolvedValue({ id: 'merchant-1', status: UserStatus.DISABLED })
+    await expect(service.createTemplate(dto, admin)).rejects.toBeInstanceOf(ConflictException)
+  })
+
+  it('rejects code generation for another merchant, a disabled template, or an expired campaign', async () => {
+    const futureTemplate = {
+      merchantId: 'merchant-1', enabled: true, validTo: new Date('2099-01-01T00:00:00.000Z'),
+      merchant: { status: UserStatus.ACTIVE },
+    }
+    const findUnique = vi.fn().mockResolvedValue(futureTemplate)
+    const userRoleFind = vi.fn().mockResolvedValue(null)
+    const service = new AllianceService({
+      couponTemplate: { findUnique },
+      userRole: { findFirst: userRoleFind },
+      auditLog: { findFirst: vi.fn().mockResolvedValue(null) },
+    } as never)
+
+    const command = { count: 2, idempotencyKey: 'coupon-batch-command-1' }
+    await expect(service.generateCodes('template-1', command, merchant)).rejects.toBeInstanceOf(ForbiddenException)
+    await expect(service.generateCodes('template-1', command, {
+      ...merchant,
+      roles: [AppRole.MERCHANT, AppRole.FRONT_DESK],
+    })).rejects.toBeInstanceOf(ForbiddenException)
+    userRoleFind.mockResolvedValue({ merchantId: 'merchant-1' })
+    findUnique.mockResolvedValue({ ...futureTemplate, enabled: false })
+    await expect(service.generateCodes('template-1', command, merchant)).rejects.toThrow('券模板已下线')
+    findUnique.mockResolvedValue({ ...futureTemplate, validTo: new Date('2020-01-01T00:00:00.000Z') })
+    await expect(service.generateCodes('template-1', command, merchant)).rejects.toThrow('券模板已过期')
+    findUnique.mockResolvedValue({
+      ...futureTemplate,
+      merchant: { status: UserStatus.DISABLED },
+    })
+    await expect(service.generateCodes('template-1', command, merchant)).rejects.toThrow('商户已停用')
+  })
+
+  it('precisely replays one coupon batch and does not double-issue under a concurrent retry', async () => {
+    const template = {
+      id: 'template-1',
+      merchantId: 'merchant-1',
+      code: 'COFFEE',
+      enabled: true,
+      issuedCount: 0,
+      issueLimit: 100,
+      validTo: new Date('2099-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-08-30T00:00:00.000Z'),
+      merchant: { status: UserStatus.ACTIVE },
+    }
+    let committedAudit: any = null
+    let releaseAudit!: () => void
+    const auditReady = new Promise<void>((resolve) => { releaseAudit = resolve })
+    let releaseReplayReads!: () => void
+    const replayReadsReady = new Promise<void>((resolve) => { releaseReplayReads = resolve })
+    let replayReads = 0
+    let createdBatch = false
+    const createMany = vi.fn().mockImplementation(async () => {
+      if (!createdBatch) {
+        createdBatch = true
+        return { count: 3 }
+      }
+      await auditReady
+      throw new Prisma.PrismaClientKnownRequestError('deterministic batch collision', {
+        code: 'P2002',
+        clientVersion: 'test',
+      })
+    })
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const auditCreate = vi.fn().mockImplementation(async ({ data }) => {
+      committedAudit = data
+      releaseAudit()
+      return { id: 'audit-batch-1', ...data }
+    })
+    const tx = {
+      auditLog: {
+        findFirst: vi.fn().mockImplementation(async () => {
+          replayReads += 1
+          if (replayReads === 2) releaseReplayReads()
+          await replayReadsReady
+          return null
+        }),
+        create: auditCreate,
+      },
+      couponTemplate: {
+        findUnique: vi.fn().mockResolvedValue(template),
+        updateMany,
+      },
+      couponCode: { createMany },
+    }
+    const prisma = {
+      couponTemplate: { findUnique: vi.fn().mockResolvedValue(template) },
+      auditLog: {
+        findFirst: vi.fn().mockImplementation(async () => committedAudit),
+      },
+      $transaction: vi.fn(async (work: (value: typeof tx) => unknown) => work(tx)),
+    }
+    const service = new AllianceService(prisma as never)
+    const command = { count: 3, idempotencyKey: 'coupon-batch-concurrent-1' }
+
+    const [first, retry] = await Promise.all([
+      service.generateCodes('template-1', command, admin),
+      service.generateCodes('template-1', command, admin),
+    ])
+    expect(first).toEqual(retry)
+    expect(first.codes).toHaveLength(3)
+    expect(new Set(first.codes).size).toBe(3)
+    expect(createMany).toHaveBeenCalledTimes(2)
+    expect(updateMany).toHaveBeenCalledOnce()
+    expect(auditCreate).toHaveBeenCalledOnce()
+    expect(committedAudit).toMatchObject({
+      requestId: command.idempotencyKey,
+      newValue: { count: 3, codes: first.codes },
+    })
+
+    await expect(service.generateCodes('template-1', {
+      count: 2,
+      idempotencyKey: command.idempotencyKey,
+    }, admin)).rejects.toThrow('幂等键已用于其他联盟操作')
+    expect(updateMany).toHaveBeenCalledOnce()
+  })
+})
+
+describe('AllianceService merchant lifecycle operations', () => {
+  it('changes merchant status with an in-transaction audit and precisely replays one command', async () => {
+    let current = {
+      id: 'merchant-1',
+      status: UserStatus.ACTIVE,
+      updatedAt: new Date('2026-08-30T00:00:00.000Z'),
+    }
+    let audit: any = null
+    const updateMany = vi.fn().mockImplementation(async ({ where, data }) => {
+      if (where.status !== current.status || where.updatedAt !== current.updatedAt) return { count: 0 }
+      current = { ...current, ...data, updatedAt: new Date() }
+      return { count: 1 }
+    })
+    const auditCreate = vi.fn().mockImplementation(async ({ data }) => {
+      audit = data
+      return { id: 'audit-1', ...data }
+    })
+    const tx = {
+      merchant: {
+        findUnique: vi.fn().mockImplementation(async () => ({ ...current })),
+        findUniqueOrThrow: vi.fn().mockImplementation(async () => ({ ...current })),
+        updateMany,
+      },
+      auditLog: {
+        findFirst: vi.fn().mockImplementation(async ({ where }) =>
+          audit?.requestId === where.requestId ? audit : null),
+        create: auditCreate,
+      },
+    }
+    const service = new AllianceService({ $transaction: runner(tx) } as never)
+    const command = {
+      status: UserStatus.DISABLED,
+      reason: '合作协议到期',
+      idempotencyKey: 'merchant-status-command-1',
+    }
+
+    await expect(service.setMerchantStatus('merchant-1', command, admin)).resolves.toMatchObject({
+      status: UserStatus.DISABLED,
+    })
+    expect(updateMany).toHaveBeenCalledOnce()
+    expect(auditCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'ALLIANCE_MERCHANT_STATUS_SET',
+        objectId: 'merchant-1',
+        oldValue: { status: UserStatus.ACTIVE },
+        newValue: expect.objectContaining({ status: UserStatus.DISABLED }),
+        reason: '合作协议到期',
+        requestId: command.idempotencyKey,
+      }),
+    }))
+
+    await expect(service.setMerchantStatus('merchant-1', command, admin)).resolves.toMatchObject({
+      status: UserStatus.DISABLED,
+    })
+    expect(updateMany).toHaveBeenCalledOnce()
+    expect(auditCreate).toHaveBeenCalledOnce()
+    await expect(service.setMerchantStatus('merchant-1', {
+      ...command,
+      reason: '同一幂等键更换原因',
+    }, admin)).rejects.toThrow('幂等键已用于其他联盟操作')
+  })
+
+  it('requires an administrator and does not enable a template under a disabled merchant', async () => {
+    const serviceWithoutDb = new AllianceService({} as never)
+    await expect(serviceWithoutDb.setMerchantStatus('merchant-1', {
+      status: UserStatus.DISABLED,
+      reason: '无权操作',
+      idempotencyKey: 'merchant-status-denied',
+    }, merchant)).rejects.toBeInstanceOf(ForbiddenException)
+    await expect(serviceWithoutDb.setTemplateStatus('template-1', {
+      enabled: false,
+      reason: '无权操作',
+      idempotencyKey: 'template-status-denied',
+    }, merchant)).rejects.toBeInstanceOf(ForbiddenException)
+
+    const tx = {
+      auditLog: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
+      couponTemplate: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'template-1',
+          enabled: false,
+          updatedAt: new Date(),
+          merchant: { status: UserStatus.DISABLED },
+        }),
+        updateMany: vi.fn(),
+        findUniqueOrThrow: vi.fn(),
+      },
+    }
+    const service = new AllianceService({ $transaction: runner(tx) } as never)
+    await expect(service.setTemplateStatus('template-1', {
+      enabled: true,
+      reason: '计划重新上线',
+      idempotencyKey: 'template-status-enable-1',
+    }, admin)).rejects.toThrow('停用商户的券模板不能启用')
+    expect(tx.couponTemplate.updateMany).not.toHaveBeenCalled()
+    expect(tx.auditLog.create).not.toHaveBeenCalled()
+  })
+
+  it('disables a coupon template and audits old and new state in the same transaction', async () => {
+    let current = {
+      id: 'template-1',
+      enabled: true,
+      updatedAt: new Date('2026-08-30T00:00:00.000Z'),
+      merchant: { status: UserStatus.ACTIVE },
+    }
+    const updateMany = vi.fn().mockImplementation(async ({ data }) => {
+      current = { ...current, ...data, updatedAt: new Date() }
+      return { count: 1 }
+    })
+    const auditCreate = vi.fn().mockResolvedValue({})
+    const tx = {
+      auditLog: { findFirst: vi.fn().mockResolvedValue(null), create: auditCreate },
+      couponTemplate: {
+        findUnique: vi.fn().mockImplementation(async () => ({ ...current })),
+        updateMany,
+        findUniqueOrThrow: vi.fn().mockImplementation(async () => ({ ...current })),
+      },
+    }
+    const service = new AllianceService({ $transaction: runner(tx) } as never)
+    await expect(service.setTemplateStatus('template-1', {
+      enabled: false,
+      reason: '活动已经结束',
+      idempotencyKey: 'template-status-disable-1',
+    }, admin)).resolves.toMatchObject({ enabled: false })
+    expect(updateMany).toHaveBeenCalledOnce()
+    expect(auditCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'ALLIANCE_COUPON_TEMPLATE_STATUS_SET',
+        oldValue: { enabled: true },
+        newValue: expect.objectContaining({ enabled: false }),
+        reason: '活动已经结束',
+      }),
+    }))
+  })
+
+  it('rejects a new redemption after the merchant is disabled', async () => {
+    const couponFind = vi.fn().mockResolvedValue(null)
+    const service = new AllianceService({
+      userRole: { findFirst: vi.fn().mockResolvedValue({ merchantId: 'merchant-1' }) },
+      couponCode: { findUnique: couponFind },
+      merchant: { findUnique: vi.fn().mockResolvedValue({ status: UserStatus.DISABLED }) },
+    } as never)
+    await expect(service.redeem({
+      code: 'YQ-COFFEE-1',
+      merchantId: 'merchant-1',
+      attributedAmountCents: 0,
+      idempotencyKey: 'redeem-disabled-merchant',
+    }, merchant)).rejects.toThrow('商户已停用，不能核销券码')
+    expect(couponFind).toHaveBeenCalledOnce()
   })
 })

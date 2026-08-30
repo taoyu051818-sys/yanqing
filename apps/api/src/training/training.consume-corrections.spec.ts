@@ -51,6 +51,7 @@ const correctionFixture = (overrides: Record<string, unknown> = {}) => ({
   reason: '误将请假学员确认消课',
   requestedById: coach.sub,
   reviewedById: null,
+  reviewReason: null,
   reversalRecognitionId: null,
   decisionIdempotencyKey: null,
   recognition: positiveRecognition,
@@ -92,7 +93,10 @@ describe('Training consume corrections', () => {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue(correction),
       },
-      auditLog: { create: vi.fn().mockResolvedValue({}) },
+      auditLog: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+      },
     };
     const findUnique = vi
       .fn()
@@ -439,6 +443,44 @@ describe('Training consume corrections', () => {
     expect(runTransaction).not.toHaveBeenCalled();
   });
 
+  it('replays a correction decision only for the same checker and reason', async () => {
+    const decided = correctionFixture({
+      status: TrainingConsumeCorrectionStatus.REJECTED,
+      decisionIdempotencyKey: 'correction-exact-decision-1',
+      reviewedById: admin.sub,
+      reviewReason: '证据不足，驳回申请',
+    });
+    const runTransaction = vi.fn();
+    const service = new TrainingService({
+      trainingConsumeCorrection: {
+        findUnique: vi.fn().mockResolvedValue(decided),
+      },
+      $transaction: runTransaction,
+    } as never);
+
+    await expect(
+      service.rejectConsumeCorrection(
+        decided.id,
+        {
+          reason: decided.reviewReason as string,
+          idempotencyKey: 'correction-exact-decision-1',
+        },
+        admin,
+      ),
+    ).resolves.toBe(decided);
+    await expect(
+      service.rejectConsumeCorrection(
+        decided.id,
+        {
+          reason: '同一幂等键却更换复核原因',
+          idempotencyKey: 'correction-exact-decision-1',
+        },
+        admin,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(runTransaction).not.toHaveBeenCalled();
+  });
+
   it('naturally reports a prior-period reversal as negative current-period revenue', async () => {
     const service = new TrainingService({
       trainingRevenueRecognition: {
@@ -566,7 +608,10 @@ describe('Training consume corrections', () => {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({ id: 'growth-credit-2' }),
       },
-      auditLog: { create: vi.fn().mockResolvedValue({}) },
+      auditLog: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+      },
     };
     const service = new TrainingService({
       $transaction: transaction(tx),

@@ -221,11 +221,11 @@ pnpm typecheck:miniapp
 pnpm build:miniapp
 ```
 
-当前基线（2026-08-30 最近一次整合运行）为 shared 13 项、API 单元 293 项、小程序 19 项、健康接口 E2E 1 项；后续新增用例时以命令实际输出为准。一次性执行全部门禁：
+当前基线（2026-08-30 最近一次整合运行）为 shared 13 项、API 单元 339 项、小程序 39 项、健康接口 E2E 1 项；后续新增用例时以命令实际输出为准。一次性执行全部门禁：
 
 ```bash
 pnpm verify        # shared + API 单元/E2E + API 构建 + 小程序类型检查/微信构建
-pnpm verify:full   # verify + Web 运营台构建
+pnpm verify:full   # verify + 上游 Next.js 视觉原型构建（非生产运营台）
 ```
 
 ## 真机验收记录模板

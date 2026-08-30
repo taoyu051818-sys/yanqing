@@ -35,19 +35,35 @@ export function setCurrentRole(role: AppRole) {
   uni.setStorageSync('yanqing_access_token', `mock-token-${role.toLowerCase()}`)
 }
 
+function persistedProfile(userId: string) {
+  const persistedUsers = uni.getStorageSync('yanqing_mock_governance_users')
+  return Array.isArray(persistedUsers)
+    ? persistedUsers.find((item: any) => item?.id === userId)
+    : null
+}
+
 export function mockUser(role = currentRole()): SessionUser {
   const profile = roleProfiles[role] || roleProfiles.MEMBER
+  const persistedUser = persistedProfile(profile.id)
   return {
     id: profile.id,
-    displayName: profile.name,
-    primaryRole: role,
-    roles: profile.roles,
+    displayName: persistedUser?.displayName || profile.name,
+    referrerId: persistedUser?.referrerId || null,
+    primaryRole: (persistedUser?.primaryRole || role) as AppRole,
+    roles: Array.isArray(persistedUser?.roles) && persistedUser.roles.length
+      ? persistedUser.roles
+      : profile.roles,
     accounts: accounts.map((item) => ({ ...item })),
     memberProfile: { level: role === 'MEMBER' ? 'GOLD' : 'STAFF', phone: '13800000005' },
   }
 }
 
 export function mockLogin(role: AppRole) {
+  const profile = roleProfiles[role] || roleProfiles.MEMBER
+  const persistedUser = persistedProfile(profile.id)
+  if (persistedUser && persistedUser.status !== 'ACTIVE') {
+    throw new Error('用户不存在、已停用或已删除')
+  }
   setCurrentRole(role)
   return { accessToken: `mock-token-${role.toLowerCase()}`, user: mockUser(role) }
 }

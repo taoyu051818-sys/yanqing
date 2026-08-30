@@ -7,7 +7,7 @@ pnpm install --frozen-lockfile
 pnpm verify:full
 ```
 
-当前基线预期：shared 领域规则 13 项通过，API 单元测试 293 项通过，小程序测试 19 项通过，健康接口 E2E 1 项通过（2026-08-30 最近一次整合运行）；NestJS、uni-app 微信小程序和 Next.js 均生产构建成功。用例会随业务闭环增加，验收记录以命令实际输出为准。
+基线数字会随业务闭环增加，验收时以命令实际输出为准。`pnpm verify` 覆盖 shared 领域规则、API 单元/E2E、NestJS 构建、小程序测试/类型检查/微信构建；`verify:full` 额外只检查上游 Next.js 视觉原型仍可构建，不能把该原型计为已联调的 Web 管理后台。
 
 若只验收 API 与小程序，可执行：
 

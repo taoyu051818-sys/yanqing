@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 
 import type { AuthUser } from '../common/auth/auth-user.js';
 import {
@@ -7,6 +11,7 @@ import {
   AttendanceStatus,
   TrainingAudience,
   TrainingEnrollmentStatus,
+  TrainingSessionStatus,
 } from '../generated/prisma/enums.js';
 import type {
   AttendanceActionDto,
@@ -14,6 +19,7 @@ import type {
   MakeupAttendanceDto,
 } from './training.dto.js';
 import { TrainingService } from './training.service.js';
+import { orderCreationCommandHash } from '../orders/order-creation-idempotency.js';
 
 const coach: AuthUser = {
   sub: 'coach-1',
@@ -99,6 +105,7 @@ const consumePrisma = (attendance = attendanceFixture()) => {
       findFirst: vi.fn().mockResolvedValue({ value: 2_000 }),
     },
     auditLog: {
+      findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
     },
   };
@@ -560,6 +567,62 @@ describe('TrainingService consumption workflow', () => {
     expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled();
   });
 
+  it('accepts only an exact keyed consume-confirmation replay and never duplicates its audit', async () => {
+    const reason = '核对签到表后确认';
+    const idempotencyKey = 'consume-confirm-exact-1';
+    const recognition = {
+      id: 'recognition-1',
+      attendanceId: 'attendance-1',
+      type: 'CONSUME',
+      sequence: 1,
+      idempotencyKey,
+      reversedBy: null,
+    };
+    const { prisma, tx } = consumePrisma(
+      attendanceFixture({
+        operatorId: coach.sub,
+        revenueRecognitions: [recognition],
+      }),
+    );
+    const commandHash = orderCreationCommandHash({
+      kind: 'TRAINING_CONSUME_CONFIRMED',
+      sessionId: 'session-1',
+      enrollmentId: 'enrollment-1',
+      feedback: null,
+      reason,
+    });
+    tx.auditLog.findFirst.mockResolvedValue({
+      actorId: administrator.sub,
+      action: 'TRAINING_CONSUME_CONFIRMED',
+      objectType: 'TrainingAttendance',
+      objectId: 'attendance-1',
+      newValue: { commandHash },
+    });
+    const service = new TrainingService(prisma as never);
+
+    await expect(
+      service.confirmConsume(
+        'session-1',
+        { enrollmentId: 'enrollment-1', reason, idempotencyKey },
+        administrator,
+      ),
+    ).resolves.toBe(recognition);
+    await expect(
+      service.confirmConsume(
+        'session-1',
+        {
+          enrollmentId: 'enrollment-1',
+          reason: '同一幂等键却更换确认原因',
+          idempotencyKey,
+        },
+        administrator,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.trainingAttendance.update).not.toHaveBeenCalled();
+    expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
   it('enforces maker/checker separation when a proposal was submitted by the approver account', async () => {
     const { prisma, tx } = consumePrisma(
       attendanceFixture({ operatorId: administrator.sub }),
@@ -576,6 +639,38 @@ describe('TrainingService consumption workflow', () => {
     expect(tx.trainingAttendance.update).not.toHaveBeenCalled();
     expect(tx.trainingEnrollment.update).not.toHaveBeenCalled();
     expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    TrainingSessionStatus.COMPLETED,
+    TrainingSessionStatus.CANCELLED,
+  ])('rejects new consume work after the session reaches %s', async (status) => {
+    const closedSession = {
+      status,
+      startsAt: new Date('2026-08-29T10:00:00.000Z'),
+      class: { name: '成人进阶班', coachId: coach.sub, assistantId: null },
+    };
+    const proposal = consumePrisma(attendanceFixture({ session: closedSession }));
+    const confirmation = consumePrisma(
+      attendanceFixture({ session: closedSession, operatorId: coach.sub }),
+    );
+
+    await expect(
+      new TrainingService(proposal.prisma as never).proposeConsume(
+        'session-1',
+        dto,
+        coach,
+      ),
+    ).rejects.toThrow('已结束或已取消的课次不能继续消课');
+    await expect(
+      new TrainingService(confirmation.prisma as never).confirmConsume(
+        'session-1',
+        { enrollmentId: 'enrollment-1' },
+        administrator,
+      ),
+    ).rejects.toThrow('已结束或已取消的课次不能继续消课');
+    expect(proposal.tx.trainingAttendance.update).not.toHaveBeenCalled();
+    expect(confirmation.tx.trainingRevenueRecognition.create).not.toHaveBeenCalled();
   });
 
   it('rejects non-coach/non-approver actors and never opens a transaction', async () => {
@@ -600,9 +695,10 @@ describe('TrainingService consumption workflow', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('keeps a session open while a coach recommendation is awaiting approval', async () => {
+  it('keeps a session open while an attended learner is not yet consumed', async () => {
+    const count = vi.fn().mockResolvedValue(1);
     const tx = {
-      trainingAttendance: { count: vi.fn().mockResolvedValue(1) },
+      trainingAttendance: { count },
       trainingSession: { update: vi.fn() },
       auditLog: { create: vi.fn() },
     };
@@ -610,8 +706,28 @@ describe('TrainingService consumption workflow', () => {
     const service = new TrainingService(prisma as never);
 
     await expect(service.completeSession('session-1', coach)).rejects.toThrow(
-      '仍有学员未处理签到/请假状态',
+      '仍有学员未完成点名或消课',
     );
+    expect(count).toHaveBeenCalledWith({
+      where: {
+        sessionId: 'session-1',
+        OR: [
+          {
+            status: {
+              in: [
+                AttendanceStatus.PENDING,
+                AttendanceStatus.LEAVE,
+                AttendanceStatus.MAKEUP_REQUIRED,
+              ],
+            },
+          },
+          {
+            status: AttendanceStatus.ATTENDED,
+            consumedSessions: 0,
+          },
+        ],
+      },
+    });
     expect(tx.trainingSession.update).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,7 @@ export interface SessionUser {
   id: string
   displayName: string
   avatarUrl?: string
+  referrerId?: string | null
   primaryRole?: AppRole
   roles: Array<AppRole | { role: AppRole; merchant?: { id: string; name: string } }>
   accounts?: Account[]
