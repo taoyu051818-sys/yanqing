@@ -1,5 +1,10 @@
 import { api, download } from "./http";
-import type { CourtAvailability, SessionUser } from "../types/domain";
+import type {
+  CourtAvailability,
+  Member360View,
+  MemberDirectory,
+  SessionUser,
+} from "../types/domain";
 
 /**
  * The operator queue is intentionally a small, transport-level contract.
@@ -137,6 +142,9 @@ export const endpoints = {
   grantMaturedGameRewards: () => api.post("/games/rewards/grant-matured"),
   events: () => api.get<any[]>("/events"),
   event: (id: string) => api.get<Record<string, any>>(`/events/${id}`),
+  managedEvents: () => api.get<any[]>("/events/managed"),
+  managedEvent: (id: string) =>
+    api.get<Record<string, any>>(`/events/managed/${id}`),
   myEventRegistration: (id: string) =>
     api.get<Record<string, any> | null>(`/events/${id}/registration/me`),
   createEvent: (data: object) => api.post("/events", data),
@@ -147,6 +155,17 @@ export const endpoints = {
       ...data,
       sourceChannel: "MINI_PROGRAM",
     }),
+  createEventPartnerInvite: (id: string) =>
+    api.post<{
+      partnerInviteCode: string;
+      partnerDisplayName: string;
+      expiresAt: string;
+    }>(`/events/${id}/partner-invites`),
+  previewEventPartnerInvite: (id: string, partnerInviteCode: string) =>
+    api.post<{ partnerDisplayName: string; expiresAt: string }>(
+      `/events/${id}/partner-invites/preview`,
+      { partnerInviteCode },
+    ),
   promoteEventWaitlist: (id: string) =>
     api.post(`/events/${id}/promote-waitlist`),
   cancelEventRegistration: (id: string, data: object) =>
@@ -199,9 +218,11 @@ export const endpoints = {
   accountTransactions: () =>
     api.get<any[]>("/members/me/accounts/transactions"),
   referralRewards: () => api.get<any[]>("/referrals/me/rewards"),
-  bindReferral: (referrerId: string) =>
-    api.post<{ id: string; referrerId: string }>("/members/me/referrer", {
-      referrerId,
+  createReferralInvite: () =>
+    api.post<{ inviteCode: string; expiresAt: string }>("/referrals/me/invites"),
+  bindReferral: (inviteCode: string) =>
+    api.post<{ bound: true }>("/members/me/referrer", {
+      inviteCode,
     }),
   grantMaturedReferralRewards: () =>
     api.post("/referrals/rewards/grant-matured"),
@@ -233,6 +254,7 @@ export const endpoints = {
   settleAllianceSettlement: (id: string) =>
     api.post(`/alliance/settlements/${id}/settle`),
   inventory: () => api.get<any[]>("/inventory"),
+  inventoryAwardOptions: () => api.get<any[]>("/inventory/award-options"),
   lowStock: () => api.get<any[]>("/inventory/low-stock"),
   inventoryItemDetail: (id: string) => api.get<any>(`/inventory/items/${id}`),
   createInventoryItem: (data: object) => api.post("/inventory", data),
@@ -301,6 +323,8 @@ export const endpoints = {
   postStocktake: (id: string, idempotencyKey: string) =>
     api.post(`/inventory/stocktakes/${id}/post`, { idempotencyKey }),
   inventoryOperations: () => api.get<any[]>("/inventory/operations"),
+  consignmentSupplierOptions: () =>
+    api.get<any[]>("/inventory/consignment/supplier-options"),
   createInventoryOperation: (data: object) =>
     api.post("/inventory/operations", data),
   submitInventoryOperation: (id: string) =>
@@ -323,7 +347,7 @@ export const endpoints = {
   reviewFrontDeskShiftVariance: (id: string, data: object) =>
     api.post(`/operations/shifts/${id}/review-variance`, data),
   adminEnrollments: () => api.get<any[]>("/training/admin/enrollments"),
-  hostedGames: () => api.get<any[]>("/games/hosted/me"),
+  managedGames: () => api.get<any[]>("/games/managed"),
   checkInVenueOrder: (orderId: string, data: object = {}) =>
     api.post(`/venues/orders/${orderId}/check-in`, data),
   fulfillVenueOrder: (orderId: string, data: object) =>
@@ -331,8 +355,8 @@ export const endpoints = {
   checkInGame: (gameId: string, userId: string, data: object = {}) =>
     api.post(`/games/${gameId}/check-in/${userId}`, data),
   completeGame: (gameId: string) => api.post(`/games/${gameId}/complete`),
-  members: () => api.get<any>("/members"),
-  member360: (id: string) => api.get<any>(`/members/${id}/360`),
+  members: () => api.get<MemberDirectory>("/members"),
+  member360: (id: string) => api.get<Member360View>(`/members/${id}/360`),
   customerLeads: (params: Record<string, any> = {}) =>
     api.get<any>("/members/leads", params),
   createCustomerLead: (data: object) => api.post("/members/leads", data),

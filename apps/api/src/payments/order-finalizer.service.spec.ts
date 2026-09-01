@@ -48,13 +48,11 @@ const payment = {
 function setup(coupon: Record<string, unknown>) {
   const tx = {
     order: {
-      findUnique: vi
-        .fn()
-        .mockResolvedValue({
-          status: 'PENDING',
-          paidCents: 0,
-          paymentChannel: null,
-        }),
+      findUnique: vi.fn().mockResolvedValue({
+        status: 'PENDING',
+        paidCents: 0,
+        paymentChannel: null,
+      }),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
@@ -164,13 +162,11 @@ describe('OrderFinalizerService referral reward invariants', () => {
   function setupReferral(referralReward: { upsert: ReturnType<typeof vi.fn> }) {
     const tx = {
       order: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            status: 'PENDING',
-            paidCents: 0,
-            paymentChannel: null,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          status: 'PENDING',
+          paidCents: 0,
+          paymentChannel: null,
+        }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         count: vi.fn().mockResolvedValue(0),
       },
@@ -193,7 +189,10 @@ describe('OrderFinalizerService referral reward invariants', () => {
 
   it('checks uniqueness by member and trigger type, regardless of trigger order', async () => {
     const referralReward = {
-      upsert: vi.fn().mockResolvedValue({ id: 'reward-existing' }),
+      upsert: vi.fn().mockResolvedValue({
+        id: 'reward-existing',
+        triggerOrderId: 'order-1',
+      }),
     };
     const { tx, service } = setupReferral(referralReward);
 
@@ -218,13 +217,25 @@ describe('OrderFinalizerService referral reward invariants', () => {
         newUserId: 'member-1',
         triggerType: 'FIRST_PAYMENT',
         triggerOrderId: 'order-1',
+        rewardValue: 100,
+        newUserRewardValue: 50,
+      }),
+    });
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'REFERRAL_REWARD_SCHEDULED',
+        objectType: 'ReferralReward',
+        objectId: 'reward-existing',
       }),
     });
   });
 
   it('uses the atomic upsert on a concurrent first-payment retry', async () => {
     const referralReward = {
-      upsert: vi.fn().mockResolvedValue({ id: 'reward-winner' }),
+      upsert: vi.fn().mockResolvedValue({
+        id: 'reward-winner',
+        triggerOrderId: 'order-1',
+      }),
     };
     const { tx, service } = setupReferral(referralReward);
 
@@ -239,7 +250,7 @@ describe('OrderFinalizerService referral reward invariants', () => {
       ),
     ).resolves.toBeUndefined();
     expect(referralReward.upsert).toHaveBeenCalledOnce();
-    expect(tx.auditLog.create).toHaveBeenCalledOnce();
+    expect(tx.auditLog.create).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -264,13 +275,11 @@ describe('OrderFinalizerService training seat activation', () => {
     };
     const tx = {
       order: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            status: 'PENDING',
-            paidCents: 0,
-            paymentChannel: null,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          status: 'PENDING',
+          paidCents: 0,
+          paymentChannel: null,
+        }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },

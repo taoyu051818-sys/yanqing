@@ -16,6 +16,7 @@ import {
   saveInventoryTransactions,
   saveInventorySuppliers,
 } from "./state";
+import { getOrders } from "./venue";
 
 const storage = new Map<string, unknown>();
 
@@ -171,8 +172,11 @@ describe("mock consignment payable and settlement workflow", () => {
       ],
       creationIdempotencyKey: "mock-consignment-order-create-1",
     });
+    expect(JSON.stringify(order)).not.toMatch(/metadata|settlementRule|supplierId/);
+    const persistedOrder = getOrders().find((item) => item.id === order.id);
     expect(
-      order.items.find((item: any) => item.itemId === consignment.id)?.metadata,
+      persistedOrder?.items.find((item: any) => item.itemId === consignment.id)
+        ?.metadata,
     ).toMatchObject({
       inventorySnapshotVersion: 1,
       mode: "CONSIGNMENT",
@@ -206,7 +210,7 @@ describe("mock consignment payable and settlement workflow", () => {
     await request("POST", `/orders/${order.id}/pay`, paymentCommand);
     await expect(
       request("POST", `/orders/${order.id}/pay`, paymentCommand),
-    ).resolves.toMatchObject({ status: "SUCCESS", idempotent: true });
+    ).resolves.toMatchObject({ status: "SUCCEEDED" });
     let orderEntries = getConsignmentPayableEntries().filter(
       (entry) => entry.orderId === order.id,
     );
@@ -290,8 +294,13 @@ describe("mock consignment payable and settlement workflow", () => {
       version: 1,
       entryCount: 1,
       payableCents: 2_250,
-      createdById: "user-finance",
+      isOwnCreator: true,
     });
+    expect(firstDraft).not.toHaveProperty("createdById");
+    expect(firstDraft).not.toHaveProperty("creationIdempotencyKey");
+    expect(firstDraft).not.toHaveProperty("creationCommandHash");
+    expect(firstDraft).not.toHaveProperty("ruleSnapshot");
+    expect(firstDraft.businessRule).toMatchObject({ commissionRateBps: 2_500 });
     expect(
       (
         await request<any[]>("GET", "/work-items")
@@ -339,6 +348,9 @@ describe("mock consignment payable and settlement workflow", () => {
           }),
         }),
       ]),
+    );
+    expect(JSON.stringify(payablePage)).not.toMatch(
+      /ruleSnapshot|idempotencyKey|commandHash/,
     );
 
     const submitted = await request(

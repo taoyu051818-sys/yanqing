@@ -12,6 +12,11 @@ import { ReferralsService } from './referrals.service.js'
 export class ReferralsController {
   constructor(private readonly referrals: ReferralsService) {}
 
+  @Post('me/invites')
+  createInvite(@CurrentUser() actor: AuthUser) {
+    return this.referrals.createInvite(actor)
+  }
+
   @Get('me/rewards')
   mine(@CurrentUser() actor: AuthUser) {
     return this.referrals.myRewards(actor)

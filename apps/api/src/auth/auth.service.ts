@@ -92,14 +92,53 @@ export class AuthService {
   }
 
   async me(userId: string) {
-    return this.prisma.user.findUniqueOrThrow({
+    const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      include: {
-        roles: { include: { merchant: { select: { id: true, name: true } } } },
-        memberProfile: true,
-        accounts: { orderBy: { type: 'asc' } },
+      select: {
+        id: true,
+        displayName: true,
+        avatarUrl: true,
+        primaryRole: true,
+        referrerId: true,
+        roles: {
+          select: {
+            role: true,
+            merchant: { select: { id: true, name: true } },
+          },
+          orderBy: { role: 'asc' },
+        },
+        memberProfile: {
+          select: {
+            level: true,
+            tags: true,
+            membershipExpiresAt: true,
+            isNewCustomer: true,
+            firstVisitAt: true,
+            lastVisitAt: true,
+            visitCount: true,
+          },
+        },
+        accounts: {
+          select: {
+            id: true,
+            type: true,
+            balance: true,
+            frozenBalance: true,
+          },
+          orderBy: { type: 'asc' },
+        },
       },
     })
+    return {
+      id: user.id,
+      displayName: user.displayName,
+      avatarUrl: user.avatarUrl,
+      primaryRole: user.primaryRole,
+      roles: user.roles,
+      memberProfile: user.memberProfile,
+      accounts: user.accounts,
+      hasReferrer: Boolean(user.referrerId),
+    }
   }
 
   private async issueToken(user: {

@@ -1,7 +1,17 @@
 <script lang="ts">
+import {
+  captureReferralAttribution,
+  type ReferralLaunchOptions,
+} from './services/referral-attribution'
+
 export default {
-  onLaunch() {
-    // Keep the root app component explicit for uni-app's MP compiler.
+  onLaunch(options?: ReferralLaunchOptions) {
+    captureReferralAttribution(options)
+  },
+  onShow(options?: ReferralLaunchOptions) {
+    // A shared card can open an already-running mini program, so the hot-start
+    // path must capture the same immutable attribution as a cold launch.
+    captureReferralAttribution(options)
   },
 }
 </script>
@@ -14,7 +24,25 @@ page {
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
+button,
+uni-button {
+  box-sizing: border-box;
+  min-width: 44px !important;
+  min-height: 44px !important;
+}
 button::after { border: none; }
+
+input,
+textarea,
+uni-input,
+uni-textarea,
+.uni-input-wrapper,
+.uni-input-input,
+.uni-textarea-wrapper,
+.uni-textarea-textarea {
+  box-sizing: border-box;
+  min-height: 44px !important;
+}
 
 .page { padding: 28rpx 28rpx 64rpx; }
 .card {
@@ -30,7 +58,7 @@ button::after { border: none; }
 .money { color: #155a37; font-weight: 700; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; }
 .primary, .secondary, .danger {
-  min-height: 82rpx;
+  min-height: 44px;
   border-radius: 22rpx;
   font-size: 28rpx;
   line-height: 82rpx;

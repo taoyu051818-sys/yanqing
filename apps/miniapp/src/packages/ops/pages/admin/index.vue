@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { onShow } from "@dcloudio/uni-app";
+import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../../../components/OperationsFrame.vue";
 import MetricCard from "../../../../components/MetricCard.vue";
 import StatusBadge from "../../../../components/StatusBadge.vue";
+import { hasOperationsAccess } from "../../../../config/operations";
 import { endpoints, type WorkItem } from "../../../../services/api";
 import { isMockMode } from "../../../../services/http";
 import { useSessionStore } from "../../../../stores/session";
 import type { AppRole } from "../../../../types/domain";
 import { money, shortDate } from "../../../../utils/format";
+import { resolveWorkItemDestination } from "../../../../utils/work-item-deep-link";
 
 type WorkGroupKey =
   | "customer"
@@ -31,6 +33,7 @@ type WorkGroupDefinition = {
 };
 
 type DisplayWorkGroup = WorkGroupDefinition & { items: WorkItem[] };
+type ManagementView = "work" | "analytics";
 
 const session = useSessionStore();
 const dashboard = ref<Record<string, any> | null>(null);
@@ -40,6 +43,12 @@ const dashboardError = ref("");
 const workItemsError = ref("");
 const workItemsNotice = ref("");
 const lastSyncedAt = ref("");
+const activeView = ref<ManagementView>("work");
+
+const managementViews: Array<{ key: ManagementView; title: string }> = [
+  { key: "work", title: "待办与异常" },
+  { key: "analytics", title: "经营分析" },
+];
 
 const roleNames: Partial<Record<AppRole, string>> = {
   MEMBER: "会员",
@@ -90,7 +99,7 @@ const workGroupDefinitions: WorkGroupDefinition[] = [
     key: "coupon",
     title: "联盟券",
     description: "券码领取、核销和归因",
-    emptyText: "暂无券待办，可进入联盟营销查看核销",
+    emptyText: "暂无券待办，可进入联盟运营查看核销",
     route: "/packages/ops/pages/merchant/index",
     roles: ["FRONT_DESK", "MERCHANT", "ADMIN", "SUPER_ADMIN"],
   },
@@ -100,7 +109,7 @@ const workGroupDefinitions: WorkGroupDefinition[] = [
     description: "低于安全线的商品、培训及赛事耗材",
     emptyText: "库存均高于安全线",
     route: "/packages/ops/pages/inventory/index",
-    roles: ["FRONT_DESK", "COACH", "EVENT_MANAGER", "ADMIN", "SUPER_ADMIN"],
+    roles: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
   },
   {
     key: "fulfillment",
@@ -128,89 +137,6 @@ const workGroupDefinitions: WorkGroupDefinition[] = [
   },
 ];
 
-const centerDefinitions: Array<{
-  title: string;
-  description: string;
-  route: string;
-  roles: AppRole[];
-}> = [
-  {
-    title: "场馆资源",
-    description: "封场维护日历、占用冲突与可售状态",
-    route: "/packages/ops/pages/venue/index",
-    roles: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    title: "今日营业",
-    description: "值班、订单队列、场馆资源",
-    route: "/packages/ops/pages/frontdesk/index",
-    roles: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    title: "会员服务",
-    description: "客户360、会员状态与服务上下文",
-    route: "/packages/ops/pages/members/index",
-    roles: [
-      "FRONT_DESK",
-      "COACH",
-      "HOST",
-      "EVENT_MANAGER",
-      "FINANCE",
-      "ADMIN",
-      "SUPER_ADMIN",
-    ],
-  },
-  {
-    title: "培训运营",
-    description: "课表、点名、消课与训练反馈",
-    route: "/packages/ops/pages/coach/index",
-    roles: ["COACH", "FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    title: "主理人运营",
-    description: "主理人申请、球局和奖励观察期",
-    route: "/packages/ops/pages/host/index",
-    roles: ["HOST", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    title: "赛事运营",
-    description: "报名、比分、排名、奖品出库与签收",
-    route: "/packages/ops/pages/event/index",
-    roles: ["EVENT_MANAGER", "FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    title: "商品库存",
-    description: "SKU、采购寄售、盘点及业务物料领用",
-    route: "/packages/ops/pages/inventory/index",
-    roles: [
-      "FRONT_DESK",
-      "COACH",
-      "EVENT_MANAGER",
-      "FINANCE",
-      "ADMIN",
-      "SUPER_ADMIN",
-    ],
-  },
-  {
-    title: "联盟营销",
-    description: "商户、券码核销与归因数据",
-    route: "/packages/ops/pages/merchant/index",
-    roles: ["FRONT_DESK", "MERCHANT", "FINANCE", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    title: "财务结算",
-    description: "收入、退款、培训分成与联盟结算",
-    route: "/packages/ops/pages/finance/index",
-    roles: ["FINANCE", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    title: "治理与审计",
-    description: "员工微信身份、岗位权限、参数版本、风险与导出",
-    route: "/packages/ops/pages/governance/index",
-    roles: ["FINANCE", "ADMIN", "SUPER_ADMIN"],
-  },
-];
-
 const roleLabel = computed(() => {
   const roles = session.roles;
   if (roles.includes("SUPER_ADMIN")) return "超级管理员";
@@ -222,9 +148,8 @@ const roleLabel = computed(() => {
 const canViewDashboard = computed(() =>
   canSee(["FINANCE", "ADMIN", "SUPER_ADMIN"]),
 );
-
-const visibleCenters = computed(() =>
-  centerDefinitions.filter((center) => canSee(center.roles)),
+const showAnalytics = computed(
+  () => canViewDashboard.value && activeView.value === "analytics",
 );
 
 const groupedWorkItems = computed<DisplayWorkGroup[]>(() =>
@@ -302,7 +227,7 @@ const decisionPanels = computed(() => [
       ["新增 / 有效会员", `${dashboard.value?.members?.newMembers || 0} / ${dashboard.value?.members?.activeMembers || 0}`],
       ["7日 / 30日复购", `${percent(dashboard.value?.members?.sevenDayRepurchase?.rate)} / ${percent(dashboard.value?.members?.thirtyDayRepurchase?.rate)}`],
       ["30天内到期 / 流失预警", `${dashboard.value?.members?.expiringWithin30Days || 0} / ${dashboard.value?.members?.inactiveOver30Days || 0}`],
-      ["直接推荐有效新客", String(dashboard.value?.marketing?.directReferralConversions || 0)],
+      ["本期推荐绑定 / 有效首单", `${dashboard.value?.marketing?.directReferralBindings || 0} / ${dashboard.value?.marketing?.directReferralConversions || 0}`],
       ["券核销率", percent(dashboard.value?.marketing?.couponRedemptionRate)],
     ],
   },
@@ -490,25 +415,28 @@ function workItemMeta(item: WorkItem) {
   return parts.join(" · ") || "待处理";
 }
 
-function openCenter(route: string) {
+function openRoute(route: string) {
   if (!route) return;
   uni.navigateTo({ url: route });
 }
 
 function openGroup(group: DisplayWorkGroup) {
-  openCenter(group.route);
+  openRoute(group.route);
 }
 
 function openWorkItem(item: WorkItem) {
-  const group = groupedWorkItems.value.find((candidate) =>
-    candidate.items.some((entry) => entry.id === item.id),
-  );
-  if (group) openGroup(group);
+  const destination = resolveWorkItemDestination(item);
+  if (!destination) {
+    uni.showToast({ title: "该待办缺少可识别的处理入口", icon: "none" });
+    return;
+  }
+  openRoute(destination.url);
 }
 
 async function load() {
   if (loading.value) return;
   await session.hydrate();
+  if (!hasOperationsAccess(session.roles, "workQueue")) return;
   loading.value = true;
   dashboard.value = null;
   workItems.value = [];
@@ -570,15 +498,19 @@ async function load() {
   }
 }
 
+onLoad((query) => {
+  if (query?.view === "analytics") activeView.value = "analytics";
+});
 onShow(load);
 </script>
 
 <template>
   <OperationsFrame
-    title="经营管理"
+    access="workQueue"
+    title="经营总览"
     eyebrow="BUSINESS CONTROL"
     :role="roleLabel"
-    description="以统一待办分派跨岗位工作，再进入对应业务中心完成履约、审批和复核。"
+    description="待办与异常优先处理；经营指标独立查看，不让分析信息挤占现场工作入口。"
   >
     <view class="operator-context card">
       <view>
@@ -586,143 +518,137 @@ onShow(load);
           session.user?.displayName || "未登录账号"
         }}</text>
         <text class="muted"
-          >当前角色：{{ roleLabel }} · 仅显示有权限的经营中心</text
+          >当前角色：{{ roleLabel }} · 待办按岗位权限和责任范围分派</text
         >
       </view>
       <text class="sync-time">{{ syncLabel }}</text>
     </view>
 
-    <view v-if="canViewDashboard && dashboardError" class="error card">
-      <text class="error-title">经营指标同步失败</text>
-      <text class="muted">{{ dashboardError }}</text>
-      <button class="secondary retry" @tap="load">重试同步</button>
-    </view>
-
-    <view v-if="canViewDashboard" class="metric-grid">
-      <MetricCard
-        v-for="item in metrics"
-        :key="item[0]"
-        :label="item[0]"
-        :value="item[1]"
-        :note="item[2]"
-      />
-    </view>
-
-    <view v-if="canViewDashboard" class="section-title">老板驾驶舱 <text class="section-note">决策口径</text></view>
-    <view v-if="canViewDashboard" class="decision-grid">
-      <view v-for="panel in decisionPanels" :key="panel.title" class="card decision-panel">
-        <text class="decision-title">{{ panel.title }}</text>
-        <text class="muted decision-note">{{ panel.note }}</text>
-        <view class="decision-rows">
-          <view v-for="item in panel.items" :key="item[0]" class="decision-row">
-            <text>{{ item[0] }}</text><text class="decision-value">{{ item[1] }}</text>
-          </view>
-        </view>
-      </view>
-    </view>
-
-    <view class="section-title"
-      >统一待办
-      <text class="section-note">{{
-        loading ? "同步中" : `${todoCount} 项`
-      }}</text></view
-    >
-    <view v-if="workItemsNotice" class="notice card">{{
-      workItemsNotice
-    }}</view>
-
-    <view v-if="loading" class="loading-stack">
-      <view v-for="index in 3" :key="index" class="card loading-row"
-        ><view class="loading-line wide"></view
-        ><view class="loading-line"></view
-      ></view>
-    </view>
-    <view v-else-if="workItemsError" class="error card">
-      <text class="error-title">统一待办加载失败</text>
-      <text class="muted">{{ workItemsError }}</text>
-      <button class="secondary retry" @tap="load">重试待办</button>
-    </view>
-    <view v-else class="todo-list">
+    <view v-if="canViewDashboard" class="view-switch">
       <view
-        v-for="group in groupedWorkItems"
-        :key="group.key"
-        class="card todo-group"
-      >
-        <view class="group-head">
-          <view>
-            <text class="group-title">{{ group.title }}</text>
-            <text class="muted">{{ group.description }}</text>
-          </view>
-          <text class="group-count" :class="{ active: group.items.length }">{{
-            group.items.length
-          }}</text>
-        </view>
-        <view v-if="group.items.length" class="item-list">
-          <view
-            v-for="item in previewItems(group.items)"
-            :key="item.id"
-            class="todo-item"
-            @tap="openWorkItem(item)"
-          >
-            <view class="item-copy"
-              ><text class="item-title">{{ item.title || "待处理事项" }}</text
-              ><text class="muted item-meta">{{
-                workItemMeta(item)
-              }}</text></view
-            >
-            <StatusBadge :value="item.status" />
-          </view>
-          <text v-if="group.items.length > 3" class="more-hint"
-            >还有 {{ group.items.length - 3 }} 项，进入中心查看全部</text
-          >
-        </view>
-        <view v-else class="group-empty">{{ group.emptyText }}</view>
-        <button class="secondary group-action" @tap="openGroup(group)">
-          {{ group.items.length ? "进入处理" : "打开中心" }}
-        </button>
-      </view>
-      <view v-if="unmappedItems.length" class="card unmapped">
-        <text class="error-title"
-          >待识别待办 {{ unmappedItems.length }} 项</text
-        >
-        <text class="muted"
-          >接口返回了暂未配置分组的事项，已保留在队列中；请补充 kind/group
-          映射后再分派。</text
-        >
-      </view>
-      <view v-if="!todoCount" class="card all-clear"
-        ><text class="all-clear-title">当前没有待处理事项</text
-        ><text class="muted"
-          >全部经营队列均已清空，继续关注今日经营指标和异常提醒。</text
-        ></view
-      >
+        v-for="view in managementViews"
+        :key="view.key"
+        class="view-option"
+        :class="{ active: activeView === view.key }"
+        @tap="activeView = view.key"
+      >{{ view.title }}</view>
     </view>
 
-    <view class="section-title"
-      >经营中心
-      <text class="section-note">{{ visibleCenters.length }} 个可用</text></view
-    >
-    <view v-if="visibleCenters.length" class="center-list">
-      <view
-        v-for="center in visibleCenters"
-        :key="center.title"
-        class="card center-row"
-        @tap="openCenter(center.route)"
+    <template v-if="showAnalytics">
+      <view v-if="dashboardError" class="error card">
+        <text class="error-title">经营指标同步失败</text>
+        <text class="muted">{{ dashboardError }}</text>
+        <button class="secondary retry" @tap="load">重试同步</button>
+      </view>
+
+      <view class="metric-grid">
+        <MetricCard
+          v-for="item in metrics"
+          :key="item[0]"
+          :label="item[0]"
+          :value="item[1]"
+          :note="item[2]"
+        />
+      </view>
+
+      <view class="section-title">老板驾驶舱 <text class="section-note">决策口径</text></view>
+      <view class="decision-grid">
+        <view v-for="panel in decisionPanels" :key="panel.title" class="card decision-panel">
+          <text class="decision-title">{{ panel.title }}</text>
+          <text class="muted decision-note">{{ panel.note }}</text>
+          <view class="decision-rows">
+            <view v-for="item in panel.items" :key="item[0]" class="decision-row">
+              <text>{{ item[0] }}</text><text class="decision-value">{{ item[1] }}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </template>
+
+    <template v-else>
+      <view class="section-title"
+        >统一待办
+        <text class="section-note">{{
+          loading ? "同步中" : `${todoCount} 项`
+        }}</text></view
       >
+      <view v-if="workItemsNotice" class="notice card">{{
+        workItemsNotice
+      }}</view>
+
+      <view v-if="loading" class="loading-stack">
+        <view v-for="index in 3" :key="index" class="card loading-row"
+          ><view class="loading-line wide"></view
+          ><view class="loading-line"></view
+        ></view>
+      </view>
+      <view v-else-if="workItemsError" class="error card">
+        <text class="error-title">统一待办加载失败</text>
+        <text class="muted">{{ workItemsError }}</text>
+        <button class="secondary retry" @tap="load">重试待办</button>
+      </view>
+      <view v-else class="todo-list">
         <view
-          ><text class="center-title">{{ center.title }}</text
-          ><text class="muted">{{ center.description }}</text></view
+          v-for="group in groupedWorkItems"
+          :key="group.key"
+          class="card todo-group"
         >
-        <text class="arrow">›</text>
+          <view class="group-head">
+            <view>
+              <text class="group-title">{{ group.title }}</text>
+              <text class="muted">{{ group.description }}</text>
+            </view>
+            <text class="group-count" :class="{ active: group.items.length }">{{
+              group.items.length
+            }}</text>
+          </view>
+          <view v-if="group.items.length" class="item-list">
+            <view
+              v-for="item in previewItems(group.items)"
+              :key="item.id"
+              class="todo-item"
+              @tap="openWorkItem(item)"
+            >
+              <view class="item-copy"
+                ><text class="item-title">{{ item.title || "待处理事项" }}</text
+                ><text class="muted item-meta">{{
+                  workItemMeta(item)
+                }}</text></view
+              >
+              <view class="item-status">
+                <StatusBadge :value="item.status" />
+              </view>
+            </view>
+            <text v-if="group.items.length > 3" class="more-hint"
+              >还有 {{ group.items.length - 3 }} 项，进入业务中心查看全部</text
+            >
+          </view>
+          <view v-else class="group-empty">{{ group.emptyText }}</view>
+          <button class="secondary group-action" @tap="openGroup(group)">
+            {{ group.items.length ? "进入处理" : "打开业务中心" }}
+          </button>
+        </view>
+        <view v-if="unmappedItems.length" class="card unmapped">
+          <text class="error-title"
+            >待识别待办 {{ unmappedItems.length }} 项</text
+          >
+          <text class="muted"
+            >接口返回了暂未配置分组的事项，已保留在队列中；请补充 kind/group
+            映射后再分派。</text
+          >
+        </view>
+        <view v-if="!todoCount" class="card all-clear"
+          ><text class="all-clear-title">当前没有待处理事项</text
+          ><text class="muted"
+            >全部经营队列均已清空，可返回工作台进入业务中心。</text
+          ></view
+        >
       </view>
-    </view>
-    <view v-else class="empty card"
-      >当前账号没有可见的经营中心，请联系管理员分配角色。</view
-    >
+    </template>
 
     <view class="card boundary"
       ><text class="muted"
-        >经营中心只负责分派和复核。余额、积分、库存、退款、比分和结算必须通过后端状态动作留痕；本页不直接修改业务状态。</text
+        >本页只负责汇总、分派和复核。余额、积分、库存、退款、比分和结算必须通过对应业务中心的状态动作留痕。</text
       ></view
     >
   </OperationsFrame>
@@ -731,11 +657,15 @@ onShow(load);
 <style scoped>
 .operator-context {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 18rpx;
   margin-top: 22rpx;
   padding: 22rpx 24rpx;
+}
+.operator-context > view {
+  flex: 1;
+  min-width: 0;
 }
 .operator-name {
   display: block;
@@ -748,9 +678,35 @@ onShow(load);
   color: #17653d;
   font-size: 21rpx;
 }
+.view-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8rpx;
+  padding: 8rpx;
+  margin-top: 18rpx;
+  background: #e6ece8;
+  border-radius: 20rpx;
+}
+.view-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 12rpx 18rpx;
+  color: #66736b;
+  border-radius: 15rpx;
+  font-size: 24rpx;
+  text-align: center;
+}
+.view-option.active {
+  color: #17492f;
+  background: #fff;
+  font-weight: 800;
+}
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14rpx;
   margin-top: 18rpx;
 }
@@ -787,11 +743,17 @@ onShow(load);
   border-bottom: 1rpx solid #edf0ed;
   font-size: 21rpx;
 }
+.decision-row > text:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .decision-value {
   flex: none;
+  max-width: 52%;
   color: #1c4c33;
   font-weight: 800;
   text-align: right;
+  overflow-wrap: anywhere;
 }
 .section-note {
   color: #758079;
@@ -817,6 +779,7 @@ onShow(load);
   font-weight: 800;
 }
 .retry {
+  min-height: 44px;
   width: 100%;
   margin: 18rpx 0 0;
 }
@@ -840,9 +803,12 @@ onShow(load);
 }
 .todo-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14rpx;
 }
 .todo-group {
+  box-sizing: border-box;
+  min-width: 0;
   padding: 24rpx;
 }
 .group-head {
@@ -850,6 +816,11 @@ onShow(load);
   align-items: flex-start;
   justify-content: space-between;
   gap: 16rpx;
+}
+.group-head > view {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .group-title {
   display: block;
@@ -879,7 +850,7 @@ onShow(load);
 }
 .todo-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 14rpx;
   padding: 18rpx 0;
@@ -891,19 +862,23 @@ onShow(load);
 }
 .item-title {
   display: block;
-  overflow: hidden;
   margin-bottom: 6rpx;
   font-size: 25rpx;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .item-meta {
   display: block;
-  overflow: hidden;
   font-size: 21rpx;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.item-status {
+  flex: 0 0 auto;
+  max-width: 42%;
 }
 .more-hint {
   display: block;
@@ -921,6 +896,7 @@ onShow(load);
 }
 .group-action {
   width: 100%;
+  min-height: 44px;
   margin: 18rpx 0 0;
 }
 .unmapped {
@@ -939,42 +915,23 @@ onShow(load);
   font-size: 29rpx;
   font-weight: 800;
 }
-.center-list {
-  display: grid;
-  gap: 0;
-}
-.center-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12rpx;
-  margin-top: 0;
-  padding: 22rpx 24rpx;
-  border-radius: 0;
-  box-shadow: none;
-}
-.center-row:first-child {
-  border-radius: 28rpx 28rpx 0 0;
-}
-.center-row:last-child {
-  border-radius: 0 0 28rpx 28rpx;
-}
-.center-title {
-  display: block;
-  margin-bottom: 8rpx;
-  font-size: 28rpx;
-  font-weight: 800;
-}
-.arrow {
-  color: #17653d;
-  font-size: 40rpx;
-}
-.empty {
-  color: #758079;
-  text-align: center;
-}
 .boundary {
   margin-top: 22rpx;
   line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 360px) {
+  .operator-context {
+    flex-direction: column;
+  }
+
+  .sync-time {
+    align-self: flex-end;
+  }
+
+  .todo-group {
+    padding: 20rpx;
+  }
 }
 </style>

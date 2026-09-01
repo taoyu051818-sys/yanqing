@@ -8,9 +8,17 @@ import {
   recordMockConsignmentSale,
   routeMockConsignmentSettlement,
 } from "./consignment-settlement";
-import { availability, getOrders, saveOrders } from "./venue";
+import {
+  availability,
+  getMockVenueCourts,
+  getOrders,
+  resolveMockPriceRule,
+  saveOrders,
+} from "./venue";
 import {
   decorateMockTrainingEnrollment,
+  mockTrainingProductView,
+  mockTrainingSessionView,
   routeMockTrainingOperations,
   validateMockYouthProduct,
 } from "./training-operations";
@@ -21,6 +29,7 @@ import {
   getCustomerLeads,
   getEnrollments,
   getEventDetail,
+  getEventPartnerInvites,
   getEvents,
   getGames,
   getFrontDeskShifts,
@@ -53,6 +62,8 @@ import {
   getRiskEvents,
   getAuditLogs,
   getDataErasureRequests,
+  getReferralInvites,
+  getReferralRewards,
   getVenueBookings,
   getVenueClosures,
   recomputeEventStandings,
@@ -62,6 +73,7 @@ import {
   saveCustomerLeads,
   saveEnrollments,
   saveEventDetail,
+  saveEventPartnerInvites,
   saveEvents,
   saveGames,
   saveFrontDeskShifts,
@@ -94,11 +106,50 @@ import {
   saveRiskEvents,
   saveAuditLogs,
   saveDataErasureRequests,
+  saveReferralInvites,
+  saveReferralRewards,
   saveVenueBookings,
   saveVenueClosures,
 } from "./state";
 
 const ok = (value: any) => JSON.parse(JSON.stringify(value));
+
+const mockTrainingSessionCommandResponse = (session: any) => ({
+  id: session?.id,
+  status: session?.status,
+});
+
+const mockTrainingAttendanceCommandResponse = (attendance: any) => ({
+  id: attendance?.id,
+  sessionId: attendance?.sessionId,
+  enrollmentId: attendance?.enrollmentId,
+  status: attendance?.status,
+});
+
+const mockTrainingConsumeProposalResponse = (attendance: any) => ({
+  ...mockTrainingAttendanceCommandResponse(attendance),
+  workflowStatus: "PENDING_CONFIRMATION",
+});
+
+const mockTrainingMakeupCommandResponse = (
+  attendance: any,
+  makeupSessionId: unknown,
+) => ({
+  ...mockTrainingAttendanceCommandResponse(attendance),
+  workflowStatus: "MAKEUP_SCHEDULED",
+  makeupSessionId:
+    typeof makeupSessionId === "string" ? makeupSessionId.trim() : "",
+});
+
+const mockTrainingConsumeConfirmationResponse = (recognition: any) => ({
+  id: recognition?.id,
+  type: recognition?.type,
+  sequence: recognition?.sequence,
+  workflowStatus: "CONFIRMED",
+  effectiveRevenueCents: recognition?.effectiveRevenueCents,
+  venueContributionCents: recognition?.venueContributionCents,
+  venueFeeCents: recognition?.venueFeeCents,
+});
 
 /**
  * The mock transport is used as an acceptance harness, so it must enforce
@@ -116,15 +167,49 @@ const requireMockRole = (...allowed: AppRole[]) => {
   if (!hasMockRole(...allowed))
     throw new Error(`当前角色无权执行该操作，需要：${allowed.join("、")}`);
 };
-const requireInventoryRead = () =>
-  requireMockRole(
-    "FRONT_DESK",
-    "COACH",
-    "EVENT_MANAGER",
-    "FINANCE",
-    "ADMIN",
-    "SUPER_ADMIN",
-  );
+const isMockMemberSelfService = () =>
+  hasMockRole("MEMBER") &&
+  !hasMockRole("FRONT_DESK", "EVENT_MANAGER", "ADMIN", "SUPER_ADMIN");
+const mockMemberPrivacyScope = ():
+  "FRONT_DESK_LIMITED" | "COACH_ASSIGNED" | "FINANCE" | "ADMIN" => {
+  if (hasMockRole("ADMIN", "SUPER_ADMIN")) return "ADMIN";
+  if (hasMockRole("FINANCE")) return "FINANCE";
+  if (hasMockRole("FRONT_DESK")) return "FRONT_DESK_LIMITED";
+  return "COACH_ASSIGNED";
+};
+const maskMockPhone = (phone?: string | null) => {
+  if (!phone) return null;
+  if (phone.length <= 4) return "*".repeat(phone.length);
+  if (phone.length <= 7) return `${phone.slice(0, 2)}***${phone.slice(-2)}`;
+  return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
+};
+const mockFrontDeskPaymentSummary = (accounts: any[]) => ({
+  storedValueAvailableCents: accounts
+    .filter((account) =>
+      ["CASH_PRINCIPAL", "GIFT_BALANCE"].includes(account.type),
+    )
+    .reduce(
+      (total, account) =>
+        total +
+        Math.max(
+          0,
+          Number(account.balance) - Number(account.frozenBalance || 0),
+        ),
+      0,
+    ),
+  badmintonCoinAvailable: accounts
+    .filter((account) => account.type === "BADMINTON_COIN")
+    .reduce(
+      (total, account) =>
+        total +
+        Math.max(
+          0,
+          Number(account.balance) - Number(account.frozenBalance || 0),
+        ),
+      0,
+    ),
+});
+const requireInventoryRead = () => requireMockRole("ADMIN", "SUPER_ADMIN");
 
 const assignedMerchant = (merchantId: unknown) =>
   Boolean(merchantId) && String(merchantId) === "merchant-coffee";
@@ -236,10 +321,7 @@ const assertMockRefundOriginIsConsistent = (
     throw new Error("已完成订单缺少完成时间，需先修复履约证据");
   if (status === "PARTIALLY_REFUNDED" && Number(refundedCents || 0) <= 0)
     throw new Error("部分退款订单缺少已退款金额，需先修复财务证据");
-  if (
-    completedAt &&
-    !["COMPLETED", "PARTIALLY_REFUNDED"].includes(status)
-  )
+  if (completedAt && !["COMPLETED", "PARTIALLY_REFUNDED"].includes(status))
     throw new Error("订单状态与完成时间不一致，需先修复履约证据");
 };
 const isExpired = (value: unknown) => {
@@ -261,6 +343,153 @@ const activeMockParameter = (key: string, at = new Date()) =>
         new Date(right.effectiveFrom).getTime() -
         new Date(left.effectiveFrom).getTime(),
     )[0];
+const activeMockIntegerParameter = (
+  key: string,
+  fallback: number,
+  at = new Date(),
+) => {
+  const value = activeMockParameter(key, at)?.value;
+  return Number.isInteger(value) && Number(value) >= 0
+    ? Number(value)
+    : fallback;
+};
+const createMockReferralReward = (order: any, orders: any[]) => {
+  if (!order.memberId) return;
+  const member = getGovernanceUsers().find(
+    (item) => item.id === order.memberId,
+  );
+  if (!member?.referrerId) return;
+  const paidStatuses = [
+    "PAID",
+    "CHECKED_IN",
+    "COMPLETED",
+    "PARTIALLY_REFUNDED",
+  ];
+  if (
+    orders.some(
+      (item) =>
+        item.id !== order.id &&
+        item.memberId === order.memberId &&
+        paidStatuses.includes(item.status),
+    )
+  )
+    return;
+  const rewards = getReferralRewards();
+  if (
+    rewards.some(
+      (item) =>
+        item.newUserId === order.memberId &&
+        item.triggerType === "FIRST_PAYMENT",
+    )
+  )
+    return;
+  const observationDays = activeMockIntegerParameter(
+    "referral.refund_observation_days",
+    7,
+  );
+  const createdAt = new Date();
+  const reward = {
+    id: newId("referral-reward"),
+    referrerId: member.referrerId,
+    newUserId: order.memberId,
+    triggerOrderId: order.id,
+    triggerType: "FIRST_PAYMENT",
+    rewardType: "BADMINTON_COIN",
+    rewardValue: activeMockIntegerParameter(
+      "referral.first_payment.coin_reward",
+      50,
+    ),
+    newUserRewardValue: activeMockIntegerParameter(
+      "referral.new_user.first_payment.coin_reward",
+      50,
+    ),
+    status: "PENDING_OBSERVATION",
+    observationEndsAt: new Date(
+      createdAt.getTime() + observationDays * 86_400_000,
+    ).toISOString(),
+    grantedAt: null,
+    reversedAt: null,
+    createdAt: createdAt.toISOString(),
+  };
+  saveReferralRewards([reward, ...rewards]);
+  saveAuditLogs([
+    {
+      id: newId("audit"),
+      actorId: mockUser().id,
+      actorRole: mockUser().primaryRole,
+      action: "REFERRAL_REWARD_SCHEDULED",
+      objectType: "ReferralReward",
+      objectId: reward.id,
+      result: "SUCCESS",
+      newValue: {
+        referrerId: reward.referrerId,
+        newUserId: reward.newUserId,
+        triggerOrderId: reward.triggerOrderId,
+        rewardValue: reward.rewardValue,
+        newUserRewardValue: reward.newUserRewardValue,
+      },
+      createdAt: reward.createdAt,
+    },
+    ...getAuditLogs(),
+  ]);
+};
+const creditMockReferralRecipient = (
+  reward: any,
+  userId: string,
+  amount: number,
+  recipientRole: "REFERRER" | "NEW_USER",
+  operatorId: string,
+) => {
+  if (amount <= 0) return null;
+  const accountBook = getMemberAccounts();
+  const accounts = accountBook[userId] || [];
+  let account = accounts.find((item) => item.type === "BADMINTON_COIN");
+  if (!account) {
+    account = {
+      id: `account-${userId}-badminton_coin`,
+      userId,
+      type: "BADMINTON_COIN",
+      balance: 0,
+      frozenBalance: 0,
+      version: 0,
+    };
+    accounts.push(account);
+  }
+  const transactions = getMemberAccountTransactions();
+  const idempotencyKey =
+    recipientRole === "REFERRER"
+      ? `REFERRAL:${reward.id}`
+      : `REFERRAL_NEW_USER:${reward.id}`;
+  if (transactions.some((item) => item.idempotencyKey === idempotencyKey))
+    return idempotencyKey;
+  const balanceBefore = Number(account.balance || 0);
+  account.balance = balanceBefore + amount;
+  account.version = Number(account.version || 0) + 1;
+  transactions.unshift({
+    id: newId("account-txn"),
+    accountId: account.id,
+    kind: "CREDIT",
+    amount,
+    balanceBefore,
+    balanceAfter: account.balance,
+    reasonCode:
+      recipientRole === "REFERRER"
+        ? "DIRECT_REFERRAL_REWARD"
+        : "NEW_MEMBER_REFERRAL_REWARD",
+    reason:
+      recipientRole === "REFERRER"
+        ? "一层直接推荐有效首单邀请人奖励"
+        : "一层直接推荐有效首单新客奖励",
+    orderId: reward.triggerOrderId,
+    operatorId,
+    idempotencyKey,
+    createdAt: new Date().toISOString(),
+  });
+  accountBook[userId] = accounts;
+  saveMemberAccounts(accountBook);
+  saveMemberAccountTransactions(transactions);
+  return idempotencyKey;
+};
 const mockOperationWindow = (
   parameterKey: string,
   defaults: { earlyMinutes: number; lateMinutes: number },
@@ -279,7 +508,11 @@ const mockOperationWindow = (
   return {
     parameterId: valid ? parameter?.id || null : null,
     parameterKey,
-    source: valid ? "SYSTEM_PARAMETER" : parameter ? "DEFAULT_INVALID_PARAMETER" : "DEFAULT_MISSING_PARAMETER",
+    source: valid
+      ? "SYSTEM_PARAMETER"
+      : parameter
+        ? "DEFAULT_INVALID_PARAMETER"
+        : "DEFAULT_MISSING_PARAMETER",
     earlyMinutes: valid ? configured.earlyMinutes : defaults.earlyMinutes,
     lateMinutes: valid ? configured.lateMinutes : defaults.lateMinutes,
   };
@@ -297,10 +530,19 @@ const assertMockOperationWindow = (options: {
   const observedAt = new Date();
   const startsAt = new Date(String(options.startsAt || ""));
   const endsAt = new Date(String(options.endsAt || ""));
-  if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()))
+  if (
+    !Number.isFinite(startsAt.getTime()) ||
+    !Number.isFinite(endsAt.getTime())
+  )
     throw new Error("业务时间无效，不能执行现场操作");
-  const policy = mockOperationWindow(options.parameterKey, options.defaults, observedAt);
-  const earliestAt = new Date(startsAt.getTime() - policy.earlyMinutes * 60_000);
+  const policy = mockOperationWindow(
+    options.parameterKey,
+    options.defaults,
+    observedAt,
+  );
+  const earliestAt = new Date(
+    startsAt.getTime() - policy.earlyMinutes * 60_000,
+  );
   const latestAt = new Date(endsAt.getTime() + policy.lateMinutes * 60_000);
   const snapshot = {
     ...policy,
@@ -311,7 +553,9 @@ const assertMockOperationWindow = (options: {
     observedAt: observedAt.toISOString(),
   };
   if (observedAt < earliestAt)
-    throw new Error(`未到允许操作窗口，最早可于 ${earliestAt.toISOString()} 执行`);
+    throw new Error(
+      `未到允许操作窗口，最早可于 ${earliestAt.toISOString()} 执行`,
+    );
   if (observedAt <= latestAt) return { ...snapshot, decision: "WITHIN_WINDOW" };
   if (!hasMockRole("ADMIN", "SUPER_ADMIN"))
     throw new Error("已超过允许操作窗口，仅管理员可历史补录");
@@ -384,6 +628,11 @@ const creationCommandHash = (command: unknown) => {
   }
   return `${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
 };
+
+const referralInviteTokenHash = (inviteCode: string) =>
+  ["a", "b", "c", "d"]
+    .map((salt) => creationCommandHash({ salt, inviteCode }))
+    .join("");
 
 const requireMasterReason = (value: unknown) => {
   const reason = text(value);
@@ -536,6 +785,53 @@ const applyMockInventoryDelta = (
   return { stockBefore, stockAfter, locationId, batchCode };
 };
 
+const mockInventoryTransactionResponse = (transaction: any) =>
+  Object.fromEntries(
+    Object.entries({
+      id: transaction.id,
+      itemId: transaction.itemId,
+      type: transaction.type,
+      quantity: transaction.quantity,
+      stockBefore: transaction.stockBefore,
+      stockAfter: transaction.stockAfter,
+      unitCostCents: transaction.unitCostCents,
+      orderItemId: transaction.orderItemId,
+      reason: transaction.reason,
+      createdAt: transaction.createdAt,
+    }).filter(([, value]) => value !== undefined),
+  );
+
+const mockPurchaseReceiptResponse = (receipt: any) => {
+  const {
+    idempotencyKey: _idempotencyKey,
+    operatorId: _operatorId,
+    ...response
+  } = receipt;
+  return response;
+};
+
+const mockPurchaseOrderResponse = (order: any) => ({
+  ...order,
+  receipts: Array.isArray(order.receipts)
+    ? order.receipts.map(mockPurchaseReceiptResponse)
+    : [],
+});
+
+const mockStocktakeResponse = (stocktake: any) => {
+  const { postIdempotencyKey: _postIdempotencyKey, ...response } = stocktake;
+  return response;
+};
+
+const mockInventoryOperationResponse = (operation: any) => {
+  const {
+    postIdempotencyKey: _postIdempotencyKey,
+    sourceTransactionId: _sourceTransactionId,
+    targetTransactionId: _targetTransactionId,
+    ...response
+  } = operation;
+  return response;
+};
+
 const mockInventoryItemContext = (item: any) => {
   const suppliers = getInventorySuppliers();
   const locations = getInventoryLocations();
@@ -555,17 +851,22 @@ const mockInventoryItemContext = (item: any) => {
       })),
     transactions: getInventoryTransactions()
       .filter((entry) => entry.itemId === item.id)
-      .slice(0, 20),
+      .slice(0, 20)
+      .map(mockInventoryTransactionResponse),
     purchaseOrderLines: getPurchaseOrders()
       .flatMap((order) =>
         (order.lines || [])
           .filter((line: any) => line.itemId === item.id)
-          .map((line: any) => ({ ...line, purchaseOrder: order })),
+          .map((line: any) => ({
+            ...line,
+            purchaseOrder: mockPurchaseOrderResponse(order),
+          })),
       )
       .slice(0, 10),
     inventoryDocuments: getInventoryOperations()
       .filter((entry) => entry.itemId === item.id)
-      .slice(0, 10),
+      .slice(0, 10)
+      .map(mockInventoryOperationResponse),
   };
 };
 
@@ -573,7 +874,8 @@ const mockSupplierContext = (supplier: any) => {
   const items = getGoods().filter((entry) => entry.supplierId === supplier.id);
   const purchaseOrders = getPurchaseOrders()
     .filter((entry) => entry.supplierId === supplier.id)
-    .slice(0, 10);
+    .slice(0, 10)
+    .map(mockPurchaseOrderResponse);
   return {
     ...supplier,
     items: items.map(mockInventoryItemContext),
@@ -595,7 +897,8 @@ const mockLocationContext = (location: any) => {
   );
   const stocktakes = getStocktakes()
     .filter((entry) => entry.locationId === location.id)
-    .slice(0, 10);
+    .slice(0, 10)
+    .map(mockStocktakeResponse);
   const operations = getInventoryOperations();
   return {
     ...location,
@@ -604,10 +907,12 @@ const mockLocationContext = (location: any) => {
     stocktakes,
     sourceOperations: operations
       .filter((entry) => entry.sourceLocationId === location.id)
-      .slice(0, 10),
+      .slice(0, 10)
+      .map(mockInventoryOperationResponse),
     targetOperations: operations
       .filter((entry) => entry.targetLocationId === location.id)
-      .slice(0, 10),
+      .slice(0, 10)
+      .map(mockInventoryOperationResponse),
     _count: {
       stockBalances: balances.length,
       defaultItems: defaultItems.length,
@@ -659,23 +964,148 @@ const beginMockOrderCreation = (
   return { tracked: true, replayed: false, key, memberId, commandHash };
 };
 
+const mockOrderResponse = (value: any) => {
+  if (value?.registration) {
+    return {
+      status: value.status ?? value.registration.status,
+      waitlistPosition: value.waitlistPosition ?? null,
+      registration: {
+        ...(value.registration.name ? { name: value.registration.name } : {}),
+        ...(value.registration.category
+          ? { category: value.registration.category }
+          : {}),
+        status: value.registration.status,
+        ...(value.registration.paymentDueAt
+          ? { paymentDueAt: value.registration.paymentDueAt }
+          : {}),
+      },
+    };
+  }
+  if (
+    !value ||
+    typeof value !== "object" ||
+    (!value.orderNo && !value.businessType)
+  ) {
+    return value;
+  }
+  const compact = (record: Record<string, any>) =>
+    Object.fromEntries(
+      Object.entries(record).filter(([, entry]) => entry !== undefined),
+    );
+  const team = value.eventTeam;
+  return compact({
+    id: value.id,
+    orderNo: value.orderNo,
+    businessType: value.businessType,
+    subjectAccount: value.subjectAccount,
+    paymentChannel: value.paymentChannel,
+    sourceChannel: value.sourceChannel,
+    status: value.status,
+    title: value.title,
+    listAmountCents: value.listAmountCents,
+    discountCents: value.discountCents,
+    payableCents: value.payableCents,
+    paidCents: value.paidCents,
+    refundedCents: value.refundedCents,
+    paidAt: value.paidAt,
+    completedAt: value.completedAt,
+    cancelledAt: value.cancelledAt,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    member: value.member?.displayName
+      ? { displayName: value.member.displayName }
+      : undefined,
+    items: Array.isArray(value.items)
+      ? value.items.map((item: any) =>
+          compact({
+            id: item.id,
+            itemType: item.itemType,
+            itemId: item.itemId,
+            name: item.name,
+            quantity: item.quantity,
+            unitPriceCents: item.unitPriceCents,
+            amountCents: item.amountCents,
+          }),
+        )
+      : undefined,
+    payments: Array.isArray(value.payments)
+      ? value.payments.map((payment: any) =>
+          compact({
+            id: payment.id,
+            paymentNo: payment.paymentNo,
+            channel: payment.channel,
+            amountCents: payment.amountCents,
+            status: payment.status,
+            paidAt: payment.paidAt,
+            createdAt: payment.createdAt,
+            updatedAt: payment.updatedAt,
+          }),
+        )
+      : undefined,
+    refunds: Array.isArray(value.refunds)
+      ? value.refunds.map((refund: any) =>
+          compact({
+            id: refund.id,
+            refundNo: refund.refundNo,
+            amountCents: refund.amountCents,
+            reason: refund.reason,
+            originalOrderStatus: refund.originalOrderStatus,
+            status: refund.status,
+            requestedAt: refund.requestedAt,
+            approvedAt: refund.approvedAt,
+            completedAt: refund.completedAt,
+          }),
+        )
+      : undefined,
+    bookings: Array.isArray(value.bookings)
+      ? value.bookings.map((booking: any) =>
+          compact({
+            id: booking.id,
+            status: booking.status,
+            startsAt: booking.startsAt,
+            endsAt: booking.endsAt,
+            checkedInAt: booking.checkedInAt,
+            completedAt: booking.completedAt,
+            court: booking.court
+              ? compact({
+                  id: booking.court.id,
+                  code: booking.court.code,
+                  name: booking.court.name,
+                })
+              : undefined,
+          }),
+        )
+      : undefined,
+    eventTeam: team
+      ? compact({
+          id: team.id,
+          name: team.name,
+          category: team.category,
+          status: team.status,
+          paymentDueAt: team.paymentDueAt,
+        })
+      : undefined,
+  });
+};
+
 const finishMockOrderCreation = (
   attempt: MockCreationAttempt,
   response: any,
 ): any => {
+  const transportResponse = mockOrderResponse(response);
   if (attempt.tracked && !attempt.replayed) {
     saveOrderCreations([
       {
         key: attempt.key,
         memberId: attempt.memberId,
         commandHash: attempt.commandHash,
-        response: ok(response),
+        response: ok(transportResponse),
         createdAt: new Date().toISOString(),
       },
       ...getOrderCreations(),
     ]);
   }
-  return ok(response);
+  return ok(transportResponse);
 };
 
 type MockTrainingCreationAttempt = {
@@ -869,24 +1299,65 @@ const trainingCorrectionView = (correction: any) => {
         (item) => item.id === ledger.attendance.sessionId,
       )
     : null;
+  const trainingClass = lesson
+    ? getTrainingProducts()
+        .flatMap((product) => product.classes || [])
+        .find((item: any) => item.id === lesson.classId)
+    : null;
+  const recognitionView = (recognition: any) =>
+    recognition
+      ? {
+          id: recognition.id,
+          type: recognition.type,
+          sequence: recognition.sequence,
+          effectiveRevenueCents: recognition.effectiveRevenueCents,
+          createdAt: recognition.createdAt,
+        }
+      : null;
   return {
-    ...correction,
-    recognition: ledger?.recognition || null,
-    reversalRecognition: reversal,
+    id: correction.id,
+    status: correction.status,
+    reason: correction.reason,
+    reviewReason: correction.reviewReason || null,
+    requestedAt: correction.requestedAt,
+    reviewedAt: correction.reviewedAt || null,
+    recognitionId: correction.recognitionId,
+    recognition: recognitionView(ledger?.recognition),
+    reversalRecognition: recognitionView(reversal),
     attendance: ledger
       ? {
-          ...ledger.attendance,
-          session: lesson,
+          id: ledger.attendance.id,
+          status: ledger.attendance.status,
+          consumedSessions: ledger.attendance.consumedSessions || 0,
+          confirmedRevenueCents: ledger.attendance.confirmedRevenueCents || 0,
+          growthPointsAwarded: ledger.attendance.growthPointsAwarded || 0,
+          feedback: ledger.attendance.feedback || null,
+          session: lesson
+            ? {
+                id: lesson.id,
+                startsAt: lesson.startsAt,
+                endsAt: lesson.endsAt,
+                status: lesson.status,
+                class: trainingClass
+                  ? { id: trainingClass.id, name: trainingClass.name }
+                  : null,
+              }
+            : null,
           enrollment: {
             id: ledger.enrollment.id,
             status: ledger.enrollment.status,
-            consumedSessions: ledger.enrollment.consumedSessions,
-            confirmedRevenueCents: ledger.enrollment.confirmedRevenueCents,
-            prepaidBalanceCents: ledger.enrollment.prepaidBalanceCents,
-            growthPointsBalance: ledger.enrollment.growthPointsBalance || 0,
-            student: ledger.enrollment.student || null,
-            buyer: ledger.enrollment.buyer || null,
-            product: ledger.enrollment.product,
+            student: ledger.enrollment.student
+              ? {
+                  id: ledger.enrollment.student.id,
+                  displayName: ledger.enrollment.student.displayName,
+                }
+              : null,
+            buyer: ledger.enrollment.buyer
+              ? {
+                  id: ledger.enrollment.buyer.id || ledger.enrollment.buyerId,
+                  displayName: ledger.enrollment.buyer.displayName,
+                }
+              : mockActorIdentity(ledger.enrollment.buyerId),
           },
         }
       : null,
@@ -995,6 +1466,22 @@ const postMockTrainingConsume = (
   return recognition;
 };
 
+const accountTransactionView = (transaction: any, accountType?: string) => ({
+  id: transaction.id,
+  kind: transaction.kind,
+  amount: transaction.amount,
+  balanceBefore: transaction.balanceBefore,
+  balanceAfter: transaction.balanceAfter,
+  reasonCode: transaction.reasonCode,
+  reason: transaction.reason,
+  expiresAt: transaction.expiresAt || null,
+  createdAt: transaction.createdAt,
+  account: accountType ? { type: accountType } : undefined,
+  operator: transaction.operatorId
+    ? { displayName: mockActorIdentity(transaction.operatorId)?.displayName }
+    : null,
+});
+
 const accountAdjustmentView = (request: any) => {
   const account = Object.values(getMemberAccounts())
     .flat()
@@ -1005,16 +1492,142 @@ const accountAdjustmentView = (request: any) => {
       ) || null
     : null;
   return {
-    ...request,
+    id: request.id,
+    amount: request.amount,
+    reason: request.reason,
+    status: request.status,
+    reviewReason: request.reviewReason || null,
+    reviewedAt: request.reviewedAt || null,
+    createdAt: request.createdAt,
+    updatedAt: request.updatedAt,
+    isOwnRequest: request.requestedById === mockUser().id,
     account: account
-      ? { ...account, user: mockMemberIdentity(account.userId) }
+      ? {
+          type: account.type,
+          balance: account.balance,
+          frozenBalance: account.frozenBalance,
+          user: {
+            displayName: mockMemberIdentity(account.userId)?.displayName,
+            phone: mockMemberIdentity(account.userId)?.phone,
+          },
+        }
       : null,
-    requestedBy: mockActorIdentity(request.requestedById),
+    requestedBy: {
+      displayName: mockActorIdentity(request.requestedById)?.displayName,
+    },
     reviewedBy: request.reviewedById
-      ? mockActorIdentity(request.reviewedById)
+      ? { displayName: mockActorIdentity(request.reviewedById)?.displayName }
       : null,
-    transaction,
+    transaction: transaction
+      ? accountTransactionView(transaction, account?.type)
+      : null,
   };
+};
+
+const trainingSettlementView = (settlement: any) => {
+  return {
+    id: settlement.id,
+    periodStart: settlement.periodStart,
+    periodEnd: settlement.periodEnd,
+    effectiveRevenueCents: settlement.effectiveRevenueCents,
+    contractRateBps: settlement.contractRateBps,
+    venueContributionCents: settlement.venueContributionCents,
+    venueFeeCents: settlement.venueFeeCents,
+    trainingPayableVenueCents: settlement.trainingPayableVenueCents,
+    coachCostCents: settlement.coachCostCents,
+    assistantCostCents: settlement.assistantCostCents,
+    materialCostCents: settlement.materialCostCents,
+    acquisitionCostCents: settlement.acquisitionCostCents,
+    marketingCostCents: settlement.marketingCostCents,
+    occupiedCourtHours: settlement.occupiedCourtHours,
+    cashContributionMarginCents: settlement.cashContributionMarginCents,
+    status: settlement.status,
+    confirmedAt: settlement.confirmedAt || null,
+    createdAt: settlement.createdAt,
+    updatedAt: settlement.updatedAt,
+    isOwnCreator: settlement.createdById === mockUser().id,
+    createdBy: settlement.createdBy?.displayName
+      ? { displayName: settlement.createdBy.displayName }
+      : null,
+    workflowHistory: (settlement.workflowHistory || []).map((entry: any) => ({
+      action: entry.action,
+      actor: entry.actor || entry.actorName || null,
+      reason: entry.reason || null,
+      at: entry.at || entry.createdAt,
+      from: entry.from ?? entry.oldValue?.status ?? null,
+      to: entry.to ?? entry.newValue?.status ?? null,
+    })),
+  };
+};
+
+const allianceSettlementView = (settlement: any) => ({
+  id: settlement.id,
+  merchantId: settlement.merchantId,
+  merchant: settlement.merchant
+    ? {
+        id: settlement.merchant.id,
+        code: settlement.merchant.code,
+        name: settlement.merchant.name,
+      }
+    : undefined,
+  periodStart: settlement.periodStart,
+  periodEnd: settlement.periodEnd,
+  issuedCount: settlement.issuedCount,
+  claimedCount: settlement.claimedCount,
+  redeemedCount: settlement.redeemedCount,
+  effectiveNewCustomers: settlement.effectiveNewCustomers,
+  attributedGmvCents: settlement.attributedGmvCents,
+  attributedGrossProfitCents: settlement.attributedGrossProfitCents,
+  cooperationFeeCents: settlement.cooperationFeeCents,
+  roi: settlement.roi,
+  status: settlement.status,
+  confirmedAt: settlement.confirmedAt || null,
+  settledAt: settlement.settledAt || null,
+  createdAt: settlement.createdAt,
+  updatedAt: settlement.updatedAt,
+  detail: {
+    workflowState: settlement.detail?.workflowState || settlement.status,
+    workflowHistory: (settlement.detail?.workflowHistory || []).map(
+      (entry: any) => ({
+        action: entry.action,
+        state: entry.state,
+        reason: entry.reason || null,
+        at: entry.at,
+      }),
+    ),
+  },
+});
+
+const venueClosureView = (closure: any) => ({
+  id: closure.id,
+  courtId: closure.courtId,
+  startsAt: closure.startsAt,
+  endsAt: closure.endsAt,
+  reason: closure.reason,
+  status: closure.status,
+  cancelledAt: closure.cancelledAt || null,
+  cancelReason: closure.cancelReason || null,
+  court: closure.court
+    ? {
+        id: closure.court.id,
+        code: closure.court.code,
+        name: closure.court.name,
+        enabled: closure.court.enabled,
+      }
+    : undefined,
+  createdBy: closure.createdBy
+    ? { displayName: closure.createdBy.displayName }
+    : null,
+  cancelledBy: closure.cancelledBy
+    ? { displayName: closure.cancelledBy.displayName }
+    : null,
+  createdAt: closure.createdAt,
+  updatedAt: closure.updatedAt,
+});
+
+const couponRedemptionView = (coupon: any) => {
+  const { idempotencyKey: _idempotencyKey, ...response } = coupon;
+  return response;
 };
 
 const GAME_CAPACITY_MIN = 4;
@@ -1209,6 +1822,349 @@ const requireEvent = (eventId: string) => {
   return getEventDetail(eventId);
 };
 
+const PUBLIC_GAME_STATUSES = ["OPEN", "FULL", "IN_PROGRESS", "COMPLETED"];
+const PUBLIC_EVENT_STATUSES = ["OPEN", "FULL", "IN_PROGRESS", "COMPLETED"];
+
+const publicGame = (game: any) => ({
+  id: game.id,
+  title: game.title,
+  level: game.level,
+  status: game.status,
+  startsAt: game.startsAt,
+  endsAt: game.endsAt,
+  capacity: game.capacity,
+  feeCents: game.feeCents,
+  newcomerOnly: Boolean(game.newcomerOnly),
+  description: game.description || null,
+  host: game.host
+    ? {
+        displayName: game.host.displayName,
+        avatarUrl: game.host.avatarUrl || null,
+      }
+    : null,
+  _count: {
+    registrations: Number(game._count?.registrations || 0),
+  },
+});
+
+const publicEvent = (event: any) => ({
+  id: event.id,
+  code: event.code,
+  name: event.name,
+  startsAt: event.startsAt,
+  registrationEndsAt: event.registrationEndsAt,
+  status: event.status,
+  capacityPeople: event.capacityPeople,
+  minimumPeople: event.minimumPeople,
+  totalRounds: event.totalRounds,
+  currentRound: event.currentRound,
+  feeCents: event.feeCents,
+  memberFeeCents: event.memberFeeCents ?? null,
+  sponsor: event.sponsor ?? null,
+});
+
+const publicEventRegistration = (registration: any, order?: any) => ({
+  id: registration.id,
+  name: registration.name,
+  playerAName: registration.playerAName,
+  playerBName: registration.playerBName,
+  category: registration.category,
+  status: registration.status,
+  paymentDueAt: registration.paymentDueAt,
+  waitlistedAt: registration.waitlistedAt,
+  promotedAt: registration.promotedAt,
+  cancellationPending: Boolean(registration.cancellationPending),
+  cancelReason: registration.cancelReason,
+  cancelRequestedAt: registration.cancelRequestedAt,
+  cancellationResolvedAt: registration.cancellationResolvedAt,
+  cancelledAt: registration.cancelledAt,
+  checkedInAt: registration.checkedInAt,
+  points: registration.points,
+  wins: registration.wins,
+  losses: registration.losses,
+  scoreDiff: registration.scoreDiff,
+  finalRank: registration.finalRank,
+  eventPointsAwarded: registration.eventPointsAwarded,
+  order: order ? mockOrderResponse(order) : null,
+});
+
+const publicEventPrizeAward = (award: any) => ({
+  id: award.id,
+  awardName: award.awardName,
+  finalRank: award.finalRank,
+  recipientNames: award.recipientNames,
+  quantity: award.quantity,
+  status: award.status,
+  note: award.note,
+  receivedByName: award.receivedByName,
+  receiptNote: award.receiptNote,
+  issuedAt: award.issuedAt,
+  receivedAt: award.receivedAt,
+  team: award.team
+    ? {
+        id: award.team.id,
+        name: award.team.name,
+        finalRank: award.team.finalRank,
+      }
+    : undefined,
+  inventoryItem: award.inventoryItem
+    ? {
+        id: award.inventoryItem.id,
+        sku: award.inventoryItem.sku,
+        name: award.inventoryItem.name,
+      }
+    : undefined,
+  operator: award.operator
+    ? { id: award.operator.id, displayName: award.operator.displayName }
+    : undefined,
+  signedBy: award.signedBy
+    ? { id: award.signedBy.id, displayName: award.signedBy.displayName }
+    : undefined,
+});
+
+const publicEventDetail = (event: any) => ({
+  ...publicEvent(event),
+  standings:
+    event.status === "COMPLETED"
+      ? (event.teams || [])
+          .filter(
+            (team: any) =>
+              team.status === "COMPLETED" && Number(team.finalRank || 0) > 0,
+          )
+          .sort(
+            (left: any, right: any) =>
+              Number(left.finalRank) - Number(right.finalRank),
+          )
+          .map((team: any) => ({
+            name: team.name,
+            category: team.category,
+            points: team.points,
+            wins: team.wins,
+            losses: team.losses,
+            scoreDiff: team.scoreDiff,
+            finalRank: team.finalRank,
+          }))
+      : [],
+});
+
+const managedGame = (game: any) => ({
+  id: game.id,
+  code: game.code,
+  title: game.title,
+  level: game.level,
+  status: game.status,
+  startsAt: game.startsAt,
+  endsAt: game.endsAt,
+  capacity: game.capacity,
+  feeCents: game.feeCents,
+  newcomerOnly: Boolean(game.newcomerOnly),
+  description: game.description || null,
+  cancelReason: game.cancelReason || null,
+  cancelledAt: game.cancelledAt || null,
+  host: game.host
+    ? {
+        displayName: game.host.displayName,
+        avatarUrl: game.host.avatarUrl || null,
+      }
+    : null,
+  registrations: (game.registrations || []).map((registration: any) => {
+    const order =
+      registration.order ||
+      getOrders().find((item: any) => item.id === registration.orderId);
+    return {
+      id: registration.id,
+      status: registration.status,
+      checkedInAt: registration.checkedInAt || null,
+      createdAt: registration.createdAt,
+      user: {
+        displayName:
+          registration.user?.displayName ||
+          registration.displayName ||
+          "报名球友",
+        avatarUrl: registration.user?.avatarUrl || null,
+      },
+      order: order ? { status: order.status } : null,
+    };
+  }),
+});
+
+const gameCommandResponse = (game: any) => ({
+  id: game.id,
+  code: game.code,
+  title: game.title,
+  level: game.level,
+  status: game.status,
+  startsAt: game.startsAt,
+  endsAt: game.endsAt,
+  capacity: game.capacity,
+  feeCents: game.feeCents,
+  newcomerOnly: Boolean(game.newcomerOnly),
+  description: game.description || null,
+  cancelReason: game.cancelReason || null,
+  cancelledAt: game.cancelledAt || null,
+});
+
+const gameCancellationResponse = (value: any) => {
+  const policy = value.game?.cancelPolicySnapshot || {};
+  return {
+    game: gameCommandResponse(value.game),
+    cancelledBookingCount: Number(value.cancelledBookingCount || 0),
+    cancelledPendingOrders: Number(
+      value.cancelledPendingOrders ?? policy.pendingOrderCount ?? 0,
+    ),
+    cancelledRegistrationCount: Number(
+      value.cancelledRegistrationCount ??
+        value.cancelledRegistrationIds?.length ??
+        policy.registrationCount ??
+        0,
+    ),
+    refundRequestCount: Number(
+      value.refundRequestCount ??
+        value.refundRequests?.length ??
+        policy.refundRequestCount ??
+        0,
+    ),
+    refundRequestedCents: Number(policy.refundRequestedCents || 0),
+    idempotent: Boolean(value.idempotent),
+  };
+};
+
+const gameRegistrationCommandResponse = (registration: any) => ({
+  id: registration.id,
+  status: registration.status,
+  checkedInAt: registration.checkedInAt || null,
+});
+
+const eventCommandResponse = (event: any) => ({
+  id: event.id,
+  code: event.code,
+  name: event.name,
+  status: event.status,
+  startsAt: event.startsAt,
+  endsAt: event.endsAt,
+  cancelReason: event.cancelReason || null,
+  cancelledAt: event.cancelledAt || null,
+});
+
+const eventCancellationResponse = (value: any) => {
+  const policy = value.event?.cancelPolicySnapshot || {};
+  return {
+    event: eventCommandResponse(value.event),
+    cancelledPendingOrders: Number(
+      value.cancelledPendingOrders ??
+        policy.pendingOrders ??
+        policy.cancelledPendingOrders ??
+        0,
+    ),
+    cancelledWaitlist: Number(
+      value.cancelledWaitlist ??
+        policy.waitlistedTeams ??
+        policy.cancelledWaitlist ??
+        0,
+    ),
+    refundRequestCount: Number(
+      value.refundRequestCount ??
+        value.refundRequests?.length ??
+        policy.refundRequestCount ??
+        0,
+    ),
+    refundRequestedCents: Number(policy.refundRequestedCents || 0),
+    idempotent: Boolean(value.idempotent),
+  };
+};
+
+const eventTeamCommandResponse = (team: any) => ({
+  id: team.id,
+  name: team.name,
+  category: team.category,
+  status: team.status,
+  checkedInAt: team.checkedInAt || null,
+  cancellationPending: Boolean(team.cancellationPending),
+});
+
+const managedEventSummary = (event: any) => ({
+  ...publicEvent(event),
+  cancelReason: event.cancelReason || null,
+  cancelledAt: event.cancelledAt || null,
+  _count: {
+    teams: Number(
+      event._count?.teams ??
+        (event.teams || []).filter(
+          (team: any) => !["CANCELLED", "REFUNDED"].includes(team.status),
+        ).length,
+    ),
+  },
+});
+
+const managedEventDetail = (event: any) => ({
+  ...managedEventSummary(event),
+  teams: (event.teams || []).map((team: any) => {
+    const order =
+      team.order || getOrders().find((item: any) => item.id === team.orderId);
+    return {
+      id: team.id,
+      name: team.name,
+      playerAName: team.playerAName,
+      playerBName: team.playerBName,
+      category: team.category,
+      seed: team.seed,
+      status: team.status,
+      waitlistedAt: team.waitlistedAt || null,
+      promotedAt: team.promotedAt || null,
+      paymentDueAt: team.paymentDueAt || null,
+      cancelReason: team.cancelReason || null,
+      cancelRequestedAt: team.cancelRequestedAt || null,
+      cancellationPending: Boolean(team.cancellationPending),
+      cancellationResolvedAt: team.cancellationResolvedAt || null,
+      cancelledAt: team.cancelledAt || null,
+      checkedInAt: team.checkedInAt || null,
+      points: Number(team.points || 0),
+      wins: Number(team.wins || 0),
+      losses: Number(team.losses || 0),
+      scoreDiff: Number(team.scoreDiff || 0),
+      finalRank: team.finalRank ?? null,
+      eventPointsAwarded: Number(team.eventPointsAwarded || 0),
+      order: order ? { status: order.status } : null,
+    };
+  }),
+  matches: (event.matches || []).map((match: any) => ({
+    id: match.id,
+    round: match.round,
+    courtLabel: match.courtLabel || null,
+    teamAId: match.teamAId,
+    teamBId: match.teamBId || null,
+    startingScoreA: Number(match.startingScoreA || 0),
+    startingScoreB: Number(match.startingScoreB || 0),
+    scoreA: match.scoreA ?? null,
+    scoreB: match.scoreB ?? null,
+    status: match.status,
+    correctionReason: match.correctionReason || null,
+    submittedAt: match.submittedAt || null,
+    confirmedAt: match.confirmedAt || null,
+  })),
+});
+
+const mockPaymentCommandResponse = (order: any) => ({
+  status: order.paymentStatus || "SUCCEEDED",
+  amountCents: Number(order.paymentAmountCents || order.payableCents || 0),
+  channel: order.paymentChannel,
+  createdAt: order.paymentCreatedAt || order.paidAt,
+  paidAt: order.paidAt || null,
+  ...(order.paymentChannel === "WECHAT" && order.wechatPay
+    ? { wechatPay: order.wechatPay }
+    : {}),
+});
+
+const mockRefundCommandResponse = (refund: any) => ({
+  id: refund.id,
+  status: refund.status,
+  amountCents: Number(refund.amountCents || 0),
+  reason: refund.reason,
+  requestedAt: refund.requestedAt,
+  approvedAt: refund.approvedAt || null,
+  completedAt: refund.completedAt || null,
+});
+
 const eventStartingScore = (
   categoryA: unknown,
   categoryB: unknown,
@@ -1288,8 +2244,7 @@ const mockReconciliationTotals = (date: string) => {
   ];
   const orders = getOrders();
   const paidOrders = orders.filter(
-    (order) =>
-      inDay(order.paidAt) && finalOrderStatuses.includes(order.status),
+    (order) => inDay(order.paidAt) && finalOrderStatuses.includes(order.status),
   );
   const completedRefunds = orders
     .flatMap((order) => order.refunds || [])
@@ -1347,8 +2302,7 @@ const mockReconciliationTotals = (date: string) => {
       0,
     ),
     trainingSettlementVenueContributionCents: trainingSettlements.reduce(
-      (sum, settlement) =>
-        sum + Number(settlement.venueContributionCents || 0),
+      (sum, settlement) => sum + Number(settlement.venueContributionCents || 0),
       0,
     ),
     allianceAttributedGmvCents: allianceSettlements.reduce(
@@ -1390,10 +2344,15 @@ const mockReconciliationBlockers = (date: string) => {
     if (!["VENUE", "GAME", "EVENT"].includes(order.businessType)) return false;
     if (order.completedAt) return false;
     if (
-      !["PAID", "CHECKED_IN", "COMPLETED", "REFUND_PENDING", "PARTIALLY_REFUNDED"].includes(
-        order.status,
-      )
-    ) return false;
+      ![
+        "PAID",
+        "CHECKED_IN",
+        "COMPLETED",
+        "REFUND_PENDING",
+        "PARTIALLY_REFUNDED",
+      ].includes(order.status)
+    )
+      return false;
     if (order.businessType === "VENUE") {
       return (order.bookings || []).some(
         (booking: any) =>
@@ -1410,8 +2369,8 @@ const mockReconciliationBlockers = (date: string) => {
       );
       return Boolean(
         game &&
-          new Date(game.endsAt || 0).getTime() < dayEnd &&
-          ["PAID", "CHECKED_IN"].includes(registration?.status),
+        new Date(game.endsAt || 0).getTime() < dayEnd &&
+        ["PAID", "CHECKED_IN"].includes(registration?.status),
       );
     }
     const eventId = order.eventId || order.parameterSnapshot?.eventId;
@@ -1419,8 +2378,8 @@ const mockReconciliationBlockers = (date: string) => {
     const team = detail?.teams?.find((item: any) => item.orderId === order.id);
     return Boolean(
       detail &&
-        new Date(detail.startsAt || 0).getTime() < dayEnd &&
-        ["PAID", "CHECKED_IN"].includes(team?.status),
+      new Date(detail.startsAt || 0).getTime() < dayEnd &&
+      ["PAID", "CHECKED_IN"].includes(team?.status),
     );
   }).length;
   const enrollments = getEnrollments();
@@ -1510,6 +2469,41 @@ const mockReconciliationBlockers = (date: string) => {
   ];
 };
 
+const mockDataErasureRequestView = (
+  request: any,
+  userScope: "none" | "basic" | "admin" = "none",
+) => ({
+  id: request.id,
+  userId: request.userId,
+  status: request.status,
+  reason: request.reason,
+  reviewedById: request.reviewedById ?? null,
+  reviewReason: request.reviewReason ?? null,
+  requestedAt: request.requestedAt,
+  reviewedAt: request.reviewedAt ?? null,
+  completedAt: request.completedAt ?? null,
+  createdAt: request.createdAt,
+  updatedAt: request.updatedAt,
+  ...(userScope !== "none" && request.user
+    ? {
+        user: {
+          id: request.user.id,
+          displayName: request.user.displayName,
+          status: request.user.status,
+          ...(userScope === "admin"
+            ? { phone: request.user.phone ?? null }
+            : {}),
+        },
+      }
+    : {}),
+  reviewedBy: request.reviewedBy
+    ? {
+        id: request.reviewedBy.id,
+        displayName: request.reviewedBy.displayName,
+      }
+    : null,
+});
+
 export async function mockRequest<T>(
   method: string,
   url: string,
@@ -1529,7 +2523,7 @@ export async function mockRequest<T>(
   );
   if (consignmentOperation.handled) return ok(consignmentOperation.value);
   if (url === "/parameters" && method === "GET") {
-    requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
+    requireMockRole("ADMIN", "SUPER_ADMIN");
     const prefix = text(data.prefix);
     return ok(
       getSystemParameters().filter(
@@ -1620,9 +2614,42 @@ export async function mockRequest<T>(
   if (url === "/audit-logs" && method === "GET") {
     requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
     const objectType = text(data.objectType);
-    const items = getAuditLogs().filter(
-      (item) => !objectType || item.objectType === objectType,
+    const fullAuditAccess = hasMockRole("ADMIN", "SUPER_ADMIN");
+    const financeObjectTypes = new Set([
+      "AccountAdjustmentRequest",
+      "AllianceSettlement",
+      "ConsignmentPayableEntry",
+      "ConsignmentSettlement",
+      "Export",
+      "HostReward",
+      "Order",
+      "Payment",
+      "ReconciliationPeriod",
+      "ReferralReward",
+      "Refund",
+      "TrainingSettlement",
+    ]);
+    if (!fullAuditAccess && objectType && !financeObjectTypes.has(objectType)) {
+      throw new Error("财务仅可查询财务职责范围内的审计记录");
+    }
+    const rows = getAuditLogs().filter(
+      (item) =>
+        (!objectType || item.objectType === objectType) &&
+        (fullAuditAccess || financeObjectTypes.has(text(item.objectType))),
     );
+    const items = fullAuditAccess
+      ? rows
+      : rows.map((item) => ({
+          id: item.id,
+          actorRole: item.actorRole,
+          action: item.action,
+          objectType: item.objectType,
+          objectId: item.objectId,
+          reason: item.reason,
+          result: item.result,
+          createdAt: item.createdAt,
+          actor: item.actor ? { displayName: item.actor.displayName } : null,
+        }));
     return ok({ items, total: items.length, page: 1, pageSize: 100 });
   }
   if (url === "/governance/users" && method === "GET") {
@@ -1784,7 +2811,8 @@ export async function mockRequest<T>(
         .filter((item) => item.userId === mockUser().id)
         .sort((left, right) =>
           String(right.requestedAt).localeCompare(String(left.requestedAt)),
-        ),
+        )
+        .map((item) => mockDataErasureRequestView(item)),
     );
   }
   if (url === "/privacy/erasure-requests" && method === "POST") {
@@ -1810,7 +2838,7 @@ export async function mockRequest<T>(
         replay.requestCommandHash !== commandHash
       )
         throw new Error("注销申请幂等键已用于不同账号或命令");
-      return ok(replay);
+      return ok(mockDataErasureRequestView(replay, "basic"));
     }
     if (
       requests.some(
@@ -1865,7 +2893,7 @@ export async function mockRequest<T>(
       },
       ...getAuditLogs(),
     ]);
-    return ok(created);
+    return ok(mockDataErasureRequestView(created, "basic"));
   }
   const erasureCancelMatch = url.match(
     /^\/privacy\/erasure-requests\/([^/]+)\/cancel$/,
@@ -1896,7 +2924,7 @@ export async function mockRequest<T>(
         replay.status !== "CANCELLED"
       )
         throw new Error("注销处理幂等键已用于不同申请、操作人或命令");
-      return ok(replay);
+      return ok(mockDataErasureRequestView(replay, "basic"));
     }
     if (request.status !== "REQUESTED")
       throw new Error("注销申请已进入终态，不能重复处理");
@@ -1930,7 +2958,7 @@ export async function mockRequest<T>(
       },
       ...getAuditLogs(),
     ]);
-    return ok(request);
+    return ok(mockDataErasureRequestView(request, "basic"));
   }
   if (url === "/privacy/erasure-requests" && method === "GET") {
     requireMockRole("ADMIN", "SUPER_ADMIN");
@@ -1940,7 +2968,12 @@ export async function mockRequest<T>(
       .sort((left, right) =>
         String(left.requestedAt).localeCompare(String(right.requestedAt)),
       );
-    return ok({ items, total: items.length, page: 1, pageSize: 100 });
+    return ok({
+      items: items.map((item) => mockDataErasureRequestView(item, "admin")),
+      total: items.length,
+      page: 1,
+      pageSize: 100,
+    });
   }
   const erasureBlockersMatch = url.match(
     /^\/privacy\/erasure-requests\/([^/]+)\/blockers$/,
@@ -2060,7 +3093,7 @@ export async function mockRequest<T>(
         replay.status !== target
       )
         throw new Error("注销处理幂等键已用于不同申请、操作人或命令");
-      return ok(replay);
+      return ok(mockDataErasureRequestView(replay, "basic"));
     }
     if (request.status !== "REQUESTED")
       throw new Error("注销申请已进入终态，不能重复处理");
@@ -2130,7 +3163,7 @@ export async function mockRequest<T>(
       },
       ...getAuditLogs(),
     ]);
-    return ok(request);
+    return ok(mockDataErasureRequestView(request, "basic"));
   }
   if (url === "/governance/risk-events" && method === "GET") {
     requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
@@ -2570,7 +3603,8 @@ export async function mockRequest<T>(
         ownerRoles: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
         createdAt: lead.createdAt,
         dueAt: lead.slaDueAt,
-        action: `/members/leads/${lead.id}`,
+        action: `/packages/ops/pages/members/index?focus=lead&id=${lead.id}`,
+        metadata: { leadId: lead.id },
       }));
     const hostItems = getHostApplications()
       .filter((application) => application.status === "APPLIED")
@@ -2585,7 +3619,8 @@ export async function mockRequest<T>(
         description: "审核会员资质、到店记录与组织能力",
         ownerRoles: ["ADMIN", "SUPER_ADMIN"],
         createdAt: application.appliedAt,
-        action: `/games/hosts/${application.userId}/approve`,
+        action: `/packages/ops/pages/members/index?focus=host-application&id=${application.id}&userId=${application.userId}`,
+        metadata: { userId: application.userId },
       }));
     const accountAdjustmentItems = getAccountAdjustmentRequests()
       .filter(
@@ -2608,7 +3643,7 @@ export async function mockRequest<T>(
           ownerRoles: ["FINANCE", "ADMIN", "SUPER_ADMIN"],
           createdAt: request.createdAt,
           amountCents: request.amount,
-          action: "/packages/ops/pages/finance/index",
+          action: `/packages/ops/pages/finance/index?focus=account-adjustment&id=${request.id}`,
         };
       });
     const trainingCorrectionItems = getTrainingConsumeCorrections()
@@ -2630,7 +3665,7 @@ export async function mockRequest<T>(
           description: `${view.attendance?.session?.class?.name || "培训课次"} · 学员 ${learner} · 申请人 ${view.requestedBy?.displayName || correction.requestedById} · ${correction.reason}`,
           ownerRoles: ["ADMIN", "SUPER_ADMIN"],
           createdAt: correction.requestedAt,
-          action: `/training/consume-corrections/${correction.id}/approve`,
+          action: `/packages/ops/pages/coach/index?focus=consume-correction&id=${correction.id}&attendanceId=${correction.attendanceId}`,
           metadata: {
             recognitionId: correction.recognitionId,
             attendanceId: correction.attendanceId,
@@ -2670,8 +3705,76 @@ export async function mockRequest<T>(
             action: `/packages/ops/pages/finance/index?focus=training-settlement&id=${settlement.id}`,
           }))
       : [];
-    const consignmentSettlementItems =
-      mockConsignmentSettlementWorkItems();
+    const consignmentSettlementItems = mockConsignmentSettlementWorkItems();
+    const refundItems = getOrders().flatMap((order) =>
+      (order.refunds || [])
+        .filter((refund: any) =>
+          [
+            "REQUESTED",
+            "REFUND_PENDING",
+            "APPROVED",
+            "PROCESSING",
+            "FAILED",
+          ].includes(refund.status),
+        )
+        .map((refund: any) => ({
+          id: `refund:${refund.id}`,
+          kind: "REFUND_REVIEW",
+          objectType: "Refund",
+          objectId: refund.id,
+          status: refund.status,
+          priority: 100,
+          title: `退款待审核 · ${refund.refundNo || order.orderNo}`,
+          description: `${order.title || "订单"} · 申请金额 ¥${(Number(refund.amountCents || 0) / 100).toFixed(2)}`,
+          ownerRoles: ["FINANCE", "ADMIN", "SUPER_ADMIN"],
+          createdAt: refund.requestedAt || order.createdAt,
+          amountCents: refund.amountCents,
+          action: `/packages/ops/pages/finance/index?focus=refund&id=${refund.id}&orderId=${order.id}`,
+          metadata: { orderId: order.id },
+        })),
+    );
+    const fulfillmentItems = getOrders()
+      .filter(
+        (order) =>
+          order.businessType === "VENUE" &&
+          ["PENDING", "PAID", "CHECKED_IN", "REFUND_PENDING"].includes(
+            order.status,
+          ),
+      )
+      .map((order) => ({
+        id: `order-fulfillment:${order.id}`,
+        kind: "ORDER_FULFILLMENT",
+        objectType: "Order",
+        objectId: order.id,
+        status: order.status,
+        priority: order.status === "PAID" ? 85 : 65,
+        title: `场地订单待履约 · ${order.orderNo}`,
+        description: order.title || "待现场处理",
+        ownerRoles: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
+        createdAt: order.createdAt,
+        action: `/packages/ops/pages/frontdesk/index?focus=order&orderId=${order.id}`,
+        metadata: { orderId: order.id },
+      }));
+    const lowStockItems = getGoods()
+      .filter(
+        (item) =>
+          item.enabled !== false &&
+          Number(item.stock) <= Number(item.safeStock),
+      )
+      .map((item) => ({
+        id: `stock:${item.id}`,
+        kind: "LOW_STOCK",
+        objectType: "InventoryItem",
+        objectId: item.id,
+        status: "OPEN",
+        priority: 60,
+        title: `库存低于安全线 · ${item.name}`,
+        description: `当前 ${item.stock} 件，安全线 ${item.safeStock} 件`,
+        ownerRoles: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
+        createdAt: item.updatedAt || new Date().toISOString(),
+        action: `/packages/ops/pages/inventory/index?focus=low-stock&id=${item.id}`,
+        metadata: { sku: item.sku },
+      }));
     const dataErasureItems = hasMockRole("ADMIN", "SUPER_ADMIN")
       ? getDataErasureRequests()
           .filter((request) => request.status === "REQUESTED")
@@ -2697,20 +3800,8 @@ export async function mockRequest<T>(
       ...trainingCorrectionItems,
       ...trainingSettlementItems,
       ...consignmentSettlementItems,
-      {
-        id: "refund:mock-1",
-        kind: "REFUND_REVIEW",
-        objectType: "Refund",
-        objectId: "mock-refund-1",
-        status: "REQUESTED",
-        priority: 100,
-        title: "退款待审核 · RF-MOCK-001",
-        description: "模拟场地订单，申请金额 ¥68.00",
-        ownerRoles: ["FINANCE", "ADMIN", "SUPER_ADMIN"],
-        createdAt: new Date(Date.now() - 3_600_000).toISOString(),
-        amountCents: 6800,
-        action: "/orders/refunds/mock-1/approve",
-      },
+      ...refundItems,
+      ...fulfillmentItems,
       {
         id: "training:mock-1",
         kind: "TRAINING_ATTENDANCE",
@@ -2722,53 +3813,44 @@ export async function mockRequest<T>(
         description: "1 名学员待登记出勤或提交消课建议",
         ownerRoles: ["COACH", "FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
         createdAt: new Date().toISOString(),
-        action: "/packages/ops/pages/coach/index",
+        action:
+          "/packages/ops/pages/coach/index?focus=attendance&id=attendance-1&sessionId=session-1",
+        metadata: { attendanceId: "attendance-1", sessionId: "session-1" },
       },
       {
         id: "event:mock-1",
         kind: "EVENT_SCORE",
         objectType: "EventMatch",
-        objectId: "match-1",
+        objectId: "match-r2-1",
         status: "PENDING",
         priority: 70,
         title: "赛事待录比分 · 第2轮",
         description: "瑞士赛有 1 场比分待确认",
         ownerRoles: ["EVENT_MANAGER", "ADMIN", "SUPER_ADMIN"],
         createdAt: new Date().toISOString(),
-        action: "/packages/ops/pages/event/index",
+        action:
+          "/packages/ops/pages/event/index?focus=score&id=match-r2-1&eventId=event-golden&round=2",
+        metadata: { eventId: "event-golden", round: 2 },
       },
       {
         id: "settlement:mock-1",
         kind: "ALLIANCE_SETTLEMENT",
         objectType: "AllianceSettlement",
-        objectId: "settlement-1",
+        objectId: "settlement-mock-1",
         status: "DRAFT",
         priority: 50,
         title: "联盟结算草稿 · 山脚咖啡",
         description: "待财务提交商户确认",
         ownerRoles: ["FINANCE", "ADMIN", "SUPER_ADMIN"],
         createdAt: new Date().toISOString(),
-        action: "/packages/ops/pages/finance/index",
+        action:
+          "/packages/ops/pages/finance/index?focus=alliance-settlement&id=settlement-mock-1",
       },
-      {
-        id: "stock:mock-1",
-        kind: "LOW_STOCK",
-        objectType: "InventoryItem",
-        objectId: "mock-stock-1",
-        status: "OPEN",
-        priority: 60,
-        title: "库存低于安全线 · 羽毛球",
-        description: "当前 4 件，安全线 10 件",
-        ownerRoles: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
-        createdAt: new Date().toISOString(),
-        action: "/inventory/mock-stock-1",
-      },
+      ...lowStockItems,
     ];
     return ok(
       items.filter((item) =>
-        item.ownerRoles.some((role: string) =>
-          roles.includes(role as AppRole),
-        ),
+        item.ownerRoles.some((role: string) => roles.includes(role as AppRole)),
       ),
     );
   }
@@ -2795,7 +3877,8 @@ export async function mockRequest<T>(
           (left, right) =>
             new Date(left.startsAt).getTime() -
             new Date(right.startsAt).getTime(),
-        ),
+        )
+        .map(venueClosureView),
     );
   }
   if (url === "/venues/closures" && method === "POST") {
@@ -2829,12 +3912,12 @@ export async function mockRequest<T>(
       ) {
         throw new Error("封场幂等键已用于不同命令");
       }
-      return ok(replay);
+      return ok(venueClosureView(replay));
     }
 
     const date = mockShanghaiBusinessDate(startsAt);
     const calendar = availability(date);
-    const court = calendar.courts.find((item: any) => item.id === courtId);
+    const court = getMockVenueCourts().find((item) => item.id === courtId);
     if (!court) throw new Error("场地不存在");
     const overlappingClosure = closures.find(
       (closure) =>
@@ -2897,7 +3980,7 @@ export async function mockRequest<T>(
       ],
     };
     saveVenueClosures([created, ...closures]);
-    return ok(created);
+    return ok(venueClosureView(created));
   }
   const cancelVenueClosureMatch = url.match(
     /^\/venues\/closures\/([^/]+)\/cancel$/,
@@ -2912,7 +3995,7 @@ export async function mockRequest<T>(
       (item) => item.id === cancelVenueClosureMatch[1],
     );
     if (!closure) throw new Error("封场记录不存在");
-    if (closure.status === "CANCELLED") return ok(closure);
+    if (closure.status === "CANCELLED") return ok(venueClosureView(closure));
     const now = new Date().toISOString();
     closure.status = "CANCELLED";
     closure.cancelledById = mockUser().id;
@@ -2933,7 +4016,7 @@ export async function mockRequest<T>(
       },
     ];
     saveVenueClosures(closures);
-    return ok(closure);
+    return ok(venueClosureView(closure));
   }
   if (url === "/venues/time-slots/manage" && method === "GET") {
     requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
@@ -2997,7 +4080,11 @@ export async function mockRequest<T>(
       throw new Error("计价时段不存在");
     if (!Number.isInteger(weekdayMask) || weekdayMask < 1 || weekdayMask > 127)
       throw new Error("星期范围必须为1-127的位掩码");
-    if (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > 10_000_000)
+    if (
+      !Number.isInteger(priceCents) ||
+      priceCents < 0 ||
+      priceCents > 10_000_000
+    )
       throw new Error("普通价格无效");
     if (
       newcomerPriceCents !== null &&
@@ -3110,7 +4197,11 @@ export async function mockRequest<T>(
       throw new Error("计价时段不存在");
     if (!Number.isInteger(weekdayMask) || weekdayMask < 1 || weekdayMask > 127)
       throw new Error("星期范围必须为1-127的位掩码");
-    if (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > 10_000_000)
+    if (
+      !Number.isInteger(priceCents) ||
+      priceCents < 0 ||
+      priceCents > 10_000_000
+    )
       throw new Error("普通价格无效");
     if (
       newcomerPriceCents !== null &&
@@ -3347,11 +4438,8 @@ export async function mockRequest<T>(
     const court = calendar.courts.find((item: any) => item.id === data.courtId);
     const slot = calendar.slots.find((item: any) => item.id === data.slotId);
     if (!court || !slot || !court.enabled) throw new Error("场地或时段不存在");
-    if (!slot.price) throw new Error("该时段未配置有效价格");
-    const priceRule = getPriceRules().find(
-      (rule) => rule.id === slot.price?.id,
-    );
-    if (!priceRule) throw new Error("该时段价格版本不存在");
+    const priceRule = resolveMockPriceRule(date, slot.id);
+    if (!priceRule) throw new Error("该时段未配置有效价格");
     if (court.usage === "MAINTENANCE") throw new Error("场地维护中");
     if (court.usage === "TRAINING")
       throw new Error("该场地为培训专用场，不能零售预订");
@@ -3364,7 +4452,7 @@ export async function mockRequest<T>(
     ) {
       throw new Error("不能预订已开始的时段");
     }
-    const closure = (calendar.closures || []).find(
+    const closure = getVenueClosures().find(
       (item: any) =>
         item.courtId === court.id &&
         item.status === "ACTIVE" &&
@@ -3382,7 +4470,7 @@ export async function mockRequest<T>(
     );
     if (overlap) throw new Error("该场地时段刚刚被预订");
 
-    let payableCents = Number(slot.price?.priceCents || 0);
+    let payableCents = Number(priceRule.priceCents || 0);
     let discountCents = 0;
     let couponId: string | undefined;
     let newcomerPolicy: Record<string, unknown> | null = null;
@@ -3421,11 +4509,11 @@ export async function mockRequest<T>(
         if (!allowedPeriods.includes(slot.period))
           throw new Error("新客体验权益仅限非黄金时段使用");
         if (
-          slot.price?.newcomerPriceCents === null ||
-          slot.price?.newcomerPriceCents === undefined
+          priceRule.newcomerPriceCents === null ||
+          priceRule.newcomerPriceCents === undefined
         )
           throw new Error("该时段未配置新客体验价");
-        payableCents = Number(slot.price.newcomerPriceCents);
+        payableCents = Number(priceRule.newcomerPriceCents);
         newcomerPolicy = {
           allowedPeriodsParameterId: parameter?.id || null,
           allowedPeriods,
@@ -3437,7 +4525,7 @@ export async function mockRequest<T>(
           payableCents - Number(template?.faceValueCents || 0),
         );
       }
-      discountCents = Number(slot.price?.priceCents || 0) - payableCents;
+      discountCents = Number(priceRule.priceCents || 0) - payableCents;
       couponId = coupon.id;
     }
     const createdAt = new Date().toISOString();
@@ -3460,7 +4548,7 @@ export async function mockRequest<T>(
       status: "PENDING",
       businessType: "VENUE",
       payableCents,
-      listAmountCents: Number(slot.price?.priceCents || payableCents),
+      listAmountCents: Number(priceRule.priceCents || payableCents),
       discountCents,
       paidCents: 0,
       refundedCents: 0,
@@ -3476,15 +4564,15 @@ export async function mockRequest<T>(
       parameterSnapshot: {
         courtId: court.id,
         slotId: slot.id,
-        priceRuleId: slot.price?.id,
-        priceRuleCode: slot.price?.code,
-        priceRuleVersion: slot.price?.version,
+        priceRuleId: priceRule.id,
+        priceRuleCode: priceRule.code,
+        priceRuleVersion: priceRule.version,
         priceRuleEffectiveFrom: priceRule.effectiveFrom,
         priceRuleEffectiveTo: priceRule.effectiveTo || null,
         priceRuleTimeSlotId: priceRule.timeSlotId,
         priceRuleWeekdayMask: priceRule.weekdayMask,
-        priceCents: slot.price?.priceCents,
-        newcomerPriceCents: slot.price?.newcomerPriceCents ?? null,
+        priceCents: priceRule.priceCents,
+        newcomerPriceCents: priceRule.newcomerPriceCents ?? null,
         date,
         startsAt: startsAt.toISOString(),
         endsAt: endsAt.toISOString(),
@@ -3505,11 +4593,14 @@ export async function mockRequest<T>(
     const mine = getOrders().filter(
       (order) => order.memberId === mockUser().id || !order.memberId,
     );
-    return ok({ items: mine, total: mine.length });
+    return ok({ items: mine.map(mockOrderResponse), total: mine.length });
   }
   if (url === "/orders/admin/all") {
     requireMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
-    return ok({ items: getOrders(), total: getOrders().length });
+    return ok({
+      items: getOrders().map(mockOrderResponse),
+      total: getOrders().length,
+    });
   }
   const orderDetailMatch = url.match(/^\/orders\/([^/]+)$/);
   if (orderDetailMatch && method === "GET") {
@@ -3521,7 +4612,7 @@ export async function mockRequest<T>(
       !hasMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN")
     )
       throw new Error("无权查看该订单");
-    return ok(order);
+    return ok(mockOrderResponse(order));
   }
   const payMatch = url.match(/^\/orders\/([^/]+)\/pay$/);
   if (payMatch && method === "POST") {
@@ -3597,11 +4688,7 @@ export async function mockRequest<T>(
     if (existingPayment && existingPayment.paymentOperatorId !== mockUser().id)
       throw new Error("支付请求只能由原操作人重试");
     if (existingPayment && existingPayment.id === order.id)
-      return ok({
-        id: order.paymentId || `payment-${order.id}`,
-        status: "SUCCESS",
-        idempotent: true,
-      });
+      return ok(mockPaymentCommandResponse(order));
     if (order.status !== "PENDING")
       throw new Error(`订单当前状态为 ${order.status}，不能支付`);
     const paymentShift =
@@ -3707,12 +4794,22 @@ export async function mockRequest<T>(
     order.paymentId = order.paymentId || `payment-${Date.now()}`;
     order.paymentStatus = "SUCCEEDED";
     order.paymentAmountCents = Number(order.payableCents || 0);
+    order.paymentCreatedAt = order.paymentCreatedAt || order.paidAt;
     order.paymentIdempotencyKey = paymentKey;
     order.paymentChannel = channel;
     order.paymentOperatorId = mockUser().id;
     order.paymentFrontDeskShiftId = paymentShift?.id || null;
     order.paymentAdminEmergencyBypass =
       channel === "OFFLINE_CASH" && !paymentShift;
+    if (channel === "WECHAT" && !order.wechatPay) {
+      order.wechatPay = {
+        timeStamp: String(Math.floor(Date.now() / 1_000)),
+        nonceStr: `mock-${Date.now().toString(36)}`,
+        package: `prepay_id=mock-${order.paymentId}`,
+        signType: "RSA",
+        paySign: "mock-signature",
+      };
+    }
     // Payment finalization advances the business aggregate as well as the
     // order.  Without this bridge a freshly paid game/event registration
     // would remain REGISTERED forever and could not be checked in.
@@ -3865,8 +4962,9 @@ export async function mockRequest<T>(
       order.fulfillmentOutcome = "FULFILLED";
       recordMockConsignmentSale(order);
     }
+    createMockReferralReward(order, orders);
     saveOrders(orders);
-    return ok({ id: order.paymentId, status: "SUCCESS" });
+    return ok(mockPaymentCommandResponse(order));
   }
   const refundMatch = url.match(/^\/orders\/([^/]+)\/refunds$/);
   if (refundMatch && method === "POST") {
@@ -3900,7 +4998,7 @@ export async function mockRequest<T>(
         existing.reason !== reason
       )
         throw new Error("退款幂等键已用于不同的退款内容");
-      return ok(existing);
+      return ok(mockRefundCommandResponse(existing));
     }
     if (
       !["PAID", "CHECKED_IN", "COMPLETED", "PARTIALLY_REFUNDED"].includes(
@@ -3970,7 +5068,7 @@ export async function mockRequest<T>(
     order.status = "REFUND_PENDING";
     order.refunds = [...(order.refunds || []), refund];
     saveOrders(orders);
-    return ok(refund);
+    return ok(mockRefundCommandResponse(refund));
   }
   const approveRefundMatch = url.match(/^\/orders\/refunds\/([^/]+)\/approve$/);
   if (approveRefundMatch && method === "POST") {
@@ -3985,7 +5083,8 @@ export async function mockRequest<T>(
     if (!order || !refund) throw new Error("退款申请不存在");
     if (refund.requestedById === mockUser().id)
       throw new Error("退款申请人与审批人不能是同一账号");
-    if (refund.status === "SUCCEEDED") return ok(refund);
+    if (refund.status === "SUCCEEDED")
+      return ok(mockRefundCommandResponse(refund));
     if (refund.status !== "REQUESTED") throw new Error("当前退款状态不能批准");
     let trainingEnrollment: any;
     if (order.businessType === "TRAINING") {
@@ -4143,7 +5242,8 @@ export async function mockRequest<T>(
       saveMemberAccountTransactions(transactions);
     }
     refund.status = "SUCCEEDED";
-    refund.completedAt = new Date().toISOString();
+    refund.approvedAt = new Date().toISOString();
+    refund.completedAt = refund.approvedAt;
     order.refundedCents =
       Number(order.refundedCents || 0) + Number(refund.amountCents || 0);
     order.status =
@@ -4238,8 +5338,21 @@ export async function mockRequest<T>(
     if (order.status === "REFUNDED" && order.businessType === "GOODS") {
       recordMockConsignmentRefund(order, refund);
     }
+    const referralRewards = getReferralRewards();
+    let referralRewardChanged = false;
+    referralRewards.forEach((reward) => {
+      if (
+        reward.triggerOrderId === order.id &&
+        ["PENDING_OBSERVATION", "AVAILABLE"].includes(reward.status)
+      ) {
+        reward.status = "REVERSED";
+        reward.reversedAt = refund.completedAt;
+        referralRewardChanged = true;
+      }
+    });
+    if (referralRewardChanged) saveReferralRewards(referralRewards);
     saveOrders(ordersAfterRefund);
-    return ok(refund);
+    return ok(mockRefundCommandResponse(refund));
   }
   const rejectRefundMatch = url.match(/^\/orders\/refunds\/([^/]+)\/reject$/);
   if (rejectRefundMatch && method === "POST") {
@@ -4254,12 +5367,13 @@ export async function mockRequest<T>(
     if (!order || !refund) throw new Error("退款申请不存在");
     if (refund.requestedById === mockUser().id)
       throw new Error("退款申请人与审批人不能是同一账号");
-    if (refund.status === "REJECTED") return ok(refund);
+    if (refund.status === "REJECTED")
+      return ok(mockRefundCommandResponse(refund));
     if (!["REQUESTED", "REFUND_PENDING"].includes(refund.status))
       throw new Error("当前退款状态不能驳回");
     if (
-      ["GAME_CANCEL:", "EVENT_CANCEL:", "EVENT_LATE_PAYMENT:"].some(
-        (prefix) => String(refund.idempotencyKey || "").startsWith(prefix),
+      ["GAME_CANCEL:", "EVENT_CANCEL:", "EVENT_LATE_PAYMENT:"].some((prefix) =>
+        String(refund.idempotencyKey || "").startsWith(prefix),
       )
     )
       throw new Error("系统强制退款不可驳回，请完成审批并原路退回");
@@ -4272,6 +5386,7 @@ export async function mockRequest<T>(
     )
       throw new Error("退款缺少原订单状态证据");
     refund.status = "REJECTED";
+    refund.approvedAt = new Date().toISOString();
     refund.rejectionReason = rejectionReason;
     const hasPending = (order.refunds || []).some((item: any) =>
       ["REQUESTED", "APPROVED", "PROCESSING"].includes(item.status),
@@ -4312,7 +5427,7 @@ export async function mockRequest<T>(
       }
     }
     saveOrders(orders);
-    return ok(refund);
+    return ok(mockRefundCommandResponse(refund));
   }
   if (url === "/games" && method === "POST") {
     requireMockRole("HOST", "ADMIN", "SUPER_ADMIN");
@@ -4354,7 +5469,7 @@ export async function mockRequest<T>(
       )
     )
       throw new Error("球局不能使用维护场或培训专用场");
-    const closure = (calendar.closures || []).find(
+    const closure = getVenueClosures().find(
       (item: any) =>
         courtIds.includes(item.courtId) &&
         item.status === "ACTIVE" &&
@@ -4399,15 +5514,25 @@ export async function mockRequest<T>(
     saveGames([created, ...getGames()]);
     return ok(created);
   }
-  if (url === "/games") return ok(getGames());
-  if (url === "/games/hosted/me") {
+  if (url === "/games" && method === "GET")
+    return ok(
+      getGames()
+        .filter((game) => PUBLIC_GAME_STATUSES.includes(String(game.status)))
+        .map(publicGame),
+    );
+  if (url === "/games/managed" && method === "GET") {
+    requireMockRole("HOST", "ADMIN", "SUPER_ADMIN");
+    if (hasMockRole("ADMIN", "SUPER_ADMIN"))
+      return ok(getGames().map(managedGame));
     const user = mockUser();
     return ok(
-      getGames().filter(
-        (game) =>
-          game.hostId === user.id ||
-          (!game.hostId && game.host?.displayName === user.displayName),
-      ),
+      getGames()
+        .filter(
+          (game) =>
+            game.hostId === user.id ||
+            (!game.hostId && game.host?.displayName === user.displayName),
+        )
+        .map(managedGame),
     );
   }
   if (url === "/games/hosts/apply" && method === "POST") {
@@ -4468,7 +5593,7 @@ export async function mockRequest<T>(
       hasMockRole("HOST") && !hasMockRole("ADMIN", "SUPER_ADMIN");
     if (hostOnly && game.hostId && game.hostId !== mockUser().id)
       throw new Error("只有本局主理人或管理员可操作该球局");
-    if (game.status === "OPEN") return ok(game);
+    if (game.status === "OPEN") return ok(gameCommandResponse(game));
     if (
       ["FULL", "IN_PROGRESS", "COMPLETED", "CANCELLED"].includes(game.status)
     ) {
@@ -4483,7 +5608,7 @@ export async function mockRequest<T>(
     }
     game.status = "OPEN";
     saveGames(list);
-    return ok(game);
+    return ok(gameCommandResponse(game));
   }
   const registerGameMatch = url.match(/^\/games\/([^/]+)\/register$/);
   if (registerGameMatch && method === "POST") {
@@ -4598,13 +5723,12 @@ export async function mockRequest<T>(
     /^\/games\/([^/]+)\/promote-waitlist$/,
   );
   if (promoteGameWaitlistMatch && method === "POST") {
-    requireMockRole("HOST", "FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
+    requireMockRole("HOST", "FRONT_DESK", "ADMIN", "SUPER_ADMIN");
     const games = getGames();
     const game = games.find((item) => item.id === promoteGameWaitlistMatch[1]);
     if (!game) throw new Error("球局不存在");
     const hostOnly =
-      hasMockRole("HOST") &&
-      !hasMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
+      hasMockRole("HOST") && !hasMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
     if (hostOnly && game.hostId && game.hostId !== mockUser().id)
       throw new Error("只有本局主理人或管理员可操作该球局");
     const promoted = promoteMockGameWaitlist(game);
@@ -4646,9 +5770,10 @@ export async function mockRequest<T>(
         replay.cancelCommandHash !== commandHash
       )
         throw new Error("球局取消幂等键已用于不同命令");
-      return ok({ game: replay, idempotent: true });
+      return ok(gameCancellationResponse({ game: replay, idempotent: true }));
     }
-    const hostOnly = hasMockRole("HOST") && !hasMockRole("ADMIN", "SUPER_ADMIN");
+    const hostOnly =
+      hasMockRole("HOST") && !hasMockRole("ADMIN", "SUPER_ADMIN");
     if (hostOnly && game.hostId !== mockUser().id)
       throw new Error("仅本局主理人或管理员可取消球局");
     if (!["DRAFT", "OPEN", "FULL"].includes(game.status))
@@ -4657,8 +5782,11 @@ export async function mockRequest<T>(
     if (new Date(game.startsAt) <= now)
       throw new Error("球局已开赛，不能执行开赛前取消");
     const orders = getOrders();
-    const activeRegistrations = (game.registrations || []).filter((registration: any) =>
-      ["WAITLISTED", "REGISTERED", "PAID", "CHECKED_IN"].includes(registration.status),
+    const activeRegistrations = (game.registrations || []).filter(
+      (registration: any) =>
+        ["WAITLISTED", "REGISTERED", "PAID", "CHECKED_IN"].includes(
+          registration.status,
+        ),
     );
     const waitlistCount = activeRegistrations.filter(
       (registration: any) => registration.status === "WAITLISTED",
@@ -4686,11 +5814,15 @@ export async function mockRequest<T>(
       const activeRefunds = (order.refunds || []).filter((refund: any) =>
         ["REQUESTED", "APPROVED", "PROCESSING"].includes(refund.status),
       );
-      const activeRefundCents = activeRefunds
-        .reduce((sum: number, refund: any) => sum + Number(refund.amountCents || 0), 0);
+      const activeRefundCents = activeRefunds.reduce(
+        (sum: number, refund: any) => sum + Number(refund.amountCents || 0),
+        0,
+      );
       const amountCents = Math.max(
         0,
-        Number(order.paidCents || 0) - Number(order.refundedCents || 0) - activeRefundCents,
+        Number(order.paidCents || 0) -
+          Number(order.refundedCents || 0) -
+          activeRefundCents,
       );
       if (amountCents <= 0) continue;
       const originalOrderStatus =
@@ -4730,7 +5862,11 @@ export async function mockRequest<T>(
           objectId: refund.id,
           reason,
           result: "SUCCESS",
-          newValue: { gameId: game.id, registrationId: registration.id, previousStatus },
+          newValue: {
+            gameId: game.id,
+            registrationId: registration.id,
+            previousStatus,
+          },
           createdAt: now.toISOString(),
         },
         ...getAuditLogs(),
@@ -4788,13 +5924,17 @@ export async function mockRequest<T>(
       },
       ...getAuditLogs(),
     ]);
-    return ok({
-      game,
-      cancelledBookingCount,
-      cancelledPendingOrders,
-      cancelledRegistrationIds: activeRegistrations.map((item: any) => item.id),
-      refundRequests,
-    });
+    return ok(
+      gameCancellationResponse({
+        game,
+        cancelledBookingCount,
+        cancelledPendingOrders,
+        cancelledRegistrationIds: activeRegistrations.map(
+          (item: any) => item.id,
+        ),
+        refundRequests,
+      }),
+    );
   }
   const completeGameMatch = url.match(/^\/games\/([^/]+)\/complete$/);
   if (completeGameMatch && method === "POST") {
@@ -4837,11 +5977,14 @@ export async function mockRequest<T>(
       if (
         previousStatus === "CHECKED_IN" &&
         (!order || !["REFUNDED", "CANCELLED"].includes(order.status))
-      ) outcome = "COMPLETED";
+      )
+        outcome = "COMPLETED";
       else if (
         previousStatus === "PAID" &&
-        (!order || !["REFUND_PENDING", "REFUNDED", "CANCELLED"].includes(order.status))
-      ) outcome = "NO_SHOW";
+        (!order ||
+          !["REFUND_PENDING", "REFUNDED", "CANCELLED"].includes(order.status))
+      )
+        outcome = "NO_SHOW";
       else if (["REGISTERED", "WAITLISTED"].includes(previousStatus))
         outcome = "CANCELLED";
       if (!outcome) continue;
@@ -4933,7 +6076,21 @@ export async function mockRequest<T>(
     saveEvents([created, ...getEvents()]);
     return ok(created);
   }
-  if (url === "/events") return ok(getEvents());
+  if (url === "/events" && method === "GET")
+    return ok(
+      getEvents()
+        .filter((event) => PUBLIC_EVENT_STATUSES.includes(String(event.status)))
+        .map(publicEvent),
+    );
+  if (url === "/events/managed" && method === "GET") {
+    requireMockRole("EVENT_MANAGER", "FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+    return ok(getEvents().map(managedEventSummary));
+  }
+  const managedEventDetailMatch = url.match(/^\/events\/managed\/([^/]+)$/);
+  if (managedEventDetailMatch && method === "GET") {
+    requireMockRole("EVENT_MANAGER", "FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+    return ok(managedEventDetail(requireEvent(managedEventDetailMatch[1])));
+  }
   const myEventRegistrationMatch = url.match(
     /^\/events\/([^/]+)\/registration\/me$/,
   );
@@ -4956,7 +6113,7 @@ export async function mockRequest<T>(
         (item) => item.id === registration.orderId,
       );
       return ok({
-        registration: { ...registration, order: order || null },
+        registration: publicEventRegistration(registration, order),
         waitlistPosition: null,
       });
     }
@@ -4968,7 +6125,7 @@ export async function mockRequest<T>(
         ),
       );
     return ok({
-      registration,
+      registration: publicEventRegistration(registration),
       waitlistPosition: Math.max(
         1,
         queue.findIndex((team: any) => team.id === registration.id) + 1,
@@ -4976,12 +6133,20 @@ export async function mockRequest<T>(
     });
   }
   const eventDetailMatch = url.match(/^\/events\/([^/]+)$/);
-  if (eventDetailMatch && method === "GET")
-    return ok(requireEvent(eventDetailMatch[1]));
+  if (eventDetailMatch && method === "GET") {
+    const detail = requireEvent(eventDetailMatch[1]);
+    if (!PUBLIC_EVENT_STATUSES.includes(String(detail.status)))
+      throw new Error("赛事不存在");
+    return ok(publicEventDetail(detail));
+  }
   const eventPrizesMatch = url.match(/^\/events\/([^/]+)\/prizes$/);
   if (eventPrizesMatch && method === "GET") {
     requireMockRole("EVENT_MANAGER", "FRONT_DESK", "ADMIN", "SUPER_ADMIN");
-    return ok(requireEvent(eventPrizesMatch[1]).prizeAwards || []);
+    return ok(
+      (requireEvent(eventPrizesMatch[1]).prizeAwards || []).map(
+        publicEventPrizeAward,
+      ),
+    );
   }
   if (eventPrizesMatch && method === "POST") {
     requireMockRole("EVENT_MANAGER", "FRONT_DESK", "ADMIN", "SUPER_ADMIN");
@@ -5022,7 +6187,7 @@ export async function mockRequest<T>(
       ) {
         throw new Error("幂等键已用于其他赛事奖品指令，请更换幂等键");
       }
-      return ok(existing);
+      return ok(publicEventPrizeAward(existing));
     }
     const team = (detail.teams || []).find((entry: any) => entry.id === teamId);
     if (!team) throw new Error("获奖队伍不存在");
@@ -5118,7 +6283,7 @@ export async function mockRequest<T>(
       ...getInventoryTransactions(),
     ]);
     saveEventDetail(detail);
-    return ok(award);
+    return ok(publicEventPrizeAward(award));
   }
   const receiveEventPrizeMatch = url.match(
     /^\/events\/([^/]+)\/prizes\/([^/]+)\/receive$/,
@@ -5144,7 +6309,7 @@ export async function mockRequest<T>(
         award.receiptNote !== receiptNote
       )
         throw new Error("奖品已经签收，签收信息与本次请求不一致");
-      return ok(award);
+      return ok(publicEventPrizeAward(award));
     }
     award.status = "RECEIVED";
     award.receivedByName = receivedByName;
@@ -5154,18 +6319,119 @@ export async function mockRequest<T>(
     award.receiptIdempotencyKey = receiptIdempotencyKey;
     award.receivedAt = new Date().toISOString();
     saveEventDetail(detail);
-    return ok(award);
+    return ok(publicEventPrizeAward(award));
+  }
+  const createEventPartnerInviteMatch = url.match(
+    /^\/events\/([^/]+)\/partner-invites$/,
+  );
+  if (createEventPartnerInviteMatch && method === "POST") {
+    requireMockRole("MEMBER");
+    const detail = requireEvent(createEventPartnerInviteMatch[1]);
+    const now = new Date();
+    if (!["OPEN", "FULL"].includes(detail.status))
+      throw new Error("赛事不在报名期");
+    if (
+      (detail.registrationEndsAt &&
+        new Date(detail.registrationEndsAt) <= now) ||
+      (detail.startsAt && new Date(detail.startsAt) <= now)
+    )
+      throw new Error("赛事报名已截止");
+    const partnerId = mockUser().id;
+    const duplicate = (detail.teams || []).find(
+      (team: any) =>
+        !["CANCELLED", "REFUNDED"].includes(team.status) &&
+        [team.captainId, team.playerAUserId, team.playerBUserId]
+          .filter(Boolean)
+          .includes(partnerId),
+    );
+    if (duplicate) throw new Error("当前账号已参加本赛事或正在候补");
+    const invites = getEventPartnerInvites();
+    invites.forEach((invite: any) => {
+      if (
+        invite.eventId === detail.id &&
+        invite.partnerId === partnerId &&
+        !invite.consumedAt &&
+        !invite.revokedAt
+      )
+        invite.revokedAt = now.toISOString();
+    });
+    const expiresAt = new Date(
+      Math.min(
+        now.getTime() + 15 * 60_000,
+        new Date(detail.registrationEndsAt).getTime(),
+        new Date(detail.startsAt).getTime(),
+      ),
+    );
+    const partnerInviteCode = `EP_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}`;
+    invites.push({
+      id: newId("event-partner-invite"),
+      eventId: detail.id,
+      partnerId,
+      partnerDisplayName: mockUser().displayName,
+      partnerInviteCode,
+      expiresAt: expiresAt.toISOString(),
+      revokedAt: null,
+      consumedAt: null,
+      consumedTeamId: null,
+      createdAt: now.toISOString(),
+    });
+    saveEventPartnerInvites(invites);
+    return ok({
+      partnerInviteCode,
+      partnerDisplayName: mockUser().displayName,
+      expiresAt: expiresAt.toISOString(),
+    });
+  }
+  const previewEventPartnerInviteMatch = url.match(
+    /^\/events\/([^/]+)\/partner-invites\/preview$/,
+  );
+  if (previewEventPartnerInviteMatch && method === "POST") {
+    requireMockRole("MEMBER");
+    const detail = requireEvent(previewEventPartnerInviteMatch[1]);
+    if (!["OPEN", "FULL"].includes(detail.status))
+      throw new Error("赛事不在报名期");
+    const invite = getEventPartnerInvites().find(
+      (item: any) =>
+        item.eventId === detail.id &&
+        item.partnerInviteCode === text(data.partnerInviteCode),
+    );
+    if (
+      !invite ||
+      invite.revokedAt ||
+      invite.consumedAt ||
+      new Date(invite.expiresAt) <= new Date()
+    )
+      throw new Error("搭档授权码无效、已使用或已过期");
+    if (invite.partnerId === mockUser().id)
+      throw new Error("不能使用自己生成的搭档授权码");
+    const duplicate = (detail.teams || []).find(
+      (team: any) =>
+        !["CANCELLED", "REFUNDED"].includes(team.status) &&
+        [team.captainId, team.playerAUserId, team.playerBUserId]
+          .filter(Boolean)
+          .includes(invite.partnerId),
+    );
+    if (duplicate) throw new Error("授权搭档已参加本赛事或正在候补");
+    return ok({
+      partnerDisplayName: invite.partnerDisplayName,
+      expiresAt: invite.expiresAt,
+    });
   }
   const registerEventMatch = url.match(/^\/events\/([^/]+)\/register$/);
   if (registerEventMatch && method === "POST") {
+    const memberSelfService = isMockMemberSelfService();
     const creation = beginMockOrderCreation(data.creationIdempotencyKey, {
       kind: "EVENT_REGISTRATION",
       eventId: registerEventMatch[1],
       name: text(data.name),
-      playerAName: text(data.playerAName),
-      playerBName: text(data.playerBName),
-      playerAUserId: text(data.playerAUserId) || null,
-      playerBUserId: text(data.playerBUserId) || null,
+      ...(memberSelfService
+        ? { partnerInviteCode: text(data.partnerInviteCode) }
+        : {
+            playerAName: text(data.playerAName),
+            playerBName: text(data.playerBName),
+            playerAUserId: text(data.playerAUserId) || null,
+            playerBUserId: text(data.playerBUserId) || null,
+          }),
       category: text(data.category),
       sourceChannel: text(data.sourceChannel) || "MINI_PROGRAM",
     });
@@ -5179,14 +6445,47 @@ export async function mockRequest<T>(
     )
       throw new Error("赛事报名已截止");
     const teamName = text(data.name);
-    const playerAName = text(data.playerAName);
-    const playerBName = text(data.playerBName);
+    let playerAName = text(data.playerAName);
+    let playerBName = text(data.playerBName);
+    let playerAUserId = text(data.playerAUserId) || mockUser().id;
+    let playerBUserId = text(data.playerBUserId);
+    let partnerInvite: any = null;
+    let partnerInviteBook: any[] = [];
+    if (memberSelfService) {
+      const partnerInviteCode = text(data.partnerInviteCode);
+      if (!partnerInviteCode)
+        throw new Error("会员报名必须填写搭档本人生成的授权码");
+      if (
+        text(data.playerAUserId) &&
+        text(data.playerAUserId) !== mockUser().id
+      )
+        throw new Error("会员报名不能替其他账号占用队长席位");
+      if (text(data.playerBUserId))
+        throw new Error("会员报名不能直接指定搭档账号");
+      partnerInviteBook = getEventPartnerInvites();
+      partnerInvite = partnerInviteBook.find(
+        (item: any) =>
+          item.eventId === detail.id &&
+          item.partnerInviteCode === partnerInviteCode,
+      );
+      if (
+        !partnerInvite ||
+        partnerInvite.revokedAt ||
+        partnerInvite.consumedAt ||
+        new Date(partnerInvite.expiresAt) <= new Date()
+      )
+        throw new Error("搭档授权码无效、已使用或已过期");
+      if (partnerInvite.partnerId === mockUser().id)
+        throw new Error("不能使用自己生成的搭档授权码");
+      playerAName = mockUser().displayName;
+      playerBName = partnerInvite.partnerDisplayName;
+      playerAUserId = mockUser().id;
+      playerBUserId = partnerInvite.partnerId;
+    }
     if (!teamName || !playerAName || !playerBName)
       throw new Error("固定双打必须填写队名和两名队员");
     if (playerAName.toLocaleLowerCase() === playerBName.toLocaleLowerCase())
       throw new Error("固定双打的两名队员不能相同");
-    const playerAUserId = text(data.playerAUserId) || mockUser().id;
-    const playerBUserId = text(data.playerBUserId);
     if (playerBUserId && playerAUserId === playerBUserId)
       throw new Error("固定双打的两名账号不能相同");
     const orders = getOrders();
@@ -5210,7 +6509,7 @@ export async function mockRequest<T>(
     const duplicateParticipant = (detail.teams || []).some(
       (team: any) =>
         [...activeTeamStatuses, "WAITLISTED"].includes(team.status) &&
-        [team.playerAUserId, team.playerBUserId]
+        [team.captainId, team.playerAUserId, team.playerBUserId]
           .filter(Boolean)
           .some((id: string) => participantIds.includes(id)),
     );
@@ -5247,6 +6546,11 @@ export async function mockRequest<T>(
       scoreDiff: 0,
       finalRank: null,
     };
+    if (partnerInvite) {
+      partnerInvite.consumedAt = createdAt;
+      partnerInvite.consumedTeamId = team.id;
+      saveEventPartnerInvites(partnerInviteBook);
+    }
     detail.teams = [...(detail.teams || []), team];
     if (shouldWaitlist) {
       detail.status = "FULL";
@@ -5503,7 +6807,7 @@ export async function mockRequest<T>(
         replay.newValue?.commandHash !== commandHash
       )
         throw new Error("赛事取消幂等键已用于不同命令");
-      return ok({ event: detail, idempotent: true });
+      return ok(eventCancellationResponse({ event: detail, idempotent: true }));
     }
     if (!["DRAFT", "OPEN", "FULL"].includes(detail.status))
       throw new Error(`赛事当前状态为 ${detail.status}，不可取消`);
@@ -5553,12 +6857,9 @@ export async function mockRequest<T>(
                   )?.originalOrderStatus
                 : order.status;
           if (
-            ![
-              "PAID",
-              "CHECKED_IN",
-              "COMPLETED",
-              "PARTIALLY_REFUNDED",
-            ].includes(originalOrderStatus)
+            !["PAID", "CHECKED_IN", "COMPLETED", "PARTIALLY_REFUNDED"].includes(
+              originalOrderStatus,
+            )
           )
             throw new Error("赛事退款缺少原订单状态证据");
           const refund = {
@@ -5632,18 +6933,20 @@ export async function mockRequest<T>(
       },
       ...getAuditLogs(),
     ]);
-    return ok({
-      event: detail,
-      cancelledPendingOrders,
-      cancelledWaitlist,
-      refundRequests,
-    });
+    return ok(
+      eventCancellationResponse({
+        event: detail,
+        cancelledPendingOrders,
+        cancelledWaitlist,
+        refundRequests,
+      }),
+    );
   }
 
   if (publishEventMatch && method === "POST") {
     requireMockRole("EVENT_MANAGER", "ADMIN", "SUPER_ADMIN");
     const detail = requireEvent(publishEventMatch[1]);
-    if (detail.status === "OPEN") return ok(detail);
+    if (detail.status === "OPEN") return ok(eventCommandResponse(detail));
     if (detail.status !== "DRAFT")
       throw new Error(`赛事当前状态为 ${detail.status}，不能发布`);
     if (
@@ -5666,7 +6969,11 @@ export async function mockRequest<T>(
     detail.status = "OPEN";
     saveEventDetail(detail);
     const event = getEvents().find((item) => item.id === publishEventMatch[1]);
-    return ok(event || { id: publishEventMatch[1], status: "OPEN" });
+    return ok(
+      eventCommandResponse(
+        event || { id: publishEventMatch[1], status: "OPEN" },
+      ),
+    );
   }
   const finishEventMatch = url.match(/^\/events\/([^/]+)\/finish$/);
   if (finishEventMatch && method === "POST") {
@@ -5733,7 +7040,8 @@ export async function mockRequest<T>(
       const order = orders.find((item) => item.id === team.orderId);
       if (
         previousStatus === "PAID" &&
-        (!order || !["REFUND_PENDING", "REFUNDED", "CANCELLED"].includes(order.status))
+        (!order ||
+          !["REFUND_PENDING", "REFUNDED", "CANCELLED"].includes(order.status))
       ) {
         team.status = "NO_SHOW";
         if (order) {
@@ -5984,7 +7292,7 @@ export async function mockRequest<T>(
       (item: any) => item.id === eventCheckInMatch[2],
     );
     if (!team) throw new Error("参赛组合不存在");
-    if (team.status === "CHECKED_IN") return ok(team);
+    if (team.status === "CHECKED_IN") return ok(eventTeamCommandResponse(team));
     if (
       !["OPEN", "FULL"].includes(detail.status) ||
       Number(detail.currentRound || 0) !== 0
@@ -6010,7 +7318,7 @@ export async function mockRequest<T>(
     team.checkedInAt = new Date().toISOString();
     team.checkInTimeWindowPolicy = timeWindowPolicy;
     saveEventDetail(detail);
-    return ok(team);
+    return ok(eventTeamCommandResponse(team));
   }
   const scoreEventMatch = url.match(/^\/events\/matches\/([^/]+)\/score$/);
   if (scoreEventMatch && method === "POST") {
@@ -6112,12 +7420,13 @@ export async function mockRequest<T>(
     return ok(
       getTrainingProducts()
         .filter((product) => product.enabled !== false)
-        .map((product) => ({
-          ...product,
-          classes: (product.classes || []).filter(
-            (trainingClass: any) => trainingClass.active !== false,
-          ),
-        })),
+        .map((product) =>
+          mockTrainingProductView(product, {
+            administrator: hasMockRole("ADMIN", "SUPER_ADMIN"),
+            coachOnly:
+              hasMockRole("COACH") && !hasMockRole("ADMIN", "SUPER_ADMIN"),
+          }),
+        ),
     );
   if (url === "/training/products" && method === "POST") {
     requireMockRole("ADMIN", "SUPER_ADMIN");
@@ -6402,7 +7711,7 @@ export async function mockRequest<T>(
         .filter(
           (enrollment) => enrollment.buyerId === userId || !enrollment.buyerId,
         )
-        .map(decorateMockTrainingEnrollment),
+        .map((enrollment) => decorateMockTrainingEnrollment(enrollment)),
     );
   }
   if (url === "/training/admin/enrollments") {
@@ -6426,8 +7735,12 @@ export async function mockRequest<T>(
       ownClassOnly
         ? getEnrollments()
             .filter((enrollment) => ownedClassIds.includes(enrollment.classId))
-            .map(decorateMockTrainingEnrollment)
-        : getEnrollments().map(decorateMockTrainingEnrollment),
+            .map((enrollment) =>
+              decorateMockTrainingEnrollment(enrollment, true),
+            )
+        : getEnrollments().map((enrollment) =>
+            decorateMockTrainingEnrollment(enrollment, true),
+          ),
     );
   }
   if (url === "/training/sessions" && method === "GET") {
@@ -6449,10 +7762,12 @@ export async function mockRequest<T>(
       : [];
     return ok(
       ownClassOnly
-        ? getTrainingSessions().filter((trainingSession) =>
-            ownedClassIds.includes(trainingSession.classId),
-          )
-        : getTrainingSessions(),
+        ? getTrainingSessions()
+            .filter((trainingSession) =>
+              ownedClassIds.includes(trainingSession.classId),
+            )
+            .map(mockTrainingSessionView)
+        : getTrainingSessions().map(mockTrainingSessionView),
     );
   }
   if (url === "/training/sessions" && method === "POST") {
@@ -6492,7 +7807,7 @@ export async function mockRequest<T>(
       command,
     );
     if (attempt.replayed)
-      return finishMockTrainingCreation(attempt, attempt.response, reason);
+      return ok(mockTrainingSessionCommandResponse(attempt.response));
     const trainingClass = getTrainingProducts()
       .flatMap((product) => product.classes || [])
       .find((item: any) => item.id === classId && item.active !== false);
@@ -6514,7 +7829,7 @@ export async function mockRequest<T>(
       selectedCourts.some((court: any) => !court.enabled)
     )
       throw new Error("部分场地不存在或已停用");
-    const closure = (calendar.closures || []).find(
+    const closure = getVenueClosures().find(
       (item: any) =>
         sortedCourtIds.includes(item.courtId) &&
         item.status === "ACTIVE" &&
@@ -6595,7 +7910,11 @@ export async function mockRequest<T>(
       enrollment.attendances = [...(enrollment.attendances || []), row];
     });
     saveEnrollments(allEnrollments);
-    return finishMockTrainingCreation(attempt, session, reason);
+    return finishMockTrainingCreation(
+      attempt,
+      mockTrainingSessionCommandResponse(session),
+      reason,
+    );
   }
   if (url === "/training/purchase") {
     const creation = beginMockOrderCreation(data.creationIdempotencyKey, {
@@ -6719,6 +8038,7 @@ export async function mockRequest<T>(
     ) as any;
     if (!lesson || !enrollment || !attendance)
       throw new Error("课次签到记录不存在");
+    attendance.enrollmentId ||= enrollment.id;
     if (
       hasMockRole("COACH") &&
       !hasMockRole("ADMIN", "SUPER_ADMIN", "FRONT_DESK") &&
@@ -6746,13 +8066,7 @@ export async function mockRequest<T>(
     )
       throw new Error("当前出勤状态已锁定，请提交更正申请");
     if (attendance.status === persistedStatus)
-      return ok({
-        id: attendance.id,
-        sessionId: attendanceMatch[1],
-        enrollmentId: data.enrollmentId,
-        status: persistedStatus,
-        lessonStatus: lesson.status,
-      });
+      return ok(mockTrainingAttendanceCommandResponse(attendance));
     const timeWindowPolicy = assertMockOperationWindow({
       parameterKey: "training.attendance_window.v1",
       defaults: { earlyMinutes: 30, lateMinutes: 120 },
@@ -6778,13 +8092,7 @@ export async function mockRequest<T>(
       timeWindowPolicy,
     });
     saveEnrollments(enrollmentList);
-    return ok({
-      id: attendance.id,
-      sessionId: attendanceMatch[1],
-      enrollmentId: data.enrollmentId,
-      status: persistedStatus,
-      lessonStatus: lesson.status,
-    });
+    return ok(mockTrainingAttendanceCommandResponse(attendance));
   }
   const makeupMatch = url.match(
     /^\/training\/sessions\/([^/]+)\/attendance\/makeup$/,
@@ -6799,18 +8107,15 @@ export async function mockRequest<T>(
       (item: any) => item.sessionId === makeupMatch[1],
     );
     if (!enrollment || !original) throw new Error("原课次签到记录不存在");
+    original.enrollmentId ||= enrollment.id;
     if (!["MAKEUP_REQUIRED", "LEAVE"].includes(original.status)) {
       if (
         original.status === "MADE_UP" &&
         original.makeupSessionId === data.makeupSessionId
       )
-        return ok({
-          id: original.id,
-          sessionId: makeupMatch[1],
-          enrollmentId: data.enrollmentId,
-          status: "MADE_UP",
-          makeupSessionId: data.makeupSessionId,
-        });
+        return ok(
+          mockTrainingMakeupCommandResponse(original, data.makeupSessionId),
+        );
       throw new Error("只有已批准请假的课次可以安排补课");
     }
     if (text(data.makeupSessionId) === makeupMatch[1])
@@ -6845,13 +8150,9 @@ export async function mockRequest<T>(
         .join("；"),
     });
     saveEnrollments(enrollmentList);
-    return ok({
-      id: original.id,
-      sessionId: makeupMatch[1],
-      enrollmentId: data.enrollmentId,
-      status: "MADE_UP",
-      makeupSessionId: data.makeupSessionId,
-    });
+    return ok(
+      mockTrainingMakeupCommandResponse(original, data.makeupSessionId),
+    );
   }
   const consumeMatch = url.match(/^\/training\/sessions\/([^/]+)\/consume$/);
   if (consumeMatch && method === "POST") {
@@ -6868,6 +8169,7 @@ export async function mockRequest<T>(
     ) as any;
     if (!lesson || !enrollment || !attendance)
       throw new Error("课次签到记录不存在");
+    attendance.enrollmentId ||= enrollment.id;
     if (
       hasMockRole("COACH") &&
       !hasMockRole("ADMIN", "SUPER_ADMIN") &&
@@ -6884,19 +8186,17 @@ export async function mockRequest<T>(
         activeRecognition?.idempotencyKey !== text(data.idempotencyKey)
       )
         throw new Error("该课次已经消课，禁止重复确认");
-      return ok({
-        ...activeRecognition,
-        workflowStatus: "CONFIRMED",
-        effectiveRevenueCents: Number(
-          attendance.confirmedRevenueCents || trainingUnitRevenue(enrollment),
-        ),
-        venueContributionCents: Math.round(
-          Number(
-            attendance.confirmedRevenueCents || trainingUnitRevenue(enrollment),
-          ) * 0.2,
-        ),
-        venueFeeCents: 0,
-      });
+      const effectiveRevenueCents = Number(
+        attendance.confirmedRevenueCents || trainingUnitRevenue(enrollment),
+      );
+      return ok(
+        mockTrainingConsumeConfirmationResponse({
+          ...activeRecognition,
+          effectiveRevenueCents,
+          venueContributionCents: Math.round(effectiveRevenueCents * 0.2),
+          venueFeeCents: 0,
+        }),
+      );
     }
     const consumeOrder = getOrders().find(
       (order) => order.id === enrollment.orderId,
@@ -6923,11 +8223,7 @@ export async function mockRequest<T>(
         feedback: text(data.feedback) || attendance.feedback,
       });
       saveEnrollments(enrollmentList);
-      return ok({
-        ...attendance,
-        workflowStatus: "PENDING_CONFIRMATION",
-        proposedById: mockUser().id,
-      });
+      return ok(mockTrainingConsumeProposalResponse(attendance));
     }
     if (attendance.operatorId === mockUser().id)
       throw new Error("消课建议提交人与确认人不能是同一账号");
@@ -6952,10 +8248,7 @@ export async function mockRequest<T>(
       data.idempotencyKey,
     );
     saveEnrollments(enrollmentList);
-    return ok({
-      ...recognition,
-      workflowStatus: "CONFIRMED",
-    });
+    return ok(mockTrainingConsumeConfirmationResponse(recognition));
   }
   const confirmConsumeMatch = url.match(
     /^\/training\/sessions\/([^/]+)\/consume\/confirm$/,
@@ -6974,6 +8267,7 @@ export async function mockRequest<T>(
     ) as any;
     if (!lesson || !enrollment || !attendance)
       throw new Error("课次签到记录不存在");
+    attendance.enrollmentId ||= enrollment.id;
     if (attendance.consumedAt) {
       const activeRecognition = activeMockConsumeRecognition(attendance);
       if (
@@ -6982,13 +8276,14 @@ export async function mockRequest<T>(
       )
         throw new Error("该课次已经使用其他幂等键消课");
       const recognized = Number(attendance.confirmedRevenueCents || 0);
-      return ok({
-        ...activeRecognition,
-        workflowStatus: "CONFIRMED",
-        effectiveRevenueCents: recognized,
-        venueContributionCents: Math.round(recognized * 0.2),
-        venueFeeCents: 0,
-      });
+      return ok(
+        mockTrainingConsumeConfirmationResponse({
+          ...activeRecognition,
+          effectiveRevenueCents: recognized,
+          venueContributionCents: Math.round(recognized * 0.2),
+          venueFeeCents: 0,
+        }),
+      );
     }
     const consumeOrder = getOrders().find(
       (order) => order.id === enrollment.orderId,
@@ -7019,7 +8314,7 @@ export async function mockRequest<T>(
       new Date(lesson.endsAt),
       "确认消课入账",
     );
-    const timeWindowPolicy = assertMockOperationWindow({
+    assertMockOperationWindow({
       parameterKey: "training.completion_window.v1",
       defaults: { earlyMinutes: 0, lateMinutes: 240 },
       startsAt: lesson.endsAt,
@@ -7035,11 +8330,7 @@ export async function mockRequest<T>(
       data.idempotencyKey,
     );
     saveEnrollments(enrollmentList);
-    return ok({
-      ...recognition,
-      workflowStatus: "CONFIRMED",
-      timeWindowPolicy,
-    });
+    return ok(mockTrainingConsumeConfirmationResponse(recognition));
   }
   if (url === "/training/consume-corrections" && method === "GET") {
     requireMockRole("COACH", "FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
@@ -7302,7 +8593,8 @@ export async function mockRequest<T>(
       (item) => item.id === completeSessionMatch[1],
     );
     if (!trainingSession) throw new Error("培训课次不存在");
-    if (trainingSession.status === "COMPLETED") return ok(trainingSession);
+    if (trainingSession.status === "COMPLETED")
+      return ok(mockTrainingSessionCommandResponse(trainingSession));
     if (trainingSession.status === "CANCELLED")
       throw new Error("已取消课次不能结课");
     if (
@@ -7336,7 +8628,7 @@ export async function mockRequest<T>(
     trainingSession.status = "COMPLETED";
     trainingSession.completionTimeWindowPolicy = timeWindowPolicy;
     saveTrainingSessions(list);
-    return ok(trainingSession);
+    return ok(mockTrainingSessionCommandResponse(trainingSession));
   }
   if (url === "/members/me/accounts/transactions") {
     const accounts = getMemberAccounts()[mockUser().id] || [];
@@ -7344,10 +8636,12 @@ export async function mockRequest<T>(
     return ok(
       getMemberAccountTransactions()
         .filter((transaction) => byId.has(transaction.accountId))
-        .map((transaction: any) => ({
-          ...transaction,
-          account: { type: byId.get(transaction.accountId)?.type },
-        }))
+        .map((transaction: any) =>
+          accountTransactionView(
+            transaction,
+            String(byId.get(transaction.accountId)?.type || ""),
+          ),
+        )
         .sort(
           (left: any, right: any) =>
             new Date(right.createdAt || 0).getTime() -
@@ -7355,10 +8649,58 @@ export async function mockRequest<T>(
         ),
     );
   }
-  if (url === "/members/me/referrer" && method === "POST") {
-    const referrerId = text(data.referrerId);
-    if (!referrerId) throw new Error("推荐人不能为空");
+  if (url === "/referrals/me/invites" && method === "POST") {
     const actor = mockUser();
+    const users = getGovernanceUsers();
+    const hasMemberIdentity = (item: any) =>
+      Array.isArray(item?.roles) &&
+      item.roles.some(
+        (role: any) =>
+          (typeof role === "string" ? role : role?.role) === "MEMBER",
+      );
+    const inviter = users.find((item) => item.id === actor.id);
+    if (!inviter || inviter.status !== "ACTIVE" || !hasMemberIdentity(inviter))
+      throw new Error("会员不存在或已停用");
+    const inviteCode = `${newId("referral-invite")}-${Math.random().toString(36).slice(2, 12)}`;
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1_000);
+    const invites = getReferralInvites();
+    saveReferralInvites([
+      {
+        id: newId("referral-invite-record"),
+        tokenHash: referralInviteTokenHash(inviteCode),
+        inviterId: actor.id,
+        expiresAt: expiresAt.toISOString(),
+        revokedAt: null,
+        useCount: 0,
+        lastUsedAt: null,
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      },
+      ...invites,
+    ]);
+    return ok({ inviteCode, expiresAt: expiresAt.toISOString() });
+  }
+  if (url === "/members/me/referrer" && method === "POST") {
+    const inviteCode = text(data.inviteCode);
+    if (
+      inviteCode.length < 20 ||
+      inviteCode.length > 128 ||
+      !/^[A-Za-z0-9_-]+$/.test(inviteCode)
+    )
+      throw new Error("邀请码无效或已过期");
+    const actor = mockUser();
+    const invites = getReferralInvites();
+    const invite = invites.find(
+      (item) => item.tokenHash === referralInviteTokenHash(inviteCode),
+    );
+    if (
+      !invite ||
+      invite.revokedAt ||
+      new Date(invite.expiresAt).getTime() <= Date.now()
+    )
+      throw new Error("邀请码无效或已过期");
+    const referrerId = invite.inviterId;
     if (referrerId === actor.id) throw new Error("不能推荐自己");
     const users = getGovernanceUsers();
     const user = users.find((item) => item.id === actor.id);
@@ -7387,11 +8729,15 @@ export async function mockRequest<T>(
         ? users.find((item) => item.id === ancestor.referrerId)
         : null;
     }
-    if (user.referrerId === referrerId) return ok({ id: actor.id, referrerId });
+    if (user.referrerId === referrerId) return ok({ bound: true });
     if (user.referrerId) throw new Error("直接推荐人已绑定，不能更换");
     user.referrerId = referrerId;
     user.updatedAt = new Date().toISOString();
+    invite.useCount = Number(invite.useCount || 0) + 1;
+    invite.lastUsedAt = user.updatedAt;
+    invite.updatedAt = user.updatedAt;
     saveGovernanceUsers(users);
+    saveReferralInvites(invites);
     saveAuditLogs([
       {
         id: newId("audit"),
@@ -7409,12 +8755,91 @@ export async function mockRequest<T>(
       },
       ...getAuditLogs(),
     ]);
-    return ok({ id: actor.id, referrerId });
+    return ok({ bound: true });
   }
-  if (url === "/referrals/me/rewards") return ok([]);
+  if (url === "/referrals/me/rewards") {
+    const actor = mockUser();
+    return ok(
+      getReferralRewards()
+        .filter(
+          (reward) =>
+            reward.referrerId === actor.id || reward.newUserId === actor.id,
+        )
+        .map((reward) => {
+          const recipientRole =
+            reward.referrerId === actor.id ? "REFERRER" : "NEW_USER";
+          const {
+            referrerId: _referrerId,
+            newUserId: _newUserId,
+            triggerOrderId: _triggerOrderId,
+            ...publicReward
+          } = reward;
+          return {
+            ...publicReward,
+            recipientRole,
+            recipientRewardValue:
+              recipientRole === "REFERRER"
+                ? reward.rewardValue
+                : reward.newUserRewardValue,
+          };
+        }),
+    );
+  }
   if (url === "/referrals/rewards/grant-matured" && method === "POST") {
     requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
-    return ok({ processed: 0, results: [] });
+    const now = new Date();
+    const rewards = getReferralRewards();
+    const orders = getOrders();
+    const processed: any[] = [];
+    for (const reward of rewards) {
+      if (!["PENDING_OBSERVATION", "AVAILABLE"].includes(reward.status))
+        continue;
+      if (new Date(reward.observationEndsAt).getTime() > now.getTime())
+        continue;
+      const order = orders.find((item) => item.id === reward.triggerOrderId);
+      if (
+        !order ||
+        order.status !== "COMPLETED" ||
+        !order.completedAt ||
+        Number(order.refundedCents || 0) > 0
+      )
+        continue;
+      const idempotencyKeys = [
+        creditMockReferralRecipient(
+          reward,
+          reward.referrerId,
+          Number(reward.rewardValue || 0),
+          "REFERRER",
+          mockUser().id,
+        ),
+        creditMockReferralRecipient(
+          reward,
+          reward.newUserId,
+          Number(reward.newUserRewardValue || 0),
+          "NEW_USER",
+          mockUser().id,
+        ),
+      ].filter(Boolean);
+      reward.status = "GRANTED";
+      reward.grantedAt = now.toISOString();
+      saveAuditLogs([
+        {
+          id: newId("audit"),
+          actorId: mockUser().id,
+          actorRole: mockUser().primaryRole,
+          action: "REFERRAL_REWARD_GRANTED",
+          objectType: "ReferralReward",
+          objectId: reward.id,
+          result: "SUCCESS",
+          newValue: { idempotencyKeys },
+          createdAt: reward.grantedAt,
+        },
+        ...getAuditLogs(),
+      ]);
+      processed.push(reward);
+    }
+    saveReferralRewards(rewards);
+    return ok({ processed: processed.length, results: processed });
   }
   if (url === "/alliance/merchants" && method === "POST") {
     requireMockRole("ADMIN", "SUPER_ADMIN");
@@ -7971,13 +9396,13 @@ export async function mockRequest<T>(
         throw new Error("券核销幂等键已用于其他商户");
       if (Number(existingByKey.attributedAmountCents || 0) !== amountCents)
         throw new Error("券核销幂等键已用于不同成交金额");
-      return ok(existingByKey);
+      return ok(couponRedemptionView(existingByKey));
     }
     if (
       coupon.idempotencyKey === idempotencyKey &&
       coupon.status === "REDEEMED"
     )
-      return ok(coupon);
+      return ok(couponRedemptionView(coupon));
     const merchant = getMerchants().find((item) => item.id === merchantId);
     if (!merchant) throw new Error("商户不存在");
     if (merchant.status && merchant.status !== "ACTIVE")
@@ -8066,7 +9491,7 @@ export async function mockRequest<T>(
         : []),
     ];
     saveAuditLogs([...auditEntries, ...getAuditLogs()]);
-    return ok(coupon);
+    return ok(couponRedemptionView(coupon));
   }
   const couponQrMatch = url.match(/^\/alliance\/coupons\/([^/]+)\/qr$/);
   if (couponQrMatch && method === "GET") {
@@ -8137,9 +9562,17 @@ export async function mockRequest<T>(
       throw new Error("会员产品名称长度必须为2-80个字符");
     if (!["EXPERIENCE", "REGULAR", "GOLD", "BLACK"].includes(level))
       throw new Error("会员等级无效");
-    if (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > 10_000_000)
+    if (
+      !Number.isInteger(priceCents) ||
+      priceCents < 0 ||
+      priceCents > 10_000_000
+    )
       throw new Error("会员产品价格无效");
-    if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 3_650)
+    if (
+      !Number.isInteger(durationDays) ||
+      durationDays < 1 ||
+      durationDays > 3_650
+    )
       throw new Error("会员产品有效天数必须为1-3650天");
     if (!benefits || typeof benefits !== "object" || Array.isArray(benefits))
       throw new Error("会员权益必须为结构化对象");
@@ -8241,9 +9674,17 @@ export async function mockRequest<T>(
       throw new Error("会员产品名称长度必须为2-80个字符");
     if (!["EXPERIENCE", "REGULAR", "GOLD", "BLACK"].includes(level))
       throw new Error("会员等级无效");
-    if (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > 10_000_000)
+    if (
+      !Number.isInteger(priceCents) ||
+      priceCents < 0 ||
+      priceCents > 10_000_000
+    )
       throw new Error("会员产品价格无效");
-    if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 3_650)
+    if (
+      !Number.isInteger(durationDays) ||
+      durationDays < 1 ||
+      durationDays > 3_650
+    )
       throw new Error("会员产品有效天数必须为1-3650天");
     if (!benefits || typeof benefits !== "object" || Array.isArray(benefits))
       throw new Error("会员权益必须为结构化对象");
@@ -8574,7 +10015,10 @@ export async function mockRequest<T>(
     const plans = getRechargePlans();
     const replay = plans
       .flatMap((plan) =>
-        (plan.transitions || []).map((transition: any) => ({ plan, transition })),
+        (plan.transitions || []).map((transition: any) => ({
+          plan,
+          transition,
+        })),
       )
       .find(({ transition }) => transition.idempotencyKey === idempotencyKey);
     if (replay) {
@@ -8775,19 +10219,51 @@ export async function mockRequest<T>(
     return finishMockOrderCreation(creation, order);
   }
   if (url === "/goods")
-    return ok(getGoods().filter((item) => item.enabled !== false));
+    return ok(
+      getGoods()
+        .filter((item) => item.enabled !== false)
+        .map((item) => ({
+          id: item.id,
+          sku: item.sku,
+          name: item.name,
+          category: item.category,
+          salePriceCents: item.salePriceCents,
+          stock: item.stock,
+        })),
+    );
   if (url === "/inventory" && method === "GET") {
     requireInventoryRead();
     return ok(getGoods().map(mockInventoryItemContext));
   }
+  if (url === "/inventory/award-options" && method === "GET") {
+    requireMockRole("FRONT_DESK", "EVENT_MANAGER", "ADMIN", "SUPER_ADMIN");
+    return ok(
+      getGoods()
+        .filter((item) => item.enabled !== false)
+        .map((item) => ({
+          id: item.id,
+          sku: item.sku,
+          name: item.name,
+          stock: item.stock,
+          enabled: item.enabled !== false,
+        })),
+    );
+  }
   if (url === "/inventory/low-stock" && method === "GET") {
-    requireInventoryRead();
+    requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
     return ok(
       getGoods()
         .filter(
           (item) => item.enabled !== false && item.stock <= item.safeStock,
         )
-        .map(mockInventoryItemContext),
+        .map((item) => ({
+          id: item.id,
+          sku: item.sku,
+          name: item.name,
+          mode: item.mode,
+          stock: item.stock,
+          safeStock: item.safeStock,
+        })),
     );
   }
   if (url === "/inventory" && method === "POST") {
@@ -9551,10 +11027,10 @@ export async function mockRequest<T>(
   }
   if (url === "/inventory/purchase-orders" && method === "GET") {
     requireInventoryRead();
-    return ok(getPurchaseOrders());
+    return ok(getPurchaseOrders().map(mockPurchaseOrderResponse));
   }
   if (url === "/inventory/purchase-orders" && method === "POST") {
-    requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+    requireMockRole("ADMIN", "SUPER_ADMIN");
     const supplier = getInventorySuppliers().find(
       (entry) => entry.id === text(data.supplierId) && entry.enabled !== false,
     );
@@ -9609,7 +11085,7 @@ export async function mockRequest<T>(
       remark: text(data.remark) || null,
     };
     savePurchaseOrders([order, ...getPurchaseOrders()]);
-    return ok(order);
+    return ok(mockPurchaseOrderResponse(order));
   }
   const purchaseAction = url.match(
     /^\/inventory\/purchase-orders\/([^/]+)\/(submit|approve|receive|cancel)$/,
@@ -9620,7 +11096,7 @@ export async function mockRequest<T>(
     if (!order) throw new Error("采购单不存在");
     const action = purchaseAction[2];
     if (action === "submit") {
-      requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+      requireMockRole("ADMIN", "SUPER_ADMIN");
       if (order.status !== "DRAFT" && order.status !== "SUBMITTED")
         throw new Error("当前采购单不能提交");
       Object.assign(order, {
@@ -9655,14 +11131,14 @@ export async function mockRequest<T>(
         cancelledAt: new Date().toISOString(),
       });
     } else {
-      requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+      requireMockRole("ADMIN", "SUPER_ADMIN");
       if (!["APPROVED", "PARTIAL_RECEIVED"].includes(order.status))
         throw new Error("采购单未审批或已完成，不能收货");
       const key = requireIdempotencyKey(data.idempotencyKey, "收货幂等键");
       const previous = (order.receipts || []).find(
         (entry: any) => entry.idempotencyKey === key,
       );
-      if (previous) return ok(previous);
+      if (previous) return ok(mockPurchaseReceiptResponse(previous));
       const receiptLines = Array.isArray(data.lines) ? data.lines : [];
       if (
         !receiptLines.length ||
@@ -9733,17 +11209,17 @@ export async function mockRequest<T>(
       saveGoods(goods);
       saveInventoryBalances(balances);
       savePurchaseOrders(orders);
-      return ok(receipt);
+      return ok(mockPurchaseReceiptResponse(receipt));
     }
     savePurchaseOrders(orders);
-    return ok(order);
+    return ok(mockPurchaseOrderResponse(order));
   }
   if (url === "/inventory/stocktakes" && method === "GET") {
     requireInventoryRead();
-    return ok(getStocktakes());
+    return ok(getStocktakes().map(mockStocktakeResponse));
   }
   if (url === "/inventory/stocktakes" && method === "POST") {
-    requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+    requireMockRole("ADMIN", "SUPER_ADMIN");
     const location = getInventoryLocations().find(
       (entry) => entry.id === text(data.locationId) && entry.enabled !== false,
     );
@@ -9761,13 +11237,13 @@ export async function mockRequest<T>(
       createdAt: new Date().toISOString(),
     };
     saveStocktakes([stocktake, ...getStocktakes()]);
-    return ok(stocktake);
+    return ok(mockStocktakeResponse(stocktake));
   }
   const stocktakeCount = url.match(
     /^\/inventory\/stocktakes\/([^/]+)\/lines\/([^/]+)\/count$/,
   );
   if (stocktakeCount && method === "POST") {
-    requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+    requireMockRole("ADMIN", "SUPER_ADMIN");
     const list = getStocktakes();
     const stocktake = list.find((entry) => entry.id === stocktakeCount[1]);
     const line = stocktake?.lines.find(
@@ -9792,7 +11268,7 @@ export async function mockRequest<T>(
     if (!stocktake) throw new Error("盘点单不存在");
     const action = stocktakeAction[2];
     if (action === "start") {
-      requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+      requireMockRole("ADMIN", "SUPER_ADMIN");
       if (stocktake.status !== "DRAFT" && stocktake.status !== "COUNTING")
         throw new Error("当前盘点单不能开始");
       if (stocktake.status === "DRAFT") {
@@ -9824,7 +11300,7 @@ export async function mockRequest<T>(
         });
       }
     } else if (action === "submit") {
-      requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+      requireMockRole("ADMIN", "SUPER_ADMIN");
       if (
         stocktake.status !== "COUNTING" ||
         stocktake.lines.some((line: any) => line.countedQuantity === null)
@@ -9841,7 +11317,7 @@ export async function mockRequest<T>(
       if (stocktake.status === "POSTED") {
         if (stocktake.postIdempotencyKey !== key)
           throw new Error("盘点单已过账");
-        return ok(stocktake);
+        return ok(mockStocktakeResponse(stocktake));
       }
       if (stocktake.status !== "REVIEW") throw new Error("盘点单尚未提交复核");
       if (
@@ -9878,14 +11354,14 @@ export async function mockRequest<T>(
       saveInventoryBalances(balances);
     }
     saveStocktakes(list);
-    return ok(stocktake);
+    return ok(mockStocktakeResponse(stocktake));
   }
   if (url === "/inventory/operations" && method === "GET") {
     requireInventoryRead();
-    return ok(getInventoryOperations());
+    return ok(getInventoryOperations().map(mockInventoryOperationResponse));
   }
   if (url === "/inventory/operations" && method === "POST") {
-    requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+    requireMockRole("ADMIN", "SUPER_ADMIN");
     const item = getGoods().find(
       (entry) => entry.id === text(data.itemId) && entry.enabled !== false,
     );
@@ -9930,7 +11406,7 @@ export async function mockRequest<T>(
       createdAt: new Date().toISOString(),
     };
     saveInventoryOperations([operation, ...getInventoryOperations()]);
-    return ok(operation);
+    return ok(mockInventoryOperationResponse(operation));
   }
   const operationAction = url.match(
     /^\/inventory\/operations\/([^/]+)\/(submit|approve|post|cancel)$/,
@@ -9941,7 +11417,7 @@ export async function mockRequest<T>(
     if (!operation) throw new Error("库存业务单不存在");
     const action = operationAction[2];
     if (action === "submit") {
-      requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+      requireMockRole("ADMIN", "SUPER_ADMIN");
       if (!["DRAFT", "SUBMITTED"].includes(operation.status))
         throw new Error("业务单不能提交");
       Object.assign(operation, {
@@ -9971,7 +11447,7 @@ export async function mockRequest<T>(
         cancelReason: text(data.reason),
       });
     } else {
-      requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+      requireMockRole("ADMIN", "SUPER_ADMIN");
       const key = requireIdempotencyKey(
         data.idempotencyKey,
         "业务单过账幂等键",
@@ -9979,7 +11455,7 @@ export async function mockRequest<T>(
       if (operation.status === "POSTED") {
         if (operation.postIdempotencyKey !== key)
           throw new Error("业务单已过账");
-        return ok(operation);
+        return ok(mockInventoryOperationResponse(operation));
       }
       if (operation.status !== "APPROVED") throw new Error("业务单尚未审批");
       const goods = getGoods();
@@ -10038,7 +11514,7 @@ export async function mockRequest<T>(
       saveInventoryBalances(balances);
     }
     saveInventoryOperations(list);
-    return ok(operation);
+    return ok(mockInventoryOperationResponse(operation));
   }
   if (url === "/goods/orders" && method === "POST") {
     if (!Array.isArray(data.items) || !data.items.length)
@@ -10109,13 +11585,7 @@ export async function mockRequest<T>(
   }
   const inventoryMatch = url.match(/^\/inventory\/([^/]+)\/transactions$/);
   if (inventoryMatch && method === "POST") {
-    requireMockRole(
-      "FRONT_DESK",
-      "COACH",
-      "EVENT_MANAGER",
-      "ADMIN",
-      "SUPER_ADMIN",
-    );
+    requireMockRole("ADMIN", "SUPER_ADMIN");
     const list = getGoods();
     const item = list.find(
       (entry) => entry.id === inventoryMatch[1] && entry.enabled !== false,
@@ -10133,13 +11603,6 @@ export async function mockRequest<T>(
       "STOCKTAKE",
     ];
     if (!validTypes.includes(type)) throw new Error("库存变动类型无效");
-    const allowed =
-      type === "TRAINING_USAGE"
-        ? ["COACH", "ADMIN", "SUPER_ADMIN"]
-        : type === "EVENT_USAGE"
-          ? ["EVENT_MANAGER", "ADMIN", "SUPER_ADMIN"]
-          : ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"];
-    requireMockRole(...(allowed as AppRole[]));
     const idempotency = requireIdempotencyKey(
       data.idempotencyKey,
       "库存幂等键",
@@ -10155,7 +11618,7 @@ export async function mockRequest<T>(
         Number(previous.quantity) !== Number(data.quantity)
       )
         throw new Error("库存幂等键已用于其他库存动作");
-      return ok(previous);
+      return ok(mockInventoryTransactionResponse(previous));
     }
     if (
       [
@@ -10222,7 +11685,7 @@ export async function mockRequest<T>(
     saveGoods(list);
     saveInventoryBalances(balances);
     saveInventoryTransactions([transaction, ...transactions]);
-    return ok(transaction);
+    return ok(mockInventoryTransactionResponse(transaction));
   }
   if (url === "/members/account-adjustments" && method === "GET") {
     requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
@@ -10394,11 +11857,12 @@ export async function mockRequest<T>(
     return ok(
       getMemberAccountTransactions()
         .filter((transaction) => accountById.has(transaction.accountId))
-        .map((transaction) => ({
-          ...transaction,
-          account: { type: accountById.get(transaction.accountId)?.type },
-          operator: mockActorIdentity(transaction.operatorId),
-        })),
+        .map((transaction) =>
+          accountTransactionView(
+            transaction,
+            String(accountById.get(transaction.accountId)?.type || ""),
+          ),
+        ),
     );
   }
 
@@ -10410,6 +11874,8 @@ export async function mockRequest<T>(
     const coachOnly =
       hasMockRole("COACH") &&
       !hasMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
+    const privacyScope = mockMemberPrivacyScope();
+    const frontDeskLimited = privacyScope === "FRONT_DESK_LIMITED";
     if (coachOnly && id !== "member-1")
       throw new Error("会员不在当前教练负责的班级中");
     const member =
@@ -10417,7 +11883,11 @@ export async function mockRequest<T>(
         ? {
             id,
             displayName: "延庆会员小林",
-            phone: coachOnly ? null : "13800000005",
+            phone: coachOnly
+              ? null
+              : privacyScope === "ADMIN"
+                ? "13800000005"
+                : maskMockPhone("13800000005"),
             memberProfile: {
               level: "GOLD",
               visitCount: 18,
@@ -10427,18 +11897,55 @@ export async function mockRequest<T>(
         : {
             id,
             displayName: "羽友小周",
-            phone: "13800000007",
+            phone:
+              privacyScope === "ADMIN"
+                ? "13800000007"
+                : maskMockPhone("13800000007"),
             memberProfile: {
               level: "REGULAR",
               visitCount: 6,
               lastVisitAt: new Date(Date.now() - 86400000).toISOString(),
             },
           };
+    const memberAccounts = getMemberAccounts()[id] || [];
     return ok({
       member,
-      accounts: coachOnly ? [] : getMemberAccounts()[id] || [],
-      recentOrders: coachOnly ? [] : getOrders().slice(0, 5),
-      recentTraining: id === "member-1" ? getEnrollments().slice(0, 5) : [],
+      accounts: coachOnly || frontDeskLimited ? [] : memberAccounts,
+      paymentSummary: frontDeskLimited
+        ? mockFrontDeskPaymentSummary(memberAccounts)
+        : undefined,
+      recentOrders: coachOnly
+        ? []
+        : frontDeskLimited
+          ? getOrders()
+              .slice(0, 5)
+              .map((order) => ({
+                id: order.id,
+                orderNo: order.orderNo,
+                businessType: order.businessType,
+                status: order.status,
+                title: order.title,
+                createdAt: order.createdAt,
+              }))
+          : getOrders().slice(0, 5),
+      recentTraining:
+        id !== "member-1"
+          ? []
+          : frontDeskLimited
+            ? getEnrollments()
+                .slice(0, 5)
+                .map((enrollment) => ({
+                  id: enrollment.id,
+                  enrollmentNo: enrollment.enrollmentNo,
+                  status: enrollment.status,
+                  totalSessions: enrollment.totalSessions,
+                  consumedSessions: enrollment.consumedSessions,
+                  expiresAt: enrollment.expiresAt,
+                  product: enrollment.product,
+                  class: enrollment.class,
+                  student: enrollment.student,
+                }))
+            : getEnrollments().slice(0, 5),
       recentGames: coachOnly
         ? []
         : getGames()
@@ -10458,7 +11965,9 @@ export async function mockRequest<T>(
               event,
             })),
       recentCoupons: coachOnly ? [] : getCoupons().slice(0, 5),
-      financialsRedacted: coachOnly,
+      privacyScope,
+      financialsRedacted: coachOnly || frontDeskLimited,
+      accountTypesLimited: coachOnly || frontDeskLimited,
     });
   }
   if (url === "/members/leads" && method === "GET") {
@@ -10634,6 +12143,7 @@ export async function mockRequest<T>(
   }
   if (url === "/members") {
     requireMockRole("FRONT_DESK", "COACH", "FINANCE", "ADMIN", "SUPER_ADMIN");
+    const privacyScope = mockMemberPrivacyScope();
     const members =
       mockRoles().includes("COACH") &&
       !hasMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN")
@@ -10645,9 +12155,17 @@ export async function mockRequest<T>(
               status: "ACTIVE",
               memberProfile: { level: "GOLD" },
               trainingContext: "当前负责班级",
+              privacyScope: "COACH_ASSIGNED",
             },
           ]
-        : MOCK_ACTIVE_MEMBERS.map((member) => ({ ...member }));
+        : MOCK_ACTIVE_MEMBERS.map((member) => ({
+            ...member,
+            phone:
+              privacyScope === "ADMIN"
+                ? member.phone
+                : maskMockPhone(member.phone),
+            privacyScope,
+          }));
     return ok({ items: members, total: members.length });
   }
   if (url === "/dashboard") {
@@ -10747,6 +12265,7 @@ export async function mockRequest<T>(
         ],
       },
       marketing: {
+        directReferralBindings: 18,
         directReferralConversions: 7,
         badmintonCoinIssuedUnits: 1_260,
         couponIssued: 120,
@@ -10825,7 +12344,8 @@ export async function mockRequest<T>(
           (left, right) =>
             new Date(right.periodEnd).getTime() -
             new Date(left.periodEnd).getTime(),
-        ),
+        )
+        .map(trainingSettlementView),
     );
   }
   if (url === "/training/settlements" && method === "POST") {
@@ -10858,7 +12378,7 @@ export async function mockRequest<T>(
       ) {
         throw new Error("该培训结算周期已生成，费用口径不同，不能覆盖原草稿");
       }
-      return ok(existing);
+      return ok(trainingSettlementView(existing));
     }
     const now = new Date().toISOString();
     const effectiveRevenueCents = 168_000;
@@ -10912,7 +12432,7 @@ export async function mockRequest<T>(
       updatedAt: now,
     };
     saveTrainingSettlements([settlement, ...list]);
-    return ok(settlement);
+    return ok(trainingSettlementView(settlement));
   }
   const trainingSettlementAction = url.match(
     /^\/training\/settlements\/([^/]+)\/(submit|confirm|settle|return|void)$/,
@@ -10978,9 +12498,10 @@ export async function mockRequest<T>(
       if (processed[idempotencyKey] !== transition.auditAction) {
         throw new Error("幂等键已用于其他培训结算动作");
       }
-      return ok(settlement);
+      return ok(trainingSettlementView(settlement));
     }
-    if (settlement.status === transition.to) return ok(settlement);
+    if (settlement.status === transition.to)
+      return ok(trainingSettlementView(settlement));
     if (settlement.status !== transition.from) {
       throw new Error(
         `培训结算单当前状态为 ${settlement.status}，不能执行该操作`,
@@ -11018,7 +12539,7 @@ export async function mockRequest<T>(
     if (idempotencyKey) processed[idempotencyKey] = transition.auditAction;
     settlement.processedIdempotencyKeys = processed;
     saveTrainingSettlements(list);
-    return ok(settlement);
+    return ok(trainingSettlementView(settlement));
   }
   if (url === "/alliance/settlements" && method === "POST") {
     requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
@@ -11045,7 +12566,7 @@ export async function mockRequest<T>(
     if (existing) {
       if (Number(existing.attributedGrossProfitCents || 0) !== grossProfit)
         throw new Error("该商户结算周期已生成，利润口径不同，请先提出调整申请");
-      return ok(existing);
+      return ok(allianceSettlementView(existing));
     }
     const settlement = {
       id: newId("settlement"),
@@ -11071,12 +12592,12 @@ export async function mockRequest<T>(
     requireMockRole("MERCHANT", "FINANCE", "ADMIN", "SUPER_ADMIN");
     if (settlementDirectoryIsScoped()) {
       return ok(
-        getSettlements().filter(
-          (settlement) => settlement.merchantId === "merchant-coffee",
-        ),
+        getSettlements()
+          .filter((settlement) => settlement.merchantId === "merchant-coffee")
+          .map(allianceSettlementView),
       );
     }
-    return ok(getSettlements());
+    return ok(getSettlements().map(allianceSettlementView));
   }
   const settlementAction = url.match(
     /^\/alliance\/settlements\/([^/]+)\/(submit|confirm|dispute|settle)$/,
@@ -11102,7 +12623,8 @@ export async function mockRequest<T>(
       requireMockRole("MERCHANT", "ADMIN", "SUPER_ADMIN");
     if (["submit", "settle"].includes(action))
       requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
-    if (settlement.status === transition.to) return ok(settlement);
+    if (settlement.status === transition.to)
+      return ok(allianceSettlementView(settlement));
     if (settlement.status !== transition.from)
       throw new Error(`结算单当前状态为 ${settlement.status}，不能执行该操作`);
     if (action === "dispute" && text(data.reason).length < 2)
@@ -11125,7 +12647,7 @@ export async function mockRequest<T>(
       ],
     };
     saveSettlements(list);
-    return ok(settlement);
+    return ok(allianceSettlementView(settlement));
   }
   const venueCheckInMatch = url.match(/^\/venues\/orders\/([^/]+)\/check-in$/);
   if (venueCheckInMatch && method === "POST") {
@@ -11134,10 +12656,11 @@ export async function mockRequest<T>(
     const order = orders.find((item) => item.id === venueCheckInMatch[1]);
     if (!order || order.businessType !== "VENUE")
       throw new Error("订场订单不存在");
-    if (order.status === "CHECKED_IN") return ok(order);
+    if (order.status === "CHECKED_IN") return ok(mockOrderResponse(order));
     if (order.status !== "PAID") throw new Error("订单未支付或状态不可签到");
     const persistedBooking = getVenueBookings().find(
-      (booking) => booking.orderId === order.id && booking.status !== "CANCELLED",
+      (booking) =>
+        booking.orderId === order.id && booking.status !== "CANCELLED",
     );
     const booking = persistedBooking || (order.bookings || [])[0];
     if (!booking) throw new Error("订单没有可履约的场地占用记录");
@@ -11169,7 +12692,7 @@ export async function mockRequest<T>(
       status: booking.status === "CONFIRMED" ? "CHECKED_IN" : booking.status,
     }));
     saveOrders(orders);
-    return ok(order);
+    return ok(mockOrderResponse(order));
   }
   const venueFulfillmentMatch = url.match(
     /^\/venues\/orders\/([^/]+)\/fulfillment$/,
@@ -11192,9 +12715,11 @@ export async function mockRequest<T>(
     );
     const evidenceSource = text(data.evidence?.source);
     if (
-      !["FRONT_DESK_ROLL_CALL", "ACCESS_CONTROL_LOG", "COURT_INSPECTION"].includes(
-        evidenceSource,
-      )
+      ![
+        "FRONT_DESK_ROLL_CALL",
+        "ACCESS_CONTROL_LOG",
+        "COURT_INSPECTION",
+      ].includes(evidenceSource)
     )
       throw new Error("履约证据来源无效");
     const observedAt = new Date(String(data.evidence?.observedAt || ""));
@@ -11206,7 +12731,10 @@ export async function mockRequest<T>(
       actorId: mockUser().id,
       outcome,
       reason,
-      evidence: { source: evidenceSource, observedAt: observedAt.toISOString() },
+      evidence: {
+        source: evidenceSource,
+        observedAt: observedAt.toISOString(),
+      },
     });
     const persistedBookings = getVenueBookings();
     const replayBooking =
@@ -11215,7 +12743,10 @@ export async function mockRequest<T>(
       ) ||
       orders
         .flatMap((item) => item.bookings || [])
-        .find((booking: any) => booking.fulfillmentIdempotencyKey === idempotencyKey);
+        .find(
+          (booking: any) =>
+            booking.fulfillmentIdempotencyKey === idempotencyKey,
+        );
     if (replayBooking) {
       if (
         replayBooking.orderId !== order.id ||
@@ -11223,12 +12754,13 @@ export async function mockRequest<T>(
         replayBooking.fulfillmentCommandHash !== commandHash
       )
         throw new Error("履约幂等键已用于不同订单、命令或操作人");
-      return ok(order);
+      return ok(mockOrderResponse(order));
     }
     if (order.status === "REFUND_PENDING")
       throw new Error("订单正在等待退款审批，请先处理退款后再履约");
     const persistedBooking = persistedBookings.find(
-      (booking) => booking.orderId === order.id && booking.status !== "CANCELLED",
+      (booking) =>
+        booking.orderId === order.id && booking.status !== "CANCELLED",
     );
     const orderBooking = (order.bookings || []).find(
       (booking: any) => booking.status !== "CANCELLED",
@@ -11240,7 +12772,10 @@ export async function mockRequest<T>(
     const now = new Date();
     const startsAt = new Date(String(booking.startsAt || ""));
     const endsAt = new Date(String(booking.endsAt || ""));
-    if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()))
+    if (
+      !Number.isFinite(startsAt.getTime()) ||
+      !Number.isFinite(endsAt.getTime())
+    )
       throw new Error("预约履约时间无效");
     if (endsAt > now) throw new Error("预约尚未结束，不能确认完成或未到场");
     if (
@@ -11273,7 +12808,8 @@ export async function mockRequest<T>(
         fulfilledAt: nowIso,
       });
     if (persistedBooking) applyBooking(persistedBooking);
-    if (orderBooking && orderBooking !== persistedBooking) applyBooking(orderBooking);
+    if (orderBooking && orderBooking !== persistedBooking)
+      applyBooking(orderBooking);
     order.completedAt = order.completedAt || nowIso;
     if (!["REFUND_PENDING", "PARTIALLY_REFUNDED"].includes(order.status))
       order.status = "COMPLETED";
@@ -11287,14 +12823,21 @@ export async function mockRequest<T>(
         id: newId("audit"),
         actorId: mockUser().id,
         actorRole: mockUser().primaryRole,
-        action: outcome === "NO_SHOW" ? "VENUE_BOOKING_NO_SHOW" : "VENUE_BOOKING_COMPLETED",
+        action:
+          outcome === "NO_SHOW"
+            ? "VENUE_BOOKING_NO_SHOW"
+            : "VENUE_BOOKING_COMPLETED",
         objectType: "CourtBooking",
         objectId: booking.id,
         reason,
         requestId: idempotencyKey,
         result: "SUCCESS",
         oldValue: { status: expectedStatus },
-        newValue: { status: outcome, orderId: order.id, evidence: fulfillmentEvidence },
+        newValue: {
+          status: outcome,
+          orderId: order.id,
+          evidence: fulfillmentEvidence,
+        },
         createdAt: nowIso,
       },
       {
@@ -11311,7 +12854,7 @@ export async function mockRequest<T>(
       },
       ...getAuditLogs(),
     ]);
-    return ok(order);
+    return ok(mockOrderResponse(order));
   }
   const gameCheckInMatch = url.match(/^\/games\/([^/]+)\/check-in\/([^/]+)$/);
   if (gameCheckInMatch && method === "POST") {
@@ -11329,9 +12872,11 @@ export async function mockRequest<T>(
     if (["DRAFT", "CANCELLED", "COMPLETED"].includes(game.status))
       throw new Error("当前球局状态不可签到");
     const registration = game?.registrations?.find(
-      (item: any) => item.userId === gameCheckInMatch[2],
+      (item: any) =>
+        item.id === gameCheckInMatch[2] || item.userId === gameCheckInMatch[2],
     );
-    if (registration?.status === "CHECKED_IN") return ok(registration);
+    if (registration?.status === "CHECKED_IN")
+      return ok(gameRegistrationCommandResponse(registration));
     if (!registration) throw new Error("报名记录不存在");
     if (registration.status !== "PAID") throw new Error("报名未支付或不存在");
     const registrationOrder = getOrders().find(
@@ -11355,7 +12900,7 @@ export async function mockRequest<T>(
       checkInTimeWindowPolicy: timeWindowPolicy,
     });
     saveGames(list);
-    return ok(registration);
+    return ok(gameRegistrationCommandResponse(registration));
   }
   throw new Error(`模拟接口尚未实现：${method} ${url}`);
 }

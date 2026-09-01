@@ -7,6 +7,7 @@ import {
   getMerchants,
   getRiskEvents,
   resetCatalogState,
+  saveAuditLogs,
   saveMerchants,
 } from "./state";
 
@@ -71,6 +72,7 @@ describe("miniapp mock governance operations", () => {
 
   it("keeps finance in maker review and reserves terminal risk decisions for administrators", async () => {
     await login("FINANCE");
+    await expect(request("GET", "/parameters")).rejects.toThrow("无权");
     const auditBefore = getAuditLogs().length;
     const reviewed = await request(
       "POST",
@@ -94,6 +96,48 @@ describe("miniapp mock governance operations", () => {
     expect(resolved).toMatchObject({ status: "RESOLVED" });
     expect(getRiskEvents().find((item) => item.id === "risk-mock-1"))
       .toMatchObject({ status: "RESOLVED", resolvedBy: "user-admin" });
+  });
+
+  it("limits finance audit search to finance objects and strips raw evidence fields", async () => {
+    saveAuditLogs([
+      {
+        id: "audit-finance-refund",
+        action: "REFUND_APPROVED",
+        objectType: "Refund",
+        objectId: "refund-1",
+        oldValue: { memberPhone: "13800000005" },
+        newValue: { amountCents: 6000 },
+        ip: "192.0.2.1",
+        deviceInfo: "internal-device",
+        result: "SUCCESS",
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "audit-governance-parameter",
+        action: "PARAMETER_VERSION_CREATED",
+        objectType: "SystemParameter",
+        objectId: "parameter-1",
+        newValue: { key: "internal.secret", value: "raw" },
+        result: "SUCCESS",
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    await login("FINANCE");
+
+    const result = await request<any>("GET", "/audit-logs");
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: "audit-finance-refund",
+      objectType: "Refund",
+    });
+    expect(result.items[0].oldValue).toBeUndefined();
+    expect(result.items[0].newValue).toBeUndefined();
+    expect(result.items[0].ip).toBeUndefined();
+    expect(result.items[0].deviceInfo).toBeUndefined();
+    await expect(
+      request("GET", "/audit-logs", { objectType: "SystemParameter" }),
+    ).rejects.toThrow("财务仅可查询");
   });
 
   it("applies persisted role and status changes to the next mock login", async () => {

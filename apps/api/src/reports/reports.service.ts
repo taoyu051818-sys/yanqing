@@ -193,8 +193,35 @@ const EXPORT_ROLES = new Set<AppRole>([
   AppRole.ADMIN,
   AppRole.SUPER_ADMIN,
 ]);
+const EXPORT_ROLE_PRIORITY = [
+  AppRole.SUPER_ADMIN,
+  AppRole.ADMIN,
+  AppRole.FINANCE,
+] as const;
+const FINANCE_SCOPES = new Set<ExportScope>(['orders', 'finance']);
 
 type ExportRow = Record<string, unknown>;
+
+const FINANCE_BLOCKED_FIELDS = new Set([
+  'parameterSnapshot',
+  'creationIdempotencyKey',
+  'creationCommandHash',
+  'idempotencyKey',
+  'requestIdempotencyKey',
+  'commandHash',
+  'metadata',
+  'providerPayload',
+  'ruleSnapshot',
+  'commissionRateBps',
+  'detail',
+]);
+
+const financeRows = (rows: ExportRow[]): ExportRow[] =>
+  rows.map((row) =>
+    Object.fromEntries(
+      Object.entries(row).filter(([key]) => !FINANCE_BLOCKED_FIELDS.has(key)),
+    ),
+  );
 
 const excelSafeString = (value: string) =>
   /^[=+\-@]/.test(value) ? `'${value}` : value;
@@ -236,17 +263,27 @@ export class ReportsService {
     scope: string,
     actor: AuthUser,
   ): Promise<{ filename: string; buffer: Buffer }> {
-    const privilegedRole = actor.roles.find((role) => EXPORT_ROLES.has(role));
-    if (!privilegedRole) throw new ForbiddenException('无权导出经营数据');
+    const authorizationRole = EXPORT_ROLE_PRIORITY.find((role) =>
+      actor.roles.includes(role),
+    );
+    if (!authorizationRole || !EXPORT_ROLES.has(authorizationRole)) {
+      throw new ForbiddenException('无权导出经营数据');
+    }
     if (!SCOPES.includes(scope as ExportScope))
       throw new BadRequestException('不支持的导出范围');
 
     const exportScope = scope as ExportScope;
+    const isAdministrator = actor.roles.some((role) =>
+      ([AppRole.ADMIN, AppRole.SUPER_ADMIN] as AppRole[]).includes(role),
+    );
+    if (!isAdministrator && !FINANCE_SCOPES.has(exportScope)) {
+      throw new ForbiddenException('财务角色仅可导出订单与财务账簿数据');
+    }
     const exportedAt = new Date();
     const datasets = await Promise.all(
       DATASETS_BY_SCOPE[exportScope].map(async (name) => ({
         name,
-        rows: await this.data(name, exportScope),
+        rows: await this.data(name, exportScope, isAdministrator),
       })),
     );
 
@@ -257,7 +294,7 @@ export class ReportsService {
       workbook,
       exportScope,
       actor,
-      privilegedRole,
+      authorizationRole,
       exportedAt,
       datasets,
     );
@@ -271,7 +308,7 @@ export class ReportsService {
     await this.prisma.auditLog.create({
       data: {
         actorId: actor.sub,
-        actorRole: privilegedRole,
+        actorRole: authorizationRole,
         action: 'DATA_EXPORTED',
         objectType: 'Export',
         objectId: exportScope,
@@ -366,7 +403,10 @@ export class ReportsService {
   private async data(
     dataset: DatasetName,
     scope: ExportScope,
+    isAdministrator: boolean,
   ): Promise<ExportRow[]> {
+    if (!isAdministrator) return this.financeData(dataset);
+
     const scopedBusinessType =
       scope === 'training'
         ? BusinessType.TRAINING
@@ -665,5 +705,310 @@ export class ReportsService {
       orderBy: { businessDate: 'desc' },
       take: EXPORT_ROW_LIMIT,
     }) as never;
+  }
+
+  /**
+   * Finance exports are accounting views, not database snapshots. Keep these
+   * selects explicit so internal replay evidence and business-rule snapshots
+   * cannot be exposed merely because a model gains another column.
+   */
+  private async financeData(dataset: DatasetName): Promise<ExportRow[]> {
+    let rows: ExportRow[];
+
+    if (dataset === 'Orders') {
+      rows = (await this.prisma.order.findMany({
+        select: {
+          id: true,
+          orderNo: true,
+          memberId: true,
+          createdById: true,
+          businessType: true,
+          subjectAccount: true,
+          paymentChannel: true,
+          sourceChannel: true,
+          status: true,
+          title: true,
+          listAmountCents: true,
+          discountCents: true,
+          payableCents: true,
+          paidCents: true,
+          refundedCents: true,
+          externalOrderNo: true,
+          consumedCouponCode: true,
+          paidAt: true,
+          completedAt: true,
+          cancelledAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'OrderItems') {
+      rows = (await this.prisma.orderItem.findMany({
+        select: {
+          id: true,
+          orderId: true,
+          itemType: true,
+          itemId: true,
+          name: true,
+          quantity: true,
+          unitPriceCents: true,
+          amountCents: true,
+        },
+        orderBy: { id: 'asc' },
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'Payments') {
+      rows = (await this.prisma.payment.findMany({
+        select: {
+          id: true,
+          paymentNo: true,
+          orderId: true,
+          userId: true,
+          operatorId: true,
+          channel: true,
+          amountCents: true,
+          status: true,
+          providerTradeNo: true,
+          paidAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'Refunds') {
+      rows = (await this.prisma.refund.findMany({
+        select: {
+          id: true,
+          refundNo: true,
+          orderId: true,
+          requestedById: true,
+          approvedById: true,
+          amountCents: true,
+          reason: true,
+          originalOrderStatus: true,
+          status: true,
+          providerRefundNo: true,
+          requestedAt: true,
+          approvedAt: true,
+          completedAt: true,
+        },
+        orderBy: { requestedAt: 'desc' },
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'Accounts') {
+      rows = (await this.prisma.account.findMany({
+        select: {
+          id: true,
+          userId: true,
+          type: true,
+          balance: true,
+          frozenBalance: true,
+          version: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: [{ userId: 'asc' }, { type: 'asc' }],
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'AccountTransactions') {
+      rows = (await this.prisma.accountTransaction.findMany({
+        select: {
+          id: true,
+          accountId: true,
+          kind: true,
+          amount: true,
+          balanceBefore: true,
+          balanceAfter: true,
+          reasonCode: true,
+          reason: true,
+          orderId: true,
+          operatorId: true,
+          expiresAt: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'TrainingRevenue') {
+      rows = (await this.prisma.trainingRevenueRecognition.findMany({
+        select: {
+          id: true,
+          attendanceId: true,
+          enrollmentId: true,
+          settlementId: true,
+          type: true,
+          sequence: true,
+          reversalOfId: true,
+          effectiveRevenueCents: true,
+          contractRateBps: true,
+          venueContributionCents: true,
+          venueFeeCents: true,
+          trainingPayableVenueCents: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'TrainingSettlements') {
+      rows = (await this.prisma.trainingSettlement.findMany({
+        select: {
+          id: true,
+          periodStart: true,
+          periodEnd: true,
+          effectiveRevenueCents: true,
+          contractRateBps: true,
+          venueContributionCents: true,
+          venueFeeCents: true,
+          trainingPayableVenueCents: true,
+          coachCostCents: true,
+          assistantCostCents: true,
+          materialCostCents: true,
+          acquisitionCostCents: true,
+          marketingCostCents: true,
+          occupiedCourtHours: true,
+          cashContributionMarginCents: true,
+          status: true,
+          confirmedById: true,
+          confirmedAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { periodEnd: 'desc' },
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'AllianceSettlements') {
+      rows = (await this.prisma.allianceSettlement.findMany({
+        select: {
+          id: true,
+          merchantId: true,
+          periodStart: true,
+          periodEnd: true,
+          issuedCount: true,
+          claimedCount: true,
+          redeemedCount: true,
+          effectiveNewCustomers: true,
+          attributedGmvCents: true,
+          attributedGrossProfitCents: true,
+          cooperationFeeCents: true,
+          roi: true,
+          status: true,
+          confirmedAt: true,
+          settledAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { periodEnd: 'desc' },
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'ConsignmentPayableEntries') {
+      rows = (await this.prisma.consignmentPayableEntry.findMany({
+        select: {
+          id: true,
+          type: true,
+          supplierId: true,
+          itemId: true,
+          orderId: true,
+          orderItemId: true,
+          refundId: true,
+          reversalOfId: true,
+          quantity: true,
+          unitSalePriceCents: true,
+          grossSaleCents: true,
+          commissionCents: true,
+          payableCents: true,
+          occurredAt: true,
+          createdAt: true,
+        },
+        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'ConsignmentSettlements') {
+      rows = (await this.prisma.consignmentSettlement.findMany({
+        select: {
+          id: true,
+          statementNo: true,
+          supplierId: true,
+          periodStart: true,
+          periodEnd: true,
+          version: true,
+          status: true,
+          entryCount: true,
+          netQuantity: true,
+          grossSaleCents: true,
+          commissionCents: true,
+          payableCents: true,
+          creationReason: true,
+          createdById: true,
+          submittedById: true,
+          confirmedById: true,
+          settledById: true,
+          voidedById: true,
+          submittedAt: true,
+          confirmedAt: true,
+          settledAt: true,
+          voidedAt: true,
+          paymentReference: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: [{ periodEnd: 'desc' }, { version: 'desc' }],
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'ConsignmentSettlementLines') {
+      rows = (await this.prisma.consignmentSettlementLine.findMany({
+        select: {
+          id: true,
+          settlementId: true,
+          payableEntryId: true,
+          quantity: true,
+          grossSaleCents: true,
+          commissionCents: true,
+          payableCents: true,
+          releasedAt: true,
+          createdAt: true,
+        },
+        orderBy: [{ settlementId: 'asc' }, { createdAt: 'asc' }],
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'ConsignmentTransitions') {
+      rows = (await this.prisma.consignmentSettlementTransition.findMany({
+        select: {
+          id: true,
+          settlementId: true,
+          action: true,
+          fromStatus: true,
+          toStatus: true,
+          reason: true,
+          actorId: true,
+          createdAt: true,
+        },
+        orderBy: [{ settlementId: 'asc' }, { createdAt: 'asc' }],
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else if (dataset === 'ReconciliationPeriods') {
+      rows = (await this.prisma.reconciliationPeriod.findMany({
+        select: {
+          id: true,
+          businessDate: true,
+          status: true,
+          totals: true,
+          exceptionCount: true,
+          closedById: true,
+          closedAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { businessDate: 'desc' },
+        take: EXPORT_ROW_LIMIT,
+      })) as unknown as ExportRow[];
+    } else {
+      throw new ForbiddenException('财务角色无权导出该数据集');
+    }
+
+    // Defense in depth for mocked/custom Prisma adapters that may ignore select.
+    return financeRows(rows);
   }
 }

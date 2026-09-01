@@ -433,8 +433,26 @@ const activeClaimedEntryIds = (settlements: JsonRecord[]) =>
     ),
   );
 
+const readableRule = (snapshot: JsonRecord = {}) => ({
+  supplierCode: text(snapshot.supplierCode),
+  supplierName: text(snapshot.supplierName),
+  settlementCycle: text(snapshot.settlementCycle),
+  commissionRateBps: Number(snapshot.commissionRateBps || 0),
+  commissionMeaning: text(snapshot.commissionMeaning) || "VENUE_COMMISSION",
+});
+
 const basePayableView = (entry: JsonRecord) => ({
-  ...entry,
+  id: entry.id,
+  type: entry.type,
+  quantity: entry.quantity,
+  unitSalePriceCents: entry.unitSalePriceCents,
+  grossSaleCents: entry.grossSaleCents,
+  commissionRateBps: entry.commissionRateBps,
+  commissionCents: entry.commissionCents,
+  payableCents: entry.payableCents,
+  occurredAt: entry.occurredAt,
+  createdAt: entry.createdAt,
+  businessRule: readableRule(entry.ruleSnapshot),
   supplier:
     entry.supplier ||
     supplierSummary(
@@ -445,6 +463,22 @@ const basePayableView = (entry: JsonRecord) => ({
   item:
     entry.item ||
     itemSummary(getGoods().find((item) => item.id === entry.itemId) || {}),
+  order: entry.order
+    ? {
+        id: entry.order.id,
+        orderNo: entry.order.orderNo,
+        completedAt: entry.order.completedAt,
+      }
+    : entry.orderNo
+      ? { orderNo: entry.orderNo, completedAt: entry.occurredAt }
+      : null,
+  refund: entry.refund
+    ? {
+        id: entry.refund.id,
+        refundNo: entry.refund.refundNo,
+        completedAt: entry.refund.completedAt,
+      }
+    : null,
 });
 
 const payableView = (entry: JsonRecord, settlements: JsonRecord[]) => ({
@@ -453,7 +487,13 @@ const payableView = (entry: JsonRecord, settlements: JsonRecord[]) => ({
     (settlement.lines || [])
       .filter((line: JsonRecord) => line.payableEntryId === entry.id)
       .map((line: JsonRecord) => ({
-        ...line,
+        id: line.id,
+        quantity: line.quantity,
+        grossSaleCents: line.grossSaleCents,
+        commissionCents: line.commissionCents,
+        payableCents: line.payableCents,
+        releasedAt: line.releasedAt || null,
+        createdAt: line.createdAt,
         settlement: {
           id: settlement.id,
           statementNo: settlement.statementNo,
@@ -469,13 +509,69 @@ const settlementView = (settlement: JsonRecord, detail = false) => {
     getInventorySuppliers().find(
       (candidate) => candidate.id === settlement.supplierId,
     );
-  if (!detail) return { ...settlement, supplier: supplierSummary(supplier || {}) };
+  const safe = {
+    id: settlement.id,
+    statementNo: settlement.statementNo,
+    supplier: supplierSummary(supplier || {}),
+    periodStart: settlement.periodStart,
+    periodEnd: settlement.periodEnd,
+    version: settlement.version,
+    status: settlement.status,
+    entryCount: settlement.entryCount,
+    netQuantity: settlement.netQuantity,
+    grossSaleCents: settlement.grossSaleCents,
+    commissionCents: settlement.commissionCents,
+    payableCents: settlement.payableCents,
+    businessRule: readableRule(settlement.ruleSnapshot),
+    creationReason: settlement.creationReason,
+    submittedAt: settlement.submittedAt || null,
+    confirmedAt: settlement.confirmedAt || null,
+    settledAt: settlement.settledAt || null,
+    voidedAt: settlement.voidedAt || null,
+    paymentReference: settlement.paymentReference || null,
+    createdAt: settlement.createdAt,
+    updatedAt: settlement.updatedAt,
+    isOwnCreator: settlement.createdById === mockUser().id,
+    createdBy: settlement.createdBy
+      ? { displayName: settlement.createdBy.displayName }
+      : null,
+    submittedBy: settlement.submittedBy
+      ? { displayName: settlement.submittedBy.displayName }
+      : null,
+    confirmedBy: settlement.confirmedBy
+      ? { displayName: settlement.confirmedBy.displayName }
+      : null,
+    settledBy: settlement.settledBy
+      ? { displayName: settlement.settledBy.displayName }
+      : null,
+    voidedBy: settlement.voidedBy
+      ? { displayName: settlement.voidedBy.displayName }
+      : null,
+    transitions: (settlement.transitions || []).map((transition: JsonRecord) => ({
+      id: transition.id,
+      action: transition.action,
+      fromStatus: transition.fromStatus || null,
+      toStatus: transition.toStatus,
+      reason: transition.reason,
+      actor: transition.actor
+        ? { displayName: transition.actor.displayName }
+        : null,
+      createdAt: transition.createdAt,
+    })),
+  };
+  if (!detail) return safe;
   const entries = getConsignmentPayableEntries();
   return {
-    ...settlement,
-    supplier: supplier || null,
+    ...safe,
+    supplier: supplierSummary(supplier || {}),
     lines: (settlement.lines || []).map((line: JsonRecord) => ({
-      ...line,
+      id: line.id,
+      quantity: line.quantity,
+      grossSaleCents: line.grossSaleCents,
+      commissionCents: line.commissionCents,
+      payableCents: line.payableCents,
+      releasedAt: line.releasedAt || null,
+      createdAt: line.createdAt,
       payableEntry: basePayableView(
         entries.find((entry) => entry.id === line.payableEntryId) || {},
       ),
@@ -835,6 +931,28 @@ export function routeMockConsignmentSettlement(
   url: string,
   data: JsonRecord = {},
 ): MockConsignmentRouteResult {
+  if (url === "/inventory/consignment/supplier-options" && method === "GET") {
+    requireSettlementRole();
+    return {
+      handled: true,
+      value: getInventorySuppliers()
+        .filter(
+          (supplier) =>
+            supplier.type === "CONSIGNMENT" && supplier.enabled !== false,
+        )
+        .map((supplier) => ({
+          id: supplier.id,
+          code: supplier.code,
+          name: supplier.name,
+          type: supplier.type,
+          enabled: supplier.enabled !== false,
+          settlementCycle: text(supplier.settlementRule?.settlementCycle),
+          commissionRateBps: Number(
+            supplier.settlementRule?.commissionRateBps || 0,
+          ),
+        })),
+    };
+  }
   if (url === "/inventory/consignment/payables" && method === "GET") {
     requireSettlementRole();
     const period = optionalPeriod(data.periodStart, data.periodEnd);

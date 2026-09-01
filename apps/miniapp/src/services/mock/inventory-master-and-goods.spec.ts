@@ -6,6 +6,7 @@ import {
   getInventoryTransactions,
   resetCatalogState,
 } from "./state";
+import { getOrders } from "./venue";
 
 const storage = new Map<string, unknown>();
 
@@ -131,7 +132,7 @@ describe("inventory master data and goods stock equivalence", () => {
     await login("FINANCE");
     await expect(
       request("GET", `/inventory/items/${item.id}`),
-    ).resolves.toMatchObject({ id: item.id, enabled: false });
+    ).rejects.toThrow("当前角色无权");
     await expect(
       request("POST", `/inventory/items/${item.id}/status`, {
         enabled: true,
@@ -143,7 +144,7 @@ describe("inventory master data and goods stock equivalence", () => {
   });
 
   it("prevents deactivation while business documents or balances still depend on master data", async () => {
-    await login("FRONT_DESK");
+    await login("ADMIN");
     const [item] = await request<any[]>("GET", "/inventory");
     const supplier = item.supplierRecord;
     const location = item.defaultLocation;
@@ -212,7 +213,7 @@ describe("inventory master data and goods stock equivalence", () => {
     );
     await expect(
       request("POST", `/orders/${order.id}/pay`, paymentCommand),
-    ).resolves.toMatchObject({ status: "SUCCESS", idempotent: true });
+    ).resolves.toMatchObject({ status: "SUCCEEDED" });
     expect(getGoods().find((entry) => entry.id === product.id)?.stock).toBe(
       stockBefore - 2,
     );
@@ -222,7 +223,7 @@ describe("inventory master data and goods stock equivalence", () => {
           entry.type === "SALE_OUT" && entry.metadata?.orderId === order.id,
       ),
     ).toHaveLength(1);
-    expect(payment.status).toBe("SUCCESS");
+    expect(payment.status).toBe("SUCCEEDED");
 
     await expect(
       request("POST", `/orders/${order.id}/refunds`, {
@@ -253,8 +254,13 @@ describe("inventory master data and goods stock equivalence", () => {
     ).resolves.toEqual(approved);
     expect(approved).toMatchObject({
       status: "SUCCEEDED",
-      returnDisposition: "RESALABLE_RETURN",
     });
+    expect(approved).not.toHaveProperty("returnDisposition");
+    expect(
+      getOrders()
+        .find((item) => item.id === order.id)
+        ?.refunds?.find((item: any) => item.id === refund.id),
+    ).toMatchObject({ returnDisposition: "RESALABLE_RETURN" });
     expect(getGoods().find((entry) => entry.id === product.id)?.stock).toBe(
       stockBefore,
     );

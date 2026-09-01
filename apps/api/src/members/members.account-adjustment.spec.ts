@@ -18,7 +18,48 @@ const admin: AuthUser = {
 }
 
 describe('MembersService account adjustment approval', () => {
-  it('enforces the finance review role inside the service when listing requests', () => {
+  it('projects ledger and adjustment queries without command or actor identifiers', async () => {
+    const rawTransaction = {
+      id: 'txn-1', accountId: 'account-1', orderId: 'order-1',
+      kind: 'CREDIT', amount: 20, balanceBefore: 50, balanceAfter: 70,
+      reasonCode: 'MANUAL_ADJUSTMENT', reason: '活动补发', expiresAt: null,
+      createdAt: new Date('2026-09-01T00:00:00.000Z'),
+      operatorId: admin.sub, idempotencyKey: 'secret-ledger-key',
+      metadata: { requestId: 'adjustment-1' },
+      account: { type: AccountType.BADMINTON_COIN },
+      operator: { id: admin.sub, displayName: admin.displayName },
+    }
+    const rawRequest = {
+      id: 'adjustment-1', accountId: 'account-1', amount: 20,
+      reason: '活动补发', status: AccountAdjustmentStatus.POSTED,
+      requestedById: finance.sub, reviewedById: admin.sub,
+      requestIdempotencyKey: 'secret-request-key', commandHash: 'hash',
+      transactionId: rawTransaction.id, transaction: rawTransaction,
+      account: { type: AccountType.BADMINTON_COIN, balance: 70, frozenBalance: 0,
+        user: { id: 'member-1', displayName: '会员甲', phone: '13800000000' } },
+      requestedBy: { id: finance.sub, displayName: finance.displayName },
+      reviewedBy: { id: admin.sub, displayName: admin.displayName },
+      createdAt: rawTransaction.createdAt, updatedAt: rawTransaction.createdAt,
+    }
+    const prisma = {
+      accountTransaction: { findMany: vi.fn().mockResolvedValue([rawTransaction]) },
+      accountAdjustmentRequest: { findMany: vi.fn().mockResolvedValue([rawRequest]) },
+    }
+    const service = new MembersService(prisma as never)
+
+    const [transaction] = await service.accountTransactions('member-1')
+    const [request] = await service.accountAdjustmentRequests({}, finance)
+    const serialized = JSON.stringify({ transaction, request })
+
+    expect(transaction).toEqual(expect.objectContaining({ id: rawTransaction.id, amount: 20 }))
+    expect(request).toEqual(expect.objectContaining({ id: rawRequest.id, isOwnRequest: true }))
+    for (const forbidden of [
+      'idempotencyKey', 'requestIdempotencyKey', 'commandHash', 'metadata',
+      'operatorId', 'requestedById', 'reviewedById', 'transactionId', 'accountId',
+    ]) expect(serialized).not.toContain(`"${forbidden}"`)
+  })
+
+  it('enforces the finance review role inside the service when listing requests', async () => {
     const prisma = { accountAdjustmentRequest: { findMany: vi.fn() } }
     const member: AuthUser = {
       sub: 'member-1',
@@ -26,8 +67,8 @@ describe('MembersService account adjustment approval', () => {
       roles: [AppRole.MEMBER],
     }
 
-    expect(() => new MembersService(prisma as never).accountAdjustmentRequests({}, member))
-      .toThrow(ForbiddenException)
+    await expect(new MembersService(prisma as never).accountAdjustmentRequests({}, member))
+      .rejects.toBeInstanceOf(ForbiddenException)
     expect(prisma.accountAdjustmentRequest.findMany).not.toHaveBeenCalled()
   })
 
@@ -62,7 +103,17 @@ describe('MembersService account adjustment approval', () => {
       idempotencyKey: 'adjustment-request-0001',
     }, finance)
 
-    expect(result).toBe(request)
+    expect(result).toMatchObject({
+      id: request.id,
+      amount: request.amount,
+      reason: request.reason,
+      status: request.status,
+      isOwnRequest: true,
+      account: expect.objectContaining({ type: account.type }),
+    })
+    expect(result).not.toHaveProperty('requestIdempotencyKey')
+    expect(result).not.toHaveProperty('commandHash')
+    expect(result).not.toHaveProperty('requestedById')
     expect(tx.account.updateMany).not.toHaveBeenCalled()
     expect(tx.accountAdjustmentRequest.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -124,6 +175,11 @@ describe('MembersService account adjustment approval', () => {
     )
 
     expect(result).toMatchObject({ status: AccountAdjustmentStatus.POSTED, transaction })
+    expect(result).not.toHaveProperty('reviewedById')
+    expect(result).not.toHaveProperty('transactionId')
+    expect(result.transaction).not.toHaveProperty('idempotencyKey')
+    expect(result.transaction).not.toHaveProperty('operatorId')
+    expect(result.transaction).not.toHaveProperty('metadata')
     expect(tx.account.updateMany).toHaveBeenCalledWith({
       where: { id: request.account.id, version: 2 },
       data: { balance: 30, version: { increment: 1 } },

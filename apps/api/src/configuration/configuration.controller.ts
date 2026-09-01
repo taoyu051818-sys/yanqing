@@ -14,12 +14,13 @@ export class ConfigurationController {
   constructor(private readonly configuration: ConfigurationService) {}
 
   @Get()
-  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN, AppRole.FINANCE)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   list(@Query() query: ParameterQueryDto) {
     return this.configuration.list(query)
   }
 
   @Get(':key')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   resolve(@Param('key') key: string, @Query('at') at?: string) {
     return this.configuration.resolve(key, at ? new Date(at) : new Date())
   }

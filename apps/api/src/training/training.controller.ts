@@ -40,8 +40,8 @@ export class TrainingController {
   constructor(private readonly training: TrainingService) {}
 
   @Get('products')
-  products() {
-    return this.training.listProducts();
+  products(@CurrentUser() actor: AuthUser) {
+    return this.training.listProducts(actor);
   }
 
   @Post('products')

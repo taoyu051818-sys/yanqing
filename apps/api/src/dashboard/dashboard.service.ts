@@ -84,7 +84,8 @@ const percentage = (numerator: number, denominator: number) =>
 
 const nonnegative = (value: number) => Math.max(0, value)
 
-const sum = (values: number[]) => values.reduce((total, value) => total + value, 0)
+const sum = (values: number[]) =>
+  values.reduce((total, value) => total + value, 0)
 
 /**
  * Allocate an absolute interval into the configured Shanghai business slots.
@@ -129,7 +130,8 @@ const allocateIntervalHours = (
 }
 
 const addPeriodHours = (target: PeriodHours, source: PeriodHours) => {
-  for (const period of Object.values(SlotPeriod)) target[period] += source[period]
+  for (const period of Object.values(SlotPeriod))
+    target[period] += source[period]
 }
 
 const countShanghaiDays = (start: Date, end: Date): number => {
@@ -148,7 +150,9 @@ const countShanghaiDays = (start: Date, end: Date): number => {
   return Math.max(1, Math.round((last - first) / DAY_MS) + 1)
 }
 
-const byBusinessType = <T extends { businessType: BusinessType; amountCents: number }>(
+const byBusinessType = <
+  T extends { businessType: BusinessType; amountCents: number },
+>(
   rows: T[],
 ) => {
   const result = Object.fromEntries(
@@ -165,11 +169,14 @@ const repurchaseWindow = (
 ) => {
   const counts = new Map<string, number>()
   for (const order of orders) {
-    if (!order.paidAt || order.paidAt < startsAt || order.paidAt >= endsAt) continue
+    if (!order.paidAt || order.paidAt < startsAt || order.paidAt >= endsAt)
+      continue
     counts.set(order.memberId, (counts.get(order.memberId) ?? 0) + 1)
   }
   const purchaserCount = counts.size
-  const repeatCustomerCount = [...counts.values()].filter((count) => count >= 2).length
+  const repeatCustomerCount = [...counts.values()].filter(
+    (count) => count >= 2,
+  ).length
   return {
     purchaserCount,
     repeatCustomerCount,
@@ -216,6 +223,7 @@ export class DashboardService {
       trainingSessions,
       trainingBalances,
       trainingNewSignups,
+      directReferralBindings,
       referralNewCustomers,
       badmintonCoinIssued,
       couponIssued,
@@ -410,6 +418,12 @@ export class DashboardService {
           },
         },
       }),
+      this.prisma.auditLog.count({
+        where: {
+          action: 'DIRECT_REFERRAL_BOUND',
+          createdAt: { gte: start, lt: end },
+        },
+      }),
       this.prisma.referralReward.count({
         where: {
           createdAt: { gte: start, lt: end },
@@ -551,7 +565,13 @@ export class DashboardService {
     for (const closure of venueClosures) {
       addPeriodHours(
         closureHours,
-        allocateIntervalHours(closure.startsAt, closure.endsAt, start, end, slots),
+        allocateIntervalHours(
+          closure.startsAt,
+          closure.endsAt,
+          start,
+          end,
+          slots,
+        ),
       )
     }
     const availableHours = emptyPeriodHours()
@@ -564,7 +584,13 @@ export class DashboardService {
     for (const booking of venueBookings) {
       addPeriodHours(
         bookedHours,
-        allocateIntervalHours(booking.startsAt, booking.endsAt, start, end, slots),
+        allocateIntervalHours(
+          booking.startsAt,
+          booking.endsAt,
+          start,
+          end,
+          slots,
+        ),
       )
     }
     const totalAvailableCourtHours = sum(Object.values(availableHours))
@@ -590,8 +616,7 @@ export class DashboardService {
           session.materialCostCents,
       ),
     )
-    const trainingCashContributionMargin =
-      trainingRevenue - trainingDirectCosts
+    const trainingCashContributionMargin = trainingRevenue - trainingDirectCosts
     const occupiedCourtHours = sum(
       trainingSessions.map((session) => Number(session.occupiedCourtHours)),
     )
@@ -805,8 +830,7 @@ export class DashboardService {
         newSignups: trainingNewSignups,
         prepaidCollectedCents: netCollectionsByBusiness[BusinessType.TRAINING],
         confirmedRevenueCents: trainingRevenue,
-        unusedBalanceCents:
-          trainingBalances._sum.prepaidBalanceCents ?? 0,
+        unusedBalanceCents: trainingBalances._sum.prepaidBalanceCents ?? 0,
         cumulativeConfirmedRevenueCents:
           trainingBalances._sum.confirmedRevenueCents ?? 0,
         refundedCents: collectedRefundsByBusiness[BusinessType.TRAINING],
@@ -838,6 +862,7 @@ export class DashboardService {
           ),
       },
       marketing: {
+        directReferralBindings,
         directReferralConversions: referralNewCustomers,
         badmintonCoinIssuedUnits: badmintonCoinIssued._sum.amount ?? 0,
         couponIssued,
@@ -853,8 +878,7 @@ export class DashboardService {
         redeemed: allianceSettlements._sum.redeemedCount ?? 0,
         effectiveNewCustomers:
           allianceSettlements._sum.effectiveNewCustomers ?? 0,
-        attributedGmvCents:
-          allianceSettlements._sum.attributedGmvCents ?? 0,
+        attributedGmvCents: allianceSettlements._sum.attributedGmvCents ?? 0,
         attributedGrossProfitCents: allianceGrossProfit,
         cooperationFeeCents: allianceFee,
         roi: allianceFee <= 0 ? null : allianceGrossProfit / allianceFee,
@@ -869,7 +893,9 @@ export class DashboardService {
         ),
         inventoryValueCents,
         inventoryTurnoverApprox:
-          inventoryValueCents <= 0 ? null : goodsCostCents / inventoryValueCents,
+          inventoryValueCents <= 0
+            ? null
+            : goodsCostCents / inventoryValueCents,
         inventoryTurnoverBasis: '期间销售成本/期末进价库存值（经营近似值）',
         lowStockCount: inventoryItems.filter(
           (item) => item.stock <= item.safeStock,

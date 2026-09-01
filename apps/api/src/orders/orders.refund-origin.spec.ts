@@ -5,8 +5,10 @@ import type { AuthUser } from '../common/auth/auth-user.js'
 import { Prisma } from '../generated/prisma/client.js'
 import {
   AppRole,
+  BookingStatus,
   BusinessType,
   OrderStatus,
+  PaymentChannel,
   RefundStatus,
 } from '../generated/prisma/enums.js'
 import { OrdersService } from './orders.service.js'
@@ -30,6 +32,110 @@ const serviceWith = (prisma: Record<string, unknown>) => new OrdersService(
 )
 
 describe('refund original order status evidence', () => {
+  const approvalHarness = (bookingStatus: BookingStatus) => {
+    const order = {
+      id: `venue-order-${bookingStatus.toLowerCase()}`,
+      orderNo: `VN-${bookingStatus}`,
+      memberId: member.sub,
+      businessType: BusinessType.VENUE,
+      status: OrderStatus.REFUND_PENDING,
+      paidCents: 6_800,
+      refundedCents: 0,
+      parameterSnapshot: {},
+      payments: [{
+        id: `payment-${bookingStatus.toLowerCase()}`,
+        channel: PaymentChannel.OFFLINE_CASH,
+        amountCents: 6_800,
+      }],
+      trainingEnrollment: null,
+      membership: null,
+      items: [],
+      gameRegistration: null,
+      eventTeam: null,
+    }
+    const refund = {
+      id: `refund-${bookingStatus.toLowerCase()}`,
+      refundNo: `RF-${bookingStatus}`,
+      orderId: order.id,
+      requestedById: member.sub,
+      approvedById: null,
+      amountCents: 6_800,
+      status: RefundStatus.REQUESTED,
+      order,
+    }
+    let persistedBookingStatus = bookingStatus
+    const courtBookingUpdate = vi.fn().mockImplementation(async ({ where, data }) => {
+      if (!where.status.notIn.includes(persistedBookingStatus)) {
+        persistedBookingStatus = data.status
+        return { count: 1 }
+      }
+      return { count: 0 }
+    })
+    const tx = {
+      refund: {
+        findUnique: vi.fn().mockResolvedValue(refund),
+        update: vi.fn().mockResolvedValue({ ...refund, status: RefundStatus.SUCCEEDED }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ ...refund, status: RefundStatus.SUCCEEDED }),
+      },
+      order: { update: vi.fn().mockResolvedValue({ ...order, status: OrderStatus.REFUNDED }) },
+      courtBooking: { updateMany: courtBookingUpdate },
+      referralReward: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    }
+    const service = new OrdersService(
+      {
+        refund: { findUnique: vi.fn().mockResolvedValue(refund) },
+        $transaction: vi.fn(async (work: (value: typeof tx) => unknown) => work(tx)),
+      } as never,
+      { get: vi.fn().mockReturnValue('mock') } as never,
+      {} as never,
+      {} as never,
+    )
+    return {
+      service,
+      refund,
+      courtBookingUpdate,
+      bookingStatus: () => persistedBookingStatus,
+    }
+  }
+
+  it('cancels an unfulfilled booking after a full refund releases the slot', async () => {
+    const harness = approvalHarness(BookingStatus.CONFIRMED)
+
+    await harness.service.approveRefund(
+      harness.refund.id,
+      { reason: '未履约全额退款' },
+      finance,
+    )
+
+    expect(harness.bookingStatus()).toBe(BookingStatus.CANCELLED)
+    expect(harness.courtBookingUpdate).toHaveBeenCalledWith({
+      where: {
+        orderId: harness.refund.orderId,
+        status: {
+          notIn: [BookingStatus.COMPLETED, BookingStatus.NO_SHOW],
+        },
+      },
+      data: { status: BookingStatus.CANCELLED },
+    })
+  })
+
+  it.each([BookingStatus.COMPLETED, BookingStatus.NO_SHOW])(
+    'keeps immutable %s fulfillment evidence after a full refund',
+    async (terminalStatus) => {
+      const harness = approvalHarness(terminalStatus)
+
+      await harness.service.approveRefund(
+        harness.refund.id,
+        { reason: '已履约质量退款' },
+        finance,
+      )
+
+      expect(harness.bookingStatus()).toBe(terminalStatus)
+      expect(harness.courtBookingUpdate).toHaveBeenCalledOnce()
+    },
+  )
+
   it('captures COMPLETED at request time without clearing completedAt', async () => {
     const completedAt = new Date('2026-08-30T08:00:00.000Z')
     const order = {

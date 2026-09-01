@@ -105,6 +105,67 @@ const fulfillmentDelegates = (storedGame: ReturnType<typeof game>) => ({
   },
 })
 
+describe('GamesService management listing', () => {
+  it('keeps a host scoped to their own games', async () => {
+    const findMany = vi.fn().mockResolvedValue([])
+    const service = new GamesService({ game: { findMany } } as never)
+
+    await service.managed(hostActor)
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { hostId: hostActor.sub } }),
+    )
+  })
+
+  it.each([AppRole.ADMIN, AppRole.SUPER_ADMIN])(
+    'lets %s load the complete management list',
+    async (role) => {
+      const findMany = vi.fn().mockResolvedValue([])
+      const service = new GamesService({ game: { findMany } } as never)
+      const actor: AuthUser = {
+        sub: `${role.toLowerCase()}-1`,
+        displayName: role,
+        roles: [role],
+      }
+
+      await service.managed(actor)
+
+      expect(findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: undefined }),
+      )
+    },
+  )
+
+  it('rejects unrelated employee roles even when the service is called directly', () => {
+    const service = new GamesService({ game: { findMany: vi.fn() } } as never)
+
+    expect(() => service.managed(financeActor)).toThrow(ForbiddenException)
+  })
+
+  it('uses an explicit management projection without actor, order or replay fields', async () => {
+    const findMany = vi.fn().mockResolvedValue([])
+    const service = new GamesService({ game: { findMany } } as never)
+
+    await service.managed(hostActor)
+
+    const query = findMany.mock.calls[0][0]
+    expect(query).not.toHaveProperty('include')
+    for (const key of [
+      'hostId',
+      'rewardRule',
+      'cancelPolicySnapshot',
+      'cancelIdempotencyKey',
+      'cancelCommandHash',
+      'cancelledById',
+    ]) expect(query.select).not.toHaveProperty(key)
+    expect(query.select.host.select).toEqual({ displayName: true, avatarUrl: true })
+    expect(query.select.registrations.select).not.toHaveProperty('userId')
+    expect(query.select.registrations.select).not.toHaveProperty('orderId')
+    expect(query.select.registrations.select.user.select).not.toHaveProperty('id')
+    expect(query.select.registrations.select.order.select).toEqual({ status: true })
+  })
+})
+
 describe('GamesService host workflow', () => {
   it('creates a pending order while a seat is available and marks the game full at capacity', async () => {
     const storedGame = {
@@ -136,7 +197,14 @@ describe('GamesService host workflow', () => {
       sub: 'member-1', displayName: '会员', roles: ['MEMBER'] as never,
     })
 
-    expect(result).toBe(createdOrder)
+    expect(result).toMatchObject({
+      id: createdOrder.id,
+      orderNo: createdOrder.orderNo,
+      gameRegistration: { id: 'registration-1' },
+    })
+    expect(result).not.toHaveProperty('parameterSnapshot')
+    expect(result).not.toHaveProperty('creationIdempotencyKey')
+    expect(result).not.toHaveProperty('creationCommandHash')
     expect(tx.order.create).toHaveBeenCalledOnce()
     expect(tx.order.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ memberId: 'member-1', createdById: 'member-1' }),
@@ -230,11 +298,14 @@ describe('GamesService host workflow', () => {
       sub: 'member-3', displayName: '候补会员', roles: ['MEMBER'] as never,
     })
 
-    expect(result).toMatchObject({
-      registration,
+    expect(result).toEqual({
+      registration: { status: RegistrationStatus.WAITLISTED },
       waitlistPosition: 4,
       status: RegistrationStatus.WAITLISTED,
     })
+    expect(result.registration).not.toHaveProperty('id')
+    expect(result.registration).not.toHaveProperty('userId')
+    expect(result.registration).not.toHaveProperty('gameId')
     expect(tx.order.create).not.toHaveBeenCalled()
     expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ action: 'GAME_WAITLISTED' }),
@@ -283,7 +354,7 @@ describe('GamesService host workflow', () => {
     })
 
     expect(result).toEqual({
-      registration: duplicate,
+      registration: { status: RegistrationStatus.WAITLISTED },
       waitlistPosition: 2,
       status: RegistrationStatus.WAITLISTED,
     })
@@ -414,6 +485,14 @@ describe('GamesService host workflow', () => {
     const service = new GamesService({ $transaction: txRunner(tx) } as never)
 
     await expect(service.promoteWaitlist('game-1', otherHostActor)).rejects.toBeInstanceOf(ForbiddenException)
+  })
+
+  it('blocks finance from promoting a game waitlist even when called directly', async () => {
+    const transaction = vi.fn()
+    const service = new GamesService({ $transaction: transaction } as never)
+
+    await expect(service.promoteWaitlist('game-1', financeActor)).rejects.toBeInstanceOf(ForbiddenException)
+    expect(transaction).not.toHaveBeenCalled()
   })
 
   it('ends a game once and snapshots only real, non-refunded check-ins', async () => {
@@ -631,7 +710,14 @@ describe('GamesService host workflow', () => {
 
     const result = await service.checkIn('game-1', 'member-r-1', hostActor)
 
-    expect(result).toBe(storedRegistration)
+    expect(result).toEqual({
+      id: storedRegistration.id,
+      status: RegistrationStatus.CHECKED_IN,
+      checkedInAt: storedRegistration.checkedInAt,
+    })
+    expect(result).not.toHaveProperty('game')
+    expect(result).not.toHaveProperty('order')
+    expect(result).not.toHaveProperty('userId')
     expect(tx.gameRegistration.update).not.toHaveBeenCalled()
     expect(tx.auditLog.create).not.toHaveBeenCalled()
   })

@@ -1,13 +1,21 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { onShow } from "@dcloudio/uni-app";
+import { computed, nextTick, ref } from "vue";
+import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../../../components/OperationsFrame.vue";
 import MetricCard from "../../../../components/MetricCard.vue";
+import { hasOperationsAccess } from "../../../../config/operations";
+import { presentPrizePool } from "../../../../config/event-presentation";
 import { endpoints } from "../../../../services/api";
 import { useSessionStore } from "../../../../stores/session";
 import type { AppRole } from "../../../../types/domain";
 import { shortDate } from "../../../../utils/format";
 import { withPendingCreationKey } from "../../../../utils/pending-creation-key";
+import {
+  findOpsDeepLinkRecord,
+  opsDeepLinkDomId,
+  parseOpsDeepLinkQuery,
+  type OpsDeepLinkQuery,
+} from "../../../../utils/work-item-deep-link";
 
 type EventStatus =
   "DRAFT" | "OPEN" | "FULL" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
@@ -145,6 +153,9 @@ const selectedRound = ref(0);
 const loading = ref(false);
 const actionKey = ref("");
 const errorMessage = ref("");
+const deepLinkQuery = ref<OpsDeepLinkQuery>({});
+const deepLinkHandled = ref(false);
+const focusedRecord = ref("");
 const prizeAwards = ref<EventPrizeAward[]>([]);
 const inventoryItems = ref<InventoryItem[]>([]);
 const selectedPrizeTeamId = ref("");
@@ -172,6 +183,7 @@ const hasAnyRole = (roles: readonly AppRole[]) =>
 const mayManageEvent = computed(() => hasAnyRole(EVENT_MANAGEMENT_ROLES));
 const mayScore = computed(() => hasAnyRole(SCORE_ROLES));
 const mayOperatePrizes = computed(() => hasAnyRole(PRIZE_ROLES));
+const mayViewEvent = computed(() => hasOperationsAccess(session.roles, "events"));
 const roleLabel = computed(() => {
   if (session.roles.includes("EVENT_MANAGER")) return "赛事管理员";
   if (session.roles.includes("FRONT_DESK")) return "前台记分 / 库存经办";
@@ -222,7 +234,7 @@ const pendingPrizeReceipts = computed(
   () => prizeAwards.value.filter((award) => award.status === "ISSUED").length,
 );
 const prizePoolEntries = computed(() =>
-  Object.entries(eventDetail.value?.prizePool || {}),
+  presentPrizePool(eventDetail.value?.prizePool),
 );
 const waitingScores = computed(() =>
   matches.value.filter(
@@ -428,12 +440,13 @@ async function load(
   errorMessage.value = "";
   try {
     if (hydrate) await session.hydrate();
-    const list = (await endpoints.events()) as EventSummary[];
+    if (!mayViewEvent.value) return;
+    const list = (await endpoints.managedEvents()) as EventSummary[];
     eventList.value = Array.isArray(list) ? list : [];
     const selected = preferredEvent(eventList.value, preferredId);
     selectedEventId.value = selected?.id || "";
     eventDetail.value = selected
-      ? ((await endpoints.event(selected.id)) as EventDetail)
+      ? ((await endpoints.managedEvent(selected.id)) as EventDetail)
       : null;
     if (
       selected &&
@@ -442,7 +455,7 @@ async function load(
     ) {
       const [awards, items] = await Promise.all([
         endpoints.eventPrizes(selected.id) as Promise<EventPrizeAward[]>,
-        endpoints.inventory() as Promise<InventoryItem[]>,
+        endpoints.inventoryAwardOptions() as Promise<InventoryItem[]>,
       ]);
       prizeAwards.value = Array.isArray(awards) ? awards : [];
       inventoryItems.value = Array.isArray(items) ? items : [];
@@ -493,10 +506,55 @@ function choosePrizeItem(event: any) {
 
 async function loadFromPage() {
   try {
-    await load("", undefined, true);
+    const requestedRound = Number(deepLinkQuery.value.round || 0) || undefined;
+    await load(deepLinkQuery.value.eventId || "", requestedRound, true);
+    await applyEventDeepLink();
   } catch {
     uni.showToast({ title: errorMessage.value, icon: "none" });
   }
+}
+
+async function applyEventDeepLink() {
+  if (deepLinkHandled.value || !deepLinkQuery.value.focus) return;
+  const focus = deepLinkQuery.value.focus;
+  deepLinkHandled.value = true;
+  if (
+    deepLinkQuery.value.eventId &&
+    selectedEventId.value !== deepLinkQuery.value.eventId
+  ) {
+    uni.showToast({ title: "未找到待办对应的赛事，可能已结束或无权查看", icon: "none" });
+    return;
+  }
+  let record: any = null;
+  let prefix = "";
+  let label = "赛事记录";
+  if (focus === "score" || focus === "match") {
+    record = findOpsDeepLinkRecord(matches.value, deepLinkQuery.value, ["id"]);
+    prefix = "event-match";
+    label = "比赛对阵";
+    if (record) selectedRound.value = Number(record.round || selectedRound.value);
+  } else if (focus === "prize") {
+    record = findOpsDeepLinkRecord(prizeAwards.value as any[], deepLinkQuery.value, ["id"]);
+    prefix = "event-prize";
+    label = "奖品发放记录";
+  } else if (focus === "team") {
+    record = findOpsDeepLinkRecord(teams.value, deepLinkQuery.value, ["id"]);
+    prefix = "event-team";
+    label = "参赛队伍";
+  } else if (focus === "event") {
+    record = eventDetail.value;
+    prefix = "event-summary";
+  } else {
+    uni.showToast({ title: `无法识别赛事待办类型：${focus}`, icon: "none" });
+    return;
+  }
+  if (!record) {
+    uni.showToast({ title: `未找到待办对应的${label}，可能已处理或无权查看`, icon: "none" });
+    return;
+  }
+  focusedRecord.value = `${prefix}:${record.id}`;
+  await nextTick();
+  uni.pageScrollTo({ selector: `#${opsDeepLinkDomId(prefix, record.id)}`, duration: 250 });
 }
 
 async function selectEvent(eventId: string) {
@@ -997,11 +1055,15 @@ async function receivePrize(award: EventPrizeAward) {
   );
 }
 
+onLoad((options) => {
+  deepLinkQuery.value = parseOpsDeepLinkQuery(options);
+});
 onShow(loadFromPage);
 </script>
 
 <template>
   <OperationsFrame
+    access="events"
     title="赛事运营"
     eyebrow="EVENT OPERATIONS"
     :role="roleLabel"
@@ -1188,7 +1250,7 @@ onShow(loadFromPage);
         />
       </view>
 
-      <view class="card event-summary">
+      <view :id="opsDeepLinkDomId('event-summary', eventDetail.id)" class="card event-summary" :class="{ 'deep-link-target': focusedRecord === `event-summary:${eventDetail.id}` }">
         <view class="row summary-top">
           <view class="summary-copy">
             <text class="event-title">{{ eventDetail.name }}</text>
@@ -1276,7 +1338,7 @@ onShow(loadFromPage);
           已支付 {{ paidTeams.length }} · 已签到 {{ checkedTeams.length }}</text
         >
       </view>
-      <view v-for="team in teams" :key="team.id" class="card team-row">
+      <view v-for="team in teams" :id="opsDeepLinkDomId('event-team', team.id)" :key="team.id" class="card team-row" :class="{ 'deep-link-target': focusedRecord === `event-team:${team.id}` }">
         <view class="team-copy">
           <view class="row team-heading"
             ><text class="team-name">{{ team.name }}</text
@@ -1346,15 +1408,15 @@ onShow(loadFromPage);
           >
         </view>
         <view class="card prize-pool-card">
-          <text class="panel-title">奖池快照</text>
+          <text class="panel-title">本场奖池</text>
           <text v-if="!prizePoolEntries.length" class="muted"
-            >未配置结构化奖池，发放时仍会固化赛事奖池原始快照。</text
+            >尚未配置奖池；发放记录仍会保留当时的业务配置用于追溯。</text
           >
           <text
             v-for="entry in prizePoolEntries"
-            :key="entry[0]"
+            :key="entry.id"
             class="prize-pool-line"
-            >{{ entry[0] }}：{{ entry[1] }}</text
+            >{{ entry.label }}：{{ entry.value }}</text
           >
         </view>
         <view class="card prize-form">
@@ -1419,8 +1481,10 @@ onShow(loadFromPage);
         </view>
         <view
           v-for="award in prizeAwards"
+          :id="opsDeepLinkDomId('event-prize', award.id)"
           :key="award.id"
           class="card prize-award"
+          :class="{ 'deep-link-target': focusedRecord === `event-prize:${award.id}` }"
         >
           <view class="row prize-heading">
             <view
@@ -1544,8 +1608,10 @@ onShow(loadFromPage);
 
       <view
         v-for="match in visibleMatches"
+        :id="opsDeepLinkDomId('event-match', match.id)"
         :key="match.id"
         class="card match-card"
+        :class="{ 'deep-link-target': focusedRecord === `event-match:${match.id}` }"
       >
         <view class="row match-heading"
           ><text class="court-label"
@@ -1614,12 +1680,13 @@ onShow(loadFromPage);
 <style scoped>
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14rpx;
   margin-top: 22rpx;
 }
 .create-event-form {
   display: grid;
+  min-width: 0;
   gap: 16rpx;
 }
 .form-grid {
@@ -1627,8 +1694,13 @@ onShow(loadFromPage);
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14rpx;
 }
+.form-grid > view,
+.form-grid > picker {
+  min-width: 0;
+}
 .create-event-form .text-input,
 .create-event-form .picker-value {
+  width: 100%;
   min-height: 68rpx;
   box-sizing: border-box;
   padding: 16rpx 18rpx;
@@ -1637,6 +1709,8 @@ onShow(loadFromPage);
   border: 1rpx solid #dfe9e2;
   border-radius: 16rpx;
   font-size: 23rpx;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .create-event-form .field-label {
   display: block;
@@ -1651,6 +1725,7 @@ onShow(loadFromPage);
 }
 .create-event-form .primary {
   width: 100%;
+  min-height: 44px;
   margin: 0;
 }
 .error-panel {
@@ -1661,6 +1736,11 @@ onShow(loadFromPage);
   margin-top: 22rpx;
   color: #8a3636;
   background: #fff4f2;
+}
+.error-panel > view {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .panel-title,
 .boundary-title {
@@ -1677,36 +1757,50 @@ onShow(loadFromPage);
   gap: 18rpx;
   margin-top: 30rpx;
 }
+.queue-header > view,
+.round-heading > view {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .queue-title,
 .round-title {
   display: block;
   margin: 0 0 6rpx;
 }
 .section-note {
+  display: block;
   color: #758079;
   font-size: 21rpx;
   font-weight: 400;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .refresh-button {
   min-width: 112rpx;
-  min-height: 58rpx;
+  min-height: 44px;
   margin: 0;
   padding: 0 16rpx;
-  line-height: 58rpx;
+  line-height: 1.3;
   font-size: 22rpx;
 }
 .event-scroll {
+  box-sizing: border-box;
+  max-width: 100%;
   width: 100%;
   margin-top: 16rpx;
   white-space: nowrap;
 }
 .event-list {
-  display: flex;
+  display: inline-flex;
+  min-width: 100%;
   gap: 14rpx;
   padding-bottom: 6rpx;
 }
 .event-option {
-  width: 430rpx;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 520rpx;
+  max-width: calc(100vw - 80rpx);
   min-height: 128rpx;
   margin: 0;
   padding: 20rpx;
@@ -1715,6 +1809,7 @@ onShow(loadFromPage);
   border: 2rpx solid transparent;
   border-radius: 24rpx;
   line-height: 1.3;
+  white-space: normal;
 }
 .event-option.selected {
   border-color: #17653d;
@@ -1760,12 +1855,13 @@ onShow(loadFromPage);
   gap: 12rpx;
 }
 .option-name {
-  max-width: 280rpx;
-  overflow: hidden;
+  flex: 1;
+  min-width: 0;
   font-size: 26rpx;
   font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .option-meta {
   display: block;
@@ -1781,7 +1877,9 @@ onShow(loadFromPage);
   align-items: flex-start;
 }
 .summary-copy {
+  flex: 1;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .event-title,
 .team-name {
@@ -1811,8 +1909,10 @@ onShow(loadFromPage);
 }
 .event-actions button {
   margin: 0;
-  min-height: 68rpx;
-  line-height: 68rpx;
+  min-height: 44px;
+  padding-top: 10rpx;
+  padding-bottom: 10rpx;
+  line-height: 1.35;
   font-size: 23rpx;
 }
 .event-actions button:only-child {
@@ -1835,6 +1935,7 @@ button[disabled] {
 }
 .team-heading {
   justify-content: flex-start;
+  flex-wrap: wrap;
 }
 .team-stat {
   display: block;
@@ -1851,16 +1952,18 @@ button[disabled] {
 }
 .inline {
   min-width: 104rpx;
-  min-height: 56rpx;
+  min-height: 44px;
   margin: 0;
   padding: 0 14rpx;
-  line-height: 56rpx;
+  line-height: 1.3;
   font-size: 22rpx;
 }
 .round-heading {
   align-items: center;
 }
 .round-scroll {
+  flex: 1;
+  min-width: 0;
   max-width: 410rpx;
   white-space: nowrap;
 }
@@ -1871,13 +1974,13 @@ button[disabled] {
 }
 .round-tab {
   min-width: 94rpx;
-  min-height: 54rpx;
+  min-height: 44px;
   margin: 0;
   padding: 0 14rpx;
   color: #456052;
   background: #e9eeea;
   border-radius: 999rpx;
-  line-height: 54rpx;
+  line-height: 1.3;
   font-size: 21rpx;
 }
 .round-tab.selected {
@@ -1899,8 +2002,12 @@ button[disabled] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14rpx;
 }
+.pairing-picker-grid > picker {
+  min-width: 0;
+}
 .pairing-button {
   width: 100%;
+  min-height: 44px;
   margin: 0;
 }
 .match-heading {
@@ -1919,8 +2026,11 @@ button[disabled] {
   margin-top: 22rpx;
 }
 .match-team {
+  min-width: 0;
   font-size: 25rpx;
   font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .match-team.right {
   text-align: right;
@@ -1953,6 +2063,7 @@ button[disabled] {
 }
 .match-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 12rpx;
   margin-top: 20rpx;
@@ -1995,6 +2106,7 @@ button[disabled] {
 }
 .picker-value,
 .text-input {
+  width: 100%;
   min-height: 66rpx;
   box-sizing: border-box;
   padding: 16rpx 18rpx;
@@ -2003,6 +2115,8 @@ button[disabled] {
   border: 1rpx solid #dfe9e2;
   border-radius: 16rpx;
   font-size: 23rpx;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .prize-form .prize-field {
   margin-top: 16rpx;
@@ -2015,6 +2129,7 @@ button[disabled] {
   max-width: 150rpx;
 }
 .prize-form .primary {
+  min-height: 44px;
   margin: 20rpx 0 0;
 }
 .prize-heading {
@@ -2040,5 +2155,85 @@ button[disabled] {
 .status-badge.received {
   color: #17653d;
   background: #e5f3e9;
+}
+
+.deep-link-target {
+  border-color: #d69a24 !important;
+  box-shadow: 0 0 0 4rpx rgba(214, 154, 36, 0.18);
+}
+@media (max-width: 420px) {
+  .event-scroll {
+    white-space: normal;
+  }
+
+  .event-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .event-option {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .form-grid,
+  .pairing-picker-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .queue-header,
+  .round-heading {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .round-scroll {
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+
+  .round-tabs {
+    justify-content: flex-start;
+  }
+
+  .team-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .team-row > .inline {
+    width: 100%;
+  }
+
+  .error-panel {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .error-panel .inline,
+  .refresh-button {
+    width: 100%;
+  }
+
+  .event-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .event-actions button:only-child {
+    grid-column: auto;
+  }
+
+  .prize-inputs {
+    flex-wrap: wrap;
+  }
+
+  .prize-inputs .prize-field {
+    flex: 1 1 220rpx;
+  }
+
+  .score-line {
+    gap: 8rpx;
+  }
 }
 </style>

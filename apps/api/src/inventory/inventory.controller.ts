@@ -28,14 +28,7 @@ import { InventoryService } from './inventory.service.js';
 @ApiTags('商品库存')
 @ApiBearerAuth()
 @Controller('inventory')
-@Roles(
-  AppRole.FRONT_DESK,
-  AppRole.COACH,
-  AppRole.EVENT_MANAGER,
-  AppRole.FINANCE,
-  AppRole.ADMIN,
-  AppRole.SUPER_ADMIN,
-)
+@Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
 export class InventoryController {
   constructor(
     private readonly inventory: InventoryService,
@@ -48,8 +41,20 @@ export class InventoryController {
   }
 
   @Get('low-stock')
+  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   lowStock(@CurrentUser() actor: AuthUser) {
     return this.inventory.lowStock(actor);
+  }
+
+  @Get('award-options')
+  @Roles(
+    AppRole.FRONT_DESK,
+    AppRole.EVENT_MANAGER,
+    AppRole.ADMIN,
+    AppRole.SUPER_ADMIN,
+  )
+  awardOptions(@CurrentUser() actor: AuthUser) {
+    return this.inventory.awardOptions(actor);
   }
 
   @Get('items/:id')
@@ -141,7 +146,7 @@ export class InventoryController {
   }
 
   @Post('purchase-orders')
-  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   createPurchaseOrder(
     @Body() dto: CreatePurchaseOrderDto,
     @CurrentUser() actor: AuthUser,
@@ -150,7 +155,7 @@ export class InventoryController {
   }
 
   @Post('purchase-orders/:id/submit')
-  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   submitPurchaseOrder(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
     return this.operations.submitPurchaseOrder(id, actor);
   }
@@ -165,7 +170,7 @@ export class InventoryController {
   }
 
   @Post('purchase-orders/:id/receive')
-  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   receivePurchaseOrder(
     @Param('id') id: string,
     @Body() dto: ReceivePurchaseOrderDto,
@@ -190,7 +195,7 @@ export class InventoryController {
   }
 
   @Post('stocktakes')
-  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   createStocktake(
     @Body() dto: CreateStocktakeDto,
     @CurrentUser() actor: AuthUser,
@@ -199,13 +204,13 @@ export class InventoryController {
   }
 
   @Post('stocktakes/:id/start')
-  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   startStocktake(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
     return this.operations.startStocktake(id, actor);
   }
 
   @Post('stocktakes/:id/lines/:lineId/count')
-  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   countStocktakeLine(
     @Param('id') id: string,
     @Param('lineId') lineId: string,
@@ -216,7 +221,7 @@ export class InventoryController {
   }
 
   @Post('stocktakes/:id/submit')
-  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   submitStocktake(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
     return this.operations.submitStocktake(id, actor);
   }
@@ -237,7 +242,7 @@ export class InventoryController {
   }
 
   @Post('operations')
-  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   createOperation(
     @Body() dto: CreateInventoryOperationDto,
     @CurrentUser() actor: AuthUser,
@@ -246,7 +251,7 @@ export class InventoryController {
   }
 
   @Post('operations/:id/submit')
-  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   submitOperation(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
     return this.operations.submitOperation(id, actor);
   }
@@ -258,7 +263,7 @@ export class InventoryController {
   }
 
   @Post('operations/:id/post')
-  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   postOperation(
     @Param('id') id: string,
     @Body() dto: PostInventoryOperationDto,
@@ -304,13 +309,7 @@ export class InventoryController {
   }
 
   @Post(':id/transactions')
-  @Roles(
-    AppRole.FRONT_DESK,
-    AppRole.COACH,
-    AppRole.EVENT_MANAGER,
-    AppRole.ADMIN,
-    AppRole.SUPER_ADMIN,
-  )
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   transact(
     @Param('id') id: string,
     @Body() dto: InventoryTransactionDto,

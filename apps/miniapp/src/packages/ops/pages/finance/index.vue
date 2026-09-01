@@ -1,14 +1,25 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { onShow } from "@dcloudio/uni-app";
+import { computed, nextTick, ref } from "vue";
+import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../../../components/OperationsFrame.vue";
 import MetricCard from "../../../../components/MetricCard.vue";
 import StatusBadge from "../../../../components/StatusBadge.vue";
+import {
+  visibleFinancePageExportScopes,
+  type FinancePageExportScope,
+} from "../../../../config/governance";
+import { hasOperationsAccess } from "../../../../config/operations";
 import { endpoints, type ReconciliationPeriod } from "../../../../services/api";
 import { isMockMode } from "../../../../services/http";
 import { useSessionStore } from "../../../../stores/session";
 import { money, shortDate, today } from "../../../../utils/format";
 import { withPendingCreationKey } from "../../../../utils/pending-creation-key";
+import {
+  findOpsDeepLinkRecord,
+  opsDeepLinkDomId,
+  parseOpsDeepLinkQuery,
+  type OpsDeepLinkQuery,
+} from "../../../../utils/work-item-deep-link";
 
 type LoadSource =
   | "dashboard"
@@ -42,6 +53,9 @@ const actionKey = ref("");
 const successMessage = ref("");
 const actionError = ref("");
 const lastSyncedAt = ref("");
+const deepLinkQuery = ref<OpsDeepLinkQuery>({});
+const deepLinkHandled = ref(false);
+const focusedRecord = ref("");
 const trainingSettlementStatusOptions = [
   { value: "", label: "全部状态" },
   { value: "DRAFT", label: "草稿" },
@@ -81,6 +95,12 @@ const canMerchantAction = computed(() =>
   session.roles.some((role) =>
     ["MERCHANT", "ADMIN", "SUPER_ADMIN"].includes(role),
   ),
+);
+const visibleExportScopes = computed(() =>
+  visibleFinancePageExportScopes(session.roles),
+);
+const canAdministrativeExport = computed(() =>
+  session.roles.some((role) => ["ADMIN", "SUPER_ADMIN"].includes(role)),
 );
 const roleLabel = computed(() => {
   if (session.roles.includes("SUPER_ADMIN")) return "超级管理员";
@@ -267,6 +287,7 @@ async function load(options: { preserveMessage?: boolean } = {}) {
 
   try {
     await session.hydrate();
+    if (!hasOperationsAccess(session.roles, "finance")) return;
     const period = businessPeriod();
     const closePeriod = closeBusinessPeriod();
     const result = await Promise.allSettled([
@@ -276,7 +297,7 @@ async function load(options: { preserveMessage?: boolean } = {}) {
       endpoints.merchants(),
       endpoints.allianceSettlements(),
       canFinanceAction.value
-        ? endpoints.inventorySuppliers()
+        ? endpoints.consignmentSupplierOptions()
         : Promise.resolve([]),
       canFinanceAction.value
         ? endpoints.consignmentPayables({ pageSize: 50 })
@@ -396,6 +417,69 @@ async function load(options: { preserveMessage?: boolean } = {}) {
   } finally {
     loading.value = false;
   }
+  await applyFinanceDeepLink();
+}
+
+async function applyFinanceDeepLink() {
+  if (deepLinkHandled.value || !deepLinkQuery.value.focus) return;
+  const focus = deepLinkQuery.value.focus;
+  let record: any = null;
+  let prefix = "";
+  let label = "财务记录";
+  if (focus === "refund") {
+    record = findOpsDeepLinkRecord(
+      activeRefunds.value.map((refund) => ({
+        ...refund,
+        orderId: refund.orderId || refund.order?.id,
+      })),
+      deepLinkQuery.value,
+      ["id", "orderId"],
+    );
+    prefix = "finance-refund";
+    label = "退款申请";
+  } else if (focus === "account-adjustment") {
+    record = findOpsDeepLinkRecord(adjustments.value, deepLinkQuery.value, ["id"]);
+    prefix = "finance-adjustment";
+    label = "账户调整申请";
+  } else if (focus === "training-settlement") {
+    record = findOpsDeepLinkRecord(trainingSettlements.value, deepLinkQuery.value, ["id"]);
+    prefix = "finance-training-settlement";
+    label = "培训结算单";
+  } else if (focus === "consignment-settlement") {
+    record = findOpsDeepLinkRecord(consignmentSettlements.value, deepLinkQuery.value, ["id"]);
+    prefix = "finance-consignment-settlement";
+    label = "寄售结算单";
+  } else if (focus === "alliance-settlement") {
+    record = findOpsDeepLinkRecord(settlements.value, deepLinkQuery.value, ["id"]);
+    prefix = "finance-alliance-settlement";
+    label = "联盟结算单";
+  } else if (focus === "shift-variance") {
+    record = findOpsDeepLinkRecord(unreviewedShiftVariances.value, deepLinkQuery.value, ["id"]);
+    prefix = "finance-shift";
+    label = "班次差异";
+  } else if (focus === "reconciliation") {
+    deepLinkHandled.value = true;
+    if (!reconciliation.value) {
+      uni.showToast({ title: "未找到待办对应的日结账期，可能尚未同步", icon: "none" });
+      return;
+    }
+    focusedRecord.value = "finance-reconciliation";
+    await nextTick();
+    uni.pageScrollTo({ selector: "#finance-reconciliation", duration: 250 });
+    return;
+  } else {
+    deepLinkHandled.value = true;
+    uni.showToast({ title: `无法识别财务待办类型：${focus}`, icon: "none" });
+    return;
+  }
+  deepLinkHandled.value = true;
+  if (!record) {
+    uni.showToast({ title: `未找到待办对应的${label}，可能已处理或无权查看`, icon: "none" });
+    return;
+  }
+  focusedRecord.value = `${prefix}:${record.id}`;
+  await nextTick();
+  uni.pageScrollTo({ selector: `#${opsDeepLinkDomId(prefix, record.id)}`, duration: 250 });
 }
 
 async function closeBusinessDay() {
@@ -586,7 +670,7 @@ function accountDelta(request: any) {
 }
 
 function isOwnAdjustment(request: any) {
-  return request.requestedById === session.user?.id;
+  return request.isOwnRequest === true;
 }
 
 function onTrainingSettlementStatusChange(event: any) {
@@ -688,9 +772,7 @@ function trainingSettlementStatusLabel(status?: string) {
 }
 
 function isOwnTrainingSettlement(settlement: any) {
-  return Boolean(
-    settlement.createdById && settlement.createdById === session.user?.id,
-  );
+  return settlement.isOwnCreator === true;
 }
 
 function trainingSettlementLatestNote(settlement: any) {
@@ -700,7 +782,7 @@ function trainingSettlementLatestNote(settlement: any) {
   const latest = history[history.length - 1];
   if (!latest) return "";
   return [
-    latest.actorName,
+    latest.actor,
     latest.reason ? `原因：${latest.reason}` : "",
     latest.at ? shortDate(latest.at) : "",
   ]
@@ -823,7 +905,7 @@ async function changeConsignmentSettlement(
 ) {
   if (
     ["confirm", "dispute", "return", "settle"].includes(action) &&
-    settlement.createdById === session.user?.id
+    settlement.isOwnCreator === true
   ) {
     uni.showToast({ title: "制单人不能复核自己的寄售账单", icon: "none" });
     return;
@@ -915,7 +997,6 @@ function consignmentSupplierName(settlement: any) {
 }
 
 function consignmentSupplierRule(supplier: any) {
-  const rule = supplier?.settlementRule || {};
   const cycle =
     (
       {
@@ -923,10 +1004,10 @@ function consignmentSupplierRule(supplier: any) {
         WEEKLY: "周结",
         MONTHLY: "月结",
       } as Record<string, string>
-    )[rule.settlementCycle] ||
-    rule.settlementCycle ||
+    )[supplier?.settlementCycle] ||
+    supplier?.settlementCycle ||
     "周期待配置";
-  return `${cycle} · 球馆佣金 ${Number(rule.commissionRateBps || 0) / 100}%`;
+  return `${cycle} · 球馆佣金 ${Number(supplier?.commissionRateBps || 0) / 100}%`;
 }
 
 function consignmentSettlementPeriod(settlement: any) {
@@ -1147,7 +1228,7 @@ function acting(key: string) {
   return actionKey.value === key;
 }
 
-async function exportOperations(scope: "events" | "inventory", label: string) {
+async function exportOperations(scope: FinancePageExportScope, label: string) {
   if (!canFinanceAction.value || actionKey.value) return;
   if (isMockMode) {
     await uni.showModal({
@@ -1177,6 +1258,9 @@ function settlementHasAction(settlement: any) {
   );
 }
 
+onLoad((options) => {
+  deepLinkQuery.value = parseOpsDeepLinkQuery(options);
+});
 onShow(() => {
   void load();
 });
@@ -1184,6 +1268,7 @@ onShow(() => {
 
 <template>
   <OperationsFrame
+    access="finance"
     title="财务结算"
     eyebrow="FINANCE & RECONCILIATION"
     :role="roleLabel"
@@ -1223,29 +1308,25 @@ onShow(() => {
     }}</view>
     <view v-if="actionError" class="notice error card">{{ actionError }}</view>
 
-    <view v-if="canFinanceAction" class="card export-bar">
+    <view v-if="visibleExportScopes.length" class="card export-bar">
       <view
         ><text class="sync-title">经营明细导出</text
-        ><text class="muted"
-          >包含收费退款、赛事五轮结果，或供应商、寄售应付/结算与全部库存作业单据。</text
-        ></view
+        ><text class="muted">{{
+          canAdministrativeExport
+            ? "管理员可导出订单、财务账簿，以及赛事或库存专项审计明细。"
+            : "财务仅可导出订单支付和职责内财务账簿，不包含内部规则快照与操作密钥。"
+        }}</text></view
       >
       <view class="export-actions">
         <button
+          v-for="scope in visibleExportScopes"
+          :key="scope[0]"
           class="secondary inline"
-          :loading="acting('export:events')"
+          :loading="acting(`export:${scope[0]}`)"
           :disabled="Boolean(actionKey)"
-          @tap="exportOperations('events', '赛事经营明细')"
+          @tap="exportOperations(scope[0], scope[1])"
         >
-          赛事 Excel
-        </button>
-        <button
-          class="secondary inline"
-          :loading="acting('export:inventory')"
-          :disabled="Boolean(actionKey)"
-          @tap="exportOperations('inventory', '库存经营明细')"
-        >
-          库存 Excel
+          {{ scope[1] }}
         </button>
       </view>
     </view>
@@ -1423,8 +1504,10 @@ onShow(() => {
     >
     <view
       v-for="refund in activeRefunds"
+      :id="opsDeepLinkDomId('finance-refund', refund.id)"
       :key="refund.id"
       class="card workflow-card"
+      :class="{ 'deep-link-target': focusedRecord === `finance-refund:${refund.id}` }"
     >
       <view class="workflow-head">
         <view class="workflow-main">
@@ -1478,7 +1561,9 @@ onShow(() => {
         >
           {{ acting(`refund-reject:${refund.id}`) ? "驳回中…" : "驳回申请" }}
         </button>
-        <text v-else class="locked-note">系统强制退款不可驳回，只能核准并原路退回。</text>
+        <text v-else class="locked-note"
+          >系统强制退款不可驳回，只能核准并原路退回。</text
+        >
       </view>
     </view>
     <view
@@ -1502,8 +1587,10 @@ onShow(() => {
       </view>
       <view
         v-for="request in adjustments"
+        :id="opsDeepLinkDomId('finance-adjustment', request.id)"
         :key="request.id"
         class="card workflow-card"
+        :class="{ 'deep-link-target': focusedRecord === `finance-adjustment:${request.id}` }"
       >
         <view class="workflow-head">
           <view class="workflow-main">
@@ -1513,7 +1600,7 @@ onShow(() => {
             <text class="muted"
               >{{ request.account?.type }} · 申请人
               {{
-                request.requestedBy?.displayName || request.requestedById
+                request.requestedBy?.displayName || "历史申请人"
               }}</text
             >
           </view>
@@ -1644,8 +1731,10 @@ onShow(() => {
     >
     <view
       v-for="statement in trainingSettlements"
+      :id="opsDeepLinkDomId('finance-training-settlement', statement.id)"
       :key="statement.id"
       class="card workflow-card settlement-card"
+      :class="{ 'deep-link-target': focusedRecord === `finance-training-settlement:${statement.id}` }"
     >
       <view class="workflow-head">
         <view class="workflow-main">
@@ -1702,7 +1791,6 @@ onShow(() => {
         <text
           >制单人：{{
             statement.createdBy?.displayName ||
-            statement.createdById ||
             "历史数据待补录"
           }}</text
         >
@@ -1976,8 +2064,10 @@ onShow(() => {
     >
     <view
       v-for="statement in consignmentSettlements"
+      :id="opsDeepLinkDomId('finance-consignment-settlement', statement.id)"
       :key="statement.id"
       class="card workflow-card settlement-card"
+      :class="{ 'deep-link-target': focusedRecord === `finance-consignment-settlement:${statement.id}` }"
     >
       <view class="workflow-head">
         <view class="workflow-main">
@@ -2050,7 +2140,7 @@ onShow(() => {
       </view>
       <view
         v-if="
-          statement.createdById === session.user?.id &&
+          statement.isOwnCreator === true &&
           ['PENDING_CONFIRMATION', 'CONFIRMED'].includes(statement.status)
         "
         class="locked-note"
@@ -2082,7 +2172,7 @@ onShow(() => {
         <button
           v-if="
             statement.status === 'PENDING_CONFIRMATION' &&
-            statement.createdById !== session.user?.id
+            statement.isOwnCreator !== true
           "
           class="primary action-button"
           :disabled="loading || Boolean(actionKey)"
@@ -2097,7 +2187,7 @@ onShow(() => {
         <button
           v-if="
             statement.status === 'PENDING_CONFIRMATION' &&
-            statement.createdById !== session.user?.id
+            statement.isOwnCreator !== true
           "
           class="danger action-button"
           :disabled="loading || Boolean(actionKey)"
@@ -2112,7 +2202,7 @@ onShow(() => {
         <button
           v-if="
             statement.status === 'CONFIRMED' &&
-            statement.createdById !== session.user?.id
+            statement.isOwnCreator !== true
           "
           class="primary action-button"
           :disabled="loading || Boolean(actionKey)"
@@ -2127,7 +2217,7 @@ onShow(() => {
         <button
           v-if="
             statement.status === 'CONFIRMED' &&
-            statement.createdById !== session.user?.id
+            statement.isOwnCreator !== true
           "
           class="danger action-button"
           :disabled="loading || Boolean(actionKey)"
@@ -2168,8 +2258,10 @@ onShow(() => {
     </view>
     <view
       v-for="shift in unreviewedShiftVariances"
+      :id="opsDeepLinkDomId('finance-shift', shift.id)"
       :key="shift.id"
       class="card workflow-card"
+      :class="{ 'deep-link-target': focusedRecord === `finance-shift:${shift.id}` }"
     >
       <view class="workflow-head">
         <view class="workflow-main">
@@ -2241,7 +2333,7 @@ onShow(() => {
         重试
       </button>
     </view>
-    <view v-else class="card reconciliation-period">
+    <view id="finance-reconciliation" v-else class="card reconciliation-period" :class="{ 'deep-link-target': focusedRecord === 'finance-reconciliation' }">
       <view class="workflow-head">
         <view class="workflow-main">
           <text class="order-title"
@@ -2378,8 +2470,10 @@ onShow(() => {
     >
     <view
       v-for="settlement in settlements"
+      :id="opsDeepLinkDomId('finance-alliance-settlement', settlement.id)"
       :key="settlement.id"
       class="card workflow-card settlement-card"
+      :class="{ 'deep-link-target': focusedRecord === `finance-alliance-settlement:${settlement.id}` }"
     >
       <view class="workflow-head">
         <view class="workflow-main">
@@ -2538,6 +2632,9 @@ onShow(() => {
 .export-actions {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
   gap: 10rpx;
 }
 .notice {
@@ -2841,5 +2938,31 @@ onShow(() => {
 }
 button[disabled] {
   opacity: 0.5;
+}
+.deep-link-target {
+  border-color: #d69a24 !important;
+  box-shadow: 0 0 0 4rpx rgba(214, 154, 36, 0.18);
+}
+
+@media (max-width: 430px) {
+  .export-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .export-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .export-actions .inline {
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    padding: 10rpx 12rpx;
+    line-height: 1.3;
+    white-space: normal;
+  }
 }
 </style>

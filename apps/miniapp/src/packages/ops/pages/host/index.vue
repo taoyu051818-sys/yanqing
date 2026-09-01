@@ -1,15 +1,22 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { onShow } from "@dcloudio/uni-app";
+import { computed, nextTick, ref } from "vue";
+import { onLoad, onShow } from "@dcloudio/uni-app";
 
 import MetricCard from "../../../../components/MetricCard.vue";
 import OperationsFrame from "../../../../components/OperationsFrame.vue";
 import StatusBadge from "../../../../components/StatusBadge.vue";
+import { hasOperationsAccess } from "../../../../config/operations";
 import { endpoints } from "../../../../services/api";
 import { useSessionStore } from "../../../../stores/session";
 import type { CourtAvailability } from "../../../../types/domain";
 import { money, shortDate } from "../../../../utils/format";
 import { withPendingCreationKey } from "../../../../utils/pending-creation-key";
+import {
+  findOpsDeepLinkRecord,
+  opsDeepLinkDomId,
+  parseOpsDeepLinkQuery,
+  type OpsDeepLinkQuery,
+} from "../../../../utils/work-item-deep-link";
 
 const session = useSessionStore();
 const games = ref<any[]>([]);
@@ -18,6 +25,9 @@ const loading = ref(false);
 const actionKey = ref("");
 const errorMessage = ref("");
 const selectedGameId = ref("");
+const deepLinkQuery = ref<OpsDeepLinkQuery>({});
+const deepLinkHandled = ref(false);
+const focusedRecord = ref("");
 
 const title = ref("");
 const description = ref("");
@@ -37,7 +47,10 @@ const levelOptions = [
 ];
 
 const mayOperate = computed(() =>
-  session.roles.some((role) => ["HOST", "ADMIN", "SUPER_ADMIN"].includes(role)),
+  hasOperationsAccess(session.roles, "games"),
+);
+const canManageAllGames = computed(() =>
+  session.roles.some((role) => ["ADMIN", "SUPER_ADMIN"].includes(role)),
 );
 const roleLabel = computed(() => {
   if (session.roles.includes("SUPER_ADMIN")) return "超级管理员";
@@ -75,7 +88,7 @@ const selectableCourts = computed(() =>
 );
 const selectedCourt = computed(() => selectableCourts.value[courtIndex.value] || null);
 const metrics = computed(() => [
-  ["我的球局", String(games.value.length), "草稿与已发布"],
+  [canManageAllGames.value ? "全部球局" : "我的球局", String(games.value.length), "草稿与已发布"],
   ["有效报名", String(seated.value.length), "当前球局"],
   ["候补队列", String(waitlisted.value.length), "按报名时间排序"],
   ["已签到", String(checkedIn.value), "按实到结算"],
@@ -126,8 +139,8 @@ async function load() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const [hosted] = await Promise.all([endpoints.hostedGames(), loadAvailability()]);
-    games.value = hosted || [];
+    const [managed] = await Promise.all([endpoints.managedGames(), loadAvailability()]);
+    games.value = managed || [];
     if (
       !selectedGameId.value ||
       !games.value.some((game) => game.id === selectedGameId.value)
@@ -139,6 +152,25 @@ async function load() {
   } finally {
     loading.value = false;
   }
+  await applyHostDeepLink();
+}
+
+async function applyHostDeepLink() {
+  if (deepLinkHandled.value || !deepLinkQuery.value.focus) return;
+  deepLinkHandled.value = true;
+  if (deepLinkQuery.value.focus !== "game") {
+    uni.showToast({ title: `无法识别球局待办类型：${deepLinkQuery.value.focus}`, icon: "none" });
+    return;
+  }
+  const game = findOpsDeepLinkRecord(games.value, deepLinkQuery.value, ["id"]);
+  if (!game) {
+    uni.showToast({ title: "未找到待办对应的球局，可能已结束或无权查看", icon: "none" });
+    return;
+  }
+  selectedGameId.value = game.id;
+  focusedRecord.value = `host-game:${game.id}`;
+  await nextTick();
+  uni.pageScrollTo({ selector: `#${opsDeepLinkDomId("host-game", game.id)}`, duration: 250 });
 }
 
 function changeDate(event: any) {
@@ -295,7 +327,7 @@ async function checkIn(player: any) {
   try {
     await endpoints.checkInGame(
       game.id,
-      player.userId || player.id,
+      player.id,
       overrideReason ? { overrideReason } : {},
     );
     uni.showToast({ title: "已签到", icon: "success" });
@@ -331,7 +363,7 @@ async function cancelGame() {
       command,
       (idempotencyKey) => endpoints.cancelGame(game.id, { reason, idempotencyKey }),
     );
-    const refundCount = result?.refundRequests?.length || 0;
+    const refundCount = Number(result?.refundRequestCount || 0);
     uni.showToast({
       title: refundCount ? `已取消，${refundCount}笔退款待审` : "球局已取消",
       icon: "success",
@@ -366,19 +398,19 @@ async function completeGame() {
   }
 }
 
+onLoad((options) => {
+  deepLinkQuery.value = parseOpsDeepLinkQuery(options);
+  selectedGameId.value = deepLinkQuery.value.gameId || deepLinkQuery.value.id || "";
+});
 onShow(load);
 </script>
 
 <template>
-  <OperationsFrame title="球局运营" eyebrow="GAME OPERATIONS" :role="roleLabel" description="从草稿创建、发布报名、候补晋级、现场签到到结束结算，主理人仅操作本人球局。">
-    <view v-if="errorMessage && mayOperate" class="card error-panel">
+  <OperationsFrame access="games" title="球局运营" eyebrow="GAME OPERATIONS" :role="roleLabel" :description="canManageAllGames ? '管理员可查看并处理全部主理人球局；主理人仍只操作本人球局。' : '从草稿创建、发布报名、候补晋级、现场签到到结束结算，主理人仅操作本人球局。'">
+    <view v-if="errorMessage" class="card error-panel">
       <view><text class="panel-title">操作未完成</text><text class="muted">{{ errorMessage }}</text></view>
       <button class="secondary inline" :disabled="loading || Boolean(actionKey)" @tap="load">重试</button>
     </view>
-
-    <view v-if="!mayOperate" class="card boundary"><text class="panel-title">无主理人工作台权限</text><text class="muted">请先使用会员身份提交主理人申请，审核通过并获得 HOST 角色后再进入。</text></view>
-
-    <template v-else>
 
     <view class="metric-grid"><MetricCard v-for="item in metrics" :key="item[0]" :label="item[0]" :value="item[1]" :note="item[2]" /></view>
 
@@ -401,14 +433,14 @@ onShow(load);
       <button class="primary" :loading="actionKey === 'create'" :disabled="loading || Boolean(actionKey) || !selectedCourt" @tap="createGame">创建球局草稿</button>
     </view>
 
-    <view class="section-title">我的球局 <text class="section-note">{{ loading ? "同步中" : `${games.length} 场` }}</text></view>
-    <scroll-view v-if="games.length" scroll-x class="game-tabs"><view class="tab-row"><button v-for="game in games" :key="game.id" class="game-tab" :class="{ active: selectedGame?.id === game.id }" :disabled="Boolean(actionKey)" @tap="selectGame(game)">{{ game.title }}</button></view></scroll-view>
+    <view class="section-title">{{ canManageAllGames ? "全部球局" : "我的球局" }} <text class="section-note">{{ loading ? "同步中" : `${games.length} 场` }}</text></view>
+    <scroll-view v-if="games.length" scroll-x class="game-tabs"><view class="tab-row"><button v-for="game in games" :key="game.id" class="game-tab" :class="{ active: selectedGame?.id === game.id }" :disabled="Boolean(actionKey)" @tap="selectGame(game)">{{ game.title }}<template v-if="canManageAllGames"> · {{ game.host?.displayName || "未知主理人" }}</template></button></view></scroll-view>
     <view v-if="loading && !selectedGame" class="empty card">球局数据同步中…</view>
     <view v-else-if="!selectedGame" class="empty card">尚未创建球局，请先建立草稿。</view>
 
     <template v-if="selectedGame">
-      <view class="card game-summary">
-        <view class="row"><view><text class="game-title">{{ selectedGame.title }}</text><text class="muted">{{ shortDate(selectedGame.startsAt) }} · {{ selectedGame.level || "公开组" }} · {{ money(selectedGame.feeCents) }}</text></view><StatusBadge :value="selectedGame.status" /></view>
+      <view :id="opsDeepLinkDomId('host-game', selectedGame.id)" class="card game-summary" :class="{ 'deep-link-target': focusedRecord === `host-game:${selectedGame.id}` }">
+        <view class="row"><view><text class="game-title">{{ selectedGame.title }}</text><text class="muted">{{ shortDate(selectedGame.startsAt) }} · {{ selectedGame.level || "公开组" }} · {{ money(selectedGame.feeCents) }}<template v-if="canManageAllGames"> · 主理人 {{ selectedGame.host?.displayName || "未识别" }}</template></text></view><StatusBadge :value="selectedGame.status" /></view>
         <text class="muted summary-copy">{{ selectedGame.description || "按实际签到人数结算激励" }}</text>
         <button v-if="selectedGame.status === 'DRAFT'" class="primary" :loading="actionKey === `publish:${selectedGame.id}`" :disabled="Boolean(actionKey)" @tap="publishGame">确认发布球局</button>
         <button v-else-if="canCompleteSelectedGame" class="primary" :loading="actionKey === `complete:${selectedGame.id}`" :disabled="Boolean(actionKey)" @tap="completeGame">结束球局并结算</button>
@@ -434,8 +466,7 @@ onShow(load);
       <view v-if="!seated.length" class="empty card">当前球局暂无有效报名。</view>
     </template>
 
-    <view class="card boundary"><text class="muted">边界：主理人只能发布、晋级候补、签到和结束本人球局；候补晋级仅在有空位时生成待支付订单，不跳过队首，不直接视为已支付。</text></view>
-    </template>
+    <view class="card boundary"><text class="muted">边界：{{ canManageAllGames ? "管理员可处理全部球局，操作均保留实际执行人审计记录" : "主理人只能发布、晋级候补、签到和结束本人球局" }}；候补晋级仅在有空位时生成待支付订单，不跳过队首，不直接视为已支付。</text></view>
   </OperationsFrame>
 </template>
 
@@ -444,4 +475,5 @@ onShow(load);
 .create-form { display:grid; gap:16rpx; }.text-input,.description-input,.field-row { box-sizing:border-box; width:100%; padding:20rpx; background:#f3f6f3; border-radius:16rpx; font-size:24rpx; }.description-input { min-height:120rpx; }.field-row { display:flex; align-items:center; justify-content:space-between; min-height:72rpx; }.time-grid { display:grid; grid-template-columns:1fr 1fr; gap:12rpx; }.fee-input { width:180rpx; text-align:right; }.guardrail { color:#7b6940; font-size:22rpx; line-height:1.6; }.create-form button { width:100%; margin:0; }
 .game-tabs { margin-bottom:18rpx; white-space:nowrap; }.tab-row { display:flex; gap:12rpx; }.game-tab { flex:0 0 auto; max-width:400rpx; min-height:64rpx; margin:0; padding:0 22rpx; overflow:hidden; color:#667169; background:#e8efea; border-radius:18rpx; line-height:64rpx; text-overflow:ellipsis; white-space:nowrap; }.game-tab.active { color:#fff; background:#17653d; }.game-summary { padding:24rpx; }.game-title,.player-name { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; }.summary-copy { display:block; margin:18rpx 0; line-height:1.6; }.game-summary button { margin:0; width:100%; }.settled { padding:18rpx; color:#17653d; background:#e8f4eb; border-radius:16rpx; text-align:center; }
 .waitlist-card { display:grid; gap:14rpx; }.wait-row { display:flex; align-items:center; justify-content:space-between; padding-bottom:12rpx; border-bottom:1rpx solid #edf0ed; font-size:24rpx; }.waitlist-card button { width:100%; margin:0; }.player-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; margin-top:14rpx; padding:20rpx 24rpx; }.inline { min-width:108rpx; min-height:56rpx; margin:0; padding:0 14rpx; line-height:56rpx; font-size:22rpx; }.empty { color:#758079; text-align:center; }.boundary { margin-top:22rpx; line-height:1.7; }.boundary .muted { display:block; }
+.deep-link-target { border-color:#d69a24!important; box-shadow:0 0 0 4rpx rgba(214,154,36,.18); }
 </style>

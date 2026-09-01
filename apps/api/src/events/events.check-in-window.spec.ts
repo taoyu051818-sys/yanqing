@@ -73,11 +73,17 @@ describe('EventsService check-in time window', () => {
     await expect(
       service.checkIn('event-1', 'team-1', admin),
     ).rejects.toBeInstanceOf(BadRequestException)
-    await expect(
-      service.checkIn('event-1', 'team-1', admin, {
-        overrideReason: '补录纸质签到表',
-      }),
-    ).resolves.toBe(updated)
+    const result = await service.checkIn('event-1', 'team-1', admin, {
+      overrideReason: '补录纸质签到表',
+    })
+    expect(result).toMatchObject({
+      id: updated.id,
+      category: updated.category,
+      status: RegistrationStatus.CHECKED_IN,
+    })
+    expect(result).not.toHaveProperty('eventId')
+    expect(result).not.toHaveProperty('captainId')
+    expect(result).not.toHaveProperty('playerAUserId')
     expect(tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         action: 'EVENT_TEAM_CHECK_IN_HISTORICAL_OVERRIDE',

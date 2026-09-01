@@ -13,7 +13,18 @@ const roleNames: Record<AppRole, string> = {
   MEMBER: '会员端', FRONT_DESK: '前台端', COACH: '教练端', HOST: '主理人端', MERCHANT: '商户端',
   FINANCE: '财务端', EVENT_MANAGER: '赛事端', ADMIN: '管理员端', SUPER_ADMIN: '超级管理端',
 }
+const roleLabels: Record<AppRole, string> = {
+  MEMBER: '会员', FRONT_DESK: '前台', COACH: '教练', HOST: '主理人', MERCHANT: '联盟商户',
+  FINANCE: '财务', EVENT_MANAGER: '赛事管理员', ADMIN: '管理员', SUPER_ADMIN: '超级管理员',
+}
 const current = computed(() => session.user?.primaryRole || 'MEMBER')
+
+function localizedRoleDescription(description: string) {
+  return description
+    .split('/')
+    .map((role) => roleLabels[role.trim() as AppRole] || '其他岗位')
+    .join(' / ')
+}
 
 onShow(() => {
   if (!isMockMode) {
@@ -34,7 +45,14 @@ async function switchRole(role: AppRole) {
   } finally { switching.value = null }
 }
 
-function resetDemo() {
+async function resetDemo() {
+  const result = await uni.showModal({
+    title: '确认重置演示数据？',
+    content: '本机产生的模拟订单和经营资料将恢复为初始状态，此操作不会影响服务器数据。',
+    confirmText: '确认重置',
+    confirmColor: '#9f3028',
+  })
+  if (!result.confirm) return
   uni.removeStorageSync('yanqing_mock_orders')
   resetCatalogState()
   uni.showToast({ title: '演示数据已重置', icon: 'success' })
@@ -53,13 +71,13 @@ function resetDemo() {
       <view v-for="item in roleOptions" :key="item.role" class="role card" :class="{ active: current === item.role }" @tap="switchRole(item.role)">
         <view>
           <text class="role-name">{{ roleNames[item.role] }}</text>
-          <text class="muted">{{ item.label }} · {{ item.description }}</text>
+          <text class="muted">{{ item.label }} · {{ localizedRoleDescription(item.description) }}</text>
         </view>
         <text class="state">{{ switching === item.role ? '切换中' : current === item.role ? '当前' : '进入 ›' }}</text>
       </view>
     </view>
     <button class="secondary reset" @tap="resetDemo">重置本机演示数据</button>
-    <view class="tip">正式环境设置 VITE_DATA_MODE=remote 后，本通道仍可保留为受权限控制的测试入口，也可以从构建中关闭。</view>
+    <view class="tip">正式环境默认关闭身份切换；如需验收，应仅向受授权的测试人员开放。</view>
   </view>
 </template>
 

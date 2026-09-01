@@ -2,11 +2,14 @@ import { ConflictException, ForbiddenException, NotFoundException } from '@nestj
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
-import { AppRole, BusinessType, LeadStatus, OrderStatus, SourceChannel } from '../generated/prisma/enums.js'
+import { AccountType, AppRole, BusinessType, LeadStatus, OrderStatus, SourceChannel } from '../generated/prisma/enums.js'
 import { MembersService } from './members.service.js'
 
 const frontDesk: AuthUser = { sub: 'frontdesk-1', displayName: '前台', roles: [AppRole.FRONT_DESK] }
 const coach: AuthUser = { sub: 'coach-1', displayName: '教练', roles: [AppRole.COACH] }
+const finance: AuthUser = { sub: 'finance-1', displayName: '财务', roles: [AppRole.FINANCE] }
+const admin: AuthUser = { sub: 'admin-1', displayName: '管理员', roles: [AppRole.ADMIN] }
+const memberActor: AuthUser = { sub: 'member-1', displayName: '会员', roles: [AppRole.MEMBER] }
 
 const lead = (overrides: Record<string, unknown> = {}) => ({
   id: 'lead-1',
@@ -42,7 +45,12 @@ const makePrisma = () => {
     memberProfile: { findMany: vi.fn().mockResolvedValue([]) },
     order: { findMany: vi.fn().mockResolvedValue([]) },
     leadFollowUp: { create: vi.fn() },
-    user: { findUnique: vi.fn() },
+    user: {
+      findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
+    },
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   }
   const prisma: Record<string, any> = {
@@ -53,7 +61,12 @@ const makePrisma = () => {
     },
     memberProfile: { findMany: vi.fn().mockResolvedValue([]) },
     order: { findMany: vi.fn().mockResolvedValue([]) },
-    user: { findUnique: vi.fn() },
+    user: {
+      findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
+    },
     trainingEnrollment: { findFirst: vi.fn() },
     $transaction: vi.fn(async (work: any) => Array.isArray(work) ? Promise.all(work) : work(tx)),
   }
@@ -225,6 +238,142 @@ describe('MembersService customer leads', () => {
 })
 
 describe('MembersService customer 360 privacy', () => {
+  const accounts = [
+    { id: 'cash', type: AccountType.CASH_PRINCIPAL, balance: 10_000, frozenBalance: 0 },
+    { id: 'gift', type: AccountType.GIFT_BALANCE, balance: 2_000, frozenBalance: 0 },
+    { id: 'coin', type: AccountType.BADMINTON_COIN, balance: 50, frozenBalance: 0 },
+    { id: 'event', type: AccountType.EVENT_POINTS, balance: 126, frozenBalance: 0 },
+    { id: 'growth', type: AccountType.GROWTH_POINTS, balance: 860, frozenBalance: 0 },
+  ]
+  const customerFixture = () => ({
+    id: 'member-1',
+    displayName: '会员',
+    avatarUrl: null,
+    phone: '13812345678',
+    status: 'ACTIVE',
+    createdAt: new Date(),
+    memberProfile: { level: 'GOLD' },
+    referrer: null,
+    accounts,
+    memberOrders: [],
+    trainingPurchases: [],
+    gameRegistrations: [],
+    eventCaptains: [],
+    couponHoldings: [],
+  })
+
+  it('returns a whitelisted directory with masked phones and no account or WeChat identifiers to front desk', async () => {
+    const { prisma, service } = makePrisma()
+    prisma.user.findMany.mockResolvedValue([{
+      id: 'member-1', displayName: '会员', avatarUrl: null, phone: '13812345678',
+      status: 'ACTIVE', createdAt: new Date(), memberProfile: { level: 'GOLD' },
+    }])
+    prisma.user.count.mockResolvedValue(1)
+
+    const result = await service.list({ page: 1, pageSize: 20 }, frontDesk)
+
+    expect(result.items[0]).toMatchObject({ phone: '138****5678', privacyScope: 'FRONT_DESK_LIMITED' })
+    const query = prisma.user.findMany.mock.calls[0][0]
+    expect(query.include).toBeUndefined()
+    expect(query.select.accounts).toBeUndefined()
+    expect(query.select.openId).toBeUndefined()
+    expect(query.select.unionId).toBeUndefined()
+  })
+
+  it('denies member directory and profile access at the service boundary', async () => {
+    const { prisma, service } = makePrisma()
+
+    await expect(service.list({ page: 1, pageSize: 20 }, memberActor)).rejects.toBeInstanceOf(ForbiddenException)
+    await expect(service.profile('member-2', memberActor)).rejects.toBeInstanceOf(ForbiddenException)
+    expect(prisma.user.findMany).not.toHaveBeenCalled()
+    expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled()
+  })
+
+  it('limits front desk customer360 to masked identity and payment-usable accounts', async () => {
+    const { prisma, service } = makePrisma()
+    prisma.user.findUnique.mockResolvedValue(customerFixture())
+
+    const result = await service.customer360('member-1', frontDesk)
+
+    expect(result).toMatchObject({
+      member: { phone: '138****5678' },
+      privacyScope: 'FRONT_DESK_LIMITED',
+      financialsRedacted: true,
+      accountTypesLimited: true,
+      accounts: [],
+      paymentSummary: {
+        storedValueAvailableCents: 12_000,
+        badmintonCoinAvailable: 50,
+      },
+    })
+    const select = prisma.user.findUnique.mock.calls[0][0].select
+    expect(select.accounts.where.type.in).toEqual([
+      AccountType.CASH_PRINCIPAL,
+      AccountType.GIFT_BALANCE,
+      AccountType.BADMINTON_COIN,
+    ])
+    expect(select.memberOrders.select.paidCents).toBeUndefined()
+    expect(select.trainingPurchases.select.prepaidBalanceCents).toBeUndefined()
+    expect(select.eventCaptains.select.eventPointsAwarded).toBeUndefined()
+    expect(select.referrer.select).toEqual({ displayName: true })
+    expect(JSON.stringify(result)).not.toContain('13812345678')
+    expect(JSON.stringify(result)).not.toContain(AccountType.CASH_PRINCIPAL)
+    expect(JSON.stringify(result)).not.toContain(AccountType.GIFT_BALANCE)
+    expect(JSON.stringify(result)).not.toContain(AccountType.EVENT_POINTS)
+    expect(JSON.stringify(result)).not.toContain(AccountType.GROWTH_POINTS)
+  })
+
+  it('keeps all account types for finance while masking unnecessary phone PII', async () => {
+    const { prisma, service } = makePrisma()
+    prisma.user.findUnique.mockResolvedValue(customerFixture())
+
+    const result = await service.customer360('member-1', finance)
+
+    expect(result.member.phone).toBe('138****5678')
+    expect(result.privacyScope).toBe('FINANCE')
+    expect(result.accountTypesLimited).toBe(false)
+    expect(result.accounts.map((account) => account.type)).toEqual(accounts.map((account) => account.type))
+  })
+
+  it('keeps full phone and account scope only for administrators', async () => {
+    const { prisma, service } = makePrisma()
+    prisma.user.findUnique.mockResolvedValue(customerFixture())
+
+    const result = await service.customer360('member-1', admin)
+
+    expect(result.member.phone).toBe('13812345678')
+    expect(result.privacyScope).toBe('ADMIN')
+    expect(result.accounts).toHaveLength(5)
+  })
+
+  it('applies the same whitelist to the legacy profile route', async () => {
+    const { prisma, service } = makePrisma()
+    prisma.user.findUniqueOrThrow.mockResolvedValue({
+      id: 'member-1', displayName: '会员', avatarUrl: null, phone: '13812345678',
+      status: 'ACTIVE', primaryRole: AppRole.MEMBER, createdAt: new Date(), updatedAt: new Date(),
+      memberProfile: { level: 'GOLD' }, accounts: accounts.slice(0, 3), guardianStudents: [], referrer: null,
+    })
+
+    const result = await service.profile('member-1', frontDesk)
+
+    expect(result).toMatchObject({
+      phone: '138****5678',
+      privacyScope: 'FRONT_DESK_LIMITED',
+      accountTypesLimited: true,
+      accounts: [],
+      paymentSummary: { storedValueAvailableCents: 12_000, badmintonCoinAvailable: 50 },
+    })
+    const select = prisma.user.findUniqueOrThrow.mock.calls[0][0].select
+    expect(select.openId).toBeUndefined()
+    expect(select.unionId).toBeUndefined()
+    expect(select.accounts.where.type.in).toEqual([
+      AccountType.CASH_PRINCIPAL,
+      AccountType.GIFT_BALANCE,
+      AccountType.BADMINTON_COIN,
+    ])
+    expect(select.referrer.select).toEqual({ displayName: true })
+  })
+
   it('returns only assigned training context to a coach', async () => {
     const { prisma, service } = makePrisma()
     prisma.trainingEnrollment.findFirst.mockResolvedValue({ id: 'enrollment-1' })

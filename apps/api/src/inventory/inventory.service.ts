@@ -58,11 +58,14 @@ const DOCUMENT_CONTROLLED_TYPES = new Set<InventoryTxnType>([
 ]);
 
 const ADMIN_ROLES: readonly AppRole[] = [AppRole.ADMIN, AppRole.SUPER_ADMIN];
-const READ_ROLES: readonly AppRole[] = [
+const READ_ROLES: readonly AppRole[] = [...ADMIN_ROLES];
+const AWARD_OPTION_ROLES: readonly AppRole[] = [
   AppRole.FRONT_DESK,
-  AppRole.COACH,
   AppRole.EVENT_MANAGER,
-  AppRole.FINANCE,
+  ...ADMIN_ROLES,
+];
+const LOW_STOCK_ROLES: readonly AppRole[] = [
+  AppRole.FRONT_DESK,
   ...ADMIN_ROLES,
 ];
 
@@ -72,21 +75,63 @@ const ITEM_STATUS_ACTION = 'INVENTORY_ITEM_STATUS_CHANGED';
 const hasRole = (actor: AuthUser, roles: readonly AppRole[]) =>
   actor.roles.some((role) => roles.includes(role));
 
+const inventoryTransactionResponse = (transaction: Record<string, any>) =>
+  Object.fromEntries(
+    Object.entries({
+      id: transaction.id,
+      itemId: transaction.itemId,
+      type: transaction.type,
+      quantity: transaction.quantity,
+      stockBefore: transaction.stockBefore,
+      stockAfter: transaction.stockAfter,
+      unitCostCents: transaction.unitCostCents,
+      orderItemId: transaction.orderItemId,
+      reason: transaction.reason,
+      createdAt: transaction.createdAt,
+    }).filter(([, value]) => value !== undefined),
+  );
+
+const inventoryOperationResponse = (operation: Record<string, any>) => {
+  const {
+    postIdempotencyKey: _postIdempotencyKey,
+    sourceTransactionId: _sourceTransactionId,
+    targetTransactionId: _targetTransactionId,
+    ...response
+  } = operation;
+  return response;
+};
+
+const inventoryItemResponse = (item: Record<string, any>) => ({
+  ...item,
+  ...(Array.isArray(item.transactions)
+    ? { transactions: item.transactions.map(inventoryTransactionResponse) }
+    : {}),
+  ...(Array.isArray(item.inventoryDocuments)
+    ? {
+        inventoryDocuments: item.inventoryDocuments.map(
+          inventoryOperationResponse,
+        ),
+      }
+    : {}),
+});
+
 @Injectable()
 export class InventoryService {
   constructor(private readonly prisma: PrismaService) {}
 
   list(actor: AuthUser) {
     this.requireRole(actor, READ_ROLES);
-    return this.prisma.inventoryItem.findMany({
-      include: {
-        supplierRecord: true,
-        defaultLocation: true,
-        stockBalances: { include: { location: true } },
-        transactions: { orderBy: { createdAt: 'desc' }, take: 10 },
-      },
-      orderBy: [{ enabled: 'desc' }, { stock: 'asc' }],
-    });
+    return this.prisma.inventoryItem
+      .findMany({
+        include: {
+          supplierRecord: true,
+          defaultLocation: true,
+          stockBalances: { include: { location: true } },
+          transactions: { orderBy: { createdAt: 'desc' }, take: 10 },
+        },
+        orderBy: [{ enabled: 'desc' }, { stock: 'asc' }],
+      })
+      .then((items) => items.map(inventoryItemResponse));
   }
 
   async detail(id: string, actor: AuthUser) {
@@ -117,20 +162,36 @@ export class InventoryService {
       },
     });
     if (!item) throw new NotFoundException('库存商品不存在');
-    return item;
+    return inventoryItemResponse(item);
   }
 
   lowStock(actor: AuthUser) {
-    this.requireRole(actor, READ_ROLES);
+    this.requireRole(actor, LOW_STOCK_ROLES);
     return this.prisma.$queryRaw<
       {
         id: string;
         sku: string;
         name: string;
+        mode: InventoryMode;
         stock: number;
         safeStock: number;
       }[]
-    >`SELECT id, sku, name, stock, "safeStock" FROM "InventoryItem" WHERE enabled = true AND stock <= "safeStock" ORDER BY stock ASC`;
+    >`SELECT id, sku, name, mode, stock, "safeStock" FROM "InventoryItem" WHERE enabled = true AND stock <= "safeStock" ORDER BY stock ASC`;
+  }
+
+  awardOptions(actor: AuthUser) {
+    this.requireRole(actor, AWARD_OPTION_ROLES);
+    return this.prisma.inventoryItem.findMany({
+      where: { enabled: true },
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        stock: true,
+        enabled: true,
+      },
+      orderBy: [{ stock: 'desc' }, { name: 'asc' }],
+    });
   }
 
   async create(dto: CreateInventoryItemDto, actor: AuthUser) {
@@ -545,15 +606,7 @@ export class InventoryService {
     dto: InventoryTransactionDto,
     actor: AuthUser,
   ) {
-    const allowedRoles: readonly AppRole[] =
-      dto.type === InventoryTxnType.TRAINING_USAGE
-        ? [AppRole.COACH, ...ADMIN_ROLES]
-        : dto.type === InventoryTxnType.EVENT_USAGE
-          ? [AppRole.EVENT_MANAGER, ...ADMIN_ROLES]
-          : dto.type === InventoryTxnType.SALE_OUT
-            ? [AppRole.FRONT_DESK, ...ADMIN_ROLES]
-            : [AppRole.FRONT_DESK, ...ADMIN_ROLES];
-    if (!hasRole(actor, allowedRoles)) {
+    if (!hasRole(actor, ADMIN_ROLES)) {
       throw new ForbiddenException('当前角色无权执行该库存动作');
     }
     if (dto.quantity === 0)
@@ -576,7 +629,7 @@ export class InventoryService {
     });
     if (existing) {
       this.assertIdempotentReplay(existing, itemId, dto, actor);
-      return existing;
+      return inventoryTransactionResponse(existing);
     }
     // Legacy committed rows remain replayable, but new controlled movements
     // must originate from their business document workflow.
@@ -655,7 +708,7 @@ export class InventoryService {
               reason,
             },
           });
-          return transaction;
+          return inventoryTransactionResponse(transaction);
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -672,7 +725,7 @@ export class InventoryService {
         });
         if (duplicate) {
           this.assertIdempotentReplay(duplicate, itemId, dto, actor);
-          return duplicate;
+          return inventoryTransactionResponse(duplicate);
         }
       }
       throw error;

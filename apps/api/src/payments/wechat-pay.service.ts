@@ -484,7 +484,12 @@ export class WechatPayService {
             }
             if (fullyRefunded) {
               await tx.courtBooking.updateMany({
-                where: { orderId: refund.orderId },
+                where: {
+                  orderId: refund.orderId,
+                  status: {
+                    notIn: [BookingStatus.COMPLETED, BookingStatus.NO_SHOW],
+                  },
+                },
                 data: { status: BookingStatus.CANCELLED },
               });
               if (refund.order.membership) {

@@ -3,6 +3,7 @@ import { computed, reactive, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OperationsFrame from '../../../../components/OperationsFrame.vue'
 import MetricCard from '../../../../components/MetricCard.vue'
+import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
 import { idempotencyKey, money } from '../../../../utils/format'
@@ -126,6 +127,7 @@ function changeMerchant(event: any) {
 
 async function load() {
   await session.hydrate()
+  if (!hasOperationsAccess(session.roles, 'alliance')) return
   const nextScopeKey = `${session.user?.id || 'anonymous'}:${[...session.roles].sort().join(',')}`
   if (dataScopeKey.value && dataScopeKey.value !== nextScopeKey) {
     selectedMerchantId.value = ''
@@ -432,7 +434,7 @@ onShow(load)
 </script>
 
 <template>
-  <OperationsFrame title="联盟商户" eyebrow="ALLIANCE MERCHANT" :role="roleLabel" :venue="merchant?.name || '商户账户'" :description="pageDescription">
+  <OperationsFrame access="alliance" title="联盟商户" eyebrow="ALLIANCE MERCHANT" :role="roleLabel" :venue="merchant?.name || '商户账户'" :description="pageDescription">
     <view v-if="loading" class="loading card">正在同步联盟商户、券活动与结算单…</view>
     <view v-if="loadError" class="error card"><text>{{ loadError }}</text><button class="ghost compact" :disabled="loading" @tap="load">重试</button></view>
     <view v-if="actionError" class="error card"><text>{{ actionError }}</text></view>

@@ -482,8 +482,10 @@ describe('TrainingService consumption workflow', () => {
 
     expect(result).toMatchObject({
       workflowStatus: 'PENDING_CONFIRMATION',
-      proposedById: coach.sub,
     });
+    expect(result).not.toHaveProperty('operatorId');
+    expect(result).not.toHaveProperty('session');
+    expect(result).not.toHaveProperty('enrollment');
     expect(tx.trainingAttendance.update).toHaveBeenCalledWith({
       where: { id: 'attendance-1' },
       data: { operatorId: coach.sub, feedback: dto.feedback },
@@ -509,8 +511,9 @@ describe('TrainingService consumption workflow', () => {
 
     expect(result).toMatchObject({
       workflowStatus: 'PENDING_CONFIRMATION',
-      proposedById: coach.sub,
     });
+    expect(result).not.toHaveProperty('operatorId');
+    expect(result).not.toHaveProperty('revenueRecognitions');
     expect(tx.trainingAttendance.update).not.toHaveBeenCalled();
     expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
@@ -529,8 +532,10 @@ describe('TrainingService consumption workflow', () => {
 
     expect(result).toMatchObject({
       id: 'recognition-1',
-      attendanceId: 'attendance-1',
+      workflowStatus: 'CONFIRMED',
     });
+    expect(result).not.toHaveProperty('idempotencyKey');
+    expect(result).not.toHaveProperty('attendanceId');
     expect(updatedAttendance).toMatchObject({
       status: AttendanceStatus.ATTENDED,
       consumedSessions: 1,
@@ -745,7 +750,12 @@ describe('TrainingService consumption workflow', () => {
         { enrollmentId: 'enrollment-1', reason, idempotencyKey },
         administrator,
       ),
-    ).resolves.toBe(recognition);
+    ).resolves.toEqual({
+      id: recognition.id,
+      type: recognition.type,
+      sequence: recognition.sequence,
+      workflowStatus: 'CONFIRMED',
+    });
     await expect(
       service.confirmConsume(
         'session-1',
@@ -984,8 +994,10 @@ describe('TrainingService attendance workflow', () => {
     );
     expect(result).toMatchObject({
       status: AttendanceStatus.ATTENDED,
-      operatorId: null,
     });
+    expect(result).not.toHaveProperty('operatorId');
+    expect(result).not.toHaveProperty('session');
+    expect(result).not.toHaveProperty('revenueRecognitions');
     expect(updated.operatorId).toBeNull();
     expect(updated.checkedInAt).toBeInstanceOf(Date);
     expect(tx.auditLog.create).toHaveBeenCalledWith({
@@ -1067,8 +1079,10 @@ describe('TrainingService attendance workflow', () => {
     );
     expect(result).toMatchObject({
       workflowStatus: 'MAKEUP_SCHEDULED',
-      targetAttendanceId: 'target-attendance',
+      makeupSessionId: 'session-2',
     });
+    expect(result).not.toHaveProperty('operatorId');
+    expect(result).not.toHaveProperty('session');
     expect(updated.status).toBe(AttendanceStatus.MADE_UP);
     expect(tx.trainingAttendance.update).toHaveBeenCalled();
     expect(tx.auditLog.create).toHaveBeenCalledWith({

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import SectionEmpty from '../../components/SectionEmpty.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 import { endpoints } from '../../services/api'
@@ -18,6 +18,7 @@ const students = ref<any[]>([])
 const trials = ref<any[]>([])
 const tab = ref<'products' | 'mine' | 'trials'>('products')
 const loading = ref(false)
+const error = ref('')
 const savingStudent = ref(false)
 const purchasingId = ref('')
 const refundingId = ref('')
@@ -25,6 +26,13 @@ const showStudentForm = ref(false)
 const defaultBirthMonth = `${new Date().getFullYear() - 10}-01`
 const studentForm = ref({ displayName: '', birthMonth: defaultBirthMonth, guardianConsentStatus: false })
 const maxBirthMonth = computed(() => new Date().toISOString().slice(0, 7))
+
+onLoad((query) => {
+  const requested = query?.tab
+  if (requested === 'products' || requested === 'mine' || requested === 'trials') {
+    tab.value = requested
+  }
+})
 const hasYouthProducts = computed(() => products.value.some((item) => item.audience === 'YOUTH'))
 const consumed = (item: any) => Number(item.consumedSessions ?? item.usedSessions ?? 0)
 const refundedCents = (item: any) => Number(item.refundedCents || 0)
@@ -64,6 +72,7 @@ const setBirthMonth = (event: any) => { studentForm.value.birthMonth = String(ev
 const setConsent = (event: any) => { studentForm.value.guardianConsentStatus = Boolean(event.detail.value) }
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     [products.value, students.value, enrollments.value, trials.value] = await Promise.all([
       endpoints.trainingProducts(),
@@ -72,7 +81,7 @@ async function load() {
       endpoints.myTrainingTrials(),
     ])
   }
-  catch (cause: any) { uni.showToast({ title: cause.message, icon: 'none' }) }
+  catch (cause: any) { error.value = cause?.message || '培训数据加载失败，请稍后重试' }
   finally { loading.value = false }
 }
 
@@ -221,6 +230,7 @@ onShow(load)
 <template>
   <view class="page safe-bottom">
     <view class="ledger-banner"><text class="banner-title">培训独立经营账</text><text>购买课包不立即确认收入；每次签到消课确认有效收入，其中20%计入场馆合同收入，不另收场地费。</text></view>
+    <view v-if="error" class="card load-error"><text>{{ error }}</text><button class="secondary retry" @tap="load">重试</button></view>
     <view class="tabs"><view :class="{ active: tab === 'products' }" @tap="tab='products'">课程课包</view><view :class="{ active: tab === 'mine' }" @tap="tab='mine'">我的课表</view><view :class="{ active: tab === 'trials' }" @tap="tab='trials'">试听结果</view></view>
     <template v-if="tab === 'products'">
       <view v-if="hasYouthProducts" class="card student-card">
@@ -242,7 +252,7 @@ onShow(load)
         <view class="details"><text>{{ product.totalSessions }}次课</text><text>{{ product.classes?.length || 0 }}个可选班级</text></view>
         <view class="row footer"><text class="money">{{ money(product.priceCents) }}</text><button class="secondary buy" :loading="purchasingId === product.id" :disabled="Boolean(purchasingId)" @tap="purchase(product)">立即报名</button></view>
       </view>
-      <SectionEmpty v-if="!products.length && !loading" title="暂无在售课包" />
+      <SectionEmpty v-if="!products.length && !loading && !error" title="暂无在售课包" />
     </template>
     <template v-else-if="tab === 'mine'">
       <view v-for="item in enrollments" :key="item.id" class="card enrollment">
@@ -264,12 +274,12 @@ onShow(load)
         </view>
         <view v-if="item.attendances?.[0]" class="feedback">最近：{{ item.attendances[0].feedback || '已完成签到消课' }}</view>
       </view>
-      <SectionEmpty v-if="!enrollments.length && !loading" title="还没有课程" />
+      <SectionEmpty v-if="!enrollments.length && !loading && !error" title="还没有课程" />
     </template>
     <template v-else>
       <view v-for="trial in trials" :key="trial.id" class="card trial-result">
         <view class="row"><view><text class="title compact">{{ trial.student?.displayName || trial.member?.displayName || '我的试听' }}</text><text class="student-tip">{{ trial.product?.name }} · {{ shortDate(trial.scheduledStartsAt) }}</text></view><StatusBadge :value="trial.status" /></view>
-        <text class="trial-coach">教练：{{ trial.coach?.displayName || trial.coachId }} · 试听编号 {{ trial.trialNo }}</text>
+        <text class="trial-coach">教练：{{ trial.coach?.displayName || '到店后由课程老师接待' }} · 试听编号 {{ trial.trialNo }}</text>
         <view v-if="trial.assessmentDimensions?.length" class="trial-scores">
           <view v-for="dimension in trial.assessmentDimensions" :key="dimension.key"><text>{{ dimension.label }}</text><text>{{ dimension.score }}/5</text><text v-if="dimension.note" class="dimension-note">{{ dimension.note }}</text></view>
         </view>
@@ -277,7 +287,7 @@ onShow(load)
         <text v-else class="student-tip">{{ trial.status === 'CHECKED_IN' ? '已签到，等待教练提交测评。' : trial.status === 'RESERVED' ? '预约成功，请按时到场。' : '当前暂无测评结果。' }}</text>
         <text v-if="trial.student" class="privacy-note">该结果仅对本学员监护人账号和授权经营人员可见。</text>
       </view>
-      <SectionEmpty v-if="!trials.length && !loading" title="还没有试听记录" />
+      <SectionEmpty v-if="!trials.length && !loading && !error" title="还没有试听记录" />
     </template>
   </view>
 </template>
@@ -295,4 +305,11 @@ onShow(load)
 .student-list { margin-top: 20rpx; border-top: 1rpx solid #edf0ed; }.student-row { display: flex; justify-content: space-between; padding: 18rpx 0; border-bottom: 1rpx solid #edf0ed; font-size: 25rpx; }.consent-ok { color: #17653d; }.consent-warn { color: #a66417; }.empty-student { padding: 18rpx 0 2rpx; }
 .student-form { padding-top: 20rpx; }.student-form input,.picker-row { box-sizing: border-box; width: 100%; min-height: 82rpx; padding: 21rpx 24rpx; margin-bottom: 16rpx; background: #f4f7f4; border-radius: 16rpx; font-size: 25rpx; }.picker-row { display: flex; justify-content: space-between; }.consent-row { display: flex; gap: 18rpx; align-items: center; color: #5c685f; font-size: 22rpx; line-height: 1.55; }.consent-row text { flex: 1; }.save-student { margin-top: 20rpx; }
 .regulatory-warning { display:grid; gap:8rpx; margin-top:16rpx; padding:16rpx; color:#965220; background:#fff4e8; border-radius:14rpx; font-size:21rpx; }.trial-result { margin-bottom:20rpx; }.trial-coach,.privacy-note { display:block; margin-top:15rpx; color:#69766d; font-size:21rpx; }.trial-scores { display:grid; grid-template-columns:repeat(3,1fr); gap:10rpx; margin-top:18rpx; }.trial-scores view { display:grid; gap:6rpx; padding:16rpx; color:#355641; background:#eef5f0; border-radius:14rpx; font-size:21rpx; }.trial-scores view text:nth-child(2) { color:#17653d; font-size:27rpx; font-weight:800; }.dimension-note { color:#778078; font-size:19rpx; line-height:1.45; }.trial-recommendation { display:grid; gap:9rpx; margin-top:16rpx; padding:18rpx; color:#405b4a; background:#f4f7f4; border-radius:14rpx; font-size:23rpx; line-height:1.6; }.recommendation-title { font-weight:800; }
+.load-error { display:flex; align-items:center; gap:18rpx; color:#9a3e36; background:#fff4f2; }.load-error text { flex:1; min-width:0; line-height:1.5; overflow-wrap:anywhere; }.retry { flex:0 0 auto; min-height:64rpx; margin:0; padding:0 22rpx; line-height:64rpx; font-size:23rpx; }
+@media (max-width: 360px) {
+  .load-error,.refund-actions,.student-card > .row { align-items: stretch; flex-wrap: wrap; }
+  .load-error .retry,.refund-button { width: 100%; }
+  .refund-limit { flex-basis: 100%; }
+  .trial-scores { grid-template-columns: 1fr; }
+}
 </style>

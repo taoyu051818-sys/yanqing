@@ -3,7 +3,8 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator'
 import { Type } from 'class-transformer'
 
-import { Roles } from '../common/auth/auth.decorators.js'
+import { CurrentUser, Roles } from '../common/auth/auth.decorators.js'
+import type { AuthUser } from '../common/auth/auth-user.js'
 import { AppRole } from '../generated/prisma/enums.js'
 import { AuditService } from './audit.service.js'
 
@@ -32,7 +33,7 @@ export class AuditController {
   constructor(private readonly audit: AuditService) {}
 
   @Get()
-  list(@Query() query: AuditQueryDto) {
-    return this.audit.list(query)
+  list(@Query() query: AuditQueryDto, @CurrentUser() actor: AuthUser) {
+    return this.audit.list(query, actor)
   }
 }

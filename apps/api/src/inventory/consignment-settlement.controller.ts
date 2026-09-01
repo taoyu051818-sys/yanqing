@@ -20,6 +20,11 @@ import { ConsignmentSettlementService } from './consignment-settlement.service.j
 export class ConsignmentSettlementController {
   constructor(private readonly settlements: ConsignmentSettlementService) {}
 
+  @Get('supplier-options')
+  supplierOptions(@CurrentUser() actor: AuthUser) {
+    return this.settlements.supplierOptions(actor);
+  }
+
   @Get('payables')
   payables(
     @Query() query: ConsignmentPayableQueryDto,

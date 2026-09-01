@@ -13,6 +13,10 @@ import {
   saveEventDetail,
   saveFrontDeskShifts,
   saveGames,
+  saveInventoryOperations,
+  saveInventoryTransactions,
+  savePurchaseOrders,
+  saveStocktakes,
   saveTrainingSessions,
   saveVenueBookings,
   saveYouthTrainingRules,
@@ -54,6 +58,159 @@ describe("miniapp mock acceptance journeys", () => {
     storage.clear();
     resetCatalogState();
     await login("MEMBER");
+  });
+
+  it("keeps public goods and order responses free of inventory cost and rule snapshots", async () => {
+    const products = await request<any[]>("GET", "/goods");
+    expect(products.length).toBeGreaterThan(0);
+    for (const field of [
+      "purchasePriceCents",
+      "supplierId",
+      "defaultLocationId",
+      "safeStock",
+      "mode",
+    ]) {
+      expect(products[0]).not.toHaveProperty(field);
+    }
+
+    saveOrders([
+      {
+        id: "order-private-snapshot",
+        orderNo: "GD-PRIVATE-1",
+        memberId: "user-member",
+        businessType: "GOODS",
+        status: "PENDING",
+        title: "寄售商品",
+        payableCents: 1200,
+        parameterSnapshot: { pricingRuleId: "internal-rule" },
+        creationCommandHash: "private-command-hash",
+        items: [
+          {
+            id: "line-private-1",
+            name: "羽毛球",
+            quantity: 1,
+            unitPriceCents: 1200,
+            amountCents: 1200,
+            metadata: {
+              supplierId: "supplier-secret",
+              settlementRule: { commissionRateBps: 2500 },
+            },
+          },
+        ],
+        payments: [
+          {
+            id: "payment-private-1",
+            status: "CREATED",
+            providerPayload: { prepayId: "private-prepay" },
+            idempotencyKey: "private-payment-key",
+          },
+        ],
+      },
+      ...getOrders(),
+    ]);
+
+    const orders = await request<any>("GET", "/orders");
+    const response = orders.items.find(
+      (item: any) => item.id === "order-private-snapshot",
+    );
+    expect(response).toBeDefined();
+    const serialized = JSON.stringify(response);
+    for (const secret of [
+      "parameterSnapshot",
+      "creationCommandHash",
+      "metadata",
+      "commissionRateBps",
+      "providerPayload",
+      "private-command-hash",
+      "supplier-secret",
+      "private-prepay",
+    ]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
+  it("keeps event list registration actions aligned with the event detail state", async () => {
+    const summaries = await request<any[]>("GET", "/events");
+    const operationalFixture = summaries.find(
+      (event) => event.id === "event-golden",
+    );
+    const registrationFixture = summaries.find(
+      (event) => event.id === "event-open-partner",
+    );
+
+    expect(operationalFixture).toMatchObject({ status: "IN_PROGRESS" });
+    expect(getEventDetail(operationalFixture.id)).toMatchObject({
+      status: "IN_PROGRESS",
+    });
+    expect(registrationFixture).toMatchObject({ status: "OPEN" });
+    expect(getEventDetail(registrationFixture.id)).toMatchObject({
+      status: "OPEN",
+    });
+    await expect(
+      request("POST", `/events/${registrationFixture.id}/partner-invites`),
+    ).resolves.toMatchObject({
+      partnerDisplayName: "延庆会员小林",
+      partnerInviteCode: expect.stringMatching(/^EP_/),
+    });
+  });
+
+  it("enforces the member directory and customer360 privacy matrix across employee roles", async () => {
+    await login("FRONT_DESK");
+    const frontDeskDirectory = await request<any>("GET", "/members");
+    expect(frontDeskDirectory.items[0]).toMatchObject({
+      phone: "138****0005",
+      privacyScope: "FRONT_DESK_LIMITED",
+    });
+    expect(JSON.stringify(frontDeskDirectory)).not.toContain("13800000005");
+    const frontDesk360 = await request<any>("GET", "/members/member-1/360");
+    expect(frontDesk360).toMatchObject({
+      member: { phone: "138****0005" },
+      privacyScope: "FRONT_DESK_LIMITED",
+      financialsRedacted: true,
+      accountTypesLimited: true,
+      accounts: [],
+      paymentSummary: {
+        storedValueAvailableCents: 148_000,
+        badmintonCoinAvailable: 500,
+      },
+    });
+    expect(
+      frontDesk360.recentOrders.every(
+        (order: any) =>
+          order.paidCents === undefined && order.refundedCents === undefined,
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(frontDesk360)).not.toContain('"EVENT_POINTS"');
+    expect(JSON.stringify(frontDesk360)).not.toContain('"GROWTH_POINTS"');
+    expect(JSON.stringify(frontDesk360)).not.toContain('"CASH_PRINCIPAL"');
+    expect(JSON.stringify(frontDesk360)).not.toContain('"GIFT_BALANCE"');
+
+    await login("FINANCE");
+    const finance360 = await request<any>("GET", "/members/member-1/360");
+    expect(finance360.member.phone).toBe("138****0005");
+    expect(finance360.privacyScope).toBe("FINANCE");
+    expect(finance360.accounts.map((account: any) => account.type)).toEqual([
+      "CASH_PRINCIPAL",
+      "GIFT_BALANCE",
+      "BADMINTON_COIN",
+      "EVENT_POINTS",
+      "GROWTH_POINTS",
+    ]);
+
+    await login("ADMIN");
+    const admin360 = await request<any>("GET", "/members/member-1/360");
+    expect(admin360.member.phone).toBe("13800000005");
+    expect(admin360.privacyScope).toBe("ADMIN");
+    expect(admin360.accounts).toHaveLength(5);
+
+    await login("COACH");
+    const coach360 = await request<any>("GET", "/members/member-1/360");
+    expect(coach360).toMatchObject({
+      member: { phone: null },
+      accounts: [],
+      privacyScope: "COACH_ASSIGNED",
+      financialsRedacted: true,
+    });
   });
 
   it("runs guardian student → seat hold → payment → prepaid refund approval", async () => {
@@ -196,11 +353,7 @@ describe("miniapp mock acceptance journeys", () => {
       correctionCommand,
     );
     await expect(
-      request(
-        "POST",
-        "/training/consume-corrections",
-        correctionCommand,
-      ),
+      request("POST", "/training/consume-corrections", correctionCommand),
     ).resolves.toMatchObject({ id: correction.id, status: "REQUESTED" });
     await expect(
       request("POST", "/training/consume-corrections", {
@@ -257,7 +410,9 @@ describe("miniapp mock acceptance journeys", () => {
       confirmedRevenueCents: before.revenue,
       growthPointsBalance: 0,
     });
-    expect(currentAttendance.revenueRecognitions.map((item: any) => item.sequence)).toEqual([1, 2]);
+    expect(
+      currentAttendance.revenueRecognitions.map((item: any) => item.sequence),
+    ).toEqual([1, 2]);
 
     await login("COACH");
     await request("POST", "/training/sessions/session-1/consume", {
@@ -294,35 +449,23 @@ describe("miniapp mock acceptance journeys", () => {
       growthPointsAwarded: 1,
     });
 
-    const adminMade = await request(
-      "POST",
-      "/training/consume-corrections",
-      {
-        recognitionId: reconsume.id,
-        reason: "管理员发现第二次误消",
-        idempotencyKey: "consume-correction-request-2",
-      },
-    );
+    const adminMade = await request("POST", "/training/consume-corrections", {
+      recognitionId: reconsume.id,
+      reason: "管理员发现第二次误消",
+      idempotencyKey: "consume-correction-request-2",
+    });
     await expect(
-      request(
-        "POST",
-        `/training/consume-corrections/${adminMade.id}/reject`,
-        {
-          reason: "本人不能复核",
-          idempotencyKey: "consume-correction-reject-self",
-        },
-      ),
+      request("POST", `/training/consume-corrections/${adminMade.id}/reject`, {
+        reason: "本人不能复核",
+        idempotencyKey: "consume-correction-reject-self",
+      }),
     ).rejects.toThrow("申请人与复核人不能为同一账号");
     await login("SUPER_ADMIN");
     await expect(
-      request(
-        "POST",
-        `/training/consume-corrections/${adminMade.id}/reject`,
-        {
-          reason: "复查证据不足，保留原消课",
-          idempotencyKey: "consume-correction-reject-2",
-        },
-      ),
+      request("POST", `/training/consume-corrections/${adminMade.id}/reject`, {
+        reason: "复查证据不足，保留原消课",
+        idempotencyKey: "consume-correction-reject-2",
+      }),
     ).resolves.toMatchObject({ status: "REJECTED" });
     expect(
       getEnrollments().find((item) => item.id === enrollment.id)!.attendances[0]
@@ -381,8 +524,12 @@ describe("miniapp mock acceptance journeys", () => {
       idempotencyKey: "venue-payment-request-0001",
     });
 
-    const startsAt = new Date(Date.now() + 15 * 60_000).toISOString();
-    const endsAt = new Date(Date.now() + 135 * 60_000).toISOString();
+    // Keep the rewritten fixture on the current Shanghai business date even
+    // when the suite runs just before midnight. A future +15 minute start can
+    // cross into tomorrow while the availability assertion still queries
+    // today, producing a clock-dependent failure unrelated to check-in.
+    const startsAt = new Date().toISOString();
+    const endsAt = new Date(Date.now() + 120 * 60_000).toISOString();
     const orders = getOrders();
     const storedOrder = orders.find((item) => item.id === order.id)!;
     storedOrder.bookings[0].startsAt = startsAt;
@@ -408,7 +555,7 @@ describe("miniapp mock acceptance journeys", () => {
     });
     expect(availability.bookings).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ orderId: order.id, status: "CHECKED_IN" }),
+        expect.objectContaining({ courtId: "court-1", status: "CHECKED_IN" }),
       ]),
     );
   });
@@ -459,14 +606,21 @@ describe("miniapp mock acceptance journeys", () => {
     const result = await request("POST", `/games/${game.id}/cancel`, command);
     expect(result).toMatchObject({
       game: { status: "CANCELLED" },
-      refundRequests: [
-        {
-          orderId: "order-game-refund-pending",
-          amountCents: 5_800,
-          originalOrderStatus: "CHECKED_IN",
-          status: "REQUESTED",
-        },
-      ],
+      refundRequestCount: 1,
+      refundRequestedCents: 5_800,
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /cancelIdempotencyKey|cancelCommandHash|cancelPolicySnapshot|requestedById|orderId/,
+    );
+    expect(
+      getOrders()
+        .find((item) => item.id === "order-game-refund-pending")
+        ?.refunds?.find((refund: any) => refund.amountCents === 5_800),
+    ).toMatchObject({
+      orderId: "order-game-refund-pending",
+      amountCents: 5_800,
+      originalOrderStatus: "CHECKED_IN",
+      status: "REQUESTED",
     });
     await expect(
       request("POST", `/games/${game.id}/cancel`, command),
@@ -500,9 +654,16 @@ describe("miniapp mock acceptance journeys", () => {
       memberId: "member-2",
     });
     expect(order).toMatchObject({
+      member: { displayName: "羽友小周" },
+      bookings: [expect.objectContaining({ status: "HELD" })],
+    });
+    expect(order).not.toHaveProperty("memberId");
+    expect(order).not.toHaveProperty("createdById");
+    expect(order).not.toHaveProperty("parameterSnapshot");
+    const persistedOrder = getOrders().find((item) => item.id === order.id)!;
+    expect(persistedOrder).toMatchObject({
       memberId: "member-2",
       createdById: "user-frontdesk",
-      member: { id: "member-2", displayName: "羽友小周" },
       bookings: [expect.objectContaining({ memberId: "member-2" })],
       parameterSnapshot: expect.objectContaining({
         targetMemberId: "member-2",
@@ -566,18 +727,21 @@ describe("miniapp mock acceptance journeys", () => {
       channel: "OFFLINE_CASH",
       idempotencyKey: "cash-gate-offline-payment-1",
     };
+    const paid = await request(
+      "POST",
+      `/orders/${order.id}/pay`,
+      paymentCommand,
+    );
+    expect(paid).toMatchObject({ status: "SUCCEEDED" });
     await expect(
       request("POST", `/orders/${order.id}/pay`, paymentCommand),
-    ).resolves.toMatchObject({ status: "SUCCESS" });
-    await expect(
-      request("POST", `/orders/${order.id}/pay`, paymentCommand),
-    ).resolves.toMatchObject({ idempotent: true });
-    expect(
-      (await request<any>("GET", "/orders/admin/all")).items.find(
-        (item: any) => item.id === order.id,
-      ),
-    ).toMatchObject({
-      paymentChannel: "OFFLINE_CASH",
+    ).resolves.toEqual(paid);
+    const adminOrder = (
+      await request<any>("GET", "/orders/admin/all")
+    ).items.find((item: any) => item.id === order.id);
+    expect(adminOrder).toMatchObject({ paymentChannel: "OFFLINE_CASH" });
+    expect(adminOrder).not.toHaveProperty("paymentOperatorId");
+    expect(getOrders().find((item) => item.id === order.id)).toMatchObject({
       paymentOperatorId: "user-frontdesk",
     });
   });
@@ -590,6 +754,12 @@ describe("miniapp mock acceptance journeys", () => {
     ).toISOString();
     eventDetail.teams = [];
     saveEventDetail(eventDetail);
+    await login("EVENT_MANAGER");
+    const partnerInvite = await request<any>(
+      "POST",
+      "/events/event-golden/partner-invites",
+    );
+    await login("MEMBER");
     const before = await request<any>("GET", "/orders");
     const date = shanghaiDate(1);
     const scenarios = [
@@ -643,8 +813,7 @@ describe("miniapp mock acceptance journeys", () => {
         url: "/events/event-golden/register",
         data: {
           name: "金羽测试队",
-          playerAName: "小林",
-          playerBName: "小周",
+          partnerInviteCode: partnerInvite.partnerInviteCode,
           category: "MIXED_DOUBLES",
           sourceChannel: "MINI_PROGRAM",
           creationIdempotencyKey: "mock-create-event-1",
@@ -682,7 +851,7 @@ describe("miniapp mock acceptance journeys", () => {
   });
 
   it("runs purchase maker/checker and idempotent partial receiving", async () => {
-    await login("FRONT_DESK");
+    await login("ADMIN");
     const [item] = await request<any[]>("GET", "/inventory");
     const [supplier] = await request<any[]>("GET", "/inventory/suppliers");
     const [location] = await request<any[]>("GET", "/inventory/locations");
@@ -701,14 +870,14 @@ describe("miniapp mock acceptance journeys", () => {
     });
     await request("POST", `/inventory/purchase-orders/${order.id}/submit`);
 
-    await login("ADMIN");
+    await login("SUPER_ADMIN");
     const approved = await request(
       "POST",
       `/inventory/purchase-orders/${order.id}/approve`,
     );
     expect(approved.status).toBe("APPROVED");
 
-    await login("FRONT_DESK");
+    await login("ADMIN");
     const command = {
       lines: [{ lineId: order.lines[0].id, quantity: 2 }],
       idempotencyKey: "purchase-receipt-request-1",
@@ -718,6 +887,8 @@ describe("miniapp mock acceptance journeys", () => {
       `/inventory/purchase-orders/${order.id}/receive`,
       command,
     );
+    expect(receipt).not.toHaveProperty("idempotencyKey");
+    expect(receipt).not.toHaveProperty("operatorId");
     await expect(
       request(
         "POST",
@@ -732,6 +903,79 @@ describe("miniapp mock acceptance journeys", () => {
       "/inventory/purchase-orders",
     );
     expect(updatedOrder).toMatchObject({ status: "PARTIAL_RECEIVED" });
+    expect(JSON.stringify(updatedOrder.receipts)).not.toMatch(
+      /idempotencyKey|operatorId/,
+    );
+  });
+
+  it("keeps inventory command evidence out of administrator responses", async () => {
+    await login("ADMIN");
+    const [item] = await request<any[]>("GET", "/inventory");
+    const now = new Date().toISOString();
+    saveInventoryTransactions([
+      {
+        id: "inventory-private-transaction",
+        itemId: item.id,
+        type: "SALE_OUT",
+        quantity: -1,
+        stockBefore: 5,
+        stockAfter: 4,
+        reason: "前台零售",
+        idempotencyKey: "inventory-private-key",
+        metadata: { upstreamSecret: "private" },
+        operatorId: "user-admin",
+        createdAt: now,
+      },
+    ]);
+    savePurchaseOrders([
+      {
+        id: "purchase-private",
+        orderNo: "PO-PRIVATE",
+        status: "PARTIAL_RECEIVED",
+        supplierId: "supplier-owned",
+        lines: [{ id: "line-private", itemId: item.id }],
+        receipts: [
+          {
+            id: "receipt-private",
+            purchaseOrderId: "purchase-private",
+            idempotencyKey: "receipt-private-key",
+            operatorId: "user-admin",
+          },
+        ],
+      },
+    ]);
+    saveStocktakes([
+      {
+        id: "stocktake-private",
+        stocktakeNo: "ST-PRIVATE",
+        status: "POSTED",
+        locationId: "location-main",
+        lines: [],
+        postIdempotencyKey: "stocktake-private-key",
+      },
+    ]);
+    saveInventoryOperations([
+      {
+        id: "operation-private",
+        documentNo: "TR-PRIVATE",
+        status: "POSTED",
+        itemId: item.id,
+        sourceLocationId: "location-main",
+        postIdempotencyKey: "operation-private-key",
+        sourceTransactionId: "transaction-private-source",
+        targetTransactionId: "transaction-private-target",
+      },
+    ]);
+
+    const responses = await Promise.all([
+      request("GET", "/inventory"),
+      request("GET", "/inventory/purchase-orders"),
+      request("GET", "/inventory/stocktakes"),
+      request("GET", "/inventory/operations"),
+    ]);
+    expect(JSON.stringify(responses)).not.toMatch(
+      /idempotencyKey|postIdempotencyKey|operatorId|metadata|sourceTransactionId|targetTransactionId|upstreamSecret/,
+    );
   });
 
   it("keeps account adjustments pending until a different operator posts exactly one ledger entry", async () => {
@@ -754,9 +998,12 @@ describe("miniapp mock acceptance journeys", () => {
     );
     expect(requested).toMatchObject({
       status: "REQUESTED",
-      requestedById: "user-finance",
+      isOwnRequest: true,
       amount: 1_250,
     });
+    expect(requested).not.toHaveProperty("requestedById");
+    expect(requested).not.toHaveProperty("requestIdempotencyKey");
+    expect(requested).not.toHaveProperty("commandHash");
     await expect(
       request("POST", "/members/member-1/accounts/adjust", command),
     ).resolves.toMatchObject({ id: requested.id, status: "REQUESTED" });
@@ -767,21 +1014,16 @@ describe("miniapp mock acceptance journeys", () => {
       }),
     ).rejects.toThrow("幂等键已用于不同的账户调整申请");
 
-    const stillPending = await request<any>(
-      "GET",
-      "/members/member-1/360",
-    );
+    const stillPending = await request<any>("GET", "/members/member-1/360");
     expect(
       stillPending.accounts.find(
         (account: any) => account.type === "CASH_PRINCIPAL",
       ).balance,
     ).toBe(cashBefore);
     await expect(
-      request(
-        "POST",
-        `/members/account-adjustments/${requested.id}/reject`,
-        { reason: "自己不能复核" },
-      ),
+      request("POST", `/members/account-adjustments/${requested.id}/reject`, {
+        reason: "自己不能复核",
+      }),
     ).rejects.toThrow("申请人与复核人不能是同一账号");
     expect(
       (await request<any[]>("GET", "/work-items")).some(
@@ -804,13 +1046,17 @@ describe("miniapp mock acceptance journeys", () => {
     );
     expect(posted).toMatchObject({
       status: "POSTED",
-      reviewedById: "user-admin",
       transaction: {
         amount: 1_250,
         balanceBefore: cashBefore,
         balanceAfter: cashBefore + 1_250,
       },
     });
+    expect(posted).not.toHaveProperty("reviewedById");
+    expect(posted).not.toHaveProperty("transactionId");
+    expect(posted.transaction).not.toHaveProperty("operatorId");
+    expect(posted.transaction).not.toHaveProperty("idempotencyKey");
+    expect(posted.transaction).not.toHaveProperty("metadata");
     const replay = await request(
       "POST",
       `/members/account-adjustments/${requested.id}/approve`,
@@ -819,14 +1065,12 @@ describe("miniapp mock acceptance journeys", () => {
     expect(replay).toMatchObject({
       id: requested.id,
       status: "POSTED",
-      transactionId: posted.transactionId,
     });
 
     const after = await request<any>("GET", "/members/member-1/360");
     expect(
-      after.accounts.find(
-        (account: any) => account.type === "CASH_PRINCIPAL",
-      ).balance,
+      after.accounts.find((account: any) => account.type === "CASH_PRINCIPAL")
+        .balance,
     ).toBe(cashBefore + 1_250);
     expect(
       getMemberAccountTransactions().filter(
@@ -847,26 +1091,33 @@ describe("miniapp mock acceptance journeys", () => {
     );
     await login("ADMIN");
     await expect(
-      request(
-        "POST",
-        `/members/account-adjustments/${toReject.id}/reject`,
-        { reason: "缺少有效原始凭证" },
-      ),
+      request("POST", `/members/account-adjustments/${toReject.id}/reject`, {
+        reason: "缺少有效原始凭证",
+      }),
     ).resolves.toMatchObject({ status: "REJECTED" });
-    const afterRejection = await request<any>(
-      "GET",
-      "/members/member-1/360",
-    );
+    const afterRejection = await request<any>("GET", "/members/member-1/360");
     expect(
       afterRejection.accounts.find(
         (account: any) => account.type === "CASH_PRINCIPAL",
       ).balance,
     ).toBe(cashBefore + 1_250);
-    expect(
-      (await request<any[]>("GET", "/members/account-adjustments", {
-        status: "REJECTED",
-      })).map((item) => item.id),
-    ).toContain(toReject.id);
+    const rejectedRequests = await request<any[]>(
+      "GET",
+      "/members/account-adjustments",
+      { status: "REJECTED" },
+    );
+    expect(rejectedRequests.map((item) => item.id)).toContain(toReject.id);
+    expect(JSON.stringify(rejectedRequests)).not.toMatch(
+      /requestIdempotencyKey|commandHash|requestedById|reviewedById|transactionId|operatorId|metadata/,
+    );
+    await login("MEMBER");
+    const ledger = await request<any[]>(
+      "GET",
+      "/members/me/accounts/transactions",
+    );
+    expect(JSON.stringify(ledger)).not.toMatch(
+      /idempotencyKey|commandHash|operatorId|metadata|accountId|orderId/,
+    );
     expect(getMemberAccountTransactions()).toHaveLength(1);
   });
 
@@ -912,9 +1163,11 @@ describe("miniapp mock acceptance journeys", () => {
 
     await login("ADMIN");
     expect(
-      (await request<any[]>("GET", "/operations/shifts/history", {
-        operatorId: "user-frontdesk",
-      })).map((shift) => shift.id),
+      (
+        await request<any[]>("GET", "/operations/shifts/history", {
+          operatorId: "user-frontdesk",
+        })
+      ).map((shift) => shift.id),
     ).toContain(opened.id);
     const closeCommand = {
       closingCashCents: 10_500,
@@ -947,11 +1200,7 @@ describe("miniapp mock acceptance journeys", () => {
       ],
     });
     await expect(
-      request(
-        "POST",
-        `/operations/shifts/${opened.id}/close`,
-        closeCommand,
-      ),
+      request("POST", `/operations/shifts/${opened.id}/close`, closeCommand),
     ).resolves.toMatchObject({ id: opened.id, status: "CLOSED" });
     await expect(
       request("POST", `/operations/shifts/${opened.id}/close`, {
@@ -967,9 +1216,11 @@ describe("miniapp mock acceptance journeys", () => {
     ).rejects.toThrow("不能复核自己的现金差异");
     await login("FINANCE");
     expect(
-      (await request<any[]>("GET", "/operations/shifts/history", {
-        status: "CLOSED",
-      })).map((shift) => shift.id),
+      (
+        await request<any[]>("GET", "/operations/shifts/history", {
+          status: "CLOSED",
+        })
+      ).map((shift) => shift.id),
     ).toContain(opened.id);
     const reviewCommand = { reason: "盘点凭证确认多收现金五元" };
     await expect(
@@ -1013,8 +1264,16 @@ describe("miniapp mock acceptance journeys", () => {
     });
     expect(draft).toMatchObject({
       status: "DRAFT",
-      createdById: "user-finance",
+      isOwnCreator: true,
+      createdBy: { displayName: "金羽财务" },
     });
+    expect(JSON.stringify(draft.workflowHistory)).not.toMatch(
+      /actorId|actorName|oldValue|newValue|commandHash/,
+    );
+    expect(draft).not.toHaveProperty("processedIdempotencyKeys");
+    expect(draft).not.toHaveProperty("createdById");
+    expect(draft).not.toHaveProperty("confirmedById");
+    expect(draft.createdBy).not.toHaveProperty("id");
     expect(
       (await request<any[]>("GET", "/work-items")).some(
         (item) =>
@@ -1049,8 +1308,9 @@ describe("miniapp mock acceptance journeys", () => {
     );
     expect(confirmed).toMatchObject({
       status: "CONFIRMED",
-      confirmedById: "user-admin",
+      isOwnCreator: false,
     });
+    expect(confirmed).not.toHaveProperty("confirmedById");
     await expect(
       request("POST", `/training/settlements/${draft.id}/confirm`, {
         reason: "合同与成本凭证一致",
@@ -1066,7 +1326,12 @@ describe("miniapp mock acceptance journeys", () => {
       },
     );
     expect(settled).toMatchObject({ status: "SETTLED" });
-    expect(settled.workflowHistory.map((item: any) => item.action)).toEqual([
+    const settlementAfterSettle = (
+      await request<any[]>("GET", "/training/settlements")
+    ).find((item) => item.id === draft.id);
+    expect(
+      settlementAfterSettle.workflowHistory.map((item: any) => item.action),
+    ).toEqual([
       "TRAINING_SETTLEMENT_CREATED",
       "TRAINING_SETTLEMENT_SUBMITTED",
       "TRAINING_SETTLEMENT_CONFIRMED",
@@ -1080,9 +1345,7 @@ describe("miniapp mock acceptance journeys", () => {
     await expect(
       request("POST", "/training/settlements", {
         periodStart: new Date(`${lockedDate}T00:00:00+08:00`).toISOString(),
-        periodEnd: new Date(
-          `${shanghaiDate(-1)}T00:00:00+08:00`,
-        ).toISOString(),
+        periodEnd: new Date(`${shanghaiDate(-1)}T00:00:00+08:00`).toISOString(),
         acquisitionCostCents: 0,
         marketingCostCents: 0,
       }),

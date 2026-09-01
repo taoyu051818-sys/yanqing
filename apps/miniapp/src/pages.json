@@ -11,7 +11,7 @@
     { "path": "pages/coupon/index", "style": { "navigationBarTitleText": "联盟优惠券" } },
     { "path": "pages/membership/index", "style": { "navigationBarTitleText": "会员权益" } },
     { "path": "pages/shop/index", "style": { "navigationBarTitleText": "金羽小店" } },
-    { "path": "pages/workspace/index", "style": { "navigationBarTitleText": "今日营业" } }
+    { "path": "pages/workspace/index", "style": { "navigationBarTitleText": "经营工作台" } }
   ],
   "subPackages": [
     {
@@ -29,13 +29,13 @@
         { "path": "pages/coach/index", "style": { "navigationBarTitleText": "教练运营" } },
         { "path": "pages/host/index", "style": { "navigationBarTitleText": "主理人运营" } },
         { "path": "pages/event/index", "style": { "navigationBarTitleText": "赛事运营" } },
-        { "path": "pages/merchant/index", "style": { "navigationBarTitleText": "联盟商户运营" } },
-        { "path": "pages/admin/index", "style": { "navigationBarTitleText": "经营管理" } },
+        { "path": "pages/merchant/index", "style": { "navigationBarTitleText": "联盟运营" } },
+        { "path": "pages/admin/index", "style": { "navigationBarTitleText": "经营总览" } },
         { "path": "pages/finance/index", "style": { "navigationBarTitleText": "财务结算" } },
         { "path": "pages/inventory/index", "style": { "navigationBarTitleText": "商品库存" } },
-        { "path": "pages/members/index", "style": { "navigationBarTitleText": "会员服务" } },
+        { "path": "pages/members/index", "style": { "navigationBarTitleText": "客户与会员" } },
         { "path": "pages/venue/index", "style": { "navigationBarTitleText": "场馆维护日历" } },
-        { "path": "pages/governance/index", "style": { "navigationBarTitleText": "治理与审计" } }
+        { "path": "pages/governance/index", "style": { "navigationBarTitleText": "治理与权限" } }
       ]
     }
   ],

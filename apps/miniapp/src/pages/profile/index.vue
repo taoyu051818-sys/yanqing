@@ -1,15 +1,24 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShareAppMessage, onShareTimeline, onShow } from '@dcloudio/uni-app'
 import { useSessionStore } from '../../stores/session'
 import { endpoints } from '../../services/api'
 import { money } from '../../utils/format'
 import { isMockMode } from '../../services/http'
+import {
+  referralSharePayload,
+  referralShareQuery,
+} from '../../services/referral-attribution'
 import { withPendingCreationKey } from '../../utils/pending-creation-key'
 
 const session = useSessionStore()
-const referrerId = ref('')
+const manualInviteCode = ref('')
 const bindingReferral = ref(false)
+const referralInviteCode = ref('')
+const referralInviteExpiresAt = ref('')
+const referralInviteLoading = ref(false)
+const referralInviteError = ref('')
+const referralRewards = ref<any[]>([])
 const erasureRequests = ref<any[]>([])
 const privacyLoading = ref(false)
 const privacyError = ref('')
@@ -21,22 +30,30 @@ const roleLabel: Record<string, string> = {
   MEMBER: '会员', COACH: '教练', FRONT_DESK: '前台', HOST: '主理人', MERCHANT: '联盟商户',
   FINANCE: '财务', ADMIN: '管理员', SUPER_ADMIN: '超级管理员',
 }
+const memberLevelLabel: Record<string, string> = {
+  BASIC: '普通会员', EXPERIENCE: '体验会员', REGULAR: '年度会员', GOLD: '金卡会员', BLACK: '黑金会员',
+}
 const privacyStatusLabel: Record<string, string> = {
   REQUESTED: '待复核', CANCELLED: '已撤回', REJECTED: '已驳回', COMPLETED: '已匿名化',
 }
-const displayRoles = computed(() => session.roles.map((role) => roleLabel[role] || role).join(' · '))
+const referralStatusLabel: Record<string, string> = {
+  PENDING_OBSERVATION: '观察期', AVAILABLE: '待发放', GRANTED: '已到账',
+  REVERSED: '已撤销', REJECTED: '未发放',
+}
+const displayRoles = computed(() => session.roles.map((role) => roleLabel[role] || '其他岗位').join(' · '))
+const displayMemberLevel = computed(() => {
+  const level = String((session.user?.memberProfile as any)?.level || 'BASIC')
+  return memberLevelLabel[level] || '普通会员'
+})
 const hasMemberProfile = computed(() => Boolean(session.user?.memberProfile))
 const openErasureRequest = computed(() => erasureRequests.value.find((item) => item.status === 'REQUESTED'))
 const latestErasureRequest = computed(() => erasureRequests.value[0])
 const menus = computed(() => [
   ...(isMockMode ? [{ title: '管理员演示通道', subtitle: '切换会员、前台、教练、主理人、商户和管理端', url: '/packages/admin/pages/switch/index' }] : []),
   { title: '我的订单', subtitle: '支付、退款及消费记录', url: '/pages/order/index' },
-  { title: '五账户明细', subtitle: '本金、赠送、羽球币、赛事积分、成长积分', url: '/pages/wallet/index' },
-  { title: '培训中心', subtitle: '课包与独立消课台账', url: '/pages/training/index' },
-  { title: '联盟权益', subtitle: '唯一券码与本地商户', url: '/pages/coupon/index' },
-  { title: '会员卡与充值', subtitle: '升级权益或充值现金本金', url: '/pages/membership/index' },
-  { title: '金羽小店', subtitle: '球、手胶、饮品与装备', url: '/pages/shop/index' },
-  ...(session.isOperator ? [{ title: '员工经营中心', subtitle: '按营业对象进入今日营业、交易、培训和结算', url: '/pages/workspace/index' }] : []),
+  { title: '我的资产', subtitle: '余额、羽球币、赛事积分与成长积分', url: '/pages/wallet/index' },
+  { title: '我的课程', subtitle: '课包、消课台账、退费与试听记录', url: '/pages/training/index?tab=mine' },
+  { title: '我的卡券', subtitle: '查看、领取和使用联盟权益', url: '/pages/coupon/index' },
 ])
 
 function logout() {
@@ -46,31 +63,82 @@ function logout() {
 const openLogin = () => uni.navigateTo({ url: '/pages/login/index' })
 const openPage = (url: string) => uni.navigateTo({ url })
 
-function copyReferralCode() {
-  if (!session.user?.id) return
-  uni.setClipboardData({ data: session.user.id })
+function hasUsableReferralInvite() {
+  const expiresAt = new Date(referralInviteExpiresAt.value).getTime()
+  return Boolean(
+    referralInviteCode.value &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > Date.now() + 60_000,
+  )
 }
 
-async function bindReferral() {
-  const requested = referrerId.value.trim()
-  if (!session.user || !requested) {
-    uni.showToast({ title: '请填写推荐人会员码', icon: 'none' })
+async function ensureReferralInvite() {
+  if (!session.user || !hasMemberProfile.value) return ''
+  if (hasUsableReferralInvite()) return referralInviteCode.value
+  referralInviteLoading.value = true
+  referralInviteError.value = ''
+  try {
+    const invite = await endpoints.createReferralInvite()
+    referralInviteCode.value = invite.inviteCode
+    referralInviteExpiresAt.value = invite.expiresAt
+    return invite.inviteCode
+  } catch (cause: any) {
+    referralInviteCode.value = ''
+    referralInviteExpiresAt.value = ''
+    referralInviteError.value = cause?.message || '安全邀请码暂时无法生成'
+    return ''
+  } finally {
+    referralInviteLoading.value = false
+  }
+}
+
+async function copyReferralCode() {
+  const inviteCode = await ensureReferralInvite()
+  if (!inviteCode) {
+    uni.showToast({ title: referralInviteError.value || '邀请码生成失败', icon: 'none' })
     return
   }
-  if (requested === session.user.id) {
-    uni.showToast({ title: '不能绑定自己为推荐人', icon: 'none' })
+  try {
+    await uni.setClipboardData({ data: inviteCode })
+  } catch {
+    uni.showToast({ title: '复制失败，请长按邀请码复制', icon: 'none' })
+  }
+}
+
+onShareAppMessage((options: any) => {
+  const shareType = String(options?.target?.dataset?.shareType || 'app-referral')
+  if (shareType === 'app-referral' && hasUsableReferralInvite()) {
+    return referralSharePayload(
+      referralInviteCode.value,
+      session.user?.displayName,
+    )
+  }
+  return { title: '延庆金羽羽毛球', path: '/pages/home/index' }
+})
+
+onShareTimeline(() => hasUsableReferralInvite()
+  ? {
+      title: `${session.user?.displayName || '好友'}邀请你使用延庆金羽小程序`,
+      query: referralShareQuery(referralInviteCode.value),
+    }
+  : { title: '延庆金羽羽毛球' })
+
+async function bindReferral() {
+  const requested = manualInviteCode.value.trim()
+  if (!session.user || !requested) {
+    uni.showToast({ title: '请填写好友发来的邀请码', icon: 'none' })
     return
   }
   const confirmed = await uni.showModal({
     title: '确认直接推荐人',
-    content: '推荐关系仅允许一层且绑定后不能更换，请确认会员码无误。',
+    content: '推荐关系仅允许一层且绑定后不能更换，请确认邀请码来自你的推荐人。',
   })
   if (!confirmed.confirm) return
   bindingReferral.value = true
   try {
     await endpoints.bindReferral(requested)
     await session.hydrate()
-    referrerId.value = ''
+    manualInviteCode.value = ''
     uni.showToast({ title: '推荐关系已绑定', icon: 'success' })
   } catch (cause: any) {
     uni.showToast({ title: cause?.message || '推荐关系绑定失败', icon: 'none' })
@@ -93,6 +161,15 @@ async function loadPrivacyRequests() {
   } finally {
     privacyLoading.value = false
   }
+}
+
+async function loadReferralRewards() {
+  if (!session.user || !hasMemberProfile.value) {
+    referralRewards.value = []
+    return
+  }
+  try { referralRewards.value = await endpoints.referralRewards() }
+  catch { referralRewards.value = [] }
 }
 
 async function requestErasure() {
@@ -161,7 +238,11 @@ async function cancelErasure() {
 
 onShow(async () => {
   await session.hydrate()
-  await loadPrivacyRequests()
+  await Promise.all([
+    loadPrivacyRequests(),
+    loadReferralRewards(),
+    ensureReferralInvite(),
+  ])
 })
 </script>
 
@@ -173,7 +254,7 @@ onShow(async () => {
         <text class="name">{{ session.user.displayName }}</text>
         <text class="muted">{{ displayRoles || '会员' }}</text>
       </view>
-      <text class="level">{{ (session.user.memberProfile as any)?.level || 'BASIC' }}</text>
+      <text class="level">{{ displayMemberLevel }}</text>
     </view>
     <view v-else class="profile-card" @tap="openLogin">
       <view class="avatar">羽</view><view class="profile-copy"><text class="name">登录后查看会员权益</text><text class="muted">点击微信一键登录</text></view>
@@ -182,22 +263,41 @@ onShow(async () => {
     <view v-if="session.user?.accounts?.length" class="account-strip">
       <view v-for="account in session.user.accounts" :key="account.id" class="account">
         <text class="account-value">{{ account.type.includes('BALANCE') || account.type.includes('CASH') ? money(account.balance) : account.balance }}</text>
-        <text class="muted">{{ accountLabel[account.type] }}</text>
+        <text class="muted">{{ accountLabel[account.type] || '其他资产' }}</text>
       </view>
+    </view>
+
+    <view v-if="session.isOperator" class="operator-entry" @tap="openPage('/pages/workspace/index')">
+      <view><text class="operator-entry-title">进入经营工作台</text><text class="operator-entry-note">处理今日待办、异常、审批与岗位业务</text></view>
+      <text class="operator-entry-arrow">›</text>
     </view>
 
     <view v-if="session.user && hasMemberProfile" class="referral card">
       <view class="referral-head">
-        <view><text class="menu-title">一层直接推荐</text><text class="muted">奖励只来自直接推荐的有效首单，不发展下级</text></view>
-        <button size="mini" class="copy" @tap="copyReferralCode">复制我的会员码</button>
+        <view class="referral-copy"><text class="invite-kind">拉新邀请</text><text class="menu-title">邀请好友使用小程序</text><text class="muted">好友通过分享卡片首次使用并完成有效首单后，双方按规则获得奖励</text></view>
+        <view class="referral-actions">
+          <button size="mini" class="copy" :loading="referralInviteLoading" :disabled="referralInviteLoading" @tap="copyReferralCode">复制邀请码</button>
+          <button size="mini" class="share" open-type="share" data-share-type="app-referral" :disabled="referralInviteLoading || !referralInviteCode">分享小程序</button>
+        </view>
       </view>
-      <text class="code">{{ session.user.id }}</text>
-      <view v-if="session.user.referrerId" class="bound-referrer">
-        <text class="bound-title">已绑定推荐人</text><text class="muted">{{ session.user.referrerId }} · 不可更换</text>
+      <text v-if="referralInviteError" class="invite-error">{{ referralInviteError }}</text>
+      <text v-if="referralInviteCode" class="referral-code">{{ referralInviteCode }}</text>
+      <text class="invite-note">这张分享卡只用于邀请好友使用小程序，不会替好友加入球局或赛事。拼场邀请请到“活动”选择具体球局；积分赛由搭档本人生成赛事授权码，再由队长确认报名。</text>
+      <view v-if="session.user.hasReferrer" class="bound-referrer">
+        <text class="bound-title">已绑定推荐人</text><text class="muted">推荐关系已生效且不可更换</text>
       </view>
       <view v-else class="bind-row">
-        <input v-model="referrerId" maxlength="100" placeholder="粘贴推荐人的会员码" />
+        <input v-model="manualInviteCode" maxlength="128" placeholder="粘贴好友发来的邀请码" />
         <button :loading="bindingReferral" :disabled="bindingReferral" class="bind" @tap="bindReferral">确认绑定</button>
+      </view>
+      <view v-if="referralRewards.length" class="reward-list">
+        <view v-for="reward in referralRewards.slice(0, 3)" :key="reward.id" class="reward-row">
+          <view>
+            <text class="reward-title">{{ reward.recipientRole === 'REFERRER' ? '邀请好友首单奖励' : '受邀新客首单奖励' }}</text>
+            <text class="muted">{{ referralStatusLabel[reward.status] || '状态更新中' }}</text>
+          </view>
+          <text class="reward-value">+{{ reward.recipientRewardValue }} 羽球币</text>
+        </view>
       </view>
     </view>
 
@@ -209,7 +309,7 @@ onShow(async () => {
     <view v-if="session.user && hasMemberProfile" class="privacy-card card">
       <view class="privacy-head">
         <view><text class="menu-title">隐私与账号注销</text><text class="muted">先结清业务，再由另一名超级管理员复核匿名化</text></view>
-        <text v-if="latestErasureRequest" class="privacy-status">{{ privacyStatusLabel[latestErasureRequest.status] || latestErasureRequest.status }}</text>
+        <text v-if="latestErasureRequest" class="privacy-status">{{ privacyStatusLabel[latestErasureRequest.status] || '处理中' }}</text>
       </view>
       <text class="privacy-note">匿名化会移除微信标识、手机号、头像、姓名和监护学员身份信息；依法需保留的订单、支付、退款、账本和审计记录只保留匿名内部编号。</text>
       <text v-if="privacyError" class="privacy-error">{{ privacyError }}</text>
@@ -227,30 +327,55 @@ onShow(async () => {
 .avatar { display: grid; flex: 0 0 auto; place-items: center; width: 96rpx; height: 96rpx; margin-right: 24rpx; color: #17422d; background: #e8d28a; border-radius: 30rpx; font-size: 38rpx; font-weight: 800; }
 .profile-copy { flex: 1; min-width: 0; }
 .profile-copy .muted { display: block; margin-top: 10rpx; color: rgba(255,255,255,.72); }
-.name { display: block; font-size: 35rpx; font-weight: 800; }
-.level { padding: 8rpx 14rpx; color: #e8d28a; border: 1rpx solid rgba(232,210,138,.5); border-radius: 999rpx; font-size: 20rpx; }
+.name { display: block; font-size: 35rpx; font-weight: 800; overflow-wrap: anywhere; }
+.level { flex: 0 1 auto; max-width: 180rpx; padding: 8rpx 14rpx; color: #e8d28a; border: 1rpx solid rgba(232,210,138,.5); border-radius: 999rpx; font-size: 20rpx; line-height: 1.4; text-align: center; overflow-wrap: anywhere; }
 .account-strip { display: flex; gap: 14rpx; overflow-x: auto; padding: 6rpx 0 24rpx; }
 .account { flex: 0 0 200rpx; padding: 24rpx; background: #fff; border-radius: 22rpx; }
-.account-value { display: block; margin-bottom: 10rpx; color: #184c30; font-size: 29rpx; font-weight: 800; }
+.account-value { display: block; margin-bottom: 10rpx; color: #184c30; font-size: 29rpx; font-weight: 800; overflow-wrap: anywhere; }
+.operator-entry { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; padding: 26rpx 28rpx; margin-bottom: 22rpx; color: #fff; background: #17653d; border-radius: 24rpx; }
+.operator-entry-title { display: block; font-size: 30rpx; font-weight: 800; }
+.operator-entry-note { display: block; margin-top: 8rpx; color: rgba(255,255,255,.72); font-size: 22rpx; }
+.operator-entry-arrow { flex: 0 0 auto; font-size: 42rpx; }
 .referral { margin-bottom: 22rpx; padding: 28rpx; }
-.referral-head { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; }
-.copy { flex: 0 0 auto; margin: 0; color: #17653d; background: #edf7f1; }
-.code { display: block; margin-top: 18rpx; padding: 14rpx 18rpx; color: #365244; background: #f4f7f4; border-radius: 14rpx; font-family: monospace; font-size: 21rpx; word-break: break-all; }
+.referral-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18rpx; }
+.referral-copy { flex: 1 1 340rpx; min-width: 0; }
+.referral-actions { display: flex; flex: 1 1 300rpx; min-width: 0; gap: 10rpx; }
+.referral-actions button { min-width: 0; min-height: 72rpx; line-height: 72rpx; font-size: 22rpx; }
+.invite-kind { display: inline-flex; padding: 6rpx 12rpx; margin-bottom: 10rpx; color: #17653d; background: #e7f4eb; border-radius: 999rpx; font-size: 19rpx; font-weight: 700; }
+.copy { flex: 1 1 0; margin: 0; color: #17653d; background: #edf7f1; }
+.share { flex: 1 1 0; margin: 0; color: #fff; background: #17653d; }
+.invite-error { display: block; margin-top: 16rpx; color: #a13b35; font-size: 21rpx; line-height: 1.5; }
+.referral-code { display: block; padding: 14rpx 16rpx; margin-top: 16rpx; color: #174b30; background: #f4f7f4; border-radius: 14rpx; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 20rpx; line-height: 1.5; overflow-wrap: anywhere; word-break: break-all; white-space: normal; user-select: text; }
+.invite-note { display: block; margin-top: 18rpx; padding: 16rpx 18rpx; color: #526258; background: #f4f7f4; border-radius: 14rpx; font-size: 21rpx; line-height: 1.6; }
 .bound-referrer { margin-top: 18rpx; padding: 18rpx; background: #fff8df; border-radius: 14rpx; }
 .bound-title { display: block; margin-bottom: 8rpx; color: #705921; font-weight: 700; }
 .bind-row { display: flex; align-items: center; gap: 12rpx; margin-top: 18rpx; }
 .bind-row input { box-sizing: border-box; flex: 1; min-width: 0; height: 72rpx; padding: 0 18rpx; background: #f6f8f6; border: 1rpx solid #dbe3de; border-radius: 14rpx; font-size: 22rpx; }
-.bind { flex: 0 0 auto; margin: 0; color: #fff; background: #17653d; font-size: 22rpx; }
+.bind { flex: 0 0 auto; min-height: 72rpx; margin: 0; color: #fff; background: #17653d; font-size: 22rpx; line-height: 72rpx; }
+.reward-list { margin-top: 18rpx; border-top: 1rpx solid #e8eee9; }
+.reward-row { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; padding: 18rpx 0; border-bottom: 1rpx solid #edf1ee; }
+.reward-row > view { flex: 1; min-width: 0; }.reward-title { display: block; margin-bottom: 6rpx; font-size: 23rpx; font-weight: 700; overflow-wrap: anywhere; }
+.reward-value { flex: 0 0 auto; color: #17653d; font-size: 23rpx; font-weight: 800; }
 .menu { padding: 0 28rpx; }
-.menu-item { display: flex; align-items: center; justify-content: space-between; padding: 28rpx 0; border-bottom: 1rpx solid #edf0ed; }
+.menu-item { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; padding: 28rpx 0; border-bottom: 1rpx solid #edf0ed; }
+.menu-item > view { min-width: 0; }
 .menu-item:last-child { border: none; }
-.menu-title { display: block; margin-bottom: 8rpx; font-weight: 700; }
+.menu-title { display: block; margin-bottom: 8rpx; font-weight: 700; overflow-wrap: anywhere; }.menu-item .muted { display: block; overflow-wrap: anywhere; }
 .privacy-card { margin-top: 22rpx; padding: 28rpx; }
-.privacy-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18rpx; }
+.privacy-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18rpx; }.privacy-head > view { flex: 1; min-width: 0; }
 .privacy-status { flex: 0 0 auto; padding: 7rpx 12rpx; color: #765d24; background: #fff3c8; border-radius: 999rpx; font-size: 20rpx; }
 .privacy-note,.privacy-error { display: block; margin-top: 16rpx; color: #6b7770; font-size: 21rpx; line-height: 1.7; }
 .privacy-error { color: #a13b35; }
 .privacy-actions { display: flex; margin-top: 18rpx; }
 .privacy-actions button { margin: 0; color: #fff; background: #8e3d36; }
 .privacy-actions .cancel-erasure { color: #6b4f20; background: #fff3c8; }
+@media (max-width: 420px) {
+  .profile-card { padding: 32rpx 26rpx; }
+  .avatar { width: 84rpx; height: 84rpx; margin-right: 18rpx; }
+  .referral-actions { flex-basis: 100%; }
+  .bind-row { align-items: stretch; flex-wrap: wrap; }
+  .bind-row input,.bind { width: 100%; }
+  .bind { flex: 1 1 100%; }
+  .privacy-head { flex-wrap: wrap; }
+}
 </style>

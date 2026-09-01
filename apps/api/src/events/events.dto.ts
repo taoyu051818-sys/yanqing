@@ -12,6 +12,7 @@ import {
   Equals,
   Max,
   MaxLength,
+  Matches,
   Min,
   MinLength,
   ValidateNested,
@@ -134,15 +135,15 @@ export class RegisterEventTeamDto {
   @MaxLength(80)
   name: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(40)
-  playerAName: string;
+  playerAName?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(40)
-  playerBName: string;
+  playerBName?: string;
 
   @IsOptional()
   @IsString()
@@ -151,6 +152,18 @@ export class RegisterEventTeamDto {
   @IsOptional()
   @IsString()
   playerBUserId?: string;
+
+  /**
+   * Member self-service registration must use an event-scoped code generated
+   * by the partner's own authenticated account. Staff-side registrations keep
+   * the explicit name/id fields for assisted on-site entry.
+   */
+  @IsOptional()
+  @IsString()
+  @MinLength(20)
+  @MaxLength(100)
+  @Matches(/^EP_[A-Za-z0-9_-]+$/)
+  partnerInviteCode?: string;
 
   @IsEnum(TeamCategory)
   category: TeamCategory;
@@ -163,6 +176,14 @@ export class RegisterEventTeamDto {
   @MinLength(8)
   @MaxLength(100)
   creationIdempotencyKey?: string;
+}
+
+export class EventPartnerInviteCodeDto {
+  @IsString()
+  @MinLength(20)
+  @MaxLength(100)
+  @Matches(/^EP_[A-Za-z0-9_-]+$/)
+  partnerInviteCode: string;
 }
 
 export class SubmitScoreDto {

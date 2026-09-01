@@ -46,19 +46,9 @@ import {
 const serial = (prefix: string) =>
   `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`;
 
-const FRONT_ROLES: readonly AppRole[] = [
-  AppRole.FRONT_DESK,
-  AppRole.ADMIN,
-  AppRole.SUPER_ADMIN,
-];
 const ADMIN_ROLES: readonly AppRole[] = [AppRole.ADMIN, AppRole.SUPER_ADMIN];
-const READ_ROLES: readonly AppRole[] = [
-  AppRole.FRONT_DESK,
-  AppRole.COACH,
-  AppRole.EVENT_MANAGER,
-  AppRole.FINANCE,
-  ...ADMIN_ROLES,
-];
+const FRONT_ROLES: readonly AppRole[] = ADMIN_ROLES;
+const READ_ROLES: readonly AppRole[] = [...ADMIN_ROLES];
 
 const SUPPLIER_CREATE_ACTION = 'SUPPLIER_CREATED';
 const SUPPLIER_UPDATE_ACTION = 'SUPPLIER_UPDATED';
@@ -66,6 +56,58 @@ const SUPPLIER_STATUS_ACTION = 'SUPPLIER_STATUS_CHANGED';
 const LOCATION_CREATE_ACTION = 'INVENTORY_LOCATION_CREATED';
 const LOCATION_UPDATE_ACTION = 'INVENTORY_LOCATION_UPDATED';
 const LOCATION_STATUS_ACTION = 'INVENTORY_LOCATION_STATUS_CHANGED';
+
+const purchaseReceiptResponse = (receipt: Record<string, any>) => {
+  const {
+    idempotencyKey: _idempotencyKey,
+    operatorId: _operatorId,
+    ...response
+  } = receipt;
+  return response;
+};
+
+const purchaseOrderResponse = (order: Record<string, any>) => ({
+  ...order,
+  ...(Array.isArray(order.receipts)
+    ? { receipts: order.receipts.map(purchaseReceiptResponse) }
+    : {}),
+});
+
+const stocktakeResponse = (stocktake: Record<string, any>) => {
+  const { postIdempotencyKey: _postIdempotencyKey, ...response } = stocktake;
+  return response;
+};
+
+const inventoryOperationResponse = (operation: Record<string, any>) => {
+  const {
+    postIdempotencyKey: _postIdempotencyKey,
+    sourceTransactionId: _sourceTransactionId,
+    targetTransactionId: _targetTransactionId,
+    ...response
+  } = operation;
+  return response;
+};
+
+const inventoryLocationResponse = (location: Record<string, any>) => ({
+  ...location,
+  ...(Array.isArray(location.stocktakes)
+    ? { stocktakes: location.stocktakes.map(stocktakeResponse) }
+    : {}),
+  ...(Array.isArray(location.sourceOperations)
+    ? {
+        sourceOperations: location.sourceOperations.map(
+          inventoryOperationResponse,
+        ),
+      }
+    : {}),
+  ...(Array.isArray(location.targetOperations)
+    ? {
+        targetOperations: location.targetOperations.map(
+          inventoryOperationResponse,
+        ),
+      }
+    : {}),
+});
 
 @Injectable()
 export class InventoryOperationsService {
@@ -155,35 +197,41 @@ export class InventoryOperationsService {
       },
     });
     if (!location) throw new NotFoundException('库位不存在');
-    return location;
+    return inventoryLocationResponse(location);
   }
 
   purchaseOrders(actor: AuthUser) {
     this.requireRole(actor, READ_ROLES);
-    return this.prisma.purchaseOrder.findMany({
-      include: {
-        supplier: true,
-        lines: { include: { item: true, location: true } },
-        receipts: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.prisma.purchaseOrder
+      .findMany({
+        include: {
+          supplier: true,
+          lines: { include: { item: true, location: true } },
+          receipts: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+      .then((orders) => orders.map(purchaseOrderResponse));
   }
 
   stocktakes(actor: AuthUser) {
     this.requireRole(actor, READ_ROLES);
-    return this.prisma.stocktake.findMany({
-      include: { location: true, lines: { include: { item: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.prisma.stocktake
+      .findMany({
+        include: { location: true, lines: { include: { item: true } } },
+        orderBy: { createdAt: 'desc' },
+      })
+      .then((documents) => documents.map(stocktakeResponse));
   }
 
   operations(actor: AuthUser) {
     this.requireRole(actor, READ_ROLES);
-    return this.prisma.inventoryOperation.findMany({
-      include: { item: true, sourceLocation: true, targetLocation: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.prisma.inventoryOperation
+      .findMany({
+        include: { item: true, sourceLocation: true, targetLocation: true },
+        orderBy: { createdAt: 'desc' },
+      })
+      .then((documents) => documents.map(inventoryOperationResponse));
   }
 
   async createSupplier(dto: CreateSupplierDto, actor: AuthUser) {
@@ -914,7 +962,7 @@ export class InventoryOperationsService {
     if (existing) {
       if (existing.purchaseOrderId !== id)
         throw new ConflictException('收货幂等键已用于其他采购单');
-      return existing;
+      return purchaseReceiptResponse(existing);
     }
     return this.prisma.$transaction(
       async (tx) => {
@@ -1039,10 +1087,12 @@ export class InventoryOperationsService {
           status,
           order.remark ?? '采购分批收货',
         );
-        return tx.purchaseReceipt.findUniqueOrThrow({
-          where: { id: receipt.id },
-          include: { lines: true },
-        });
+        return tx.purchaseReceipt
+          .findUniqueOrThrow({
+            where: { id: receipt.id },
+            include: { lines: true },
+          })
+          .then(purchaseReceiptResponse);
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -1090,7 +1140,7 @@ export class InventoryOperationsService {
     });
     if (!location?.enabled)
       throw new NotFoundException('盘点库位不存在或已停用');
-    return this.prisma.stocktake.create({
+    const created = await this.prisma.stocktake.create({
       data: {
         stocktakeNo: serial('ST'),
         locationId: location.id,
@@ -1099,86 +1149,89 @@ export class InventoryOperationsService {
       },
       include: { location: true, lines: true },
     });
+    return stocktakeResponse(created);
   }
 
   startStocktake(id: string, actor: AuthUser) {
     this.requireRole(actor, FRONT_ROLES);
-    return this.prisma.$transaction(async (tx) => {
-      const stocktake = await tx.stocktake.findUnique({
-        where: { id },
-        include: { location: true },
-      });
-      if (!stocktake) throw new NotFoundException('盘点单不存在');
-      if (stocktake.location?.enabled === false)
-        throw new ConflictException('盘点库位已停用');
-      if (stocktake.status === StocktakeStatus.COUNTING) return stocktake;
-      if (stocktake.status !== StocktakeStatus.DRAFT)
-        throw new ConflictException('当前盘点单不能开始盘点');
-      const items = await tx.inventoryItem.findMany({
-        where: { enabled: true },
-      });
-      for (const item of items.filter(
-        (entry) => entry.defaultLocationId === stocktake.locationId,
-      )) {
-        await this.reconciledBalance(
-          tx,
-          item,
-          stocktake.locationId,
-          this.batch(item.batchCode),
-          item.expiresAt,
-        );
-      }
-      let balances = await tx.inventoryStockBalance.findMany({
-        where: { locationId: stocktake.locationId, item: { enabled: true } },
-        include: { item: true },
-      });
-      const itemIdsWithBalance = new Set(
-        balances.map((balance) => balance.itemId),
-      );
-      for (const item of items.filter(
-        (entry) => !itemIdsWithBalance.has(entry.id),
-      )) {
-        const balance = await tx.inventoryStockBalance.create({
-          data: {
-            itemId: item.id,
-            locationId: stocktake.locationId,
-            batchCode: 'DEFAULT',
-            quantity: 0,
-          },
+    return this.prisma
+      .$transaction(async (tx) => {
+        const stocktake = await tx.stocktake.findUnique({
+          where: { id },
+          include: { location: true },
+        });
+        if (!stocktake) throw new NotFoundException('盘点单不存在');
+        if (stocktake.location?.enabled === false)
+          throw new ConflictException('盘点库位已停用');
+        if (stocktake.status === StocktakeStatus.COUNTING) return stocktake;
+        if (stocktake.status !== StocktakeStatus.DRAFT)
+          throw new ConflictException('当前盘点单不能开始盘点');
+        const items = await tx.inventoryItem.findMany({
+          where: { enabled: true },
+        });
+        for (const item of items.filter(
+          (entry) => entry.defaultLocationId === stocktake.locationId,
+        )) {
+          await this.reconciledBalance(
+            tx,
+            item,
+            stocktake.locationId,
+            this.batch(item.batchCode),
+            item.expiresAt,
+          );
+        }
+        let balances = await tx.inventoryStockBalance.findMany({
+          where: { locationId: stocktake.locationId, item: { enabled: true } },
           include: { item: true },
         });
-        balances.push(balance);
-      }
-      for (const balance of balances) {
-        await tx.stocktakeLine.create({
-          data: {
-            stocktakeId: id,
-            itemId: balance.itemId,
-            batchCode: balance.batchCode,
-            expiresAt: balance.expiresAt,
-            bookQuantity: balance.quantity,
-          },
+        const itemIdsWithBalance = new Set(
+          balances.map((balance) => balance.itemId),
+        );
+        for (const item of items.filter(
+          (entry) => !itemIdsWithBalance.has(entry.id),
+        )) {
+          const balance = await tx.inventoryStockBalance.create({
+            data: {
+              itemId: item.id,
+              locationId: stocktake.locationId,
+              batchCode: 'DEFAULT',
+              quantity: 0,
+            },
+            include: { item: true },
+          });
+          balances.push(balance);
+        }
+        for (const balance of balances) {
+          await tx.stocktakeLine.create({
+            data: {
+              stocktakeId: id,
+              itemId: balance.itemId,
+              batchCode: balance.batchCode,
+              expiresAt: balance.expiresAt,
+              bookQuantity: balance.quantity,
+            },
+          });
+        }
+        await tx.stocktake.update({
+          where: { id },
+          data: { status: StocktakeStatus.COUNTING, startedAt: new Date() },
         });
-      }
-      await tx.stocktake.update({
-        where: { id },
-        data: { status: StocktakeStatus.COUNTING, startedAt: new Date() },
-      });
-      await this.audit(
-        tx,
-        actor,
-        'STOCKTAKE_STARTED',
-        'Stocktake',
-        id,
-        StocktakeStatus.DRAFT,
-        StocktakeStatus.COUNTING,
-        stocktake.reason,
-      );
-      return tx.stocktake.findUniqueOrThrow({
-        where: { id },
-        include: { location: true, lines: { include: { item: true } } },
-      });
-    });
+        await this.audit(
+          tx,
+          actor,
+          'STOCKTAKE_STARTED',
+          'Stocktake',
+          id,
+          StocktakeStatus.DRAFT,
+          StocktakeStatus.COUNTING,
+          stocktake.reason,
+        );
+        return tx.stocktake.findUniqueOrThrow({
+          where: { id },
+          include: { location: true, lines: { include: { item: true } } },
+        });
+      })
+      .then(stocktakeResponse);
   }
 
   countStocktakeLine(
@@ -1222,44 +1275,46 @@ export class InventoryOperationsService {
 
   submitStocktake(id: string, actor: AuthUser) {
     this.requireRole(actor, FRONT_ROLES);
-    return this.prisma.$transaction(async (tx) => {
-      const stocktake = await tx.stocktake.findUnique({
-        where: { id },
-        include: { lines: true },
-      });
-      if (!stocktake) throw new NotFoundException('盘点单不存在');
-      if (stocktake.status === StocktakeStatus.REVIEW) return stocktake;
-      if (stocktake.status !== StocktakeStatus.COUNTING)
-        throw new ConflictException('盘点单不在录数状态');
-      if (
-        !stocktake.lines.length ||
-        stocktake.lines.some((line) => line.countedQuantity === null)
-      ) {
-        throw new ConflictException('仍有盘点明细未录入实盘数量');
-      }
-      await tx.stocktake.update({
-        where: { id },
-        data: {
-          status: StocktakeStatus.REVIEW,
-          submittedById: actor.sub,
-          submittedAt: new Date(),
-        },
-      });
-      await this.audit(
-        tx,
-        actor,
-        'STOCKTAKE_SUBMITTED',
-        'Stocktake',
-        id,
-        StocktakeStatus.COUNTING,
-        StocktakeStatus.REVIEW,
-        stocktake.reason,
-      );
-      return tx.stocktake.findUniqueOrThrow({
-        where: { id },
-        include: { location: true, lines: { include: { item: true } } },
-      });
-    });
+    return this.prisma
+      .$transaction(async (tx) => {
+        const stocktake = await tx.stocktake.findUnique({
+          where: { id },
+          include: { lines: true },
+        });
+        if (!stocktake) throw new NotFoundException('盘点单不存在');
+        if (stocktake.status === StocktakeStatus.REVIEW) return stocktake;
+        if (stocktake.status !== StocktakeStatus.COUNTING)
+          throw new ConflictException('盘点单不在录数状态');
+        if (
+          !stocktake.lines.length ||
+          stocktake.lines.some((line) => line.countedQuantity === null)
+        ) {
+          throw new ConflictException('仍有盘点明细未录入实盘数量');
+        }
+        await tx.stocktake.update({
+          where: { id },
+          data: {
+            status: StocktakeStatus.REVIEW,
+            submittedById: actor.sub,
+            submittedAt: new Date(),
+          },
+        });
+        await this.audit(
+          tx,
+          actor,
+          'STOCKTAKE_SUBMITTED',
+          'Stocktake',
+          id,
+          StocktakeStatus.COUNTING,
+          StocktakeStatus.REVIEW,
+          stocktake.reason,
+        );
+        return tx.stocktake.findUniqueOrThrow({
+          where: { id },
+          include: { location: true, lines: { include: { item: true } } },
+        });
+      })
+      .then(stocktakeResponse);
   }
 
   async postStocktake(id: string, dto: PostStocktakeDto, actor: AuthUser) {
@@ -1274,7 +1329,7 @@ export class InventoryOperationsService {
         if (stocktake.status === StocktakeStatus.POSTED) {
           if (stocktake.postIdempotencyKey !== dto.idempotencyKey)
             throw new ConflictException('盘点单已使用其他幂等键过账');
-          return stocktake;
+          return stocktakeResponse(stocktake);
         }
         if (stocktake.status !== StocktakeStatus.REVIEW)
           throw new ConflictException('盘点单尚未提交复核');
@@ -1362,10 +1417,12 @@ export class InventoryOperationsService {
           StocktakeStatus.POSTED,
           stocktake.reason,
         );
-        return tx.stocktake.findUniqueOrThrow({
-          where: { id },
-          include: { location: true, lines: { include: { item: true } } },
-        });
+        return tx.stocktake
+          .findUniqueOrThrow({
+            where: { id },
+            include: { location: true, lines: { include: { item: true } } },
+          })
+          .then(stocktakeResponse);
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -1401,7 +1458,7 @@ export class InventoryOperationsService {
     ) {
       throw new NotFoundException('库存商品或库位不存在');
     }
-    return this.prisma.inventoryOperation.create({
+    const created = await this.prisma.inventoryOperation.create({
       data: {
         documentNo: serial(
           dto.type === InventoryOperationType.TRANSFER ? 'TR' : 'LS',
@@ -1420,6 +1477,7 @@ export class InventoryOperationsService {
       },
       include: { item: true, sourceLocation: true, targetLocation: true },
     });
+    return inventoryOperationResponse(created);
   }
 
   submitOperation(id: string, actor: AuthUser) {
@@ -1429,45 +1487,47 @@ export class InventoryOperationsService {
       InventoryOperationStatus.DRAFT,
       InventoryOperationStatus.SUBMITTED,
       actor,
-    );
+    ).then(inventoryOperationResponse);
   }
 
   approveOperation(id: string, actor: AuthUser) {
     this.requireRole(actor, ADMIN_ROLES);
-    return this.prisma.$transaction(async (tx) => {
-      const operation = await tx.inventoryOperation.findUnique({
-        where: { id },
-      });
-      if (!operation) throw new NotFoundException('库存业务单不存在');
-      if (operation.status === InventoryOperationStatus.APPROVED)
-        return operation;
-      if (operation.status !== InventoryOperationStatus.SUBMITTED)
-        throw new ConflictException('库存业务单尚未提交');
-      if (operation.createdById === actor.sub)
-        throw new ForbiddenException('库存业务制单人与审批人不能为同一账号');
-      await tx.inventoryOperation.update({
-        where: { id },
-        data: {
-          status: InventoryOperationStatus.APPROVED,
-          approvedById: actor.sub,
-          approvedAt: new Date(),
-        },
-      });
-      await this.audit(
-        tx,
-        actor,
-        'INVENTORY_OPERATION_APPROVED',
-        'InventoryOperation',
-        id,
-        operation.status,
-        InventoryOperationStatus.APPROVED,
-        operation.reason,
-      );
-      return tx.inventoryOperation.findUniqueOrThrow({
-        where: { id },
-        include: { item: true, sourceLocation: true, targetLocation: true },
-      });
-    });
+    return this.prisma
+      .$transaction(async (tx) => {
+        const operation = await tx.inventoryOperation.findUnique({
+          where: { id },
+        });
+        if (!operation) throw new NotFoundException('库存业务单不存在');
+        if (operation.status === InventoryOperationStatus.APPROVED)
+          return operation;
+        if (operation.status !== InventoryOperationStatus.SUBMITTED)
+          throw new ConflictException('库存业务单尚未提交');
+        if (operation.createdById === actor.sub)
+          throw new ForbiddenException('库存业务制单人与审批人不能为同一账号');
+        await tx.inventoryOperation.update({
+          where: { id },
+          data: {
+            status: InventoryOperationStatus.APPROVED,
+            approvedById: actor.sub,
+            approvedAt: new Date(),
+          },
+        });
+        await this.audit(
+          tx,
+          actor,
+          'INVENTORY_OPERATION_APPROVED',
+          'InventoryOperation',
+          id,
+          operation.status,
+          InventoryOperationStatus.APPROVED,
+          operation.reason,
+        );
+        return tx.inventoryOperation.findUniqueOrThrow({
+          where: { id },
+          include: { item: true, sourceLocation: true, targetLocation: true },
+        });
+      })
+      .then(inventoryOperationResponse);
   }
 
   async postOperation(
@@ -1490,7 +1550,7 @@ export class InventoryOperationsService {
         if (operation.status === InventoryOperationStatus.POSTED) {
           if (operation.postIdempotencyKey !== dto.idempotencyKey)
             throw new ConflictException('库存业务单已使用其他幂等键过账');
-          return operation;
+          return inventoryOperationResponse(operation);
         }
         if (operation.status !== InventoryOperationStatus.APPROVED)
           throw new ConflictException('库存业务单尚未审批');
@@ -1618,10 +1678,12 @@ export class InventoryOperationsService {
           InventoryOperationStatus.POSTED,
           operation.reason,
         );
-        return tx.inventoryOperation.findUniqueOrThrow({
-          where: { id },
-          include: { item: true, sourceLocation: true, targetLocation: true },
-        });
+        return tx.inventoryOperation
+          .findUniqueOrThrow({
+            where: { id },
+            include: { item: true, sourceLocation: true, targetLocation: true },
+          })
+          .then(inventoryOperationResponse);
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -1629,40 +1691,42 @@ export class InventoryOperationsService {
 
   cancelOperation(id: string, dto: CancelDocumentDto, actor: AuthUser) {
     this.requireRole(actor, ADMIN_ROLES);
-    return this.prisma.$transaction(async (tx) => {
-      const operation = await tx.inventoryOperation.findUnique({
-        where: { id },
-      });
-      if (!operation) throw new NotFoundException('库存业务单不存在');
-      if (operation.status === InventoryOperationStatus.CANCELLED)
-        return operation;
-      if (
-        operation.status !== InventoryOperationStatus.DRAFT &&
-        operation.status !== InventoryOperationStatus.SUBMITTED &&
-        operation.status !== InventoryOperationStatus.APPROVED
-      ) {
-        throw new ConflictException('已过账库存业务单不能取消');
-      }
-      const cancelled = await tx.inventoryOperation.update({
-        where: { id },
-        data: {
-          status: InventoryOperationStatus.CANCELLED,
-          cancelledAt: new Date(),
-          reason: `${operation.reason}；取消：${dto.reason.trim()}`,
-        },
-      });
-      await this.audit(
-        tx,
-        actor,
-        'INVENTORY_OPERATION_CANCELLED',
-        'InventoryOperation',
-        id,
-        operation.status,
-        InventoryOperationStatus.CANCELLED,
-        dto.reason.trim(),
-      );
-      return cancelled;
-    });
+    return this.prisma
+      .$transaction(async (tx) => {
+        const operation = await tx.inventoryOperation.findUnique({
+          where: { id },
+        });
+        if (!operation) throw new NotFoundException('库存业务单不存在');
+        if (operation.status === InventoryOperationStatus.CANCELLED)
+          return operation;
+        if (
+          operation.status !== InventoryOperationStatus.DRAFT &&
+          operation.status !== InventoryOperationStatus.SUBMITTED &&
+          operation.status !== InventoryOperationStatus.APPROVED
+        ) {
+          throw new ConflictException('已过账库存业务单不能取消');
+        }
+        const cancelled = await tx.inventoryOperation.update({
+          where: { id },
+          data: {
+            status: InventoryOperationStatus.CANCELLED,
+            cancelledAt: new Date(),
+            reason: `${operation.reason}；取消：${dto.reason.trim()}`,
+          },
+        });
+        await this.audit(
+          tx,
+          actor,
+          'INVENTORY_OPERATION_CANCELLED',
+          'InventoryOperation',
+          id,
+          operation.status,
+          InventoryOperationStatus.CANCELLED,
+          dto.reason.trim(),
+        );
+        return cancelled;
+      })
+      .then(inventoryOperationResponse);
   }
 
   private moveOperation(

@@ -15,11 +15,62 @@ const member: AuthUser = {
 }
 
 describe('GoodsService order creator evidence', () => {
+  it('returns a public catalogue projection without cost or supplier fields', async () => {
+    const findMany = vi.fn().mockResolvedValue([])
+    const service = new GoodsService({ inventoryItem: { findMany } } as never)
+
+    await service.products()
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { enabled: true },
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        category: true,
+        salePriceCents: true,
+        stock: true,
+      },
+      orderBy: [{ category: 'asc' }, { name: 'asc' }],
+    })
+    const select = findMany.mock.calls[0][0].select
+    expect(select.purchasePriceCents).toBeUndefined()
+    expect(select.supplierId).toBeUndefined()
+    expect(select.defaultLocationId).toBeUndefined()
+    expect(select.safeStock).toBeUndefined()
+    expect(select.mode).toBeUndefined()
+  })
+
+  it('rejects a zero-stock product before creating an order or audit row', async () => {
+    const tx = {
+      inventoryItem: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: 'goods-empty',
+          name: '售罄羽毛球',
+          stock: 0,
+        }]),
+      },
+      order: { create: vi.fn() },
+      auditLog: { create: vi.fn() },
+    }
+    const prisma = {
+      $transaction: vi.fn(async (work: (client: typeof tx) => unknown) => work(tx)),
+    }
+    const service = new GoodsService(prisma as never)
+
+    await expect(service.createOrder({
+      items: [{ itemId: 'goods-empty', quantity: 1 }],
+    }, member)).rejects.toThrow('售罄羽毛球 库存不足')
+
+    expect(tx.order.create).not.toHaveBeenCalled()
+    expect(tx.auditLog.create).not.toHaveBeenCalled()
+  })
+
   it('audits goods order creation once and does not audit an exact replay', async () => {
     const key = 'goods-order-key-1'
     let stored: Record<string, any> | null = null
     const orderCreate = vi.fn().mockImplementation(async ({ data }: { data: Record<string, any> }) => {
-      stored = { id: 'goods-order-1', ...data, items: [] }
+      stored = { id: 'goods-order-1', ...data, items: data.items?.create || [] }
       return stored
     })
     const auditCreate = vi.fn().mockResolvedValue({})
@@ -66,7 +117,7 @@ describe('GoodsService order creator evidence', () => {
       creationIdempotencyKey: key,
     }
 
-    await service.createOrder(command, member)
+    const response = await service.createOrder(command, member)
     await service.createOrder(command, member)
 
     expect(orderCreate).toHaveBeenCalledOnce()
@@ -114,5 +165,14 @@ describe('GoodsService order creator evidence', () => {
       }),
     })
     expect(JSON.stringify(auditCreate.mock.calls[0][0])).not.toContain(key)
+    expect(response.items?.[0]).toMatchObject({
+      itemId: 'goods-ball',
+      name: '羽毛球',
+      quantity: 2,
+      amountCents: 240,
+    })
+    expect(JSON.stringify(response)).not.toContain('metadata')
+    expect(JSON.stringify(response)).not.toContain('commissionRateBps')
+    expect(JSON.stringify(response)).not.toContain('supplier-consignment')
   })
 })

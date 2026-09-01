@@ -57,6 +57,7 @@ import {
   orderCreationCommandHash,
   type OrderCreationFields,
 } from '../orders/order-creation-idempotency.js';
+import { orderResponse } from '../orders/order-response.js';
 import { completeOrderFulfillment } from '../orders/order-fulfillment.js';
 import {
   assertOperationTimeWindow,
@@ -64,6 +65,14 @@ import {
   TRAINING_COMPLETION_WINDOW_PARAMETER,
 } from '../common/time-window/operation-time-window.js';
 import { YouthTrainingRulesService } from './youth-training-rules.service.js';
+import {
+  trainingAttendanceCommandResponse,
+  trainingConsumeConfirmationResponse,
+  trainingConsumeProposalResponse,
+  trainingMakeupCommandResponse,
+  trainingSessionCommandResponse,
+  trainingSettlementListResponse,
+} from './training-command-response.js';
 
 const serial = (prefix: string) =>
   `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`;
@@ -120,12 +129,50 @@ export class TrainingService {
     @Optional() private readonly youthRules?: YouthTrainingRulesService,
   ) {}
 
-  listProducts() {
-    return this.prisma.trainingProduct.findMany({
+  async listProducts(actor: AuthUser) {
+    const administrator = actor.roles.some(
+      (role) => role === AppRole.ADMIN || role === AppRole.SUPER_ADMIN,
+    );
+    const coachOnly =
+      actor.roles.includes(AppRole.COACH) &&
+      !actor.roles.some(
+        (role) => role === AppRole.ADMIN || role === AppRole.SUPER_ADMIN,
+      );
+    const products = await this.prisma.trainingProduct.findMany({
       where: { enabled: true },
-      include: { classes: { where: { active: true } } },
+      include: {
+        classes: {
+          where: {
+            active: true,
+            ...(coachOnly
+              ? { OR: [{ coachId: actor.sub }, { assistantId: actor.sub }] }
+              : {}),
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
+    return products.map((product) => ({
+      id: product.id,
+      name: product.name,
+      audience: product.audience,
+      totalSessions: product.totalSessions,
+      validityDays: product.validityDays,
+      priceCents: product.priceCents,
+      enabled: product.enabled,
+      classes: product.classes.map((trainingClass) => ({
+        id: trainingClass.id,
+        name: trainingClass.name,
+        capacity: trainingClass.capacity,
+        active: trainingClass.active,
+        ...(administrator
+          ? {
+              coachId: trainingClass.coachId,
+              assistantId: trainingClass.assistantId,
+            }
+          : {}),
+      })),
+    }));
   }
 
   async listEnrollments(actor: AuthUser, all = false) {
@@ -152,9 +199,10 @@ export class TrainingService {
         : { buyerId: actor.sub },
       include: {
         product: true,
-        order: { select: { parameterSnapshot: true, status: true } },
+        order: { select: { status: true } },
         class: true,
         student: true,
+        buyer: { select: { id: true, displayName: true } },
         attendances: {
           include: {
             session: true,
@@ -189,18 +237,96 @@ export class TrainingService {
           );
         }
       }
-      const parameterSnapshot = enrollment.order?.parameterSnapshot as
-        Record<string, unknown> | null | undefined;
+      const operational = all;
       return {
-        ...enrollment,
+        id: enrollment.id,
+        enrollmentNo: enrollment.enrollmentNo,
+        contractNo: enrollment.contractNo,
+        productId: enrollment.productId,
+        classId: enrollment.classId,
+        studentId: enrollment.studentId,
+        buyerId: operational ? enrollment.buyerId : undefined,
+        orderId: enrollment.orderId,
+        totalSessions: enrollment.totalSessions,
+        consumedSessions: enrollment.consumedSessions,
+        totalAmountCents: enrollment.totalAmountCents,
+        prepaidBalanceCents: enrollment.prepaidBalanceCents,
+        confirmedRevenueCents: enrollment.confirmedRevenueCents,
+        refundedCents: enrollment.refundedCents,
+        status: enrollment.status,
+        seatReservedUntil: enrollment.seatReservedUntil,
+        startsAt: enrollment.startsAt,
+        expiresAt: enrollment.expiresAt,
+        product: {
+          id: enrollment.product.id,
+          name: enrollment.product.name,
+          audience: enrollment.product.audience,
+          totalSessions: enrollment.product.totalSessions,
+          validityDays: enrollment.product.validityDays,
+          priceCents: enrollment.product.priceCents,
+        },
+        class: enrollment.class
+          ? {
+              id: enrollment.class.id,
+              name: enrollment.class.name,
+              capacity: enrollment.class.capacity,
+              active: enrollment.class.active,
+            }
+          : null,
+        student: enrollment.student
+          ? {
+              id: enrollment.student.id,
+              displayName: enrollment.student.displayName,
+            }
+          : null,
+        buyer: operational ? enrollment.buyer : undefined,
+        order: enrollment.order ? { status: enrollment.order.status } : null,
+        attendances: enrollment.attendances.map((attendance) => ({
+          id: attendance.id,
+          sessionId: attendance.sessionId,
+          enrollmentId: attendance.enrollmentId,
+          status: attendance.status,
+          consumedSessions: attendance.consumedSessions,
+          confirmedRevenueCents: attendance.confirmedRevenueCents,
+          growthPointsAwarded: attendance.growthPointsAwarded,
+          feedback: attendance.feedback,
+          checkedInAt: attendance.checkedInAt,
+          consumedAt: attendance.consumedAt,
+          ...(operational
+            ? {
+                operatorId: attendance.operatorId,
+                revenueRecognitions: attendance.revenueRecognitions.map(
+                  (recognition) => ({
+                    id: recognition.id,
+                    type: recognition.type,
+                    sequence: recognition.sequence,
+                    effectiveRevenueCents: recognition.effectiveRevenueCents,
+                    reversedBy: recognition.reversedBy
+                      ? {
+                          id: recognition.reversedBy.id,
+                          type: recognition.reversedBy.type,
+                          sequence: recognition.reversedBy.sequence,
+                        }
+                      : null,
+                    createdAt: recognition.createdAt,
+                  }),
+                ),
+              }
+            : {}),
+          session: {
+            id: attendance.session.id,
+            classId: attendance.session.classId,
+            startsAt: attendance.session.startsAt,
+            endsAt: attendance.session.endsAt,
+            status: attendance.session.status,
+          },
+        })),
         regulatoryWarnings: warnings,
-        youthRegulatorySnapshot:
-          parameterSnapshot?.youthRegulatoryValidation ?? null,
       };
     });
   }
 
-  listSessions(actor?: AuthUser) {
+  async listSessions(actor?: AuthUser) {
     const coachScope =
       actor?.roles.includes(AppRole.COACH) &&
       !actor.roles.some((role) =>
@@ -211,7 +337,7 @@ export class TrainingService {
           AppRole.FRONT_DESK,
         ].includes(role as never),
       );
-    return this.prisma.trainingSession.findMany({
+    const sessions = await this.prisma.trainingSession.findMany({
       where: coachScope
         ? {
             class: {
@@ -235,6 +361,51 @@ export class TrainingService {
       orderBy: { startsAt: 'desc' },
       take: 100,
     });
+    return sessions.map((session) => ({
+      id: session.id,
+      classId: session.classId,
+      startsAt: session.startsAt,
+      endsAt: session.endsAt,
+      status: session.status,
+      courtCount: session.courtCount,
+      occupiedCourtHours: session.occupiedCourtHours,
+      note: session.note,
+      class: {
+        id: session.class.id,
+        name: session.class.name,
+        capacity: session.class.capacity,
+        active: session.class.active,
+        product: {
+          id: session.class.product.id,
+          name: session.class.product.name,
+          audience: session.class.product.audience,
+        },
+      },
+      attendances: session.attendances.map((attendance) => ({
+        id: attendance.id,
+        sessionId: attendance.sessionId,
+        enrollmentId: attendance.enrollmentId,
+        status: attendance.status,
+        consumedSessions: attendance.consumedSessions,
+        confirmedRevenueCents: attendance.confirmedRevenueCents,
+        growthPointsAwarded: attendance.growthPointsAwarded,
+        feedback: attendance.feedback,
+        checkedInAt: attendance.checkedInAt,
+        consumedAt: attendance.consumedAt,
+        enrollment: {
+          id: attendance.enrollment.id,
+          enrollmentNo: attendance.enrollment.enrollmentNo,
+          status: attendance.enrollment.status,
+          student: attendance.enrollment.student
+            ? {
+                id: attendance.enrollment.student.id,
+                displayName: attendance.enrollment.student.displayName,
+              }
+            : null,
+          buyer: attendance.enrollment.buyer,
+        },
+      })),
+    }));
   }
 
   async createProduct(dto: CreateTrainingProductDto, actor: AuthUser) {
@@ -705,7 +876,7 @@ export class TrainingService {
   }
 
   async purchase(dto: PurchaseTrainingDto, actor: AuthUser) {
-    return executeOrderCreation(this.prisma, {
+    const order = await executeOrderCreation(this.prisma, {
       memberId: actor.sub,
       creationIdempotencyKey: dto.creationIdempotencyKey,
       command: {
@@ -722,6 +893,7 @@ export class TrainingService {
         }),
       create: (creation) => this.purchaseOnce(dto, actor, creation),
     });
+    return orderResponse(order);
   }
 
   private async purchaseOnce(
@@ -924,12 +1096,12 @@ export class TrainingService {
       });
       if (!existing)
         throw new ConflictException('培训课次幂等记录对应的对象不存在');
-      return existing;
+      return trainingSessionCommandResponse(existing);
     }
     const occupiedCourtHours =
       courtIds.length * ((endsAt.getTime() - startsAt.getTime()) / 3_600_000);
 
-    return this.prisma.$transaction(
+    const session = await this.prisma.$transaction(
       async (tx) => {
         const concurrentReplay = await this.findTrainingCommandReplay(
           tx,
@@ -1051,6 +1223,7 @@ export class TrainingService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+    return trainingSessionCommandResponse(session);
   }
 
   /**
@@ -1089,7 +1262,7 @@ export class TrainingService {
       throw new ForbiddenException('仅教练可提交消课建议');
     }
 
-    return this.prisma.$transaction(
+    const attendance = await this.prisma.$transaction(
       async (tx) => {
         const attendance = await tx.trainingAttendance.findUnique({
           where: {
@@ -1161,11 +1334,7 @@ export class TrainingService {
           if (attendance.operatorId !== actor.sub) {
             throw new ConflictException('该课次已有其他教练提交消课建议');
           }
-          return {
-            ...attendance,
-            workflowStatus: 'PENDING_CONFIRMATION' as const,
-            proposedById: attendance.operatorId,
-          };
+          return attendance;
         }
         if (enrollment.order?.status === OrderStatus.REFUND_PENDING) {
           throw new ConflictException(
@@ -1202,14 +1371,11 @@ export class TrainingService {
             } as never,
           },
         });
-        return {
-          ...updated,
-          workflowStatus: 'PENDING_CONFIRMATION' as const,
-          proposedById: actor.sub,
-        };
+        return updated;
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+    return trainingConsumeProposalResponse(attendance);
   }
 
   /**
@@ -1239,7 +1405,7 @@ export class TrainingService {
       reason,
     });
 
-    return this.prisma.$transaction(
+    const recognition = await this.prisma.$transaction(
       async (tx) => {
         const attendance = await tx.trainingAttendance.findUnique({
           where: {
@@ -1523,6 +1689,7 @@ export class TrainingService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+    return trainingConsumeConfirmationResponse(recognition);
   }
 
   /**
@@ -1609,7 +1776,8 @@ export class TrainingService {
         ) {
           throw new ConflictException('当前出勤状态已锁定，请提交更正申请');
         }
-        if (attendance.status === nextStatus) return attendance;
+        if (attendance.status === nextStatus)
+          return trainingAttendanceCommandResponse(attendance);
 
         const feedback =
           dto.feedback?.trim() || attendance.feedback || undefined;
@@ -1662,7 +1830,7 @@ export class TrainingService {
             } as never,
           },
         });
-        return updated;
+        return trainingAttendanceCommandResponse(updated);
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -1706,11 +1874,7 @@ export class TrainingService {
         this.assertAttendanceOperator(original.session.class, actor);
 
         if (original.status === AttendanceStatus.MADE_UP) {
-          return {
-            ...original,
-            workflowStatus: 'MAKEUP_ALREADY_SCHEDULED' as const,
-            makeupSessionId: dto.makeupSessionId,
-          };
+          return trainingMakeupCommandResponse(original, dto.makeupSessionId);
         }
         if (
           original.status !== AttendanceStatus.MAKEUP_REQUIRED &&
@@ -1778,12 +1942,7 @@ export class TrainingService {
             } as never,
           },
         });
-        return {
-          ...updated,
-          workflowStatus: 'MAKEUP_SCHEDULED' as const,
-          makeupSessionId: makeupSession.id,
-          targetAttendanceId: target.id,
-        };
+        return trainingMakeupCommandResponse(updated, makeupSession.id);
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -1860,7 +2019,7 @@ export class TrainingService {
           objectId: sessionId,
           commandHash,
         });
-        return session;
+        return trainingSessionCommandResponse(session);
       }
       const classAssignmentPresent =
         Object.prototype.hasOwnProperty.call(session.class, 'coachId') ||
@@ -1876,7 +2035,8 @@ export class TrainingService {
       ) {
         throw new ForbiddenException('教练只能结束自己负责班级的课次');
       }
-      if (session.status === TrainingSessionStatus.COMPLETED) return session;
+      if (session.status === TrainingSessionStatus.COMPLETED)
+        return trainingSessionCommandResponse(session);
       if (session.status === TrainingSessionStatus.CANCELLED)
         throw new ConflictException('已取消课次不能结课');
       const timeWindowPolicy = await assertOperationTimeWindow(tx, {
@@ -1935,11 +2095,11 @@ export class TrainingService {
           requestId,
         },
       });
-      return updated;
+      return trainingSessionCommandResponse(updated);
     });
   }
 
-  listConsumeCorrections(actor: AuthUser) {
+  async listConsumeCorrections(actor: AuthUser) {
     const allowed = [
       AppRole.COACH,
       AppRole.FRONT_DESK,
@@ -1951,7 +2111,7 @@ export class TrainingService {
       throw new ForbiddenException('当前角色无权查看消课冲正申请');
     }
     const coachScope = this.isCoachOnly(actor);
-    return this.prisma.trainingConsumeCorrection.findMany({
+    const corrections = await this.prisma.trainingConsumeCorrection.findMany({
       where: coachScope
         ? {
             attendance: {
@@ -1964,12 +2124,49 @@ export class TrainingService {
           }
         : undefined,
       include: {
-        recognition: true,
-        reversalRecognition: true,
+        recognition: {
+          select: {
+            id: true,
+            type: true,
+            sequence: true,
+            effectiveRevenueCents: true,
+            createdAt: true,
+          },
+        },
+        reversalRecognition: {
+          select: {
+            id: true,
+            type: true,
+            sequence: true,
+            effectiveRevenueCents: true,
+            createdAt: true,
+          },
+        },
         attendance: {
-          include: {
-            session: true,
-            enrollment: { include: { student: true } },
+          select: {
+            id: true,
+            status: true,
+            consumedSessions: true,
+            confirmedRevenueCents: true,
+            growthPointsAwarded: true,
+            feedback: true,
+            session: {
+              select: {
+                id: true,
+                startsAt: true,
+                endsAt: true,
+                status: true,
+                class: { select: { id: true, name: true } },
+              },
+            },
+            enrollment: {
+              select: {
+                id: true,
+                status: true,
+                student: { select: { id: true, displayName: true } },
+                buyer: { select: { id: true, displayName: true } },
+              },
+            },
           },
         },
         requestedBy: { select: { id: true, displayName: true } },
@@ -1977,6 +2174,44 @@ export class TrainingService {
       },
       orderBy: { requestedAt: 'desc' },
     });
+    return corrections.map((correction) => ({
+      id: correction.id,
+      status: correction.status,
+      reason: correction.reason,
+      reviewReason: correction.reviewReason,
+      requestedAt: correction.requestedAt,
+      reviewedAt: correction.reviewedAt,
+      recognitionId: correction.recognitionId,
+      recognition: {
+        id: correction.recognition.id,
+        type: correction.recognition.type,
+        sequence: correction.recognition.sequence,
+        effectiveRevenueCents: correction.recognition.effectiveRevenueCents,
+        createdAt: correction.recognition.createdAt,
+      },
+      reversalRecognition: correction.reversalRecognition
+        ? {
+            id: correction.reversalRecognition.id,
+            type: correction.reversalRecognition.type,
+            sequence: correction.reversalRecognition.sequence,
+            effectiveRevenueCents:
+              correction.reversalRecognition.effectiveRevenueCents,
+            createdAt: correction.reversalRecognition.createdAt,
+          }
+        : null,
+      attendance: {
+        id: correction.attendance.id,
+        status: correction.attendance.status,
+        consumedSessions: correction.attendance.consumedSessions,
+        confirmedRevenueCents: correction.attendance.confirmedRevenueCents,
+        growthPointsAwarded: correction.attendance.growthPointsAwarded,
+        feedback: correction.attendance.feedback,
+        session: correction.attendance.session,
+        enrollment: correction.attendance.enrollment,
+      },
+      requestedBy: correction.requestedBy,
+      reviewedBy: correction.reviewedBy,
+    }));
   }
 
   async requestConsumeCorrection(
@@ -1992,7 +2227,9 @@ export class TrainingService {
       where: { requestIdempotencyKey: dto.idempotencyKey },
     });
     if (existing) {
-      return this.assertCorrectionRequestReplay(existing, dto, actor, reason);
+      return this.correctionCommandResponse(
+        this.assertCorrectionRequestReplay(existing, dto, actor, reason),
+      );
     }
     try {
       return await this.prisma.$transaction(
@@ -2065,7 +2302,7 @@ export class TrainingService {
               requestId: dto.idempotencyKey,
             },
           });
-          return correction;
+          return this.correctionCommandResponse(correction);
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -2079,11 +2316,13 @@ export class TrainingService {
             where: { requestIdempotencyKey: dto.idempotencyKey },
           });
         if (duplicate)
-          return this.assertCorrectionRequestReplay(
-            duplicate,
-            dto,
-            actor,
-            reason,
+          return this.correctionCommandResponse(
+            this.assertCorrectionRequestReplay(
+              duplicate,
+              dto,
+              actor,
+              reason,
+            ),
           );
         const active = await this.prisma.trainingConsumeCorrection.findFirst({
           where: {
@@ -2116,12 +2355,14 @@ export class TrainingService {
         include: { recognition: true, reversalRecognition: true },
       });
     if (decisionReplay) {
-      return this.assertCorrectionDecisionReplay(
-        decisionReplay,
-        id,
-        TrainingConsumeCorrectionStatus.APPROVED,
-        actor,
-        reviewReason,
+      return this.correctionCommandResponse(
+        this.assertCorrectionDecisionReplay(
+          decisionReplay,
+          id,
+          TrainingConsumeCorrectionStatus.APPROVED,
+          actor,
+          reviewReason,
+        ),
       );
     }
     return this.prisma.$transaction(
@@ -2157,12 +2398,14 @@ export class TrainingService {
           if (correction.decisionIdempotencyKey !== dto.idempotencyKey) {
             throw new ConflictException('冲正申请已使用其他幂等键批准');
           }
-          return this.assertCorrectionDecisionReplay(
-            correction,
-            id,
-            TrainingConsumeCorrectionStatus.APPROVED,
-            actor,
-            reviewReason,
+          return this.correctionCommandResponse(
+            this.assertCorrectionDecisionReplay(
+              correction,
+              id,
+              TrainingConsumeCorrectionStatus.APPROVED,
+              actor,
+              reviewReason,
+            ),
           );
         }
         if (correction.status !== TrainingConsumeCorrectionStatus.REQUESTED) {
@@ -2427,7 +2670,7 @@ export class TrainingService {
             requestId: dto.idempotencyKey,
           },
         });
-        return approved;
+        return this.correctionCommandResponse(approved);
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -2447,12 +2690,14 @@ export class TrainingService {
         where: { decisionIdempotencyKey: dto.idempotencyKey },
       });
     if (decisionReplay) {
-      return this.assertCorrectionDecisionReplay(
-        decisionReplay,
-        id,
-        TrainingConsumeCorrectionStatus.REJECTED,
-        actor,
-        reviewReason,
+      return this.correctionCommandResponse(
+        this.assertCorrectionDecisionReplay(
+          decisionReplay,
+          id,
+          TrainingConsumeCorrectionStatus.REJECTED,
+          actor,
+          reviewReason,
+        ),
       );
     }
     return this.prisma.$transaction(async (tx) => {
@@ -2464,12 +2709,14 @@ export class TrainingService {
         if (correction.decisionIdempotencyKey !== dto.idempotencyKey) {
           throw new ConflictException('冲正申请已使用其他幂等键驳回');
         }
-        return this.assertCorrectionDecisionReplay(
-          correction,
-          id,
-          TrainingConsumeCorrectionStatus.REJECTED,
-          actor,
-          reviewReason,
+        return this.correctionCommandResponse(
+          this.assertCorrectionDecisionReplay(
+            correction,
+            id,
+            TrainingConsumeCorrectionStatus.REJECTED,
+            actor,
+            reviewReason,
+          ),
         );
       }
       if (correction.status !== TrainingConsumeCorrectionStatus.REQUESTED) {
@@ -2503,7 +2750,7 @@ export class TrainingService {
           requestId: dto.idempotencyKey,
         },
       });
-      return rejected;
+      return this.correctionCommandResponse(rejected);
     });
   }
 
@@ -2706,7 +2953,7 @@ export class TrainingService {
         objectId: { in: settlements.map((settlement) => settlement.id) },
         action: { startsWith: 'TRAINING_SETTLEMENT_' },
       },
-      include: { actor: { select: { id: true, displayName: true } } },
+      include: { actor: { select: { displayName: true } } },
       orderBy: { createdAt: 'asc' },
     });
     return settlements.map((settlement) => {
@@ -2716,20 +2963,31 @@ export class TrainingService {
       const creator = history.find(
         (audit) => audit.action === 'TRAINING_SETTLEMENT_CREATED',
       );
-      return {
-        ...settlement,
-        createdById: creator?.actorId ?? null,
-        createdBy: creator?.actor ?? null,
-        workflowHistory: history.map((audit) => ({
-          action: audit.action,
-          actorId: audit.actorId,
-          actorName: audit.actor?.displayName ?? null,
-          reason: audit.reason,
-          oldValue: audit.oldValue,
-          newValue: audit.newValue,
-          at: audit.createdAt,
-        })),
-      };
+      const workflowHistory = history.map((audit) => ({
+        action: audit.action,
+        actor: audit.actor?.displayName ?? null,
+        reason: audit.reason,
+        from:
+          audit.oldValue &&
+          typeof audit.oldValue === 'object' &&
+          !Array.isArray(audit.oldValue) &&
+          'status' in audit.oldValue
+            ? String(audit.oldValue.status)
+            : null,
+        to:
+          audit.newValue &&
+          typeof audit.newValue === 'object' &&
+          !Array.isArray(audit.newValue) &&
+          'status' in audit.newValue
+            ? String(audit.newValue.status)
+            : null,
+        at: audit.createdAt,
+      }));
+      return trainingSettlementListResponse(settlement, {
+        isOwnCreator: creator?.actorId === actor.sub,
+        createdByDisplayName: creator?.actor?.displayName ?? null,
+        workflowHistory,
+      });
     });
   }
 
@@ -3106,6 +3364,26 @@ export class TrainingService {
         ).includes(role),
       )
     );
+  }
+
+  private correctionCommandResponse<
+    T extends {
+      id: string;
+      status: TrainingConsumeCorrectionStatus;
+      reason: string;
+      reviewReason?: string | null;
+      requestedAt: Date;
+      reviewedAt?: Date | null;
+    },
+  >(correction: T) {
+    return {
+      id: correction.id,
+      status: correction.status,
+      reason: correction.reason,
+      reviewReason: correction.reviewReason ?? null,
+      requestedAt: correction.requestedAt,
+      reviewedAt: correction.reviewedAt ?? null,
+    };
   }
 
   private assertCorrectionRequestReplay<

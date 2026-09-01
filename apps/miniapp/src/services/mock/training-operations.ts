@@ -235,7 +235,36 @@ const person = (id: string | null) => {
   return known[id] ? { id, displayName: known[id] } : null;
 };
 
-const trialView = (trial: any) => {
+const youthRulePublicView = (rule: any) => ({
+  id: rule.id,
+  version: rule.version,
+  status: rule.status,
+  maxTotalSessions: rule.maxTotalSessions,
+  maxValidityDays: rule.maxValidityDays,
+  maxContractAmountCents: rule.maxContractAmountCents,
+  warningThresholdDays: rule.warningThresholdDays,
+  hardBlock: rule.hardBlock,
+  effectiveFrom: rule.effectiveFrom,
+  effectiveTo: rule.effectiveTo || null,
+});
+
+const youthRuleManagementView = (rule: any) => {
+  const requestedBy = person(rule.requestedById);
+  const reviewedBy = person(rule.reviewedById);
+  return {
+    ...youthRulePublicView(rule),
+    requestReason: rule.requestReason,
+    reviewReason: rule.reviewReason || null,
+    reviewedAt: rule.reviewedAt || null,
+    createdAt: rule.createdAt,
+    updatedAt: rule.updatedAt,
+    isOwnRequester: rule.requestedById === mockUser().id,
+    requestedBy: requestedBy ? { displayName: requestedBy.displayName } : null,
+    reviewedBy: reviewedBy ? { displayName: reviewedBy.displayName } : null,
+  };
+};
+
+const trialView = (trial: any, management = true) => {
   const product = getTrainingProducts().find(
     (item) => item.id === trial.productId,
   );
@@ -248,36 +277,106 @@ const trialView = (trial: any) => {
   const enrollment = getEnrollments().find(
     (item) => item.id === trial.convertedEnrollmentId,
   );
-  return {
-    ...trial,
-    lead: lead
+  const productView = (item: any) =>
+    item
       ? {
-          id: lead.id,
-          displayName: lead.displayName,
-          status: lead.status,
-          sourceChannel: lead.sourceChannel,
-          campaign: lead.campaign,
-          convertedMemberId: lead.convertedMemberId,
+          id: item.id,
+          name: item.name,
+          audience: item.audience,
+          totalSessions: item.totalSessions,
+          validityDays: item.validityDays,
+          priceCents: item.priceCents,
         }
-      : null,
+      : null;
+  return {
+    id: trial.id,
+    trialNo: trial.trialNo,
+    status: trial.status,
+    sourceChannel: trial.sourceChannel,
+    scheduledStartsAt: trial.scheduledStartsAt,
+    scheduledEndsAt: trial.scheduledEndsAt,
+    checkedInAt: trial.checkedInAt || null,
+    noShowAt: trial.noShowAt || null,
+    assessedAt: trial.assessedAt || null,
+    convertedAt: trial.convertedAt || null,
+    lostAt: trial.lostAt || null,
+    cancelledAt: trial.cancelledAt || null,
+    assessmentDimensions: trial.assessmentDimensions || null,
+    recommendation: trial.recommendation || null,
+    assessmentNote: trial.assessmentNote || null,
     student: student
       ? {
           id: student.id,
           displayName: student.displayName,
-          guardianId: student.guardianId,
         }
       : null,
     guardian: person(trial.guardianId),
     member: person(trial.memberId),
-    product,
-    class: trainingClass,
-    session,
+    product: productView(product),
+    class: trainingClass
+      ? {
+          id: trainingClass.id,
+          name: trainingClass.name,
+          capacity: trainingClass.capacity,
+          active: trainingClass.active !== false,
+          product: productView(trainingClass.product),
+        }
+      : null,
+    session: session
+      ? {
+          id: session.id,
+          classId: session.classId,
+          startsAt: session.startsAt,
+          endsAt: session.endsAt,
+          status: session.status,
+        }
+      : null,
     coach: person(trial.coachId),
-    convertedEnrollment: enrollment || null,
-    transitions: (trial.transitions || []).map((transition: any) => ({
-      ...transition,
-      actor: person(transition.actorId),
-    })),
+    ...(management
+      ? {
+          leadId: trial.leadId || null,
+          studentId: trial.studentId || null,
+          guardianId: trial.guardianId || null,
+          memberId: trial.memberId || null,
+          productId: trial.productId,
+          classId: trial.classId || null,
+          sessionId: trial.sessionId || null,
+          coachId: trial.coachId,
+          lead: lead
+            ? {
+                id: lead.id,
+                displayName: lead.displayName,
+                status: lead.status,
+                sourceChannel: lead.sourceChannel,
+                campaign: lead.campaign,
+                convertedMemberId: lead.convertedMemberId,
+              }
+            : null,
+          convertedEnrollment: enrollment
+            ? {
+                id: enrollment.id,
+                enrollmentNo: enrollment.enrollmentNo,
+                status: enrollment.status,
+                product: productView(enrollment.product),
+                student: enrollment.student
+                  ? {
+                      id: enrollment.student.id,
+                      displayName: enrollment.student.displayName,
+                    }
+                  : null,
+              }
+            : null,
+          transitions: (trial.transitions || []).map((transition: any) => ({
+            id: transition.id,
+            fromStatus: transition.fromStatus,
+            toStatus: transition.toStatus,
+            action: transition.action,
+            reason: transition.reason,
+            actor: person(transition.actorId),
+            createdAt: transition.createdAt,
+          })),
+        }
+      : {}),
   };
 };
 
@@ -346,7 +445,50 @@ export const validateMockYouthProduct = (
   };
 };
 
-export const decorateMockTrainingEnrollment = (enrollment: any) => {
+const mockTrainingProductSummary = (product: any) =>
+  product
+    ? {
+        id: product.id,
+        name: product.name,
+        audience: product.audience,
+        totalSessions: product.totalSessions,
+        validityDays: product.validityDays,
+        priceCents: product.priceCents,
+      }
+    : null;
+
+export const mockTrainingProductView = (
+  product: any,
+  options: { administrator?: boolean; coachOnly?: boolean } = {},
+) => ({
+  ...mockTrainingProductSummary(product),
+  enabled: product.enabled !== false,
+  classes: (product.classes || [])
+    .filter(
+      (trainingClass: any) =>
+        trainingClass.active !== false &&
+        (!options.coachOnly ||
+          trainingClass.coachId === mockUser().id ||
+          trainingClass.assistantId === mockUser().id),
+    )
+    .map((trainingClass: any) => ({
+      id: trainingClass.id,
+      name: trainingClass.name,
+      capacity: trainingClass.capacity,
+      active: trainingClass.active !== false,
+      ...(options.administrator
+        ? {
+            coachId: trainingClass.coachId || null,
+            assistantId: trainingClass.assistantId || null,
+          }
+        : {}),
+    })),
+});
+
+export const decorateMockTrainingEnrollment = (
+  enrollment: any,
+  operational = false,
+) => {
   const warnings: string[] = [];
   if (enrollment.product?.audience === "YOUTH") {
     const remainingDays = Math.ceil(
@@ -360,12 +502,144 @@ export const decorateMockTrainingEnrollment = (enrollment: any) => {
       );
   }
   const order = getOrders().find((item) => item.id === enrollment.orderId);
+  const product =
+    enrollment.product ||
+    getTrainingProducts().find((item) => item.id === enrollment.productId);
+  const trainingClass = classContext(enrollment.classId);
+  const student = getStudents().find((item) => item.id === enrollment.studentId);
   return {
-    ...enrollment,
-    order: order
-      ? { parameterSnapshot: order.parameterSnapshot, status: order.status }
-      : enrollment.order,
+    id: enrollment.id,
+    enrollmentNo: enrollment.enrollmentNo,
+    contractNo: enrollment.contractNo,
+    productId: enrollment.productId || product?.id,
+    classId: enrollment.classId || trainingClass?.id || null,
+    studentId: enrollment.studentId || null,
+    ...(operational ? { buyerId: enrollment.buyerId || null } : {}),
+    orderId: enrollment.orderId || null,
+    totalSessions: enrollment.totalSessions,
+    consumedSessions: Number(
+      enrollment.consumedSessions ?? enrollment.usedSessions ?? 0,
+    ),
+    totalAmountCents:
+      enrollment.totalAmountCents ?? product?.priceCents ?? 0,
+    prepaidBalanceCents: enrollment.prepaidBalanceCents ?? 0,
+    confirmedRevenueCents: enrollment.confirmedRevenueCents ?? 0,
+    refundedCents: enrollment.refundedCents ?? 0,
+    status: enrollment.status,
+    seatReservedUntil: enrollment.seatReservedUntil || null,
+    startsAt: enrollment.startsAt || null,
+    expiresAt: enrollment.expiresAt,
+    product: mockTrainingProductSummary(product),
+    class: trainingClass
+      ? {
+          id: trainingClass.id,
+          name: trainingClass.name,
+          capacity: trainingClass.capacity,
+          active: trainingClass.active !== false,
+        }
+      : null,
+    student: student
+      ? { id: student.id, displayName: student.displayName }
+      : enrollment.student
+        ? {
+            id: enrollment.student.id,
+            displayName: enrollment.student.displayName,
+          }
+        : null,
+    ...(operational
+      ? {
+          buyer: enrollment.buyer
+            ? {
+                id: enrollment.buyer.id || enrollment.buyerId,
+                displayName: enrollment.buyer.displayName,
+              }
+            : person(enrollment.buyerId),
+        }
+      : {}),
+    order: order ? { status: order.status } : null,
+    attendances: (enrollment.attendances || []).map((attendance: any) => {
+      const session = getTrainingSessions().find(
+        (item) => item.id === attendance.sessionId,
+      );
+      return {
+        id: attendance.id,
+        sessionId: attendance.sessionId,
+        enrollmentId: attendance.enrollmentId || enrollment.id,
+        status: attendance.status,
+        consumedSessions: attendance.consumedSessions || 0,
+        confirmedRevenueCents: attendance.confirmedRevenueCents || 0,
+        growthPointsAwarded: attendance.growthPointsAwarded || 0,
+        feedback: attendance.feedback || null,
+        checkedInAt: attendance.checkedInAt || null,
+        consumedAt: attendance.consumedAt || null,
+        ...(operational
+          ? {
+              operatorId: attendance.operatorId || null,
+              revenueRecognitions: (attendance.revenueRecognitions || []).map(
+                (recognition: any) => ({
+                  id: recognition.id,
+                  type: recognition.type,
+                  sequence: recognition.sequence,
+                  effectiveRevenueCents: recognition.effectiveRevenueCents,
+                  reversedBy: recognition.reversedBy
+                    ? {
+                        id: recognition.reversedBy.id,
+                        type: recognition.reversedBy.type,
+                        sequence: recognition.reversedBy.sequence,
+                      }
+                    : null,
+                  createdAt: recognition.createdAt,
+                }),
+              ),
+            }
+          : {}),
+        session: session
+          ? {
+              id: session.id,
+              classId: session.classId,
+              startsAt: session.startsAt,
+              endsAt: session.endsAt,
+              status: session.status,
+            }
+          : null,
+      };
+    }),
     regulatoryWarnings: warnings,
+  };
+};
+
+export const mockTrainingSessionView = (session: any) => {
+  const trainingClass = classContext(session.classId) || session.class;
+  return {
+    id: session.id,
+    classId: session.classId,
+    startsAt: session.startsAt,
+    endsAt: session.endsAt,
+    status: session.status,
+    courtCount: session.courtCount ?? (session.courtIds || []).length,
+    occupiedCourtHours: session.occupiedCourtHours,
+    note: session.note || null,
+    class: trainingClass
+      ? {
+          id: trainingClass.id || session.classId,
+          name: trainingClass.name,
+          capacity: trainingClass.capacity,
+          active: trainingClass.active !== false,
+          product: mockTrainingProductSummary(trainingClass.product),
+        }
+      : null,
+    attendances: (session.attendances || []).map((attendance: any) => ({
+      id: attendance.id,
+      sessionId: attendance.sessionId || session.id,
+      enrollmentId: attendance.enrollmentId,
+      status: attendance.status,
+      consumedSessions: attendance.consumedSessions || 0,
+      confirmedRevenueCents: attendance.confirmedRevenueCents || 0,
+      growthPointsAwarded: attendance.growthPointsAwarded || 0,
+      feedback: attendance.feedback || null,
+      checkedInAt: attendance.checkedInAt || null,
+      consumedAt: attendance.consumedAt || null,
+    })),
   };
 };
 
@@ -802,7 +1076,7 @@ const createYouthRule = (data: any) => {
   if (replay) {
     if (replay.requestedById !== mockUser().id || replay.commandHash !== hash)
       throw new Error("监管规则制单幂等键已用于其他命令");
-    return replay;
+    return youthRuleManagementView(replay);
   }
   if (!Number.isFinite(effectiveFrom.getTime()) || effectiveFrom <= new Date())
     throw new Error("监管规则生效时间必须晚于当前时间，以便完成异人复核");
@@ -836,7 +1110,7 @@ const createYouthRule = (data: any) => {
     requestId: idempotencyKey,
     newValue: { status: rule.status, version: rule.version, commandHash: hash },
   });
-  return rule;
+  return youthRuleManagementView(rule);
 };
 
 const decideYouthRule = (
@@ -866,7 +1140,7 @@ const decideYouthRule = (
       replay.decisionCommandHash !== hash
     )
       throw new Error("监管规则复核幂等键已用于其他决定");
-    return replay;
+    return youthRuleManagementView(replay);
   }
   const rule = rules.find((item) => item.id === ruleId);
   if (!rule) throw new Error("青少年监管规则不存在");
@@ -925,7 +1199,7 @@ const decideYouthRule = (
     oldValue: { status: before },
     newValue: { status: target, version: rule.version, decisionCommandHash: hash },
   });
-  return rule;
+  return youthRuleManagementView(rule);
 };
 
 const updateTrainingProduct = (productId: string, data: any) => {
@@ -1010,7 +1284,7 @@ export function routeMockTrainingOperations(
           (trial) =>
             trial.memberId === userId || trial.guardianId === userId,
         )
-        .map(trialView),
+        .map((trial) => trialView(trial, false)),
     };
   }
   if (url === "/training/trials" && method === "GET") {
@@ -1024,7 +1298,7 @@ export function routeMockTrainingOperations(
             (!data.status || trial.status === data.status) &&
             (!coachOnly || trial.coachId === mockUser().id),
         )
-        .map(trialView),
+        .map((trial) => trialView(trial)),
     };
   }
   if (url === "/training/trials" && method === "POST")
@@ -1037,15 +1311,20 @@ export function routeMockTrainingOperations(
       handled: true,
       value: transitionTrial(trialAction[1], trialAction[2], data),
     };
-  if (url === "/training/youth-rules/active" && method === "GET")
-    return { handled: true, value: activeMockYouthTrainingRule() };
+  if (url === "/training/youth-rules/active" && method === "GET") {
+    const activeRule = activeMockYouthTrainingRule();
+    return {
+      handled: true,
+      value: activeRule ? youthRulePublicView(activeRule) : null,
+    };
+  }
   if (url === "/training/youth-rules" && method === "GET") {
     requireRole("ADMIN", "SUPER_ADMIN");
     return {
       handled: true,
-      value: getYouthTrainingRules().filter(
-        (rule) => !data.status || rule.status === data.status,
-      ),
+      value: getYouthTrainingRules()
+        .filter((rule) => !data.status || rule.status === data.status)
+        .map(youthRuleManagementView),
     };
   }
   if (url === "/training/youth-rules" && method === "POST")

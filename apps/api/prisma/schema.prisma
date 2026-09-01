@@ -487,8 +487,8 @@ model User {
   rechargePlanTransitions             RechargePlanTransition[]          @relation("RechargePlanTransitionActor")
   createdMembershipProducts           MembershipProduct[]               @relation("MembershipProductCreator")
   membershipProductTransitions        MembershipProductTransition[]     @relation("MembershipProductTransitionActor")
-  createdPriceRules                   PriceRule[]                        @relation("PriceRuleCreator")
-  priceRuleTransitions                PriceRuleTransition[]              @relation("PriceRuleTransitionActor")
+  createdPriceRules                   PriceRule[]                       @relation("PriceRuleCreator")
+  priceRuleTransitions                PriceRuleTransition[]             @relation("PriceRuleTransitionActor")
   courtBookings                       CourtBooking[]                    @relation("MemberBookings")
   fulfilledCourtBookings              CourtBooking[]                    @relation("CourtBookingFulfiller")
   courtClosuresCreated                CourtClosure[]                    @relation("CourtClosureCreator")
@@ -499,6 +499,7 @@ model User {
   hostRewards                         HostReward[]                      @relation("HostRewards")
   gameRegistrations                   GameRegistration[]
   eventCaptains                       EventTeam[]                       @relation("EventCaptains")
+  eventPartnerInvites                 EventPartnerInvite[]              @relation("EventPartnerInviteIssuer")
   cancelledEventTeams                 EventTeam[]                       @relation("EventTeamCanceller")
   cancelledEvents                     Event[]                           @relation("EventCanceller")
   trainingPurchases                   TrainingEnrollment[]              @relation("TrainingPurchases")
@@ -539,6 +540,7 @@ model User {
   signedEventPrizes                   EventPrizeAward[]                 @relation("EventPrizeSigner")
   referralRewardsGiven                ReferralReward[]                  @relation("RewardReferrer")
   referralRewardsEarned               ReferralReward[]                  @relation("RewardNewUser")
+  referralInvites                     ReferralInvite[]                  @relation("ReferralInviteIssuer")
   exportJobs                          ExportJob[]
   dataErasureRequests                 DataErasureRequest[]              @relation("DataErasureRequester")
   reviewedDataErasureRequests         DataErasureRequest[]              @relation("DataErasureReviewer")
@@ -1287,6 +1289,7 @@ model Event {
   teams                EventTeam[]
   matches              EventMatch[]
   prizeAwards          EventPrizeAward[]
+  partnerInvites       EventPartnerInvite[]
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 
@@ -1339,6 +1342,7 @@ model EventTeam {
   matchesAsA             EventMatch[]       @relation("MatchTeamA")
   matchesAsB             EventMatch[]       @relation("MatchTeamB")
   prizeAwards            EventPrizeAward[]
+  partnerInvite          EventPartnerInvite?
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
 
@@ -1347,6 +1351,25 @@ model EventTeam {
   @@index([eventId, status, createdAt])
   @@index([status, paymentDueAt])
   @@index([cancelledById, cancelRequestedAt])
+}
+
+model EventPartnerInvite {
+  id             String     @id @default(cuid())
+  eventId        String
+  partnerId      String
+  tokenHash      String     @unique
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  consumedAt     DateTime?
+  consumedTeamId String?    @unique
+  event          Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  partner        User       @relation("EventPartnerInviteIssuer", fields: [partnerId], references: [id], onDelete: Cascade)
+  consumedTeam   EventTeam? @relation(fields: [consumedTeamId], references: [id], onDelete: SetNull)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([eventId, partnerId, expiresAt])
+  @@index([expiresAt, revokedAt, consumedAt])
 }
 
 model EventMatch {
@@ -1823,21 +1846,22 @@ model AllianceSettlement {
 }
 
 model ReferralReward {
-  id                String       @id @default(cuid())
-  referrerId        String
-  newUserId         String
-  triggerOrderId    String?
-  triggerType       String
-  rewardType        String
-  rewardValue       Int
-  status            RewardStatus @default(PENDING_OBSERVATION)
-  observationEndsAt DateTime
-  grantedAt         DateTime?
-  reversedAt        DateTime?
-  referrer          User         @relation("RewardReferrer", fields: [referrerId], references: [id], onDelete: Restrict)
-  newUser           User         @relation("RewardNewUser", fields: [newUserId], references: [id], onDelete: Restrict)
-  triggerOrder      Order?       @relation(fields: [triggerOrderId], references: [id], onDelete: SetNull)
-  createdAt         DateTime     @default(now())
+  id                 String       @id @default(cuid())
+  referrerId         String
+  newUserId          String
+  triggerOrderId     String?
+  triggerType        String
+  rewardType         String
+  rewardValue        Int
+  newUserRewardValue Int          @default(0)
+  status             RewardStatus @default(PENDING_OBSERVATION)
+  observationEndsAt  DateTime
+  grantedAt          DateTime?
+  reversedAt         DateTime?
+  referrer           User         @relation("RewardReferrer", fields: [referrerId], references: [id], onDelete: Restrict)
+  newUser            User         @relation("RewardNewUser", fields: [newUserId], references: [id], onDelete: Restrict)
+  triggerOrder       Order?       @relation(fields: [triggerOrderId], references: [id], onDelete: SetNull)
+  createdAt          DateTime     @default(now())
 
   // A reward is a property of the new member + business trigger, not of a
   // particular order.  Keeping triggerOrderId in the old key allowed two
@@ -1846,6 +1870,22 @@ model ReferralReward {
   // invariant is enforced independently at the database boundary.
   @@unique([newUserId, triggerType])
   @@index([referrerId, status])
+}
+
+model ReferralInvite {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  inviterId  String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  useCount   Int       @default(0)
+  lastUsedAt DateTime?
+  inviter    User      @relation("ReferralInviteIssuer", fields: [inviterId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([inviterId, expiresAt])
+  @@index([expiresAt, revokedAt])
 }
 
 model InventoryItem {

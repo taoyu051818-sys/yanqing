@@ -159,9 +159,22 @@ describe('EventsService prize inventory workflow', () => {
     };
     const service = new EventsService(prisma as never);
 
-    await expect(
-      service.issuePrize('event-1', issueDto(), eventManager),
-    ).resolves.toEqual(award);
+    const result = await service.issuePrize(
+      'event-1',
+      issueDto(),
+      eventManager,
+    );
+    expect(result).toMatchObject({
+      id: award.id,
+      awardName: award.awardName,
+      recipientNames: award.recipientNames,
+      quantity: award.quantity,
+      note: award.note,
+      status: award.status,
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /eventId|teamId|inventoryItemId|inventoryTransactionId|idempotencyKey|prizePoolSnapshot/,
+    );
     expect(tx.inventoryItem.updateMany).toHaveBeenCalledWith({
       where: { id: 'item-1', stock: 10 },
       data: { stock: 8 },
@@ -220,9 +233,21 @@ describe('EventsService prize inventory workflow', () => {
     };
     const service = new EventsService(prisma as never);
 
-    await expect(
-      service.issuePrize('event-1', issueDto(), eventManager),
-    ).resolves.toBe(existing);
+    const replay = await service.issuePrize(
+      'event-1',
+      issueDto(),
+      eventManager,
+    );
+    expect(replay).toMatchObject({
+      id: existing.id,
+      awardName: existing.awardName,
+      recipientNames: existing.recipientNames,
+      quantity: existing.quantity,
+      note: existing.note,
+    });
+    expect(JSON.stringify(replay)).not.toMatch(
+      /eventId|teamId|inventoryItemId|idempotencyKey/,
+    );
     expect(prisma.$transaction).not.toHaveBeenCalled();
     await expect(
       service.issuePrize('event-1', issueDto({ quantity: 3 }), eventManager),
@@ -326,7 +351,10 @@ describe('EventsService prize inventory workflow', () => {
       status: EventPrizeStatus.RECEIVED,
       receivedByName: '甲',
     });
-    expect(second).toBe(current);
+    expect(second).toEqual(first);
+    expect(JSON.stringify(second)).not.toMatch(
+      /eventId|receiptIdempotencyKey|signedById/,
+    );
     expect(tx.eventPrizeAward.updateMany).toHaveBeenCalledOnce();
     expect(tx.auditLog.create).toHaveBeenCalledOnce();
   });
@@ -349,17 +377,23 @@ describe('EventsService prize inventory workflow', () => {
     };
     const service = new EventsService(prisma as never);
 
-    await expect(
-      service.receivePrize(
-        'event-1',
-        'award-1',
-        {
-          receivedByName: '甲',
-          idempotencyKey: 'event-receipt-key-1',
-        },
-        warehouseOperator,
-      ),
-    ).resolves.toBe(received);
+    const result = await service.receivePrize(
+      'event-1',
+      'award-1',
+      {
+        receivedByName: '甲',
+        idempotencyKey: 'event-receipt-key-1',
+      },
+      warehouseOperator,
+    );
+    expect(result).toMatchObject({
+      id: received.id,
+      status: EventPrizeStatus.RECEIVED,
+      receivedByName: '甲',
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /eventId|receiptIdempotencyKey/,
+    );
     expect(prisma.eventPrizeAward.findUnique).not.toHaveBeenCalled();
   });
 });

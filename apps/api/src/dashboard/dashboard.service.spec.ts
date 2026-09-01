@@ -133,6 +133,7 @@ const makePrisma = () => ({
       { userId: 'member-2', subscriptions: [] },
     ]),
   },
+  auditLog: { count: vi.fn().mockResolvedValue(7) },
   eventTeam: {
     findMany: vi.fn().mockResolvedValue([
       {
@@ -219,23 +220,23 @@ const makePrisma = () => ({
     ]),
   },
   inventoryTransaction: {
-    findMany: vi
-      .fn()
-      .mockResolvedValue([
-        {
-          type: 'SALE_OUT',
-          quantity: -3,
-          unitCostCents: 1_000,
-        },
-        {
-          type: 'ADJUSTMENT',
-          quantity: 1,
-          unitCostCents: 1_000,
-        },
-      ]),
+    findMany: vi.fn().mockResolvedValue([
+      {
+        type: 'SALE_OUT',
+        quantity: -3,
+        unitCostCents: 1_000,
+      },
+      {
+        type: 'ADJUSTMENT',
+        quantity: 1,
+        unitCostCents: 1_000,
+      },
+    ]),
   },
   trainingSettlement: {
-    findMany: vi.fn().mockResolvedValue([{ id: 'settlement-1', status: 'SETTLED' }]),
+    findMany: vi
+      .fn()
+      .mockResolvedValue([{ id: 'settlement-1', status: 'SETTLED' }]),
   },
 })
 
@@ -284,6 +285,19 @@ describe('DashboardService', () => {
       directCostCents: 4_500,
       cashContributionMarginCents: 3_500,
       resourceEfficiencyCentsPerCourtHour: 1_750,
+    })
+    expect(result.marketing).toMatchObject({
+      directReferralBindings: 7,
+      directReferralConversions: 1,
+    })
+    expect(prisma.auditLog.count).toHaveBeenCalledWith({
+      where: {
+        action: 'DIRECT_REFERRAL_BOUND',
+        createdAt: {
+          gte: date('2026-08-29T16:00:00.000Z'),
+          lt: date('2026-08-30T16:00:00.000Z'),
+        },
+      },
     })
     expect(prisma.order.findMany.mock.calls[1]?.[0]).toMatchObject({
       where: {

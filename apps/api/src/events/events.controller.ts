@@ -10,6 +10,7 @@ import {
   CorrectScoreDto,
   CorrectEventPairingsDto,
   CreateEventDto,
+  EventPartnerInviteCodeDto,
   EventTeamCheckInDto,
   IssueEventPrizeDto,
   PublishEventDto,
@@ -28,6 +29,28 @@ export class EventsController {
   @Get()
   list() {
     return this.events.list();
+  }
+
+  @Get('managed')
+  @Roles(
+    AppRole.EVENT_MANAGER,
+    AppRole.FRONT_DESK,
+    AppRole.ADMIN,
+    AppRole.SUPER_ADMIN,
+  )
+  managedList() {
+    return this.events.managedList();
+  }
+
+  @Get('managed/:id')
+  @Roles(
+    AppRole.EVENT_MANAGER,
+    AppRole.FRONT_DESK,
+    AppRole.ADMIN,
+    AppRole.SUPER_ADMIN,
+  )
+  managedDetail(@Param('id') id: string) {
+    return this.events.managedDetail(id);
   }
 
   @Get(':id/registration/me')
@@ -74,6 +97,23 @@ export class EventsController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.events.register(id, dto, actor);
+  }
+
+  @Post(':id/partner-invites')
+  createPartnerInvite(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.events.createPartnerInvite(id, actor);
+  }
+
+  @Post(':id/partner-invites/preview')
+  previewPartnerInvite(
+    @Param('id') id: string,
+    @Body() dto: EventPartnerInviteCodeDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.events.previewPartnerInvite(id, dto.partnerInviteCode, actor);
   }
 
   @Post(':id/promote-waitlist')

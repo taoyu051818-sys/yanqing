@@ -13,6 +13,7 @@ import type { AuthUser } from '../common/auth/auth-user.js'
 import { PrismaService } from '../database/prisma.service.js'
 import {
   AccountAdjustmentStatus,
+  AccountType,
   AccountTxnKind,
   AppRole,
   BusinessType,
@@ -42,6 +43,8 @@ import type {
 const LEAD_TERMINAL_STATUSES: LeadStatus[] = [LeadStatus.CONVERTED, LeadStatus.LOST, LeadStatus.ARCHIVED]
 const LEAD_WRITE_ROLES: AppRole[] = [AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN]
 const LEAD_VIEW_ROLES: AppRole[] = [...LEAD_WRITE_ROLES, AppRole.COACH]
+const referralInviteTokenHash = (value: string) =>
+  createHash('sha256').update(value).digest('hex')
 const ACTIVE_TRAINING_STATUSES: TrainingEnrollmentStatus[] = [
   TrainingEnrollmentStatus.ACTIVE,
   TrainingEnrollmentStatus.COMPLETED,
@@ -53,6 +56,79 @@ const FUNNEL_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.COMPLETED,
   OrderStatus.PARTIALLY_REFUNDED,
 ]
+const FRONT_DESK_ACCOUNT_TYPES: AccountType[] = [
+  AccountType.CASH_PRINCIPAL,
+  AccountType.GIFT_BALANCE,
+  AccountType.BADMINTON_COIN,
+]
+
+const maskPhone = (phone: string | null | undefined) => {
+  if (!phone) return null
+  if (phone.length <= 4) return '*'.repeat(phone.length)
+  if (phone.length <= 7) return `${phone.slice(0, 2)}***${phone.slice(-2)}`
+  return `${phone.slice(0, 3)}****${phone.slice(-4)}`
+}
+
+const frontDeskPaymentSummary = (
+  accounts: Array<{ type: AccountType; balance: number; frozenBalance: number }>,
+) => ({
+  storedValueAvailableCents: accounts
+    .filter((account) => ([AccountType.CASH_PRINCIPAL, AccountType.GIFT_BALANCE] as AccountType[]).includes(account.type))
+    .reduce((total, account) => total + Math.max(0, account.balance - account.frozenBalance), 0),
+  badmintonCoinAvailable: accounts
+    .filter((account) => account.type === AccountType.BADMINTON_COIN)
+    .reduce((total, account) => total + Math.max(0, account.balance - account.frozenBalance), 0),
+})
+
+const accountTransactionResponse = (transaction: any) => ({
+  id: transaction.id,
+  kind: transaction.kind,
+  amount: transaction.amount,
+  balanceBefore: transaction.balanceBefore,
+  balanceAfter: transaction.balanceAfter,
+  reasonCode: transaction.reasonCode,
+  reason: transaction.reason,
+  expiresAt: transaction.expiresAt ?? null,
+  createdAt: transaction.createdAt,
+  account: transaction.account ? { type: transaction.account.type } : undefined,
+  operator: transaction.operator
+    ? { displayName: transaction.operator.displayName }
+    : null,
+})
+
+const accountAdjustmentResponse = (request: any, actorId?: string) => ({
+  id: request.id,
+  amount: request.amount,
+  reason: request.reason,
+  status: request.status,
+  reviewReason: request.reviewReason ?? null,
+  reviewedAt: request.reviewedAt ?? null,
+  createdAt: request.createdAt,
+  updatedAt: request.updatedAt,
+  isOwnRequest: actorId ? request.requestedById === actorId : undefined,
+  account: request.account
+    ? {
+        type: request.account.type,
+        balance: request.account.balance,
+        frozenBalance: request.account.frozenBalance,
+        user: request.account.user
+          ? {
+              displayName: request.account.user.displayName,
+              phone: request.account.user.phone,
+            }
+          : undefined,
+      }
+    : undefined,
+  requestedBy: request.requestedBy
+    ? { displayName: request.requestedBy.displayName }
+    : undefined,
+  reviewedBy: request.reviewedBy
+    ? { displayName: request.reviewedBy.displayName }
+    : null,
+  transaction: request.transaction
+    ? accountTransactionResponse(request.transaction)
+    : null,
+})
 
 type FunnelBucket = {
   sourceChannel: SourceChannel
@@ -76,9 +152,13 @@ type FunnelBucket = {
 export class MembersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(query: MemberQueryDto, actor?: AuthUser) {
-    const coachOnly = Boolean(actor?.roles.includes(AppRole.COACH) &&
-      !actor.roles.some((role) => [AppRole.FRONT_DESK, AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never)))
+  async list(query: MemberQueryDto, actor: AuthUser) {
+    this.assertAnyRole(
+      actor,
+      [AppRole.FRONT_DESK, AppRole.COACH, AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN],
+      '无权查看会员目录',
+    )
+    const coachOnly = this.isCoachOnly(actor)
     const activeTrainingStatuses: TrainingEnrollmentStatus[] = [
       TrainingEnrollmentStatus.ACTIVE,
       TrainingEnrollmentStatus.COMPLETED,
@@ -98,7 +178,7 @@ export class MembersService {
         ],
       })
     }
-    if (coachOnly && actor) {
+    if (coachOnly) {
       conditions.push({
         OR: [
           {
@@ -134,7 +214,7 @@ export class MembersService {
       trainingPurchases: {
         where: {
           status: { in: activeTrainingStatuses },
-          class: { OR: [{ coachId: actor?.sub ?? '' }, { assistantId: actor?.sub ?? '' }] },
+          class: { OR: [{ coachId: actor.sub }, { assistantId: actor.sub }] },
         },
         select: {
           id: true,
@@ -155,7 +235,7 @@ export class MembersService {
           enrollments: {
             where: {
               status: { in: activeTrainingStatuses },
-              class: { OR: [{ coachId: actor?.sub ?? '' }, { assistantId: actor?.sub ?? '' }] },
+              class: { OR: [{ coachId: actor.sub }, { assistantId: actor.sub }] },
             },
             select: {
               id: true,
@@ -171,25 +251,70 @@ export class MembersService {
       },
     }
 
+    if (coachOnly) {
+      const [items, total] = await this.prisma.$transaction([
+        this.prisma.user.findMany({
+          where,
+          select: coachSelect,
+          orderBy: { createdAt: 'desc' },
+          skip: (query.page - 1) * query.pageSize,
+          take: query.pageSize,
+        }),
+        this.prisma.user.count({ where }),
+      ])
+      return {
+        items: items.map((item) => ({ ...item, privacyScope: 'COACH_ASSIGNED' as const })),
+        total,
+        page: query.page,
+        pageSize: query.pageSize,
+      }
+    }
+
+    // A directory lookup is not an account export. Return an explicit
+    // operational identity whitelist and load balances only from customer360.
+    // This also prevents openId/unionId from leaking through a whole-row User
+    // include when an employee opens the member picker.
+    const directorySelect = {
+      id: true,
+      displayName: true,
+      avatarUrl: true,
+      phone: true,
+      status: true,
+      createdAt: true,
+      memberProfile: {
+        select: {
+          level: true,
+          tags: true,
+          membershipExpiresAt: true,
+          isNewCustomer: true,
+          firstVisitAt: true,
+          lastVisitAt: true,
+          visitCount: true,
+        },
+      },
+    } satisfies Prisma.UserSelect
     const [items, total] = await this.prisma.$transaction([
-      coachOnly
-        ? this.prisma.user.findMany({
-            where,
-            select: coachSelect,
-            orderBy: { createdAt: 'desc' },
-            skip: (query.page - 1) * query.pageSize,
-            take: query.pageSize,
-          })
-        : this.prisma.user.findMany({
-            where,
-            include: { memberProfile: true, accounts: { orderBy: { type: 'asc' } } },
-            orderBy: { createdAt: 'desc' },
-            skip: (query.page - 1) * query.pageSize,
-            take: query.pageSize,
-          }),
+      this.prisma.user.findMany({
+        where,
+        select: directorySelect,
+        orderBy: { createdAt: 'desc' },
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
       this.prisma.user.count({ where }),
     ])
-    return { items, total, page: query.page, pageSize: query.pageSize }
+    const privacyScope = this.memberPrivacyScope(actor)
+    const revealPhone = privacyScope === 'ADMIN'
+    return {
+      items: items.map((item) => ({
+        ...item,
+        phone: revealPhone ? item.phone : maskPhone(item.phone),
+        privacyScope,
+      })),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+    }
   }
 
   async listLeads(query: LeadQueryDto, actor: AuthUser) {
@@ -666,17 +791,139 @@ export class MembersService {
       return {
         member: { id: member.id, displayName: member.displayName, avatarUrl: member.avatarUrl, phone: null, memberProfile: member.memberProfile },
         accounts: [], recentOrders: [], recentTraining: member.trainingPurchases,
-        recentGames: [], recentEvents: [], recentCoupons: [], financialsRedacted: true,
+        recentGames: [], recentEvents: [], recentCoupons: [],
+        privacyScope: 'COACH_ASSIGNED' as const,
+        financialsRedacted: true,
+        accountTypesLimited: true,
       }
     }
 
     this.assertAnyRole(actor, [AppRole.FRONT_DESK, AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN], '无权查看会员全景')
+    if (this.isFrontDeskLimited(actor)) {
+      const member = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          displayName: true,
+          avatarUrl: true,
+          phone: true,
+          status: true,
+          createdAt: true,
+          memberProfile: {
+            select: {
+              level: true,
+              tags: true,
+              membershipExpiresAt: true,
+              isNewCustomer: true,
+              firstVisitAt: true,
+              lastVisitAt: true,
+              visitCount: true,
+            },
+          },
+          referrer: { select: { displayName: true } },
+          accounts: {
+            where: { type: { in: FRONT_DESK_ACCOUNT_TYPES } },
+            select: { id: true, type: true, balance: true, frozenBalance: true },
+            orderBy: { type: 'asc' },
+          },
+          memberOrders: {
+            select: {
+              id: true,
+              orderNo: true,
+              businessType: true,
+              status: true,
+              title: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          },
+          trainingPurchases: {
+            select: {
+              id: true,
+              enrollmentNo: true,
+              status: true,
+              totalSessions: true,
+              consumedSessions: true,
+              expiresAt: true,
+              product: { select: { id: true, name: true } },
+              class: { select: { id: true, name: true } },
+              student: { select: { id: true, displayName: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          },
+          gameRegistrations: {
+            select: {
+              id: true,
+              status: true,
+              checkedInAt: true,
+              createdAt: true,
+              game: { select: { id: true, code: true, title: true, startsAt: true, status: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          },
+          eventCaptains: {
+            select: {
+              id: true,
+              name: true,
+              status: true,
+              finalRank: true,
+              createdAt: true,
+              event: { select: { id: true, code: true, name: true, startsAt: true, status: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          },
+          couponHoldings: {
+            select: {
+              id: true,
+              code: true,
+              status: true,
+              claimedAt: true,
+              redeemedAt: true,
+              expiresAt: true,
+              template: {
+                select: {
+                  id: true,
+                  name: true,
+                  benefitDescription: true,
+                  merchant: { select: { id: true, name: true } },
+                },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          },
+        },
+      })
+      if (!member) throw new NotFoundException('会员不存在')
+      const { accounts, memberOrders, trainingPurchases, gameRegistrations, eventCaptains, couponHoldings, ...basic } = member
+      return {
+        member: { ...basic, phone: maskPhone(basic.phone) },
+        accounts: [],
+        paymentSummary: frontDeskPaymentSummary(accounts),
+        recentOrders: memberOrders,
+        recentTraining: trainingPurchases,
+        recentGames: gameRegistrations,
+        recentEvents: eventCaptains,
+        recentCoupons: couponHoldings,
+        privacyScope: 'FRONT_DESK_LIMITED' as const,
+        financialsRedacted: true,
+        accountTypesLimited: true,
+      }
+    }
+
+    const privacyScope = this.memberPrivacyScope(actor)
     const member = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true, displayName: true, avatarUrl: true, phone: true, status: true, createdAt: true,
         memberProfile: true,
-        referrer: { select: { id: true, displayName: true } },
+        referrer: privacyScope === 'ADMIN'
+          ? { select: { id: true, displayName: true } }
+          : { select: { displayName: true } },
         accounts: { select: { id: true, type: true, balance: true, frozenBalance: true, updatedAt: true }, orderBy: { type: 'asc' } },
         memberOrders: {
           select: { id: true, orderNo: true, businessType: true, status: true, title: true, payableCents: true, paidCents: true, refundedCents: true, createdAt: true },
@@ -707,18 +954,28 @@ export class MembersService {
     if (!member) throw new NotFoundException('会员不存在')
     const { accounts, memberOrders, trainingPurchases, gameRegistrations, eventCaptains, couponHoldings, ...basic } = member
     return {
-      member: basic,
+      member: {
+        ...basic,
+        phone: privacyScope === 'ADMIN' ? basic.phone : maskPhone(basic.phone),
+      },
       accounts,
       recentOrders: memberOrders,
       recentTraining: trainingPurchases,
       recentGames: gameRegistrations,
       recentEvents: eventCaptains,
       recentCoupons: couponHoldings,
+      privacyScope,
       financialsRedacted: false,
+      accountTypesLimited: false,
     }
   }
 
   async profile(userId: string, actor: AuthUser) {
+    this.assertAnyRole(
+      actor,
+      [AppRole.FRONT_DESK, AppRole.COACH, AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN],
+      '无权查看会员档案',
+    )
     const privileged = actor.roles.some((role) =>
       ([AppRole.FRONT_DESK, AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN] as AppRole[]).includes(role),
     )
@@ -810,29 +1067,75 @@ export class MembersService {
       })
     }
 
-    return this.prisma.user.findUniqueOrThrow({
+    const privacyScope = this.memberPrivacyScope(actor)
+    const member = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      include: {
-        memberProfile: true,
-        accounts: { orderBy: { type: 'asc' } },
-        guardianStudents: true,
-        referrer: { select: { id: true, displayName: true } },
+      select: {
+        id: true,
+        displayName: true,
+        avatarUrl: true,
+        phone: true,
+        status: true,
+        primaryRole: true,
+        createdAt: true,
+        updatedAt: true,
+        memberProfile: {
+          select: {
+            level: true,
+            tags: true,
+            sourceChannel: true,
+            membershipExpiresAt: true,
+            isNewCustomer: true,
+            firstVisitAt: true,
+            lastVisitAt: true,
+            visitCount: true,
+          },
+        },
+        accounts: {
+          ...(privacyScope === 'FRONT_DESK_LIMITED'
+            ? { where: { type: { in: FRONT_DESK_ACCOUNT_TYPES } } }
+            : {}),
+          select: { id: true, type: true, balance: true, frozenBalance: true, updatedAt: true },
+          orderBy: { type: 'asc' },
+        },
+        guardianStudents: {
+          select: {
+            id: true,
+            displayName: true,
+            birthMonth: true,
+            guardianConsentStatus: true,
+          },
+        },
+        referrer: privacyScope === 'ADMIN'
+          ? { select: { id: true, displayName: true } }
+          : { select: { displayName: true } },
       },
     })
+    return {
+      ...member,
+      phone: privacyScope === 'ADMIN' ? member.phone : maskPhone(member.phone),
+      accounts: privacyScope === 'FRONT_DESK_LIMITED' ? [] : member.accounts,
+      paymentSummary: privacyScope === 'FRONT_DESK_LIMITED'
+        ? frontDeskPaymentSummary(member.accounts)
+        : undefined,
+      privacyScope,
+      accountTypesLimited: privacyScope === 'FRONT_DESK_LIMITED',
+    }
   }
 
-  accountTransactions(userId: string) {
-    return this.prisma.accountTransaction.findMany({
+  async accountTransactions(userId: string) {
+    const transactions = await this.prisma.accountTransaction.findMany({
       where: { account: { userId } },
       include: { account: { select: { type: true } }, operator: { select: { displayName: true } } },
       orderBy: { createdAt: 'desc' },
       take: 200,
     })
+    return transactions.map(accountTransactionResponse)
   }
 
-  accountAdjustmentRequests(query: AccountAdjustmentQueryDto, actor: AuthUser) {
+  async accountAdjustmentRequests(query: AccountAdjustmentQueryDto, actor: AuthUser) {
     this.assertAnyRole(actor, [AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN], '无权查看账户调整申请')
-    return this.prisma.accountAdjustmentRequest.findMany({
+    const requests = await this.prisma.accountAdjustmentRequest.findMany({
       where: query.status ? { status: query.status } : undefined,
       include: {
         account: { include: { user: { select: { id: true, displayName: true, phone: true } } } },
@@ -843,6 +1146,7 @@ export class MembersService {
       orderBy: { createdAt: 'desc' },
       take: 200,
     })
+    return requests.map((request) => accountAdjustmentResponse(request, actor.sub))
   }
 
   async adjustAccount(userId: string, dto: AdjustAccountDto, actor: AuthUser) {
@@ -872,10 +1176,10 @@ export class MembersService {
       return existing
     }
     const duplicate = await replay()
-    if (duplicate) return duplicate
+    if (duplicate) return accountAdjustmentResponse({ ...duplicate, account }, actor.sub)
 
     try {
-      return await this.prisma.$transaction(
+      const result = await this.prisma.$transaction(
         async (tx) => {
           const duplicateInTransaction = await tx.accountAdjustmentRequest.findUnique({
             where: { requestIdempotencyKey: requestKey },
@@ -911,6 +1215,7 @@ export class MembersService {
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       )
+      return accountAdjustmentResponse({ ...result, account }, actor.sub)
     } catch (error) {
       const target = error instanceof Prisma.PrismaClientKnownRequestError ? error.meta?.target : null
       if (
@@ -919,7 +1224,7 @@ export class MembersService {
         JSON.stringify(target).includes('requestIdempotencyKey')
       ) {
         const concurrent = await replay()
-        if (concurrent) return concurrent
+        if (concurrent) return accountAdjustmentResponse({ ...concurrent, account }, actor.sub)
       }
       throw error
     }
@@ -929,7 +1234,7 @@ export class MembersService {
     this.assertAnyRole(actor, [AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN], '无权复核账户调整申请')
     const reviewReason = dto.reason.trim()
     if (reviewReason.length < 2) throw new BadRequestException('复核原因至少需要2个字符')
-    return this.prisma.$transaction(
+    const result = await this.prisma.$transaction(
       async (tx) => {
         const request = await tx.accountAdjustmentRequest.findUnique({
           where: { id: requestId },
@@ -990,13 +1295,14 @@ export class MembersService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     )
+    return accountAdjustmentResponse(result, actor.sub)
   }
 
   async rejectAccountAdjustment(requestId: string, dto: ReviewAccountAdjustmentDto, actor: AuthUser) {
     this.assertAnyRole(actor, [AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN], '无权复核账户调整申请')
     const reviewReason = dto.reason.trim()
     if (reviewReason.length < 2) throw new BadRequestException('驳回原因至少需要2个字符')
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const request = await tx.accountAdjustmentRequest.findUnique({ where: { id: requestId } })
       if (!request) throw new NotFoundException('账户调整申请不存在')
       if (request.status === AccountAdjustmentStatus.REJECTED) return request
@@ -1029,10 +1335,14 @@ export class MembersService {
       })
       return rejected
     })
+    return accountAdjustmentResponse(result, actor.sub)
   }
 
   async bindReferral(dto: BindReferralDto, actor: AuthUser) {
     const userId = actor.sub
+    const inviteCode = dto.inviteCode.trim()
+    const inviteHash = referralInviteTokenHash(inviteCode)
+    const now = new Date()
     // Binding is an immutable, single-write relationship.  Perform the
     // validation and conditional update in one serializable transaction so
     // two first-login requests cannot race and silently choose different
@@ -1040,7 +1350,7 @@ export class MembersService {
     try {
       return await this.prisma.$transaction(
         async (tx) => {
-          const [user, referrer] = await Promise.all([
+          const [user, invite] = await Promise.all([
             tx.user.findUnique({
               where: { id: userId },
               select: {
@@ -1051,27 +1361,38 @@ export class MembersService {
                 memberProfile: { select: { id: true } },
               },
             }),
-            tx.user.findUnique({
-              where: { id: dto.referrerId },
+            tx.referralInvite.findUnique({
+              where: { tokenHash: inviteHash },
               select: {
                 id: true,
-                referrerId: true,
-                status: true,
-                deletedAt: true,
-                memberProfile: { select: { id: true } },
+                expiresAt: true,
+                revokedAt: true,
+                inviter: {
+                  select: {
+                    id: true,
+                    referrerId: true,
+                    status: true,
+                    deletedAt: true,
+                    memberProfile: { select: { id: true } },
+                  },
+                },
               },
             }),
           ])
           if (!user || user.status !== UserStatus.ACTIVE || user.deletedAt || !user.memberProfile) {
             throw new NotFoundException('会员不存在或已停用')
           }
+          if (!invite || invite.revokedAt || invite.expiresAt <= now) {
+            throw new BadRequestException('邀请码无效或已过期')
+          }
+          const referrer = invite.inviter
           if (!referrer || referrer.status !== UserStatus.ACTIVE || referrer.deletedAt || !referrer.memberProfile) {
             throw new NotFoundException('推荐人不存在或已停用')
           }
           try {
             validateDirectReferral({
               userId,
-              requestedReferrerId: dto.referrerId,
+              requestedReferrerId: referrer.id,
               existingReferrerId: user.referrerId,
             })
           } catch (error) {
@@ -1081,9 +1402,16 @@ export class MembersService {
 
           const changed = await tx.user.updateMany({
             where: { id: userId, referrerId: null, status: UserStatus.ACTIVE, deletedAt: null },
-            data: { referrerId: dto.referrerId },
+            data: { referrerId: referrer.id },
           })
           if (changed.count === 1) {
+            await tx.referralInvite.update({
+              where: { id: invite.id },
+              data: {
+                useCount: { increment: 1 },
+                lastUsedAt: now,
+              },
+            })
             await tx.auditLog.create({
               data: {
                 actorId: userId,
@@ -1092,29 +1420,38 @@ export class MembersService {
                 objectType: 'User',
                 objectId: userId,
                 oldValue: { referrerId: null } as never,
-                newValue: { referrerId: dto.referrerId } as never,
+                newValue: { referrerId: referrer.id, referralInviteId: invite.id } as never,
                 reason: '会员本人确认一层直接推荐关系',
               },
             })
-            return { id: userId, referrerId: dto.referrerId }
+            return { bound: true }
           }
 
           // A concurrent request may have won the conditional write.  Return
           // success only when it chose the same referrer; a different choice is
           // an immutable-binding conflict and must be visible to the caller.
           const latest = await tx.user.findUnique({ where: { id: userId }, select: { id: true, referrerId: true } })
-          if (latest?.referrerId === dto.referrerId) return latest
+          if (latest?.referrerId === referrer.id) return { bound: true }
           throw new ConflictException('直接推荐人已绑定，不能更换')
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       )
     } catch (error) {
       if (!this.isPrismaErrorCode(error, 'P2034')) throw error
-      const latest = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { id: true, referrerId: true },
-      })
-      if (latest?.referrerId === dto.referrerId) return latest
+      const [invite, latest] = await Promise.all([
+        this.prisma.referralInvite.findUnique({
+          where: { tokenHash: inviteHash },
+          select: { inviterId: true, expiresAt: true, revokedAt: true },
+        }),
+        this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { id: true, referrerId: true },
+        }),
+      ])
+      if (!invite || invite.revokedAt || invite.expiresAt <= now) {
+        throw new BadRequestException('邀请码无效或已过期')
+      }
+      if (latest?.referrerId === invite.inviterId) return { bound: true }
       throw new ConflictException('推荐关系刚刚发生变化，请刷新后重试')
     }
   }
@@ -1122,6 +1459,18 @@ export class MembersService {
   private isCoachOnly(actor: AuthUser) {
     return actor.roles.includes(AppRole.COACH) &&
       !actor.roles.some((role) => ([AppRole.FRONT_DESK, AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN] as AppRole[]).includes(role))
+  }
+
+  private isFrontDeskLimited(actor: AuthUser) {
+    return actor.roles.includes(AppRole.FRONT_DESK) &&
+      !actor.roles.some((role) => ([AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN] as AppRole[]).includes(role))
+  }
+
+  private memberPrivacyScope(actor: AuthUser): 'FRONT_DESK_LIMITED' | 'COACH_ASSIGNED' | 'FINANCE' | 'ADMIN' {
+    if (actor.roles.some((role) => ([AppRole.ADMIN, AppRole.SUPER_ADMIN] as AppRole[]).includes(role))) return 'ADMIN'
+    if (actor.roles.includes(AppRole.FINANCE)) return 'FINANCE'
+    if (actor.roles.includes(AppRole.FRONT_DESK)) return 'FRONT_DESK_LIMITED'
+    return 'COACH_ASSIGNED'
   }
 
   private assertAnyRole(actor: AuthUser, allowed: readonly AppRole[], message: string) {

@@ -20,6 +20,21 @@ const actor: AuthUser = {
 };
 
 describe('EventsController publish command', () => {
+  it('protects full management reads from ordinary members', () => {
+    const roles = [
+      AppRole.EVENT_MANAGER,
+      AppRole.FRONT_DESK,
+      AppRole.ADMIN,
+      AppRole.SUPER_ADMIN,
+    ];
+    expect(
+      Reflect.getMetadata(ROLES_KEY, EventsController.prototype.managedList),
+    ).toEqual(roles);
+    expect(
+      Reflect.getMetadata(ROLES_KEY, EventsController.prototype.managedDetail),
+    ).toEqual(roles);
+  });
+
   it('delegates event creation with the authenticated operator', async () => {
     const events = {
       create: vi.fn().mockResolvedValue({ id: 'event-1', status: 'DRAFT' }),

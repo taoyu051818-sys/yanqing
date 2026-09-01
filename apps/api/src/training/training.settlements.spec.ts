@@ -285,7 +285,7 @@ describe('TrainingService settlement list', () => {
     });
     expect(result[0]).toMatchObject({
       id: row.id,
-      createdById: finance.sub,
+      isOwnCreator: false,
       createdBy: { displayName: finance.displayName },
       workflowHistory: [
         expect.objectContaining({ action: 'TRAINING_SETTLEMENT_CREATED' }),
@@ -294,6 +294,28 @@ describe('TrainingService settlement list', () => {
           reason: '复核通过',
         }),
       ],
+    });
+    expect(result[0].workflowHistory[1]).toEqual({
+      action: 'TRAINING_SETTLEMENT_CONFIRMED',
+      actor: admin.displayName,
+      reason: '复核通过',
+      from: SettlementStatus.PENDING_CONFIRMATION,
+      to: SettlementStatus.CONFIRMED,
+      at: new Date('2026-08-03T01:00:00.000Z'),
+    });
+    expect(result[0].workflowHistory[1]).not.toHaveProperty('actorId');
+    expect(result[0].workflowHistory[1]).not.toHaveProperty('oldValue');
+    expect(result[0].workflowHistory[1]).not.toHaveProperty('newValue');
+    expect(result[0].workflowHistory[1]).not.toHaveProperty('commandHash');
+    expect(result[0]).not.toHaveProperty('createdById');
+    expect(result[0]).not.toHaveProperty('confirmedById');
+    expect(result[0].createdBy).not.toHaveProperty('id');
+
+    const creatorView = await service.listSettlements({}, finance);
+    expect(creatorView[0]).toMatchObject({
+      id: row.id,
+      isOwnCreator: true,
+      createdBy: { displayName: finance.displayName },
     });
   });
 });

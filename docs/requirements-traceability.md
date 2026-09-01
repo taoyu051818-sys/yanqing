@@ -7,7 +7,7 @@
 | FR-03 主理人球局 | 活动页与球局运营中心；`games` | 申请审批、报名支付、实到签到、按实到奖励 | 状态校验、事务与审计 |
 | FR-04 固定双打瑞士制 | 赛事页；`events` + shared | 24–48 人、5 轮、避免重复、让分、21 分封顶、纠错排名 | 瑞士配对/让分/比分单测 |
 | FR-05 培训独立经营账 | 培训页与培训运营中心；`training` | 产品/班级/课次、预收、maker/checker 消课、冲正、成本、退款和周期结算 | 20%/零场地费服务与 DB 约束；结算/冲正测试 |
-| FR-06 羽球币与直接推荐 | 个人中心、钱包；`members`/`referrals` | 本人一次绑定；只有 `referrerId` 一层；首付观察期；退款冲回 | 自荐/闭环/改绑/并发与账户隔离单测 |
+| FR-06 羽球币与直接推荐 | 分享卡、启动归因、个人中心、钱包、老板驾驶舱；`members`/`referrals` | 冷/热启动暂存，登录后本人一次绑定；只有 `referrerId` 一层；首付观察期；邀请人/新客双边参数化奖励；退款前冲回；绑定数/有效首单数 | 自荐/闭环/改绑/并发、双边账户隔离与真实 HTTP+PG 复验 |
 | FR-07 唯一联盟券 | 券包与商户核销台；`alliance` | 唯一码、商户作用域、归因 GMV、拉新、ROI | 条件核销、唯一索引、风险事件 |
 | FR-08 商品库存 | 金羽小店、库存主数据、库存预警与寄售应付工作台；`goods`/`inventory` | 供应商/SKU/库位详情更新与启停；采购/寄售、销售出库、退货回库、安全库存；寄售履约生成应付、整单退款追加冲正，自营 SKU 不生成应付 | 支付事务条件扣减、主数据状态/幂等测试、2000 迁移约束、ConsignmentSettlementService/迁移契约测试 |
 | FR-09 财务结算 | 老板驾驶舱与财务工作台；`dashboard`/`reports`/`inventory/consignment` | 场馆/培训分账、联盟结算、寄售 `DRAFT→PENDING_CONFIRMATION→CONFIRMED→SETTLED` 及争议/退回/作废、Excel 导出 | maker-checker/幂等/关账测试，应付、结算单、明细与流转全量导出 |
@@ -24,7 +24,7 @@
 | FR-20 退款与履约互锁 | 交易退款、场地/球局/赛事/培训状态动作；`orders`/`payments` | 系统取消强制退款不可驳回；保存退款前订单状态；`REFUND_PENDING` 冻结履约/消课 | refund-origin、event-refund、fulfillment 与各领域冻结测试 |
 | FR-21 充值退款短款风险 | 五账户、退款回调和风险治理；`payments`/`governance` | 平台退款成功不因可追回余额不足回滚；只扣可用额并记录 `RECHARGE_REFUND_BALANCE_SHORTFALL` 未追回金额 | 微信通知重放、账户非负/冻结约束与风险事件测试 |
 | FR-22 商业主数据版本 | 会员服务会员产品/充值计划、场馆资源价格规则 | 新版本默认停用；编码版本唯一；有效区间/启停冲突；创建/状态命令幂等与审计；历史单据快照不变 | 2020/2010 迁移契约、服务/API/Mock 测试 |
-| FR-23 数据升级与寄售 cutover | Prisma 迁移和财务 cutover 清单 | 旧 17 迁移顺序升级到 26；首个寄售快照版本 1 时间；历史缺证交易不按当前规则猜测回填 | 全新库 26/26、migrate status/Schema diff、cutover SQL 清单与双人签字 |
+| FR-23 数据升级与寄售 cutover | Prisma 迁移和财务 cutover 清单 | 旧 17 迁移顺序升级到 29；首个寄售快照版本 1 时间；历史缺证交易不按当前规则猜测回填 | 本地全新库 29/29、migrate status/Schema diff 已通过；目标库仍需 cutover SQL 清单、备份恢复记录与双人签字 |
 
 ## 合同硬规则
 
@@ -32,6 +32,6 @@
 |---|---|---|---|
 | 培训有效收入 × 20% | `trainingContractContributionCents` | rate=2000 且金额公式 CHECK | shared 与 TrainingService 测试 |
 | 培训不另收场地费 | 结算恒返回 0 | `venueFeeCents=0` CHECK | shared 与 TrainingService 测试 |
-| 无多级推荐 | 仅 `User.referrerId` 与单个奖励接收人 | 单一外键，无层级奖励表 | 自荐/改绑测试 |
+| 无多级推荐 | 仅 `User.referrerId` 一层；同一转化事件只包含邀请人和新客两个直接参与者 | 单一推荐外键、`(newUserId,triggerType)` 唯一、双边金额非负 | 自荐/改绑、并发首付和双方幂等入账测试 |
 | 五账户隔离 | 支付渠道只映射一个账户 | `(userId,type)` 唯一、余额非负 | 账户隔离测试 |
 | 券只核销一次 | 状态条件更新和幂等键 | code/idempotency 唯一、核销完整性 CHECK | 状态机测试 |

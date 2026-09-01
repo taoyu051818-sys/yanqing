@@ -31,7 +31,7 @@ function isBooked(courtId: string, slot: CourtAvailability['slots'][number]) {
 }
 
 async function load() {
-  loading.value = true; error.value = ''; selected.value = null
+  loading.value = true; error.value = ''; selected.value = null; data.value = null
   try { data.value = await endpoints.availability(date.value) }
   catch (cause: any) { error.value = cause.message }
   finally { loading.value = false }
@@ -76,7 +76,7 @@ onShow(load)
     </view>
     <view v-if="error" class="card error">{{ error }}</view>
     <scroll-view v-if="data?.courts.length" scroll-x class="matrix-wrap">
-      <view class="matrix" :style="{ width: `${180 + data.courts.length * 150}rpx` }">
+      <view class="matrix" :style="{ width: `${180 + data.courts.length * 150}rpx`, gridTemplateColumns: `180rpx repeat(${data.courts.length}, 150rpx)` }">
         <view class="head cell">时段</view>
         <view v-for="court in data.courts" :key="court.id" class="head cell">{{ court.name }}</view>
         <template v-for="slot in data.slots" :key="slot.id">
@@ -91,7 +91,7 @@ onShow(load)
         </template>
       </view>
     </scroll-view>
-    <SectionEmpty v-else-if="!loading" title="暂无可订时段" description="请切换日期或联系前台" />
+    <SectionEmpty v-else-if="!loading && !error" title="暂无可订时段" description="请切换日期或联系前台" />
 
     <view v-if="selected" class="confirm card">
       <view class="row"><text class="confirm-title">{{ selectedCourt?.name }} · {{ selectedSlot?.label }}</text><text class="money">{{ money(selectedSlot?.price?.priceCents) }}</text></view>
@@ -105,7 +105,7 @@ onShow(load)
 .notice { padding: 18rpx 24rpx; margin-bottom: 20rpx; color: #7b5910; background: #fff3d9; border-radius: 18rpx; font-size: 23rpx; }
 .date { color: #17653d; font-weight: 700; }
 .matrix-wrap { width: 100%; padding-bottom: 20rpx; }
-.matrix { display: grid; grid-template-columns: 180rpx repeat(20,150rpx); overflow: hidden; background: #fff; border-radius: 24rpx; }
+.matrix { display: grid; overflow: hidden; background: #fff; border-radius: 24rpx; }
 .cell { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90rpx; padding: 8rpx; border-right: 1rpx solid #edf0ed; border-bottom: 1rpx solid #edf0ed; box-sizing: border-box; font-size: 22rpx; }
 .head { position: sticky; top: 0; color: #fff; background: #1b5c39; font-weight: 700; }
 .slot-label { align-items: flex-start; padding-left: 20rpx; font-weight: 700; }
@@ -113,7 +113,7 @@ onShow(load)
 .court.disabled { color: #9ca49f; background: #f2f3f2; }
 .court.selected { color: #fff; background: #17653d; box-shadow: inset 0 0 0 4rpx #c9ac54; }
 .confirm { position: sticky; bottom: 18rpx; margin-top: 24rpx; box-shadow: 0 16rpx 60rpx rgba(17,62,37,.18); }
-.confirm-title { font-weight: 700; }
+.confirm-title { min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
 .coupon-input { margin: 22rpx 0; }
 .error { color: #ae2f2f; }
 </style>

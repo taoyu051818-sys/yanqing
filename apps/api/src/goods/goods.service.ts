@@ -11,6 +11,7 @@ import {
 } from '../inventory/consignment-order-snapshot.js'
 import type { CreateGoodsOrderDto } from './goods.dto.js'
 import { executeOrderCreation } from '../orders/order-creation-idempotency.js'
+import { orderResponse } from '../orders/order-response.js'
 
 const orderNo = () => `GD${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`
 
@@ -19,7 +20,18 @@ export class GoodsService {
   constructor(private readonly prisma: PrismaService) {}
 
   products() {
-    return this.prisma.inventoryItem.findMany({ where: { enabled: true }, orderBy: [{ category: 'asc' }, { name: 'asc' }] })
+    return this.prisma.inventoryItem.findMany({
+      where: { enabled: true },
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        category: true,
+        salePriceCents: true,
+        stock: true,
+      },
+      orderBy: [{ category: 'asc' }, { name: 'asc' }],
+    })
   }
 
   async createOrder(dto: CreateGoodsOrderDto, actor: AuthUser) {
@@ -28,7 +40,7 @@ export class GoodsService {
     const commandItems = [...quantities.entries()]
       .map(([itemId, quantity]) => ({ itemId, quantity }))
       .sort((left, right) => left.itemId.localeCompare(right.itemId))
-    return executeOrderCreation(this.prisma, {
+    const order = await executeOrderCreation(this.prisma, {
       memberId: actor.sub,
       creationIdempotencyKey: dto.creationIdempotencyKey,
       command: { kind: 'GOODS_ORDER', items: commandItems },
@@ -87,5 +99,6 @@ export class GoodsService {
         return created
       }),
     })
+    return orderResponse(order)
   }
 }

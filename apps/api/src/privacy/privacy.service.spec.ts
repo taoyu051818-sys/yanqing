@@ -7,6 +7,18 @@ import { PrivacyService } from './privacy.service.js'
 
 const member: AuthUser = { sub: 'member-1', displayName: '会员甲', roles: ['MEMBER'] }
 const superAdmin: AuthUser = { sub: 'admin-1', displayName: '超级管理员', roles: ['SUPER_ADMIN'] }
+const privateReplayFields = [
+  'requestIdempotencyKey',
+  'requestCommandHash',
+  'decisionIdempotencyKey',
+  'decisionCommandHash',
+] as const
+
+const expectPrivateReplayFieldsHidden = (value: unknown) => {
+  for (const field of privateReplayFields) {
+    expect(value).not.toHaveProperty(field)
+  }
+}
 
 const emptyCounts = () => ({
   account: { count: vi.fn().mockResolvedValue(0) },
@@ -57,6 +69,8 @@ describe('PrivacyService data-erasure workflow', () => {
 
     expect(first.id).toBe('erasure-1')
     expect(second.id).toBe('erasure-1')
+    expectPrivateReplayFieldsHidden(first)
+    expectPrivateReplayFieldsHidden(second)
     expect(tx.dataErasureRequest.create).toHaveBeenCalledTimes(1)
     expect(tx.auditLog.create).toHaveBeenCalledTimes(1)
     expect(tx.auditLog.create).toHaveBeenCalledWith({
@@ -66,6 +80,52 @@ describe('PrivacyService data-erasure workflow', () => {
         requestId: command.idempotencyKey,
       }),
     })
+  })
+
+  it('projects member and administrator lists without replay keys or command hashes', async () => {
+    const raw = {
+      id: 'erasure-private-fields',
+      userId: member.sub,
+      status: DataErasureRequestStatus.REQUESTED,
+      reason: '不再使用服务',
+      requestIdempotencyKey: 'private-request-key',
+      requestCommandHash: 'private-request-hash',
+      decisionIdempotencyKey: 'private-decision-key',
+      decisionCommandHash: 'private-decision-hash',
+      reviewedById: superAdmin.sub,
+      reviewReason: '待处理',
+      requestedAt: new Date('2026-08-30T00:00:00.000Z'),
+      reviewedAt: null,
+      completedAt: null,
+      createdAt: new Date('2026-08-30T00:00:00.000Z'),
+      updatedAt: new Date('2026-08-30T00:00:00.000Z'),
+      user: {
+        id: member.sub,
+        displayName: member.displayName,
+        phone: '13800000000',
+        status: 'ACTIVE',
+      },
+      reviewedBy: { id: superAdmin.sub, displayName: superAdmin.displayName },
+    }
+    const prisma: any = {
+      dataErasureRequest: {
+        findMany: vi.fn().mockResolvedValue([raw]),
+        count: vi.fn().mockResolvedValue(1),
+      },
+      $transaction: (values: Promise<unknown>[]) => Promise.all(values),
+    }
+    const service = new PrivacyService(prisma)
+
+    const mine = await service.listMine(member)
+    const managed = await service.list({ page: 1, pageSize: 20 } as any, superAdmin)
+
+    expect(mine[0]).toMatchObject({ id: raw.id, status: raw.status })
+    expect(managed.items[0]).toMatchObject({
+      id: raw.id,
+      user: { displayName: member.displayName, phone: '13800000000' },
+    })
+    expectPrivateReplayFieldsHidden(mine[0])
+    expectPrivateReplayFieldsHidden(managed.items[0])
   })
 
   it('does not let the requester approve their own irreversible anonymization', async () => {
@@ -123,6 +183,10 @@ describe('PrivacyService data-erasure workflow', () => {
     const completed = {
       ...current,
       status: 'COMPLETED',
+      requestIdempotencyKey: 'private-request-key',
+      requestCommandHash: 'private-request-hash',
+      decisionIdempotencyKey: 'private-decision-key',
+      decisionCommandHash: 'private-decision-hash',
       user: { id: member.sub, displayName: '已注销用户-mber-1', status: 'DELETED' },
       reviewedBy: { id: superAdmin.sub, displayName: superAdmin.displayName },
     }
@@ -179,6 +243,7 @@ describe('PrivacyService data-erasure workflow', () => {
     }, superAdmin)
 
     expect(result.status).toBe('COMPLETED')
+    expectPrivateReplayFieldsHidden(result)
     expect(tx.user.updateMany).toHaveBeenLastCalledWith({
       where: expect.objectContaining({ id: member.sub, status: 'DISABLED', deletedAt: null }),
       data: expect.objectContaining({

@@ -43,7 +43,11 @@ describe('GamesService publish workflow', () => {
     const service = new GamesService({ $transaction: runner(tx) } as never)
     const dto: PublishGameDto = { reason: '场地和收费已复核' }
 
-    await expect(service.publish('game-1', dto, actor)).resolves.toEqual(published)
+    const result = await service.publish('game-1', dto, actor)
+    expect(result).toMatchObject({ id: published.id, status: GameStatus.OPEN })
+    expect(result).not.toHaveProperty('hostId')
+    expect(result).not.toHaveProperty('host')
+    expect(result).not.toHaveProperty('courtBookings')
     expect(tx.game.updateMany).toHaveBeenCalledWith({
       where: { id: 'game-1', status: GameStatus.DRAFT },
       data: { status: GameStatus.OPEN },
@@ -54,14 +58,24 @@ describe('GamesService publish workflow', () => {
   })
 
   it('returns an already-open game on retry without another audit', async () => {
-    const current = draft({ status: GameStatus.OPEN })
+    const current = draft({
+      status: GameStatus.OPEN,
+      host: {
+        openId: 'should-never-cross-http',
+        unionId: 'union-secret',
+        phone: '13800000000',
+        hostProfile: { status: HostStatus.APPROVED },
+      },
+    })
     const tx = {
       game: { findUnique: vi.fn().mockResolvedValue(current), updateMany: vi.fn(), findUniqueOrThrow: vi.fn() },
       auditLog: { create: vi.fn() },
     }
     const service = new GamesService({ $transaction: runner(tx) } as never)
 
-    await expect(service.publish('game-1', undefined, actor)).resolves.toEqual(current)
+    const result = await service.publish('game-1', undefined, actor)
+    expect(result).toMatchObject({ id: current.id, status: GameStatus.OPEN })
+    expect(JSON.stringify(result)).not.toMatch(/openId|unionId|phone|hostProfile/)
     expect(tx.game.updateMany).not.toHaveBeenCalled()
     expect(tx.auditLog.create).not.toHaveBeenCalled()
   })
@@ -81,7 +95,10 @@ describe('GamesService publish workflow', () => {
 
     await expect(service.publish('game-1', {}, otherHost)).rejects.toBeInstanceOf(ForbiddenException)
     expect(tx.game.updateMany).not.toHaveBeenCalled()
-    await expect(service.publish('game-1', {}, owningHost)).resolves.toEqual(published)
+    await expect(service.publish('game-1', {}, owningHost)).resolves.toMatchObject({
+      id: published.id,
+      status: GameStatus.OPEN,
+    })
   })
 
   it.each([GameStatus.CANCELLED, GameStatus.FULL, GameStatus.IN_PROGRESS, GameStatus.COMPLETED])(

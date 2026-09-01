@@ -123,9 +123,13 @@ describe('GamesService cancellation', () => {
     expect(result).toMatchObject({
       cancelledBookingCount: 2,
       cancelledPendingOrders: 1,
-      cancelledRegistrationIds: registrations.map((registration) => registration.id),
-      refundRequests: [refund],
+      cancelledRegistrationCount: registrations.length,
+      refundRequestCount: 1,
+      refundRequestedCents: 6_000,
     })
+    expect(JSON.stringify(result)).not.toMatch(
+      /cancelIdempotencyKey|cancelCommandHash|cancelPolicySnapshot|requestedById|orderId/,
+    )
     expect(tx.game.updateMany).toHaveBeenCalledWith({
       where: {
         id: current.id,
@@ -231,7 +235,10 @@ describe('GamesService cancellation', () => {
 
     await expect(
       service.cancel(current.id, cancelDto, hostActor),
-    ).resolves.toMatchObject({ refundRequests: [createdRefund] })
+    ).resolves.toMatchObject({
+      refundRequestCount: 1,
+      refundRequestedCents: createdRefund.amountCents,
+    })
     expect(tx.refund.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         orderId: registration.order.id,
@@ -262,9 +269,14 @@ describe('GamesService cancellation', () => {
       $transaction: transaction,
     } as never)
 
-    await expect(
-      service.cancel(existing.id, cancelDto, hostActor),
-    ).resolves.toEqual({ game: existing, idempotent: true })
+    const result = await service.cancel(existing.id, cancelDto, hostActor)
+    expect(result).toMatchObject({
+      game: { id: existing.id, status: GameStatus.CANCELLED },
+      idempotent: true,
+    })
+    expect(JSON.stringify(result)).not.toMatch(
+      /cancelIdempotencyKey|cancelCommandHash|cancelPolicySnapshot|cancelledById/,
+    )
     expect(transaction).not.toHaveBeenCalled()
   })
 

@@ -26,9 +26,10 @@ export class GamesController {
     return this.games.list()
   }
 
-  @Get('hosted/me')
-  hosted(@CurrentUser() actor: AuthUser) {
-    return this.games.myHosted(actor)
+  @Get('managed')
+  @Roles(AppRole.HOST, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  managed(@CurrentUser() actor: AuthUser) {
+    return this.games.managed(actor)
   }
 
   @Post('hosts/apply')
@@ -105,7 +106,7 @@ export class GamesController {
   }
 
   @Post(':id/promote-waitlist')
-  @Roles(AppRole.HOST, AppRole.FRONT_DESK, AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(AppRole.HOST, AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   promoteWaitlist(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
     return this.games.promoteWaitlist(id, actor)
   }
@@ -114,11 +115,11 @@ export class GamesController {
   @Roles(AppRole.HOST, AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   checkIn(
     @Param('id') id: string,
-    @Param('userId') userId: string,
+    @Param('userId') registrationId: string,
     @Body() dto: GameCheckInDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.games.checkIn(id, userId, actor, dto)
+    return this.games.checkIn(id, registrationId, actor, dto)
   }
 
   @Post(':id/complete')

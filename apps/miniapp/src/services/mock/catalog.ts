@@ -6,7 +6,7 @@ export const games = [{
 
 export const events = [
   {
-    id: 'event-golden', name: '延庆金羽积分赛·秋季站', status: 'OPEN', minimumPeople: 24, capacityPeople: 48,
+    id: 'event-golden', name: '延庆金羽积分赛·秋季站', status: 'IN_PROGRESS', minimumPeople: 24, capacityPeople: 48,
     totalRounds: 5, currentRound: 2, feeCents: 9900, startsAt: new Date(Date.now() + 7 * 86400000).toISOString(),
   },
   {
@@ -14,6 +14,13 @@ export const events = [
     minimumPeople: 24, capacityPeople: 48, totalRounds: 5, currentRound: 5, feeCents: 9900,
     startsAt: new Date(Date.now() - 7 * 86400000).toISOString(),
     prizePool: { champion: '冠军奖：训练羽毛球', runnerUp: '亚军奖：专业手胶' },
+  },
+  {
+    id: 'event-open-partner', code: 'EV-PARTNER-OPEN', name: '延庆金羽固定双打公开赛', status: 'OPEN',
+    minimumPeople: 24, capacityPeople: 48, totalRounds: 5, currentRound: 0, feeCents: 9900,
+    memberFeeCents: 7900,
+    registrationEndsAt: new Date(Date.now() + 10 * 86400000).toISOString(),
+    startsAt: new Date(Date.now() + 14 * 86400000).toISOString(),
   },
 ]
 

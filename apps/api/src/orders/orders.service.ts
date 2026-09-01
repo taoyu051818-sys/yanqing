@@ -46,6 +46,7 @@ import {
   requireOpenFrontDeskShift,
   type FrontDeskShiftAuthorization,
 } from '../operations/frontdesk-shift-gate.js';
+import { orderResponse } from './order-response.js';
 
 const serial = (prefix: string) =>
   `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`;
@@ -72,6 +73,55 @@ const NON_REJECTABLE_SYSTEM_REFUND_PREFIXES = [
   'EVENT_CANCEL:',
   'EVENT_LATE_PAYMENT:',
 ] as const;
+
+export interface PaymentCommandResponse {
+  status: PaymentStatus;
+  amountCents: number;
+  channel: PaymentChannel;
+  createdAt: Date;
+  paidAt: Date | null;
+  wechatPay?: Record<string, unknown>;
+}
+
+export interface RefundCommandResponse {
+  id: string;
+  status: RefundStatus;
+  amountCents: number;
+  reason: string;
+  requestedAt: Date;
+  approvedAt: Date | null;
+  completedAt: Date | null;
+}
+
+const paymentCommandResponse = (payment: Record<string, any>): PaymentCommandResponse => {
+  const providerPayload = payment.providerPayload as
+    | { wechatPay?: unknown }
+    | null
+    | undefined;
+  const wechatPay = payment.wechatPay ?? providerPayload?.wechatPay;
+  return {
+    status: payment.status,
+    amountCents: payment.amountCents,
+    channel: payment.channel,
+    createdAt: payment.createdAt,
+    paidAt: payment.paidAt ?? null,
+    ...(payment.channel === PaymentChannel.WECHAT &&
+    wechatPay &&
+    typeof wechatPay === 'object'
+      ? { wechatPay: wechatPay as Record<string, unknown> }
+      : {}),
+  };
+};
+
+const refundCommandResponse = (refund: Record<string, any>): RefundCommandResponse => ({
+  id: refund.id,
+  status: refund.status,
+  amountCents: refund.amountCents,
+  reason: refund.reason,
+  requestedAt: refund.requestedAt,
+  approvedAt: refund.approvedAt ?? null,
+  completedAt: refund.completedAt ?? null,
+});
 
 @Injectable()
 export class OrdersService {
@@ -102,11 +152,16 @@ export class OrdersService {
       }),
       this.prisma.order.count({ where }),
     ]);
-    return { items, total, page: query.page, pageSize: query.pageSize };
+    return {
+      items: items.map(orderResponse),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
   }
 
-  detail(orderId: string, actor: AuthUser) {
-    return this.prisma.order.findFirstOrThrow({
+  async detail(orderId: string, actor: AuthUser) {
+    const order = await this.prisma.order.findFirstOrThrow({
       where: this.canManageAll(actor)
         ? { id: orderId }
         : { id: orderId, memberId: actor.sub },
@@ -121,6 +176,7 @@ export class OrdersService {
         trainingEnrollment: { include: { product: true, student: true } },
       },
     });
+    return orderResponse(order);
   }
 
   async pay(orderId: string, dto: PayOrderDto, actor: AuthUser) {
@@ -172,11 +228,11 @@ export class OrdersService {
       this.assertPaymentAuthorization(existing.userId, dto.channel, actor);
       if (existing.operatorId !== actor.sub)
         throw new ForbiddenException('支付请求只能由原操作人重试');
-      return existing;
+      return paymentCommandResponse(existing);
     }
 
     try {
-      return await this.prisma.$transaction(
+      const result = await this.prisma.$transaction(
         async (tx) => {
           const order = await tx.order.findUnique({
             where: { id: orderId },
@@ -190,6 +246,9 @@ export class OrdersService {
           this.assertPaymentAuthorization(order.memberId, dto.channel, actor);
           if (order.status !== OrderStatus.PENDING)
             throw new ConflictException('订单当前状态不可支付');
+          if (order.businessType === BusinessType.GOODS) {
+            await this.assertGoodsStockAvailable(tx, order.items);
+          }
           if (
             order.businessType === BusinessType.RECHARGE &&
             ACCOUNT_CHANNELS[dto.channel]
@@ -340,6 +399,7 @@ export class OrdersService {
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
+      return paymentCommandResponse(result);
     } catch (error) {
       // The unique idempotency key is also the concurrency boundary. If two
       // devices create the same payment simultaneously, resolve the losing
@@ -365,10 +425,43 @@ export class OrdersService {
           );
           if (concurrent.operatorId !== actor.sub)
             throw new ForbiddenException('支付请求只能由原操作人重试');
-          return concurrent;
+          return paymentCommandResponse(concurrent);
         }
       }
       throw error;
+    }
+  }
+
+  private async assertGoodsStockAvailable(
+    tx: Prisma.TransactionClient,
+    orderItems: Array<{
+      itemId: string | null;
+      name: string;
+      quantity: number;
+    }>,
+  ) {
+    const required = new Map<string, { name: string; quantity: number }>();
+    for (const item of orderItems) {
+      if (!item.itemId) continue;
+      const current = required.get(item.itemId);
+      required.set(item.itemId, {
+        name: item.name,
+        quantity: (current?.quantity ?? 0) + item.quantity,
+      });
+    }
+    if (!required.size) throw new ConflictException('商品订单缺少可出库明细');
+
+    const inventory = await tx.inventoryItem.findMany({
+      where: { id: { in: [...required.keys()] }, enabled: true },
+      select: { id: true, name: true, stock: true },
+    });
+    const available = new Map(inventory.map((item) => [item.id, item]));
+    for (const [itemId, demand] of required) {
+      const item = available.get(itemId);
+      if (!item) throw new BadRequestException(`${demand.name} 已下架，无法支付`);
+      if (item.stock < demand.quantity) {
+        throw new BadRequestException(`${item.name} 库存不足，无法支付`);
+      }
     }
   }
 
@@ -411,7 +504,7 @@ export class OrdersService {
       ) {
         throw new ConflictException('退款幂等键已用于不同的退款内容');
       }
-      return existing;
+      return refundCommandResponse(existing);
     }
     const refundableStatuses = new Set<OrderStatus>([
       OrderStatus.PAID,
@@ -438,7 +531,7 @@ export class OrdersService {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         // Re-read and reserve the remaining refundable amount inside the same
         // transaction.  Two phones may submit a refund at the same time; the
         // preflight read above is only a fast error path and must not be the
@@ -569,6 +662,7 @@ export class OrdersService {
         });
         return refund;
       });
+      return refundCommandResponse(result);
     } catch (error) {
       // If two requests race before either sees the unique key, resolve the
       // losing insert to the committed refund row rather than exposing a 500.
@@ -591,7 +685,7 @@ export class OrdersService {
           ) {
             throw new ConflictException('退款幂等键已用于不同的退款内容');
           }
-          return duplicate;
+          return refundCommandResponse(duplicate);
         }
       }
       throw error;
@@ -602,7 +696,7 @@ export class OrdersService {
   async rejectRefund(refundId: string, dto: ReviewRefundDto, actor: AuthUser) {
     if (!this.isRefundApprover(actor))
       throw new ForbiddenException('仅财务或管理员可驳回退款');
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const refund = await tx.refund.findUnique({
         where: { id: refundId },
         include: { order: { include: { eventTeam: true } } },
@@ -703,6 +797,7 @@ export class OrdersService {
       });
       return rejected;
     });
+    return refundCommandResponse(result);
   }
 
   async approveRefund(refundId: string, dto: ReviewRefundDto, actor: AuthUser) {
@@ -710,7 +805,7 @@ export class OrdersService {
       throw new ForbiddenException('仅财务或管理员可审批退款');
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        return await this.prisma.$transaction(
+        const result = await this.prisma.$transaction(
           async (tx) => {
             const refund = await tx.refund.findUnique({
               where: { id: refundId },
@@ -952,7 +1047,12 @@ export class OrdersService {
             }
             if (fullyRefunded) {
               await tx.courtBooking.updateMany({
-                where: { orderId: refund.orderId },
+                where: {
+                  orderId: refund.orderId,
+                  status: {
+                    notIn: [BookingStatus.COMPLETED, BookingStatus.NO_SHOW],
+                  },
+                },
                 data: { status: BookingStatus.CANCELLED },
               });
               if (refund.order.membership) {
@@ -1081,6 +1181,7 @@ export class OrdersService {
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );
+        return refundCommandResponse(result);
       } catch (error) {
         if (
           isPrismaErrorCode(error, 'P2002') ||
@@ -1094,7 +1195,7 @@ export class OrdersService {
             (completed.status === RefundStatus.PROCESSING ||
               completed.status === RefundStatus.SUCCEEDED)
           ) {
-            return completed;
+            return refundCommandResponse(completed);
           }
           if (attempt < 3) continue;
           throw new ConflictException('退款审批发生并发冲突，请刷新后重试');

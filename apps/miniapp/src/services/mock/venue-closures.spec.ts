@@ -47,6 +47,8 @@ describe("venue closure mock acceptance", () => {
       creationIdempotencyKey: "closure-mock-key-1",
     };
     const created = await request("POST", "/venues/closures", command);
+    expect(created).not.toHaveProperty("creationIdempotencyKey");
+    expect(created).not.toHaveProperty("createdById");
     await expect(request("POST", "/venues/closures", command)).resolves.toEqual(created);
     await expect(request<any[]>("GET", "/venues/closures", {
       status: "ACTIVE",
@@ -54,7 +56,10 @@ describe("venue closure mock acceptance", () => {
       to: `${date}T24:00:00+08:00`,
     })).resolves.toEqual([expect.objectContaining({ id: created.id, status: "ACTIVE" })]);
     await expect(request<any>("GET", "/venues/availability", { date }))
-      .resolves.toMatchObject({ closures: [expect.objectContaining({ id: created.id })] });
+      .resolves.toMatchObject({ closures: [expect.objectContaining({
+        courtId: command.courtId,
+        status: "ACTIVE",
+      })] });
 
     await login("MEMBER");
     await expect(request("GET", "/venues/closures")).rejects.toThrow("无权");
@@ -79,6 +84,7 @@ describe("venue closure mock acceptance", () => {
       { reason: "维护计划已调整" },
     );
     expect(cancelled).toMatchObject({ status: "CANCELLED", cancelReason: "维护计划已调整" });
+    expect(cancelled).not.toHaveProperty("creationIdempotencyKey");
     expect(getVenueClosures()).toEqual([
       expect.objectContaining({ id: created.id, status: "CANCELLED" }),
     ]);

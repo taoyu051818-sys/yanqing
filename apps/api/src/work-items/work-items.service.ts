@@ -117,8 +117,6 @@ export class WorkItemsService {
     ]);
     const canOperateInventory = hasAny(roles, [
       AppRole.FRONT_DESK,
-      AppRole.COACH,
-      AppRole.EVENT_MANAGER,
       AppRole.ADMIN,
       AppRole.SUPER_ADMIN,
     ]);
@@ -333,6 +331,14 @@ export class WorkItemsService {
       canOperateInventory
         ? this.prisma.inventoryItem.findMany({
             where: { enabled: true },
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              stock: true,
+              safeStock: true,
+              updatedAt: true,
+            },
             orderBy: { stock: 'asc' },
             take: Math.min(limit * 2, 200),
           })
@@ -844,13 +850,11 @@ export class WorkItemsService {
           description: `当前 ${item.stock} 件，安全线 ${item.safeStock} 件`,
           ownerRoles: [
             AppRole.FRONT_DESK,
-            AppRole.COACH,
-            AppRole.EVENT_MANAGER,
             AppRole.ADMIN,
             AppRole.SUPER_ADMIN,
           ],
           createdAt: item.updatedAt.toISOString(),
-          action: `/inventory/${item.id}`,
+          action: `/packages/ops/pages/inventory/index?focus=low-stock&id=${item.id}`,
           metadata: {
             sku: item.sku,
             stock: item.stock,
@@ -879,7 +883,9 @@ export class WorkItemsService {
         const action =
           order.businessType === BusinessType.VENUE
             ? `/packages/ops/pages/frontdesk/index?focus=fulfillment&orderId=${order.id}`
-            : `/packages/ops/pages/event/index?focus=fulfillment&orderId=${order.id}`;
+            : order.businessType === BusinessType.GAME
+              ? `/packages/ops/pages/host/index?focus=fulfillment&orderId=${order.id}`
+              : `/packages/ops/pages/event/index?focus=fulfillment&orderId=${order.id}`;
         return {
           id: `order:${order.id}`,
           kind: 'ORDER_FULFILLMENT' as const,

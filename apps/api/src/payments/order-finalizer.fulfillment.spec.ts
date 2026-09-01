@@ -256,6 +256,51 @@ describe('instant order fulfillment after successful payment', () => {
     expect(consignment.recordCompletedGoodsSale).not.toHaveBeenCalled();
   });
 
+  it('rejects a zero-stock goods payment before stock or completion writes', async () => {
+    const order = baseOrder(BusinessType.GOODS, {
+      items: [
+        {
+          id: 'order-item-empty',
+          itemId: 'item-empty',
+          name: '售罄羽毛球',
+          quantity: 1,
+          unitPriceCents: 4_800,
+          amountCents: 4_800,
+        },
+      ],
+    });
+    const { tx, service, consignment } = harness(order);
+    tx.inventoryItem.findUnique.mockResolvedValue({
+      id: 'item-empty',
+      stock: 0,
+      defaultLocationId: 'location-1',
+      batchCode: null,
+      expiresAt: null,
+      purchasePriceCents: 300,
+    });
+    tx.inventoryStockBalance.findUnique.mockResolvedValue({
+      id: 'balance-empty',
+      quantity: 0,
+    });
+    tx.inventoryStockBalance.findMany.mockResolvedValue([{ quantity: 0 }]);
+
+    await expect(
+      service.finalize(
+        tx as never,
+        order as never,
+        payment,
+        payment.operatorId,
+        AppRole.MEMBER,
+        now,
+      ),
+    ).rejects.toThrow('库存不足');
+
+    expect(tx.inventoryItem.updateMany).not.toHaveBeenCalled();
+    expect(tx.inventoryStockBalance.updateMany).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+    expect(consignment.recordCompletedGoodsSale).not.toHaveBeenCalled();
+  });
+
   it('rejects an audit actor that differs from the persisted payment operator', async () => {
     const order = baseOrder(BusinessType.MEMBERSHIP);
     const { tx, service } = harness(order);

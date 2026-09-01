@@ -18,6 +18,18 @@ vi.stubGlobal("uni", {
 const login = (role: string) => mockRequest<any>("POST", "/auth/dev-login", { role });
 const request = <T = any>(method: string, url: string, data: Record<string, unknown> = {}) =>
   mockRequest<T>(method, url, data);
+const privateReplayFields = [
+  "requestIdempotencyKey",
+  "requestCommandHash",
+  "decisionIdempotencyKey",
+  "decisionCommandHash",
+] as const;
+
+const expectPrivateReplayFieldsHidden = (value: unknown) => {
+  for (const field of privateReplayFields) {
+    expect(value).not.toHaveProperty(field);
+  }
+};
 
 describe("miniapp mock data-erasure workflow", () => {
   beforeEach(async () => {
@@ -32,17 +44,23 @@ describe("miniapp mock data-erasure workflow", () => {
     const replay = await request("POST", "/privacy/erasure-requests", create);
 
     expect(replay.id).toBe(first.id);
+    expectPrivateReplayFieldsHidden(first);
+    expectPrivateReplayFieldsHidden(replay);
     await expect(request("POST", "/privacy/erasure-requests", {
       ...create, reason: "另一个注销原因",
     })).rejects.toThrow("幂等键已用于不同账号或命令");
     const mine = await request<any[]>("GET", "/privacy/erasure-requests/me");
     expect(mine).toHaveLength(1);
     expect(mine[0]).toMatchObject({ userId: "user-member", status: "REQUESTED" });
+    expectPrivateReplayFieldsHidden(mine[0]);
 
     const cancel = { reason: "决定继续使用", idempotencyKey: "privacy-cancel-member-1" };
     const cancelled = await request("POST", `/privacy/erasure-requests/${first.id}/cancel`, cancel);
-    await expect(request("POST", `/privacy/erasure-requests/${first.id}/cancel`, cancel)).resolves.toEqual(cancelled);
+    const cancelReplay = await request("POST", `/privacy/erasure-requests/${first.id}/cancel`, cancel);
+    expect(cancelReplay).toEqual(cancelled);
     expect(cancelled.status).toBe("CANCELLED");
+    expectPrivateReplayFieldsHidden(cancelled);
+    expectPrivateReplayFieldsHidden(cancelReplay);
     expect(getAuditLogs().filter((item) => item.objectId === first.id)).toHaveLength(2);
   });
 
@@ -74,13 +92,17 @@ describe("miniapp mock data-erasure workflow", () => {
     const queue = await request<any>("GET", "/privacy/erasure-requests", { status: "REQUESTED" });
     const ready = queue.items.find((item: any) => item.id === "erasure-mock-ready");
     expect(ready).toBeTruthy();
+    expectPrivateReplayFieldsHidden(ready);
     await expect(request<any[]>("GET", `/privacy/erasure-requests/${ready.id}/blockers`)).resolves.toEqual([]);
 
     const command = { reason: "确认所有业务已经结清", idempotencyKey: "privacy-complete-ready-1" };
     const completed = await request("POST", `/privacy/erasure-requests/${ready.id}/complete`, command);
-    await expect(request("POST", `/privacy/erasure-requests/${ready.id}/complete`, command)).resolves.toEqual(completed);
+    const replay = await request("POST", `/privacy/erasure-requests/${ready.id}/complete`, command);
+    expect(replay).toEqual(completed);
 
     expect(completed).toMatchObject({ status: "COMPLETED", completedAt: expect.any(String) });
+    expectPrivateReplayFieldsHidden(completed);
+    expectPrivateReplayFieldsHidden(replay);
     expect(getGovernanceUsers().find((item) => item.id === "user-privacy")).toMatchObject({
       status: "DELETED",
       phone: null,

@@ -88,6 +88,50 @@ describe('TrainingTrialsService', () => {
     service = new TrainingTrialsService(prisma)
   })
 
+  it('projects member and operator trial views without replay or cost evidence', async () => {
+    const raw = baseTrial({
+      creationIdempotencyKey: 'trial-secret-key',
+      creationCommandHash: 'trial-secret-hash',
+      createdById: 'front-1',
+      product: {
+        id: 'product-1', name: '试听课', audience: TrainingAudience.ADULT,
+        totalSessions: 12, validityDays: 90, priceCents: 68_000,
+        unitRevenueCents: 5_666, refundRule: { internal: true },
+      },
+      class: {
+        id: 'class-1', name: '成人班', capacity: 12, active: true,
+        coachId: coach.sub, assistantId: null, coachCostCents: 20_000,
+        product: null,
+      },
+      transitions: [{
+        id: 'transition-1', fromStatus: null,
+        toStatus: TrainingTrialStatus.RESERVED, action: 'RESERVE',
+        reason: '预约试听', actorId: 'front-1', idempotencyKey: 'secret',
+        commandHash: 'hash', payload: { internal: true },
+        actor: { id: 'front-1', displayName: '前台' }, createdAt: new Date(),
+      }],
+    })
+    prisma.trainingTrial.findMany.mockResolvedValue([raw])
+    const member: AuthUser = {
+      sub: 'member-1', displayName: '会员', roles: [AppRole.MEMBER],
+    }
+
+    const mine = await service.list({}, member, true)
+    const managed = await service.list({}, coach)
+
+    expect(mine[0]).not.toHaveProperty('creationIdempotencyKey')
+    expect(mine[0]).not.toHaveProperty('creationCommandHash')
+    expect(mine[0]).not.toHaveProperty('transitions')
+    expect(mine[0]?.product).not.toHaveProperty('refundRule')
+    expect(managed[0]?.class).not.toHaveProperty('coachCostCents')
+    expect(managed[0]?.transitions[0]).toMatchObject({
+      id: 'transition-1', reason: '预约试听', actor: { displayName: '前台' },
+    })
+    expect(managed[0]?.transitions[0]).not.toHaveProperty('idempotencyKey')
+    expect(managed[0]?.transitions[0]).not.toHaveProperty('commandHash')
+    expect(managed[0]?.transitions[0]).not.toHaveProperty('payload')
+  })
+
   it('reserves a youth trial with lead, guardian, class and coach evidence', async () => {
     const startsAt = new Date(Date.now() + 86_400_000)
     const dto = {
@@ -334,7 +378,14 @@ describe('TrainingTrialsService', () => {
         trial: replayTrial,
       })
     prisma.$transaction.mockRejectedValue({ code: 'P2002' })
-    await expect(service.checkIn('trial-1', dto, frontDesk)).resolves.toEqual(replayTrial)
+    const result = await service.checkIn('trial-1', dto, frontDesk)
+    expect(result).toMatchObject({
+      id: replayTrial.id,
+      trialNo: replayTrial.trialNo,
+      status: TrainingTrialStatus.CHECKED_IN,
+    })
+    expect(result).not.toHaveProperty('creationIdempotencyKey')
+    expect(result).not.toHaveProperty('creationCommandHash')
   })
 
   it('recovers same-command P2034 reservation races from the committed creation key', async () => {
@@ -384,7 +435,14 @@ describe('TrainingTrialsService', () => {
     prisma.courtBooking.findFirst.mockResolvedValue({ courtId: 'court-1' })
     prisma.courtClosure.findFirst.mockResolvedValue(null)
     prisma.$transaction.mockRejectedValue({ code: 'P2034' })
-    await expect(service.create(dto, frontDesk)).resolves.toEqual(replay)
+    const result = await service.create(dto, frontDesk)
+    expect(result).toMatchObject({
+      id: replay.id,
+      trialNo: replay.trialNo,
+      status: TrainingTrialStatus.RESERVED,
+    })
+    expect(result).not.toHaveProperty('createdById')
+    expect(result).not.toHaveProperty('creationCommandHash')
   })
 
   it('rejects direct state overwrite and a lost concurrent transition race', async () => {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { mockRequest } from "./router";
 import { resetCatalogState } from "./state";
+import { getOrders } from "./venue";
 
 const storage = new Map<string, unknown>();
 
@@ -83,7 +84,10 @@ describe("commercial master data mock state machines", () => {
       productId: created.id,
       creationIdempotencyKey: "membership-family-purchase",
     });
-    expect(order.parameterSnapshot).toMatchObject({
+    expect(order).not.toHaveProperty("parameterSnapshot");
+    expect(
+      getOrders().find((item) => item.id === order.id)?.parameterSnapshot,
+    ).toMatchObject({
       productId: created.id,
       productCode: command.code,
       productVersion: 1,
@@ -157,10 +161,7 @@ describe("commercial master data mock state machines", () => {
       date: "2026-08-30",
     });
     expect(availability.slots.find((slot: any) => slot.id === "slot-1").price)
-      .toMatchObject({
-        id: created.id,
-        code: "PRICE_S1",
-        version: 2,
+      .toEqual({
         priceCents: 7_200,
         newcomerPriceCents: 5_000,
       });

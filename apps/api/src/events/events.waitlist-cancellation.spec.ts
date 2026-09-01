@@ -10,6 +10,7 @@ import {
   RegistrationStatus,
   SourceChannel,
   TeamCategory,
+  UserStatus,
 } from '../generated/prisma/client.js';
 import type { RegisterEventTeamDto } from './events.dto.js';
 import { EVENT_MINIMUM_PEOPLE, EVENT_TOTAL_ROUNDS } from './events.dto.js';
@@ -47,10 +48,7 @@ const registrationDto = (
   overrides: Partial<RegisterEventTeamDto> = {},
 ): RegisterEventTeamDto => ({
   name: '候补一队',
-  playerAName: '甲',
-  playerBName: '乙',
-  playerAUserId: member.sub,
-  playerBUserId: 'member-b',
+  partnerInviteCode: 'EP_waitlist_partner_authorization_123',
   category: TeamCategory.MIXED_DOUBLES,
   sourceChannel: SourceChannel.MINI_PROGRAM,
   creationIdempotencyKey: 'event-waitlist-command-1',
@@ -66,6 +64,24 @@ describe('event persistent FIFO registration', () => {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       memberProfile: { findUnique: vi.fn().mockResolvedValue(null) },
+      eventPartnerInvite: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'partner-invite-1',
+          eventId: 'event-1',
+          partnerId: 'member-b',
+          expiresAt: new Date('2099-08-30T08:30:00.000Z'),
+          revokedAt: null,
+          consumedAt: null,
+          partner: {
+            id: 'member-b',
+            displayName: '搭档乙',
+            status: UserStatus.ACTIVE,
+            deletedAt: null,
+            memberProfile: { id: 'profile-b' },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       eventTeam: {
         findFirst: vi.fn().mockResolvedValue(null),
         count: vi
@@ -104,21 +120,30 @@ describe('event persistent FIFO registration', () => {
     expect(created).toMatchObject({
       status: RegistrationStatus.WAITLISTED,
       waitlistPosition: 1,
-      registration: { id: 'team-wait-1', orderId: null },
+      registration: {
+        name: dto.name,
+        category: dto.category,
+        status: RegistrationStatus.WAITLISTED,
+      },
     });
+    expect(created.registration).not.toHaveProperty('id');
+    expect(created.registration).not.toHaveProperty('orderId');
+    expect(created.registration).not.toHaveProperty('captainId');
     expect(tx.order.create).not.toHaveBeenCalled();
     expect(tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ action: 'EVENT_WAITLISTED' }),
     });
 
     const replay: any = await service.register('event-1', dto, member);
-    expect(replay.registration.id).toBe('team-wait-1');
+    expect(replay).toEqual(created);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
 
     await expect(
       service.register(
         'event-1',
-        registrationDto({ playerBName: '另一个队员' }),
+        registrationDto({
+          partnerInviteCode: 'EP_different_partner_authorization_456',
+        }),
         member,
       ),
     ).rejects.toThrow('赛事报名幂等键已用于不同命令');
@@ -280,8 +305,12 @@ describe('event cancellation workflow', () => {
     expect(result).toMatchObject({
       cancelledPendingOrders: 1,
       cancelledWaitlist: 1,
-      refundRequests: [{ status: 'REQUESTED', amountCents: 8_800 }],
+      refundRequestCount: 1,
+      refundRequestedCents: 8_800,
     });
+    expect(JSON.stringify(result)).not.toMatch(
+      /cancelIdempotencyKey|cancelCommandHash|cancelPolicySnapshot|requestedById|orderId/,
+    );
     expect(refundCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         orderId: 'order-paid',

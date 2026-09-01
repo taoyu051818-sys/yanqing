@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { mockRequest } from "./router";
 import { getAuditLogs, resetCatalogState } from "./state";
+import { getOrders } from "./venue";
 
 const storage = new Map<string, unknown>();
 
@@ -171,7 +172,11 @@ describe("miniapp mock alliance operations", () => {
       creationIdempotencyKey: "newcomer-daytime-order-1",
     });
     expect(experienceOrder).toMatchObject({ payableCents: 4_800, discountCents: 2_000 });
-    expect(experienceOrder.parameterSnapshot.newcomerPolicy).toMatchObject({
+    expect(experienceOrder).not.toHaveProperty("parameterSnapshot");
+    const persistedExperienceOrder = getOrders().find(
+      (order) => order.id === experienceOrder.id,
+    );
+    expect(persistedExperienceOrder?.parameterSnapshot.newcomerPolicy).toMatchObject({
       allowedPeriodsParameterId: "parameter-newcomer-periods",
       slotPeriod: "EARLY",
     });
@@ -238,8 +243,10 @@ describe("miniapp mock alliance operations", () => {
     expect(disputed.detail.workflowHistory.at(-1)).toMatchObject({
       action: "dispute",
       reason: "核销归因金额需要复核",
-      actorId: "user-merchant",
     });
+    expect(JSON.stringify({ outdoorDraft, coffeeDraft, visible, disputed })).not.toMatch(
+      /codeIds|settlementRule|actorId/,
+    );
 
     await login("ADMIN");
     await request("POST", `/alliance/settlements/${coffeeDraft.id}/submit`);
@@ -332,6 +339,10 @@ describe("miniapp mock alliance operations", () => {
       frontDeskShiftId: shift.id,
       adminEmergencyBypass: false,
     });
+    expect(frontDeskRedemption).not.toHaveProperty("idempotencyKey");
+    await expect(
+      request("POST", "/alliance/coupons/redeem", frontDeskCommand),
+    ).resolves.toEqual(frontDeskRedemption);
     expect(getAuditLogs().find(
       (item) => item.requestId === frontDeskCommand.idempotencyKey,
     )).toMatchObject({
@@ -355,6 +366,7 @@ describe("miniapp mock alliance operations", () => {
       frontDeskShiftId: null,
       adminEmergencyBypass: false,
     });
+    expect(merchantRedemption).not.toHaveProperty("idempotencyKey");
   });
 
   it("persists audited lifecycle changes and blocks operations for a disabled merchant", async () => {

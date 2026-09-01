@@ -7,6 +7,7 @@ import {
   getMemberAccountTransactions,
   resetCatalogState,
 } from "./state";
+import { getOrders } from "./venue";
 
 const storage = new Map<string, unknown>();
 
@@ -111,13 +112,16 @@ describe("miniapp financial P0 hardening", () => {
       title: "充值500元赠25元",
       listAmountCents: 50_000,
       payableCents: 50_000,
-      parameterSnapshot: {
-        rechargePlanId: "recharge-plan-mock-500",
-        rechargePlanCode: "RECHARGE_500",
-        rechargePlanVersion: 1,
-        principalCents: 50_000,
-        giftCents: 2_500,
-      },
+    });
+    expect(order).not.toHaveProperty("parameterSnapshot");
+    expect(
+      getOrders().find((item) => item.id === order.id)?.parameterSnapshot,
+    ).toMatchObject({
+      rechargePlanId: "recharge-plan-mock-500",
+      rechargePlanCode: "RECHARGE_500",
+      rechargePlanVersion: 1,
+      principalCents: 50_000,
+      giftCents: 2_500,
     });
   });
 
@@ -132,11 +136,9 @@ describe("miniapp financial P0 hardening", () => {
     };
     await request("POST", `/orders/${order.id}/pay`, payment);
     await expect(request("POST", `/orders/${order.id}/pay`, payment)).resolves
-      .toMatchObject({ status: "SUCCESS", idempotent: true });
+      .toMatchObject({ status: "SUCCEEDED" });
 
-    let stored = (await request<any>("GET", "/orders")).items.find(
-      (item: any) => item.id === order.id,
-    );
+    let stored = getOrders().find((item: any) => item.id === order.id);
     expect(stored).toMatchObject({
       status: "COMPLETED",
       paymentStatus: "SUCCEEDED",
@@ -158,9 +160,7 @@ describe("miniapp financial P0 hardening", () => {
     await request("POST", `/orders/refunds/${refund.id}/approve`, {
       reason: "核对权益未使用",
     });
-    stored = (await request<any>("GET", "/orders/admin/all")).items.find(
-      (item: any) => item.id === order.id,
-    );
+    stored = getOrders().find((item: any) => item.id === order.id);
     expect(stored).toMatchObject({
       status: "REFUNDED",
       paymentStatus: "REFUNDED",
@@ -398,7 +398,10 @@ describe("miniapp financial P0 hardening", () => {
       reason: "退款原状态测试",
       idempotencyKey: `mock-refund-origin-${String(originalStatus).toLowerCase()}`,
     });
-    expect(refund.originalOrderStatus).toBe(originalStatus);
+    const storedRefund = getOrders()[0].refunds.find(
+      (item: any) => item.id === refund.id,
+    );
+    expect(storedRefund.originalOrderStatus).toBe(originalStatus);
 
     await login("FINANCE");
     await request("POST", `/orders/refunds/${refund.id}/reject`, {

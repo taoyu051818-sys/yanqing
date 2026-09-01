@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   AccountType,
+  BookingStatus,
   BusinessType,
   OrderStatus,
   PaymentChannel,
@@ -11,6 +12,75 @@ import {
 import { WechatPayService } from './wechat-pay.service.js'
 
 describe('WechatPayService refund terminal handling', () => {
+  it('never rewrites terminal venue fulfillment evidence after provider refund success', async () => {
+    const order = {
+      id: 'order-venue-completed',
+      orderNo: 'VN202608300001',
+      memberId: 'member-venue',
+      businessType: BusinessType.VENUE,
+      status: OrderStatus.REFUND_PENDING,
+      paidCents: 6_800,
+      refundedCents: 0,
+      parameterSnapshot: {},
+      trainingEnrollment: null,
+      membership: null,
+      items: [],
+      gameRegistration: null,
+      eventTeam: null,
+      payments: [{
+        id: 'payment-venue',
+        status: PaymentStatus.SUCCEEDED,
+        channel: PaymentChannel.WECHAT,
+        amountCents: 6_800,
+      }],
+    }
+    const refund = {
+      id: 'refund-venue-completed',
+      refundNo: 'RF202608300099',
+      orderId: order.id,
+      requestedById: order.memberId,
+      approvedById: 'finance-1',
+      amountCents: 6_800,
+      status: RefundStatus.PROCESSING,
+      order,
+    }
+    const tx = {
+      refund: {
+        findUnique: vi.fn().mockResolvedValue(refund),
+        update: vi.fn().mockResolvedValue({ ...refund, status: RefundStatus.SUCCEEDED }),
+      },
+      order: { update: vi.fn().mockResolvedValue({ ...order, status: OrderStatus.REFUNDED }) },
+      courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      referralReward: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    }
+    const service = new WechatPayService(
+      { get: vi.fn() } as never,
+      {
+        refund: { findUnique: vi.fn().mockResolvedValue(refund) },
+        $transaction: vi.fn(async (work: (client: typeof tx) => unknown) => work(tx)),
+      } as never,
+      {} as never,
+    )
+
+    await expect((service as any).finalizeRefund({
+      out_refund_no: refund.refundNo,
+      refund_id: 'wechat-refund-venue',
+      refund_status: 'SUCCESS',
+      amount: { refund: 6_800, total: 6_800 },
+    })).resolves.toEqual({ accepted: true, outstandingRecoveryCents: 0 })
+
+    expect(tx.courtBooking.updateMany).toHaveBeenCalledWith({
+      where: {
+        orderId: order.id,
+        status: {
+          notIn: [BookingStatus.COMPLETED, BookingStatus.NO_SHOW],
+        },
+      },
+      data: { status: BookingStatus.CANCELLED },
+    })
+  })
+
   it('persists provider success, recovers available recharge value and records one shortfall risk on retries', async () => {
     const order = {
       id: 'order-recharge-1',

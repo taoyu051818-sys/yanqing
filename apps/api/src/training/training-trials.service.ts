@@ -110,11 +110,128 @@ const trialInclude = {
   },
 } as const
 
+const trialProductView = (product: any) =>
+  product
+    ? {
+        id: product.id,
+        name: product.name,
+        audience: product.audience,
+        totalSessions: product.totalSessions,
+        validityDays: product.validityDays,
+        priceCents: product.priceCents,
+      }
+    : null
+
+const trainingTrialResponse = (trial: any, management: boolean) => ({
+  id: trial.id,
+  trialNo: trial.trialNo,
+  status: trial.status,
+  sourceChannel: trial.sourceChannel,
+  scheduledStartsAt: trial.scheduledStartsAt,
+  scheduledEndsAt: trial.scheduledEndsAt,
+  checkedInAt: trial.checkedInAt,
+  noShowAt: trial.noShowAt,
+  assessedAt: trial.assessedAt,
+  convertedAt: trial.convertedAt,
+  lostAt: trial.lostAt,
+  cancelledAt: trial.cancelledAt,
+  assessmentDimensions: trial.assessmentDimensions,
+  recommendation: trial.recommendation,
+  assessmentNote: trial.assessmentNote,
+  product: trialProductView(trial.product),
+  student: trial.student
+    ? { id: trial.student.id, displayName: trial.student.displayName }
+    : null,
+  guardian: trial.guardian
+    ? { id: trial.guardian.id, displayName: trial.guardian.displayName }
+    : null,
+  member: trial.member
+    ? { id: trial.member.id, displayName: trial.member.displayName }
+    : null,
+  coach: trial.coach
+    ? { id: trial.coach.id, displayName: trial.coach.displayName }
+    : null,
+  class: trial.class
+    ? {
+        id: trial.class.id,
+        name: trial.class.name,
+        capacity: trial.class.capacity,
+        active: trial.class.active,
+        product: trialProductView(trial.class.product),
+      }
+    : null,
+  session: trial.session
+    ? {
+        id: trial.session.id,
+        classId: trial.session.classId,
+        startsAt: trial.session.startsAt,
+        endsAt: trial.session.endsAt,
+        status: trial.session.status,
+      }
+    : null,
+  ...(management
+    ? {
+        leadId: trial.leadId,
+        studentId: trial.studentId,
+        guardianId: trial.guardianId,
+        memberId: trial.memberId,
+        productId: trial.productId,
+        classId: trial.classId,
+        sessionId: trial.sessionId,
+        coachId: trial.coachId,
+        lead: trial.lead
+          ? {
+              id: trial.lead.id,
+              displayName: trial.lead.displayName,
+              status: trial.lead.status,
+              sourceChannel: trial.lead.sourceChannel,
+              campaign: trial.lead.campaign,
+              convertedMemberId: trial.lead.convertedMemberId,
+            }
+          : null,
+        convertedEnrollment: trial.convertedEnrollment
+          ? {
+              id: trial.convertedEnrollment.id,
+              enrollmentNo: trial.convertedEnrollment.enrollmentNo,
+              status: trial.convertedEnrollment.status,
+              product: trialProductView(trial.convertedEnrollment.product),
+              class: trial.convertedEnrollment.class
+                ? {
+                    id: trial.convertedEnrollment.class.id,
+                    name: trial.convertedEnrollment.class.name,
+                  }
+                : null,
+              student: trial.convertedEnrollment.student
+                ? {
+                    id: trial.convertedEnrollment.student.id,
+                    displayName: trial.convertedEnrollment.student.displayName,
+                  }
+                : null,
+            }
+          : null,
+        transitions: (trial.transitions || []).map((transition: any) => ({
+          id: transition.id,
+          fromStatus: transition.fromStatus,
+          toStatus: transition.toStatus,
+          action: transition.action,
+          reason: transition.reason,
+          actor: transition.actor
+            ? {
+                id: transition.actor.id,
+                displayName: transition.actor.displayName,
+              }
+            : null,
+          createdAt: transition.createdAt,
+        })),
+      }
+    : {}),
+})
+
 @Injectable()
 export class TrainingTrialsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  list(query: TrainingTrialQueryDto, actor: AuthUser, mine = false) {
+  async list(query: TrainingTrialQueryDto, actor: AuthUser, mine = false) {
     const coachOnly =
       actor.roles.includes(AppRole.COACH) &&
       !actor.roles.some((role) =>
@@ -122,7 +239,7 @@ export class TrainingTrialsService {
       )
     const startsAt = query.from ? new Date(query.from) : undefined
     const endsAt = query.to ? new Date(query.to) : undefined
-    return this.prisma.trainingTrial.findMany({
+    const trials = await this.prisma.trainingTrial.findMany({
       where: {
         status: query.status,
         scheduledStartsAt:
@@ -145,6 +262,7 @@ export class TrainingTrialsService {
       orderBy: { scheduledStartsAt: 'desc' },
       take: 200,
     })
+    return trials.map((trial) => trainingTrialResponse(trial, !mine))
   }
 
   async create(dto: CreateTrainingTrialDto, actor: AuthUser) {
@@ -199,7 +317,7 @@ export class TrainingTrialsService {
       if (replay.createdById !== actor.sub || replay.creationCommandHash !== commandHash) {
         throw new ConflictException('试听预约幂等键已用于其他命令')
       }
-      return replay
+      return trainingTrialResponse(replay, true)
     }
     if (scheduledStartsAt <= new Date()) {
       throw new BadRequestException('试听开始时间必须晚于当前时间')
@@ -348,7 +466,7 @@ export class TrainingTrialsService {
           ) {
             throw new ConflictException('试听预约幂等键已用于其他命令')
           }
-          return concurrent
+          return trainingTrialResponse(concurrent, true)
         }
         await this.assertNoScheduleConflict(
           tx,
@@ -415,10 +533,11 @@ export class TrainingTrialsService {
           idempotencyKey,
           { commandHash },
         )
-        return tx.trainingTrial.findUniqueOrThrow({
+        const trial = await tx.trainingTrial.findUniqueOrThrow({
           where: { id: created.id },
           include: trialInclude,
         })
+        return trainingTrialResponse(trial, true)
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       )
@@ -433,7 +552,7 @@ export class TrainingTrialsService {
         concurrent.createdById === actor.sub &&
         concurrent.creationCommandHash === commandHash
       ) {
-        return concurrent
+        return trainingTrialResponse(concurrent, true)
       }
       throw new ConflictException('试听预约发生并发冲突，请刷新后使用原幂等键重试')
     }
@@ -594,7 +713,7 @@ export class TrainingTrialsService {
       ) {
         throw new ConflictException('试听动作幂等键已用于其他命令')
       }
-      return replay.trial
+      return trainingTrialResponse(replay.trial, true)
     }
 
     try {
@@ -679,10 +798,11 @@ export class TrainingTrialsService {
           idempotencyKey,
           { commandHash, ...options.payload, timeWindowPolicy },
         )
-        return tx.trainingTrial.findUniqueOrThrow({
+        const trial = await tx.trainingTrial.findUniqueOrThrow({
           where: { id },
           include: trialInclude,
         })
+        return trainingTrialResponse(trial, true)
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       )
@@ -699,7 +819,7 @@ export class TrainingTrialsService {
         concurrent.actorId === actor.sub &&
         concurrent.commandHash === commandHash
       ) {
-        return concurrent.trial
+        return trainingTrialResponse(concurrent.trial, true)
       }
       throw new ConflictException('试听动作发生并发冲突，请刷新后使用原幂等键重试')
     }

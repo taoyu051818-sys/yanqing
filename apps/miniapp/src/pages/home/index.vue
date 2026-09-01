@@ -10,6 +10,19 @@ const loading = ref(false)
 const nextGame = ref<any>(null)
 const nextEvent = ref<any>(null)
 const greeting = computed(() => session.user ? `${session.user.displayName}，好久不见` : '每一次挥拍，都算数')
+const roleLabel: Record<string, string> = {
+  MEMBER: '会员',
+  COACH: '教练',
+  FRONT_DESK: '前台',
+  HOST: '球局主理人',
+  MERCHANT: '联盟商户',
+  FINANCE: '财务',
+  ADMIN: '管理员',
+  SUPER_ADMIN: '超级管理员',
+}
+const displayRoles = computed(() =>
+  session.roles.map((role) => roleLabel[role] || '其他岗位').join(' · '),
+)
 
 const shortcuts = [
   { title: '在线订场', subtitle: '20片场地实时可订', url: '/pages/booking/index', tab: true },
@@ -27,7 +40,11 @@ const openLogin = () => uni.navigateTo({ url: '/pages/login/index' })
 const openCommunity = () => uni.switchTab({ url: '/pages/community/index' })
 
 onShow(async () => {
-  if (!session.user && !(await session.hydrate())) return
+  // A share can hot-open the home page while the recipient is already logged
+  // in. In that case App.onShow has just captured the inviter, so consume it
+  // immediately instead of waiting for a later relaunch or profile visit.
+  if (session.user) await session.applyPendingReferral()
+  else if (!(await session.hydrate())) return
   loading.value = true
   try {
     const [games, events] = await Promise.all([endpoints.games(), endpoints.events()])
@@ -45,7 +62,7 @@ onShow(async () => {
       <text class="headline">{{ greeting }}</text>
       <text class="hero-copy">延庆人的羽毛球生活方式，从订一片场开始。</text>
       <button v-if="!session.isAuthenticated" class="hero-button" @tap="openLogin">微信一键登录</button>
-      <view v-else class="identity"><text>{{ session.roles.join(' · ') || 'MEMBER' }}</text></view>
+      <view v-else class="identity"><text>{{ displayRoles || '会员' }}</text></view>
     </view>
 
     <view class="grid-2 shortcut-grid">
@@ -78,13 +95,18 @@ onShow(async () => {
 <style scoped>
 .hero { padding: 44rpx 36rpx; margin: 8rpx 0 28rpx; color: #fff; background: linear-gradient(145deg,#123d27,#1d7447 65%,#c9a846); border-radius: 36rpx; box-shadow: 0 24rpx 60rpx rgba(15,70,40,.2); }
 .eyebrow { display: block; opacity: .7; font-size: 19rpx; letter-spacing: 3rpx; }
-.headline { display: block; margin-top: 28rpx; font-size: 46rpx; font-weight: 800; }
+.headline { display: block; margin-top: 28rpx; font-size: 46rpx; font-weight: 800; overflow-wrap: anywhere; }
 .hero-copy { display: block; max-width: 540rpx; margin-top: 14rpx; opacity: .85; font-size: 27rpx; line-height: 1.65; }
 .hero-button { width: 260rpx; margin: 34rpx 0 0; color: #153f29; background: #fff; border-radius: 18rpx; font-size: 26rpx; }
-.identity { display: inline-flex; margin-top: 28rpx; padding: 10rpx 18rpx; background: rgba(255,255,255,.16); border-radius: 999rpx; font-size: 21rpx; }
+.identity { display: inline-flex; max-width: 100%; margin-top: 28rpx; padding: 10rpx 18rpx; background: rgba(255,255,255,.16); border-radius: 999rpx; font-size: 21rpx; line-height: 1.5; overflow-wrap: anywhere; }
 .shortcut-grid { margin-bottom: 20rpx; }
 .shortcut { position: relative; min-height: 140rpx; padding: 24rpx; background: #fff; border-radius: 24rpx; }
-.shortcut-title,.feature-title { display: block; margin-bottom: 10rpx; font-size: 31rpx; font-weight: 700; }
+.shortcut-title,.feature-title { display: block; margin-bottom: 10rpx; font-size: 31rpx; font-weight: 700; overflow-wrap: anywhere; }
 .arrow { position: absolute; right: 22rpx; bottom: 18rpx; color: #17653d; }
 .feature-title { margin-top: 26rpx; }
+@media (max-width: 360px) {
+  .hero { padding: 36rpx 30rpx; }
+  .headline { font-size: 41rpx; }
+  .shortcut { min-height: 156rpx; padding: 22rpx; }
+}
 </style>

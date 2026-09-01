@@ -284,7 +284,13 @@ async function seed() {
       'referral.first_payment.coin_reward',
       50,
       ParameterType.INTEGER,
-      '直接推荐新客首次付费奖励羽球币',
+      '直接推荐新客首次付费时邀请人奖励羽球币',
+    ],
+    [
+      'referral.new_user.first_payment.coin_reward',
+      50,
+      ParameterType.INTEGER,
+      '直接推荐新客首次付费时新客奖励羽球币',
     ],
     [
       'referral.refund_observation_days',

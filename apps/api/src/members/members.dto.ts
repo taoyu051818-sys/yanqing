@@ -6,6 +6,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -70,8 +71,10 @@ export class ReviewAccountAdjustmentDto {
 
 export class BindReferralDto {
   @IsString()
-  @MinLength(1)
-  referrerId: string
+  @MinLength(20)
+  @MaxLength(128)
+  @Matches(/^[A-Za-z0-9_-]+$/)
+  inviteCode: string
 }
 
 export class LeadQueryDto {

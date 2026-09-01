@@ -47,22 +47,39 @@ export function mockUser(role = currentRole()): SessionUser {
   const persistedUser = persistedProfile(profile.id)
   const persistedAccountBook = uni.getStorageSync('yanqing_mock_member_accounts')
   const persistedAccounts = persistedAccountBook?.[profile.id]
+  const sourceRoles = Array.isArray(persistedUser?.roles) && persistedUser.roles.length
+    ? persistedUser.roles
+    : profile.roles
+  const sourceAccounts = Array.isArray(persistedAccounts) ? persistedAccounts : accounts
+  const memberProfile = persistedUser?.memberProfile || {}
   return {
     id: profile.id,
     displayName: persistedUser?.displayName || profile.name,
-    referrerId: persistedUser?.referrerId || null,
+    ...(persistedUser?.avatarUrl ? { avatarUrl: persistedUser.avatarUrl } : {}),
+    hasReferrer: Boolean(persistedUser?.referrerId),
     primaryRole: (persistedUser?.primaryRole || role) as AppRole,
-    roles: Array.isArray(persistedUser?.roles) && persistedUser.roles.length
-      ? persistedUser.roles
-      : profile.roles,
-    accounts: Array.isArray(persistedAccounts)
-      ? persistedAccounts.map((item: any) => ({ ...item }))
-      : accounts.map((item) => ({ ...item })),
+    roles: sourceRoles.map((item: any) => typeof item === 'string'
+      ? item
+      : {
+          role: item.role,
+          ...(item.merchant
+            ? { merchant: { id: item.merchant.id, name: item.merchant.name } }
+            : {}),
+        }),
+    accounts: sourceAccounts.map((item: any) => ({
+      id: item.id,
+      type: item.type,
+      balance: item.balance,
+      frozenBalance: item.frozenBalance,
+    })),
     memberProfile: {
-      level: role === 'MEMBER' ? 'GOLD' : 'STAFF',
-      phone: '13800000005',
-      isNewCustomer: role === 'MEMBER',
-      ...(persistedUser?.memberProfile || {}),
+      level: memberProfile.level || (role === 'MEMBER' ? 'GOLD' : 'STAFF'),
+      tags: Array.isArray(memberProfile.tags) ? [...memberProfile.tags] : [],
+      membershipExpiresAt: memberProfile.membershipExpiresAt ?? null,
+      isNewCustomer: memberProfile.isNewCustomer ?? role === 'MEMBER',
+      firstVisitAt: memberProfile.firstVisitAt ?? null,
+      lastVisitAt: memberProfile.lastVisitAt ?? null,
+      visitCount: Number(memberProfile.visitCount || 0),
     },
   }
 }

@@ -59,6 +59,53 @@ const normalized = (value: string, label: string, min = 2, max = 300) => {
   return result
 }
 
+const hasOwn = (value: object, key: string) =>
+  Object.prototype.hasOwnProperty.call(value, key)
+
+/**
+ * Data-erasure commands keep their replay keys and hashes in persistence, but
+ * callers only need the workflow state and review evidence. Keep this
+ * allow-list at the HTTP boundary so adding a database column cannot silently
+ * expand the privacy response contract.
+ */
+const dataErasureRequestResponse = (request: any) => ({
+  id: request.id,
+  userId: request.userId,
+  status: request.status,
+  reason: request.reason,
+  reviewedById: request.reviewedById ?? null,
+  reviewReason: request.reviewReason ?? null,
+  requestedAt: request.requestedAt,
+  reviewedAt: request.reviewedAt ?? null,
+  completedAt: request.completedAt ?? null,
+  createdAt: request.createdAt,
+  updatedAt: request.updatedAt,
+  ...(hasOwn(request, 'user')
+    ? {
+        user: request.user
+          ? {
+              id: request.user.id,
+              displayName: request.user.displayName,
+              status: request.user.status,
+              ...(hasOwn(request.user, 'phone')
+                ? { phone: request.user.phone }
+                : {}),
+            }
+          : null,
+      }
+    : {}),
+  ...(hasOwn(request, 'reviewedBy')
+    ? {
+        reviewedBy: request.reviewedBy
+          ? {
+              id: request.reviewedBy.id,
+              displayName: request.reviewedBy.displayName,
+            }
+          : null,
+      }
+    : {}),
+})
+
 @Injectable()
 export class PrivacyService {
   constructor(private readonly prisma: PrismaService) {}
@@ -127,12 +174,13 @@ export class PrivacyService {
     }
   }
 
-  listMine(actor: AuthUser) {
-    return this.prisma.dataErasureRequest.findMany({
+  async listMine(actor: AuthUser) {
+    const requests = await this.prisma.dataErasureRequest.findMany({
       where: { userId: actor.sub },
       include: { reviewedBy: { select: { id: true, displayName: true } } },
       orderBy: { requestedAt: 'desc' },
     })
+    return requests.map(dataErasureRequestResponse)
   }
 
   async list(query: DataErasureRequestQueryDto, actor: AuthUser) {
@@ -151,7 +199,12 @@ export class PrivacyService {
       }),
       this.prisma.dataErasureRequest.count({ where }),
     ])
-    return { items, total, page: query.page, pageSize: query.pageSize }
+    return {
+      items: items.map(dataErasureRequestResponse),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+    }
   }
 
   async blockers(requestId: string, actor: AuthUser) {
@@ -484,14 +537,15 @@ export class PrivacyService {
     if (changed.count !== 1) throw new ConflictException('账号状态已发生变化，请重新检查注销条件')
   }
 
-  private view(client: PrivacyClient, id: string) {
-    return client.dataErasureRequest.findUniqueOrThrow({
+  private async view(client: PrivacyClient, id: string) {
+    const request = await client.dataErasureRequest.findUniqueOrThrow({
       where: { id },
       include: {
         user: { select: { id: true, displayName: true, status: true } },
         reviewedBy: { select: { id: true, displayName: true } },
       },
     })
+    return dataErasureRequestResponse(request)
   }
 
   private assertRequestReplay(

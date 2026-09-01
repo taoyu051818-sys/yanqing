@@ -29,6 +29,7 @@ import type {
   SetRechargePlanStatusDto,
 } from './memberships.dto.js'
 import { executeOrderCreation } from '../orders/order-creation-idempotency.js'
+import { orderResponse } from '../orders/order-response.js'
 
 const orderNo = (prefix: string) =>
   `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`
@@ -573,7 +574,7 @@ export class MembershipsService {
   }
 
   async purchase(dto: PurchaseMembershipDto, actor: AuthUser) {
-    return executeOrderCreation(this.prisma, {
+    const order = await executeOrderCreation(this.prisma, {
       memberId: actor.sub,
       creationIdempotencyKey: dto.creationIdempotencyKey,
       command: { kind: 'MEMBERSHIP_PURCHASE', productId: dto.productId },
@@ -646,10 +647,11 @@ export class MembershipsService {
         return created
       }),
     })
+    return orderResponse(order)
   }
 
-  recharge(dto: CreateRechargeDto, actor: AuthUser) {
-    return executeOrderCreation(this.prisma, {
+  async recharge(dto: CreateRechargeDto, actor: AuthUser) {
+    const order = await executeOrderCreation(this.prisma, {
       memberId: actor.sub,
       creationIdempotencyKey: dto.creationIdempotencyKey,
       command: { kind: 'RECHARGE', planId: dto.planId },
@@ -714,6 +716,7 @@ export class MembershipsService {
         return created
       }),
     })
+    return orderResponse(order)
   }
 
   private async createMembershipProductVersion(

@@ -323,28 +323,41 @@ export class OrderFinalizerService {
         },
       });
       if (previousPaidOrders === 0) {
-        const [rewardParameter, observationParameter] = await Promise.all([
-          tx.systemParameter.findFirst({
-            where: {
-              key: 'referral.first_payment.coin_reward',
-              effectiveFrom: { lte: now },
-              OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-            },
-            orderBy: { effectiveFrom: 'desc' },
-          }),
-          tx.systemParameter.findFirst({
-            where: {
-              key: 'referral.refund_observation_days',
-              effectiveFrom: { lte: now },
-              OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-            },
-            orderBy: { effectiveFrom: 'desc' },
-          }),
-        ]);
+        const [rewardParameter, newUserRewardParameter, observationParameter] =
+          await Promise.all([
+            tx.systemParameter.findFirst({
+              where: {
+                key: 'referral.first_payment.coin_reward',
+                effectiveFrom: { lte: now },
+                OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+              },
+              orderBy: { effectiveFrom: 'desc' },
+            }),
+            tx.systemParameter.findFirst({
+              where: {
+                key: 'referral.new_user.first_payment.coin_reward',
+                effectiveFrom: { lte: now },
+                OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+              },
+              orderBy: { effectiveFrom: 'desc' },
+            }),
+            tx.systemParameter.findFirst({
+              where: {
+                key: 'referral.refund_observation_days',
+                effectiveFrom: { lte: now },
+                OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+              },
+              orderBy: { effectiveFrom: 'desc' },
+            }),
+          ]);
         const rewardValue =
           typeof rewardParameter?.value === 'number'
             ? Math.max(0, Math.round(rewardParameter.value))
             : 100;
+        const newUserRewardValue =
+          typeof newUserRewardParameter?.value === 'number'
+            ? Math.max(0, Math.round(newUserRewardParameter.value))
+            : 50;
         const observationDays =
           typeof observationParameter?.value === 'number'
             ? Math.max(0, Math.round(observationParameter.value))
@@ -357,7 +370,7 @@ export class OrderFinalizerService {
         // committing the payment without its downstream side effects.  A
         // database upsert is atomic and leaves the already-created reward
         // untouched on a retry.
-        await tx.referralReward.upsert({
+        const scheduledReward = await tx.referralReward.upsert({
           where: {
             newUserId_triggerType: {
               newUserId: order.memberId,
@@ -372,12 +385,38 @@ export class OrderFinalizerService {
             triggerType: 'FIRST_PAYMENT',
             rewardType: 'BADMINTON_COIN',
             rewardValue,
+            newUserRewardValue,
             status: RewardStatus.PENDING_OBSERVATION,
             observationEndsAt: new Date(
               now.getTime() + observationDays * 86_400_000,
             ),
           },
         });
+        if (scheduledReward.triggerOrderId === order.id) {
+          await tx.auditLog.create({
+            data: {
+              actorId: paymentActorId,
+              actorRole,
+              action: 'REFERRAL_REWARD_SCHEDULED',
+              objectType: 'ReferralReward',
+              objectId: scheduledReward.id,
+              newValue: {
+                referrerId: member.referrerId,
+                newUserId: order.memberId,
+                triggerOrderId: order.id,
+                rewardType: 'BADMINTON_COIN',
+                referrerRewardValue: rewardValue,
+                newUserRewardValue,
+                observationDays,
+                parameterIds: {
+                  referrerReward: rewardParameter?.id ?? null,
+                  newUserReward: newUserRewardParameter?.id ?? null,
+                  observation: observationParameter?.id ?? null,
+                },
+              } as never,
+            },
+          });
+        }
       }
     }
 

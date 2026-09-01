@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
@@ -119,13 +121,15 @@ describe('all direct order creation entrypoints', () => {
   })
 
   it('replays a normalized fixed-doubles event registration', async () => {
+    const partnerInviteCode = 'EP_order_replay_partner_code_123456'
     const command = {
-      kind: 'EVENT_REGISTRATION', eventId: 'event-1', name: '金羽组合', playerAName: '甲', playerBName: '乙',
-      playerAUserId: null, playerBUserId: null, category: TeamCategory.MIXED_DOUBLES, sourceChannel: SourceChannel.MINI_PROGRAM,
+      kind: 'EVENT_REGISTRATION', eventId: 'event-1', name: '金羽组合', playerAName: null, playerBName: null,
+      playerAUserId: actor.sub, playerBUserId: null, category: TeamCategory.MIXED_DOUBLES, sourceChannel: SourceChannel.MINI_PROGRAM,
+      partnerInviteTokenHash: createHash('sha256').update(partnerInviteCode).digest('hex'),
     }
     const prisma = replayPrisma(command, { id: 'order-existing', eventTeam: { id: 'team-1' } })
     await expect(new EventsService(prisma as never).register('event-1', {
-      name: ' 金羽组合 ', playerAName: ' 甲 ', playerBName: '乙', category: TeamCategory.MIXED_DOUBLES,
+      name: ' 金羽组合 ', partnerInviteCode, category: TeamCategory.MIXED_DOUBLES,
       sourceChannel: SourceChannel.MINI_PROGRAM, creationIdempotencyKey: key,
     }, actor)).resolves.toMatchObject({ id: 'order-existing' })
     expect(prisma.event.findUnique).not.toHaveBeenCalled()

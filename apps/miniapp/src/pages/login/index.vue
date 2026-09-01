@@ -17,7 +17,20 @@ const developmentRoles: Array<{ role: AppRole; label: string }> = [
   { role: 'EVENT_MANAGER', label: '赛事管理员' }, { role: 'ADMIN', label: '管理员' },
   { role: 'SUPER_ADMIN', label: '超级管理员' },
 ]
-const finish = () => uni.switchTab({ url: '/pages/home/index' })
+const finish = () => {
+  if (session.referralAttributionMessage) {
+    uni.showToast({
+      title: session.referralAttributionMessage,
+      icon: session.referralAttribution === 'bound' ? 'success' : 'none',
+      duration: 2600,
+    })
+  }
+  if (session.isOperator) {
+    uni.reLaunch({ url: '/pages/workspace/index' })
+    return
+  }
+  uni.switchTab({ url: '/pages/home/index' })
+}
 async function loginWechat() {
   error.value = ''
   try { await session.loginWithWechat(); finish() }
@@ -59,6 +72,6 @@ async function loginDev(role: AppRole) {
 .dev { margin-top: 70rpx; text-align: left; }
 .dev-title { display: block; margin-bottom: 8rpx; font-weight: 700; }
 .role-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 14rpx; margin-top: 22rpx; }
-.role { padding: 0; min-height: 66rpx; line-height: 66rpx; font-size: 23rpx; }
+.role { width: 100%; padding: 0; min-height: 66rpx; line-height: 66rpx; font-size: 23rpx; }
 .privacy { position: fixed; right: 30rpx; bottom: 32rpx; left: 30rpx; color: #919993; font-size: 20rpx; }
 </style>

@@ -17,46 +17,26 @@ function shanghaiDate(value: unknown): string {
 }
 
 export function availability(date: string): CourtAvailability {
-  const courts = Array.from({ length: 20 }, (_, index) => ({
-    id: `court-${index + 1}`,
-    code: `C${String(index + 1).padStart(2, '0')}`,
-    number: index + 1,
-    name: `${index + 1}号场`,
-    usage: index < 16 ? 'PUBLIC' : 'TRAINING',
-    enabled: true,
+  const courts = getMockVenueCourts().map((court) => ({
+    id: court.id,
+    name: court.name,
+    usage: court.usage,
+    enabled: court.enabled,
   }))
   const starts = [420, 540, 660, 780, 900, 1020, 1140, 1260]
-  const pricingAt = new Date(`${date}T00:00:00+08:00`).getTime()
-  const weekdayBit = 1 << new Date(`${date}T00:00:00Z`).getUTCDay()
-  const priceRules = getPriceRules()
   const slots = starts.map((startMinutes, index) => {
     const period: NonNullable<CourtAvailability['slots'][number]['period']> =
       index === 0 ? 'EARLY' : index < 6 ? 'DAYTIME' : 'PRIME'
     const slotId = `slot-${index + 1}`
-    const rule = priceRules
-      .filter((candidate) =>
-        candidate.enabled === true &&
-        (candidate.timeSlotId === slotId || candidate.timeSlotId == null) &&
-        new Date(candidate.effectiveFrom).getTime() <= pricingAt &&
-        (!candidate.effectiveTo || new Date(candidate.effectiveTo).getTime() > pricingAt) &&
-        (Number(candidate.weekdayMask) & weekdayBit) !== 0,
-      )
-      .sort((left, right) =>
-        Number(Boolean(right.timeSlotId)) - Number(Boolean(left.timeSlotId)) ||
-        new Date(right.effectiveFrom).getTime() - new Date(left.effectiveFrom).getTime() ||
-        Number(right.version) - Number(left.version),
-      )[0]
+    const rule = resolveMockPriceRule(date, slotId)
     return {
       id: slotId,
-      code: `S${index + 1}`,
       label: slotLabels[index],
       startMinutes,
       endMinutes: startMinutes + 120,
       period,
+      enabled: true,
       price: rule ? {
-        id: rule.id,
-        code: rule.code,
-        version: rule.version,
         priceCents: rule.priceCents,
         newcomerPriceCents: rule.newcomerPriceCents,
       } : undefined,
@@ -78,15 +58,57 @@ export function availability(date: string): CourtAvailability {
   if (activePersisted.length !== persisted.filter((booking) => booking.status !== 'CANCELLED').length) {
     saveVenueBookings(persisted.filter((booking) => booking.status !== 'CANCELLED' && !(booking.status === 'HELD' && booking.holdExpiresAt && new Date(booking.holdExpiresAt).getTime() <= now)))
   }
-  const bookings = [...seedBookings, ...activePersisted]
+  const bookings = [...seedBookings, ...activePersisted].map((booking) => ({
+    courtId: booking.courtId,
+    startsAt: booking.startsAt,
+    endsAt: booking.endsAt,
+    status: booking.status,
+    usage: booking.usage,
+  }))
   const dayStart = new Date(`${date}T00:00:00+08:00`).getTime()
   const dayEnd = dayStart + 86_400_000
-  const closures = getVenueClosures().filter((closure) =>
-    closure.status === 'ACTIVE' &&
-    new Date(closure.startsAt).getTime() < dayEnd &&
-    new Date(closure.endsAt).getTime() > dayStart,
-  ) as CourtAvailability['closures']
+  const closures = getVenueClosures()
+    .filter((closure) =>
+      closure.status === 'ACTIVE' &&
+      new Date(closure.startsAt).getTime() < dayEnd &&
+      new Date(closure.endsAt).getTime() > dayStart,
+    )
+    .map((closure) => ({
+      courtId: closure.courtId,
+      startsAt: closure.startsAt,
+      endsAt: closure.endsAt,
+      status: closure.status,
+    })) as CourtAvailability['closures']
   return { date, courts, slots, bookings, closures }
+}
+
+export function getMockVenueCourts() {
+  return Array.from({ length: 20 }, (_, index) => ({
+    id: `court-${index + 1}`,
+    code: `C${String(index + 1).padStart(2, '0')}`,
+    number: index + 1,
+    name: `${index + 1}号场`,
+    usage: index < 16 ? 'PUBLIC' : 'TRAINING',
+    enabled: true,
+  }))
+}
+
+export function resolveMockPriceRule(date: string, slotId: string) {
+  const pricingAt = new Date(`${date}T00:00:00+08:00`).getTime()
+  const weekdayBit = 1 << new Date(`${date}T00:00:00Z`).getUTCDay()
+  return getPriceRules()
+    .filter((candidate) =>
+      candidate.enabled === true &&
+      (candidate.timeSlotId === slotId || candidate.timeSlotId == null) &&
+      new Date(candidate.effectiveFrom).getTime() <= pricingAt &&
+      (!candidate.effectiveTo || new Date(candidate.effectiveTo).getTime() > pricingAt) &&
+      (Number(candidate.weekdayMask) & weekdayBit) !== 0,
+    )
+    .sort((left, right) =>
+      Number(Boolean(right.timeSlotId)) - Number(Boolean(left.timeSlotId)) ||
+      new Date(right.effectiveFrom).getTime() - new Date(left.effectiveFrom).getTime() ||
+      Number(right.version) - Number(left.version),
+    )[0]
 }
 
 export const seedOrders = [

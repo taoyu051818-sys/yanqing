@@ -19,6 +19,7 @@ const KEYS = {
   games: "yanqing_mock_games",
   events: "yanqing_mock_events",
   eventDetails: "yanqing_mock_event_details",
+  eventPartnerInvites: "yanqing_mock_event_partner_invites",
   enrollments: "yanqing_mock_enrollments",
   students: "yanqing_mock_students",
   trainingSessions: "yanqing_mock_training_sessions",
@@ -60,6 +61,8 @@ const KEYS = {
   riskEvents: "yanqing_mock_risk_events",
   auditLogs: "yanqing_mock_audit_logs",
   dataErasureRequests: "yanqing_mock_data_erasure_requests",
+  referralInvites: "yanqing_mock_referral_invites",
+  referralRewards: "yanqing_mock_referral_rewards",
 } as const;
 
 function read<T>(key: string, fallback: T): T {
@@ -273,6 +276,9 @@ const initialSystemParameters = (): JsonRecord[] => [
   { id: "parameter-training-venue-fee", key: "training.venue_fee_cents", value: 0, type: "INTEGER", description: "培训场地费硬禁用", locked: true, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
   { id: "parameter-newcomer-valid-days", key: "newcomer.experience.valid_days", value: 7, type: "INTEGER", description: "新客体验权益领取后有效天数", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
   { id: "parameter-newcomer-periods", key: "newcomer.experience.allowed_slot_periods", value: ["EARLY", "DAYTIME"], type: "JSON", description: "新客体验权益允许使用的非黄金时段", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
+  { id: "parameter-referral-inviter-reward", key: "referral.first_payment.coin_reward", value: 50, type: "INTEGER", description: "直接推荐新客首单邀请人奖励羽球币", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
+  { id: "parameter-referral-new-user-reward", key: "referral.new_user.first_payment.coin_reward", value: 50, type: "INTEGER", description: "直接推荐新客首单新客奖励羽球币", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
+  { id: "parameter-referral-observation", key: "referral.refund_observation_days", value: 7, type: "INTEGER", description: "首单完成后的退款观察期", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
   { id: "parameter-booking-hold", key: "booking.hold_minutes", value: 10, type: "INTEGER", description: "待支付订单占场分钟数", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
   { id: "parameter-venue-check-in-window-v1", key: "operations.venue_check_in_window.v1", value: { version: 1, earlyMinutes: 30, lateMinutes: 30 }, type: "JSON", description: "场地签到窗口 v1（提前/延后均不超过240分钟）", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
   { id: "parameter-game-check-in-window-v1", key: "operations.game_check_in_window.v1", value: { version: 1, earlyMinutes: 30, lateMinutes: 30 }, type: "JSON", description: "球局签到窗口 v1（提前/延后均不超过240分钟）", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
@@ -1075,6 +1081,30 @@ export function getDataErasureRequests(): JsonRecord[] {
 
 export function saveDataErasureRequests(value: JsonRecord[]) {
   return write(KEYS.dataErasureRequests, value);
+}
+
+export function getReferralRewards(): JsonRecord[] {
+  return read<JsonRecord[]>(KEYS.referralRewards, []);
+}
+
+export function saveReferralRewards(value: JsonRecord[]) {
+  return write(KEYS.referralRewards, value);
+}
+
+export function getReferralInvites(): JsonRecord[] {
+  return read<JsonRecord[]>(KEYS.referralInvites, []);
+}
+
+export function saveReferralInvites(value: JsonRecord[]) {
+  return write(KEYS.referralInvites, value);
+}
+
+export function getEventPartnerInvites(): JsonRecord[] {
+  return read<JsonRecord[]>(KEYS.eventPartnerInvites, []);
+}
+
+export function saveEventPartnerInvites(value: JsonRecord[]) {
+  return write(KEYS.eventPartnerInvites, value);
 }
 
 export function getRiskEvents(): JsonRecord[] {

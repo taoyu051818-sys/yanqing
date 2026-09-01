@@ -7,6 +7,7 @@ import {
   resetCatalogState,
   saveTrainingTrials,
 } from "./state";
+import { getOrders } from "./venue";
 
 const storage = new Map<string, unknown>();
 
@@ -50,6 +51,11 @@ describe("miniapp mock training trial funnel", () => {
       idempotencyKey: "trial-reserve-mock-001",
     };
     const reserved = await request("POST", "/training/trials", reserveCommand);
+    expect(reserved).not.toHaveProperty("creationIdempotencyKey");
+    expect(reserved).not.toHaveProperty("creationCommandHash");
+    expect(reserved.transitions?.[0]).not.toHaveProperty("idempotencyKey");
+    expect(reserved.transitions?.[0]).not.toHaveProperty("commandHash");
+    expect(reserved.transitions?.[0]).not.toHaveProperty("payload");
     await expect(
       request("POST", "/training/trials", reserveCommand),
     ).resolves.toEqual(reserved);
@@ -100,7 +106,7 @@ describe("miniapp mock training trial funnel", () => {
     );
     expect(converted).toMatchObject({
       status: "CONVERTED",
-      convertedEnrollmentId: "enroll-1",
+      convertedEnrollment: { id: "enroll-1" },
     });
     await expect(
       request("POST", `/training/trials/${reserved.id}/lost`, {
@@ -116,6 +122,8 @@ describe("miniapp mock training trial funnel", () => {
       status: "CONVERTED",
       recommendation: "建议进入成人进阶班并加强步法训练",
     });
+    expect(mine[0]).not.toHaveProperty("leadId");
+    expect(mine[0]).not.toHaveProperty("transitions");
     expect(
       getAuditLogs().filter((item) => item.objectId === reserved.id),
     ).toHaveLength(4);
@@ -191,6 +199,22 @@ describe("miniapp mock training trial funnel", () => {
 });
 
 describe("miniapp mock youth training rules", () => {
+  const privateRuleFields = [
+    "requestedById",
+    "reviewedById",
+    "requestIdempotencyKey",
+    "decisionIdempotencyKey",
+    "commandHash",
+    "decisionCommandHash",
+  ];
+  const expectSafeRule = (rule: Record<string, unknown>) => {
+    for (const field of privateRuleFields)
+      expect(rule).not.toHaveProperty(field);
+    if (rule.requestedBy)
+      expect(rule.requestedBy).not.toHaveProperty("id");
+    if (rule.reviewedBy) expect(rule.reviewedBy).not.toHaveProperty("id");
+  };
+
   beforeEach(() => {
     storage.clear();
     resetCatalogState();
@@ -234,7 +258,7 @@ describe("miniapp mock youth training rules", () => {
     ).rejects.toThrow("正式销售已阻断");
 
     const effectiveFrom = new Date(Date.now() + 60_000).toISOString();
-    const draft = await timedRequest("POST", "/training/youth-rules", {
+    const draftCommand = {
       maxTotalSessions: 24,
       maxValidityDays: 200,
       maxContractAmountCents: 260_000,
@@ -243,8 +267,21 @@ describe("miniapp mock youth training rules", () => {
       effectiveFrom,
       reason: "根据测试经营合规口径提交完整规则",
       idempotencyKey: "youth-rule-draft-mock-001",
+    };
+    const draft = await timedRequest(
+      "POST",
+      "/training/youth-rules",
+      draftCommand,
+    );
+    expect(draft).toMatchObject({
+      status: "DRAFT",
+      isOwnRequester: true,
+      requestedBy: { displayName: "金羽管理员" },
     });
-    expect(draft).toMatchObject({ status: "DRAFT", requestedById: "user-admin" });
+    expectSafeRule(draft);
+    await expect(
+      timedRequest("POST", "/training/youth-rules", draftCommand),
+    ).resolves.toEqual(draft);
     await expect(
       timedRequest("POST", `/training/youth-rules/${draft.id}/publish`, {
         reason: "制单人越权复核",
@@ -253,18 +290,42 @@ describe("miniapp mock youth training rules", () => {
     ).rejects.toThrow("SUPER_ADMIN");
 
     await timedRequest("POST", "/auth/dev-login", { role: "SUPER_ADMIN" });
+    const publishCommand = {
+      reason: "异人复核字段完整并同意发布",
+      idempotencyKey: "youth-rule-publish-mock-001",
+    };
     const published = await timedRequest(
       "POST",
       `/training/youth-rules/${draft.id}/publish`,
-      {
-        reason: "异人复核字段完整并同意发布",
-        idempotencyKey: "youth-rule-publish-mock-001",
-      },
+      publishCommand,
     );
-    expect(published).toMatchObject({ status: "PUBLISHED", reviewedById: "user-super" });
+    expect(published).toMatchObject({
+      status: "PUBLISHED",
+      isOwnRequester: false,
+      reviewedBy: { displayName: "超级管理员" },
+    });
+    expectSafeRule(published);
+    await expect(
+      timedRequest(
+        "POST",
+        `/training/youth-rules/${draft.id}/publish`,
+        publishCommand,
+      ),
+    ).resolves.toEqual(published);
+    const listed = await timedRequest<any[]>("GET", "/training/youth-rules");
+    expect(listed[0]).toMatchObject({
+      id: draft.id,
+      isOwnRequester: false,
+      requestedBy: { displayName: "金羽管理员" },
+      reviewedBy: { displayName: "超级管理员" },
+    });
+    expectSafeRule(listed[0]);
     await vi.advanceTimersByTimeAsync(60_001);
     const active = await timedRequest("GET", "/training/youth-rules/active");
     expect(active.version).toBe(draft.version);
+    expectSafeRule(active);
+    expect(active).not.toHaveProperty("requestReason");
+    expect(active).not.toHaveProperty("reviewReason");
 
     const product = await timedRequest("POST", "/training/products", {
       code: "YOUTH-RULED",
@@ -300,7 +361,9 @@ describe("miniapp mock youth training rules", () => {
       sourceChannel: "MINI_PROGRAM",
       creationIdempotencyKey: "youth-purchase-mock-001",
     });
-    expect(order.parameterSnapshot.youthRegulatoryValidation).toMatchObject({
+    expect(order).not.toHaveProperty("parameterSnapshot");
+    const storedOrder = getOrders().find((item) => item.id === order.id)!;
+    expect(storedOrder.parameterSnapshot.youthRegulatoryValidation).toMatchObject({
       version: draft.version,
       limits: { maxTotalSessions: 24, maxValidityDays: 200 },
     });

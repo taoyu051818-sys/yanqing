@@ -1,14 +1,21 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { computed, nextTick, ref } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import OperationsFrame from '../../../../components/OperationsFrame.vue'
 import MetricCard from '../../../../components/MetricCard.vue'
 import StatusBadge from '../../../../components/StatusBadge.vue'
+import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
 import type { CourtAvailability } from '../../../../types/domain'
 import { money, shortDate } from '../../../../utils/format'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
+import {
+  findOpsDeepLinkRecord,
+  opsDeepLinkDomId,
+  parseOpsDeepLinkQuery,
+  type OpsDeepLinkQuery,
+} from '../../../../utils/work-item-deep-link'
 
 const session = useSessionStore()
 const lessons = ref<any[]>([])
@@ -20,12 +27,16 @@ const trials = ref<any[]>([])
 const leads = ref<any[]>([])
 const trialStudents = ref<any[]>([])
 const trialMembers = ref<any[]>([])
+const staffUsers = ref<any[]>([])
 const youthRules = ref<any[]>([])
 const activeYouthRule = ref<any | null>(null)
 const loading = ref(false)
 const actionKey = ref('')
 const actionMessage = ref('')
 const errorMessage = ref('')
+const deepLinkQuery = ref<OpsDeepLinkQuery>({})
+const deepLinkHandled = ref(false)
+const focusedRecord = ref('')
 
 const productCode = ref('')
 const productName = ref('')
@@ -46,7 +57,7 @@ const classWeekdayIndex = ref(2)
 const classStartTime = ref('19:00')
 const classEndTime = ref('21:00')
 const classCapacity = ref('12')
-const classCoachId = ref('user-coach')
+const classCoachId = ref('')
 const classAssistantId = ref('')
 const classCoachCostYuan = ref('200')
 const classAssistantCostYuan = ref('0')
@@ -68,8 +79,14 @@ const trialMemberIndex = ref(0)
 const trialLeadIndex = ref(0)
 const trialStudentIndex = ref(0)
 const trialSessionIndex = ref(0)
-const trialCoachId = ref('user-coach')
-const trialSourceOptions = ['STORE_VISIT', 'WECHAT_GROUP', 'DOUYIN', 'REFERRAL', 'OTHER']
+const trialCoachId = ref('')
+const trialSourceOptions = [
+  { value: 'STORE_VISIT', label: '到店咨询' },
+  { value: 'WECHAT_GROUP', label: '微信群' },
+  { value: 'DOUYIN', label: '抖音' },
+  { value: 'REFERRAL', label: '好友推荐' },
+  { value: 'OTHER', label: '其他渠道' },
+]
 const trialSourceIndex = ref(0)
 const trialReason = ref('')
 const trialLinkLead = ref(false)
@@ -84,7 +101,7 @@ const ruleEffectiveTime = ref('09:00')
 const ruleReason = ref('')
 
 const mayViewTraining = computed(() =>
-  session.roles.some((role) => ['COACH', 'FRONT_DESK', 'FINANCE', 'ADMIN', 'SUPER_ADMIN'].includes(role)),
+  hasOperationsAccess(session.roles, 'training'),
 )
 const canConfigureTraining = computed(() =>
   session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)),
@@ -121,6 +138,11 @@ const canMarkAttendance = computed(() =>
 const canRequestCorrection = computed(() =>
   session.roles.some((role) => ['COACH', 'FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'].includes(role)),
 )
+const coachUsers = computed(() => staffUsers.value.filter((user) => {
+  const roles = [user.primaryRole, ...(user.roles || []).map((item: any) => typeof item === 'string' ? item : item.role)]
+  return user.status !== 'DISABLED' && roles.includes('COACH')
+}))
+const coachOptions = computed(() => [{ id: '', displayName: '暂不指定' }, ...coachUsers.value])
 const requestedCorrections = computed(() => corrections.value.filter((item) => item.status === 'REQUESTED'))
 const activeProducts = computed(() => products.value.filter((item) => item.enabled !== false))
 const activeClasses = computed(() => activeProducts.value.flatMap((product) =>
@@ -129,12 +151,7 @@ const activeClasses = computed(() => activeProducts.value.flatMap((product) =>
     .map((trainingClass: any) => ({ ...trainingClass, product })),
 ))
 const sessionClasses = computed(() => {
-  const coachOnly = session.roles.includes('COACH') && !canConfigureTraining.value
-  return coachOnly
-    ? activeClasses.value.filter((trainingClass) =>
-        trainingClass.coachId === session.user?.id || trainingClass.assistantId === session.user?.id,
-      )
-    : activeClasses.value
+  return activeClasses.value
 })
 const selectedClassProduct = computed(() => activeProducts.value[classProductIndex.value] || null)
 const selectedSessionClass = computed(() => sessionClasses.value[sessionClassIndex.value] || null)
@@ -193,6 +210,27 @@ const metrics = computed(() => [
   ['试听转课', String(trials.value.filter((item) => item.status === 'CONVERTED').length), '已绑定正式报名'],
 ])
 
+function coachDisplayName(coachId?: string, fallback = '班级教练待配置') {
+  if (!coachId) return fallback
+  if (coachId === session.user?.id) return session.user?.displayName || '当前教练'
+  const staff = staffUsers.value.find((item) => item.id === coachId)
+  if (staff?.displayName) return staff.displayName
+  const trial = trials.value.find((item) => item.coachId === coachId && item.coach?.displayName)
+  return trial?.coach?.displayName || '已配置教练'
+}
+
+function changeClassCoach(event: any) {
+  classCoachId.value = coachOptions.value[Number(event.detail.value)]?.id || ''
+}
+
+function changeClassAssistant(event: any) {
+  classAssistantId.value = coachOptions.value[Number(event.detail.value)]?.id || ''
+}
+
+function trialSourceLabel(source?: string) {
+  return trialSourceOptions.find((item) => item.value === source)?.label || '其他渠道'
+}
+
 async function load() {
   await session.hydrate()
   if (!mayViewTraining.value) {
@@ -212,6 +250,7 @@ async function load() {
     canManageTrials.value ? endpoints.members() : Promise.resolve({ items: [] }),
     endpoints.activeYouthTrainingRule(),
     canConfigureTraining.value ? endpoints.youthTrainingRules() : Promise.resolve([]),
+    canConfigureTraining.value ? endpoints.governanceUsers({ page: 1, pageSize: 100 }) : Promise.resolve({ items: [] }),
   ])
   if (result[0].status === 'fulfilled') lessons.value = result[0].value || []
   if (result[1].status === 'fulfilled') enrollments.value = result[1].value || []
@@ -223,6 +262,10 @@ async function load() {
   if (result[7].status === 'fulfilled') trialMembers.value = (result[7].value as any)?.items || result[7].value || []
   if (result[8].status === 'fulfilled') activeYouthRule.value = result[8].value || null
   if (result[9].status === 'fulfilled') youthRules.value = result[9].value || []
+  if (result[10].status === 'fulfilled') {
+    const payload: any = result[10].value
+    staffUsers.value = Array.isArray(payload) ? payload : payload?.items || []
+  }
   const failed = result.find((item) => item.status === 'rejected') as PromiseRejectedResult | undefined
   if (failed) errorMessage.value = failed.reason?.message || '部分培训经营数据加载失败。'
   if (classProductIndex.value >= activeProducts.value.length) classProductIndex.value = 0
@@ -231,6 +274,50 @@ async function load() {
   if (selectedTrialClass.value?.coachId) trialCoachId.value = selectedTrialClass.value.coachId
   if (canCreateSession.value) await loadCourtAvailability()
   loading.value = false
+  await applyCoachDeepLink()
+}
+
+async function applyCoachDeepLink() {
+  if (deepLinkHandled.value || !deepLinkQuery.value.focus) return
+  const focus = deepLinkQuery.value.focus
+  let record: any = null
+  let prefix = ''
+  let label = '培训记录'
+  if (focus === 'consume-correction') {
+    record = findOpsDeepLinkRecord(corrections.value, deepLinkQuery.value, ['id', 'recognitionId', 'attendanceId'])
+    prefix = 'coach-correction'
+    label = '消课冲正申请'
+  } else if (focus === 'trial') {
+    record = findOpsDeepLinkRecord(trials.value, deepLinkQuery.value, ['id'])
+    prefix = 'coach-trial'
+    label = '试听预约'
+  } else if (focus === 'attendance' || focus === 'session') {
+    record = findOpsDeepLinkRecord(lessons.value, deepLinkQuery.value, ['id'])
+    if (!record) {
+      const attendances = enrollments.value.flatMap((enrollment) =>
+        (enrollment.attendances || []).map((attendance: any) => ({
+          ...attendance,
+          enrollmentId: enrollment.id,
+        })),
+      )
+      const attendance = findOpsDeepLinkRecord(attendances, deepLinkQuery.value, ['id', 'sessionId'])
+      if (attendance) record = lessons.value.find((lesson) => lesson.id === attendance.sessionId) || null
+    }
+    prefix = 'coach-lesson'
+    label = '培训课次或点名记录'
+  } else {
+    deepLinkHandled.value = true
+    uni.showToast({ title: `无法识别培训待办类型：${focus}`, icon: 'none' })
+    return
+  }
+  deepLinkHandled.value = true
+  if (!record) {
+    uni.showToast({ title: `未找到待办对应的${label}，可能已处理或无权查看`, icon: 'none' })
+    return
+  }
+  focusedRecord.value = `${prefix}:${record.id}`
+  await nextTick()
+  uni.pageScrollTo({ selector: `#${opsDeepLinkDomId(prefix, record.id)}`, duration: 250 })
 }
 
 function shanghaiDate(offsetDays = 0) {
@@ -472,7 +559,7 @@ async function createSession() {
 
 function changeTrialSession(event: any) {
   trialSessionIndex.value = Number(event.detail.value)
-  if (selectedTrialClass.value?.coachId) trialCoachId.value = selectedTrialClass.value.coachId
+  trialCoachId.value = selectedTrialClass.value?.coachId || ''
 }
 
 function setTrialLinkLead(event: any) {
@@ -489,6 +576,7 @@ async function createTrial() {
     const reason = requiredReason(trialReason.value)
     if (!trialSession || !trainingClass || !product) throw new Error('请先选择已有场地资源的待开课次。')
     if (!subject) throw new Error('请选择试听主体。')
+    if (!trialCoachId.value.trim()) throw new Error('所选班级尚未配置试听教练，请先完善班级人员。')
     if (trialSubjectIndex.value === 2 && product.audience !== 'YOUTH') {
       throw new Error('青少年学员只能预约青少年培训产品。')
     }
@@ -500,7 +588,7 @@ async function createTrial() {
       classId: trainingClass.id,
       sessionId: trialSession.id,
       coachId: trialCoachId.value.trim(),
-      sourceChannel: trialSourceOptions[trialSourceIndex.value],
+      sourceChannel: trialSourceOptions[trialSourceIndex.value].value,
       scheduledStartsAt: trialSession.startsAt,
       scheduledEndsAt: trialSession.endsAt,
       reason,
@@ -515,7 +603,7 @@ async function createTrial() {
     }
     const confirmed = await uni.showModal({
       title: '确认预约试听',
-      content: `${subject.displayName} · ${product.name}\n${shortDate(trialSession.startsAt)} · 教练 ${command.coachId}\n原因：${reason}`,
+      content: `${subject.displayName} · ${product.name}\n${shortDate(trialSession.startsAt)} · 教练 ${coachDisplayName(command.coachId)}\n原因：${reason}`,
       confirmText: '确认预约',
     })
     if (!confirmed.confirm) return
@@ -758,7 +846,7 @@ function activeCorrection(recognitionId: string) {
 }
 
 function isOwnCorrection(correction: any) {
-  return correction.requestedById === session.user?.id
+  return correction.requestedBy?.id === session.user?.id
 }
 
 function correctionStudentName(correction: any) {
@@ -1022,17 +1110,14 @@ async function complete(lesson: any) {
   catch (cause: any) { uni.showToast({ title: cause.message || '结束失败', icon: 'none' }) }
 }
 
+onLoad((options) => {
+  deepLinkQuery.value = parseOpsDeepLinkQuery(options)
+})
 onShow(load)
 </script>
 
 <template>
-  <OperationsFrame title="培训运营" eyebrow="TRAINING OPERATIONS" :role="roleLabel" description="以课表为主线，按点名、消课建议、主管确认和课后反馈完成培训账本闭环。">
-    <view v-if="!mayViewTraining" class="card access-denied">
-      <text class="panel-title">无培训经营页权限</text>
-      <text class="muted">该页面仅供教练、前台、财务与管理员按职责查看或操作。</text>
-    </view>
-
-    <template v-else>
+  <OperationsFrame access="training" title="培训运营" eyebrow="TRAINING OPERATIONS" :role="roleLabel" description="以课表为主线，按点名、消课建议、主管确认和课后反馈完成培训账本闭环。">
     <view v-if="errorMessage" class="card error-panel">
       <view><text class="panel-title">操作未完成</text><text class="muted">{{ errorMessage }}</text></view>
       <button class="secondary inline" :disabled="loading || Boolean(actionKey)" @tap="load">重试</button>
@@ -1057,16 +1142,16 @@ onShow(load)
         <text>时段：{{ selectedTrialSession ? `${shortDate(selectedTrialSession.startsAt)} 至 ${shortDate(selectedTrialSession.endsAt)}` : '—' }}</text>
       </view>
       <view class="form-grid">
-        <view><text class="field-label">试听教练用户 ID</text><input v-model="trialCoachId" class="form-input" placeholder="须为班级教练或助教" /></view>
-        <picker :range="trialSourceOptions" :value="trialSourceIndex" @change="trialSourceIndex = Number(($event.detail as any).value)"><view><text class="field-label">来源渠道</text><view class="picker-value">{{ trialSourceOptions[trialSourceIndex] }} ›</view></view></picker>
+        <view><text class="field-label">试听教练</text><view class="picker-value readonly-value">{{ coachDisplayName(trialCoachId) }}</view></view>
+        <picker :range="trialSourceOptions" range-key="label" :value="trialSourceIndex" @change="trialSourceIndex = Number(($event.detail as any).value)"><view><text class="field-label">来源渠道</text><view class="picker-value">{{ trialSourceOptions[trialSourceIndex].label }} ›</view></view></picker>
       </view>
       <view><text class="field-label">预约事实与原因（必填）</text><textarea v-model="trialReason" class="reason-input" maxlength="300" placeholder="例如：监护人电话确认周末到场试听" /></view>
       <text class="guardrail">预约必须落在已有培训课次及场地占用内；同一教练或同一试听主体发生时段重叠会被服务端拒绝。</text>
-      <button class="primary full-button" :loading="actionKey === 'create-trial'" :disabled="loading || Boolean(actionKey) || !selectedTrialSession || !selectedTrialSubject" @tap="createTrial">预约试听</button>
+      <button class="primary full-button" :loading="actionKey === 'create-trial'" :disabled="loading || Boolean(actionKey) || !selectedTrialSession || !selectedTrialSubject || !trialCoachId" @tap="createTrial">预约试听</button>
     </view>
-    <view v-for="trial in trials" :key="trial.id" class="card trial-card">
+    <view v-for="trial in trials" :id="opsDeepLinkDomId('coach-trial', trial.id)" :key="trial.id" class="card trial-card" :class="{ 'deep-link-target': focusedRecord === `coach-trial:${trial.id}` }">
       <view class="row"><view><text class="trial-title">{{ trial.student?.displayName || trial.member?.displayName || trial.lead?.displayName || trial.trialNo }}</text><text class="muted">{{ trial.trialNo }} · {{ trial.product?.name }} · {{ shortDate(trial.scheduledStartsAt) }}</text></view><StatusBadge :value="trial.status" /></view>
-      <view class="trial-context"><text>教练：{{ trial.coach?.displayName || trial.coachId }}</text><text>来源：{{ trial.sourceChannel }}</text><text>监护人：{{ trial.guardian?.displayName || '不适用' }}</text></view>
+      <view class="trial-context"><text>教练：{{ trial.coach?.displayName || coachDisplayName(trial.coachId) }}</text><text>来源：{{ trialSourceLabel(trial.sourceChannel) }}</text><text>监护人：{{ trial.guardian?.displayName || '不适用' }}</text></view>
       <view v-if="trial.assessmentDimensions?.length" class="assessment-grid">
         <view v-for="dimension in trial.assessmentDimensions" :key="dimension.key"><text>{{ dimension.label }}</text><text class="score">{{ dimension.score }}/5</text></view>
         <text class="recommendation">训练建议：{{ trial.recommendation }}</text>
@@ -1097,24 +1182,24 @@ onShow(load)
         <view class="row"><view><text class="trial-title">当前生效 {{ activeYouthRule.version }}</text><text class="muted">生效于 {{ shortDate(activeYouthRule.effectiveFrom) }}</text></view><StatusBadge value="PUBLISHED" /></view>
         <view class="rule-values"><text>总课时上限 {{ activeYouthRule.maxTotalSessions }}</text><text>有效期限上限 {{ activeYouthRule.maxValidityDays }} 天</text><text>单合同上限 {{ money(activeYouthRule.maxContractAmountCents) }}</text><text>到期预警 {{ activeYouthRule.warningThresholdDays }} 天</text></view>
       </view>
-      <view v-else class="card rule-blocked"><text class="trial-title">当前无生效规则</text><text>青少年培训产品启用、变更与正式购买均会明确阻断；请由 ADMIN 制单、另一 SUPER_ADMIN 复核，并等待生效时间。</text></view>
+      <view v-else class="card rule-blocked"><text class="trial-title">当前无生效规则</text><text>青少年培训产品启用、变更与正式购买均会明确阻断；请由管理员制单、另一名超级管理员复核，并等待生效时间。</text></view>
       <view v-if="canDraftYouthRule" class="card creation-form">
         <text class="guardrail">下列字段全部由管理员依据当期合规要求填写。系统不预置、不暗示任何法定数值。</text>
         <view class="form-grid"><view><text class="field-label">最大总课时</text><input v-model="ruleMaxSessions" class="form-input" type="number" placeholder="请按现行要求填写" /></view><view><text class="field-label">最大有效期限（天）</text><input v-model="ruleMaxValidityDays" class="form-input" type="number" placeholder="请按现行要求填写" /></view></view>
         <view class="form-grid"><view><text class="field-label">单合同金额上限（元）</text><input v-model="ruleMaxAmountYuan" class="form-input" type="digit" placeholder="请按现行要求填写" /></view><view><text class="field-label">到期预警阈值（天）</text><input v-model="ruleWarningDays" class="form-input" type="number" placeholder="由管理员配置" /></view></view>
         <view class="form-grid"><picker mode="date" :value="ruleEffectiveDate" :start="shanghaiDate()" @change="ruleEffectiveDate = ($event.detail as any).value"><view><text class="field-label">计划生效日期</text><view class="picker-value">{{ ruleEffectiveDate }} ›</view></view></picker><picker mode="time" :value="ruleEffectiveTime" @change="ruleEffectiveTime = ($event.detail as any).value"><view><text class="field-label">计划生效时间</text><view class="picker-value">{{ ruleEffectiveTime }} ›</view></view></picker></view>
-        <view class="consent-line"><text>超限时硬阻断（关闭则产生显著 WARNING 并固化快照）</text><switch color="#17653d" :checked="ruleHardBlock" @change="setRuleHardBlock" /></view>
+        <view class="consent-line"><text>超限时硬阻断（关闭后仍会产生显著预警并固化快照）</text><switch color="#17653d" :checked="ruleHardBlock" @change="setRuleHardBlock" /></view>
         <view><text class="field-label">制单依据（必填）</text><textarea v-model="ruleReason" class="reason-input" maxlength="300" placeholder="填写规则来源、核对日期与业务依据" /></view>
         <button class="primary full-button" :loading="actionKey === 'create-youth-rule'" :disabled="loading || Boolean(actionKey)" @tap="createYouthRule">提交规则草案</button>
       </view>
       <view v-for="rule in youthRules" :key="rule.id" class="card rule-card">
-        <view class="row"><view><text class="trial-title">{{ rule.version }}</text><text class="muted">申请人 {{ rule.requestedBy?.displayName || rule.requestedById }} · 计划 {{ shortDate(rule.effectiveFrom) }} 生效</text></view><StatusBadge :value="rule.status" /></view>
+        <view class="row"><view><text class="trial-title">{{ rule.version }}</text><text class="muted">申请人 {{ rule.requestedBy?.displayName || '系统记录' }} · 计划 {{ shortDate(rule.effectiveFrom) }} 生效</text></view><StatusBadge :value="rule.status" /></view>
         <view class="rule-values"><text>总课时 {{ rule.maxTotalSessions }}</text><text>有效期 {{ rule.maxValidityDays }} 天</text><text>合同额 {{ money(rule.maxContractAmountCents) }}</text><text>预警 {{ rule.warningThresholdDays }} 天 · {{ rule.hardBlock ? '硬阻断' : '仅预警' }}</text></view>
         <text class="audit-hint">制单依据：{{ rule.requestReason }}</text>
         <view v-if="rule.status === 'DRAFT' && canReviewYouthRule" class="trial-actions">
-          <button class="primary inline" :disabled="rule.requestedById === session.user?.id" @tap="decideYouthRule(rule, 'publish')">复核发布</button>
-          <button class="danger inline" :disabled="rule.requestedById === session.user?.id" @tap="decideYouthRule(rule, 'reject')">驳回</button>
-          <text v-if="rule.requestedById === session.user?.id" class="pending-text">本人制单，必须由另一账号复核</text>
+          <button class="primary inline" :disabled="rule.isOwnRequester === true" @tap="decideYouthRule(rule, 'publish')">复核发布</button>
+          <button class="danger inline" :disabled="rule.isOwnRequester === true" @tap="decideYouthRule(rule, 'reject')">驳回</button>
+          <text v-if="rule.isOwnRequester === true" class="pending-text">本人制单，必须由另一账号复核</text>
         </view>
       </view>
     </template>
@@ -1128,7 +1213,7 @@ onShow(load)
           <text class="product-price">{{ money(product.priceCents) }}</text>
           <view v-if="product.classes?.length" class="class-summary">
             <view v-for="trainingClass in product.classes" :key="trainingClass.id" class="class-summary-row">
-              <view><text class="class-name">{{ trainingClass.name }}</text><text class="muted">容量 {{ trainingClass.capacity }} 人 · {{ trainingClass.coachId || '待分配教练' }}</text></view>
+              <view><text class="class-name">{{ trainingClass.name }}</text><text class="muted">容量 {{ trainingClass.capacity }} 人 · {{ coachDisplayName(trainingClass.coachId, '待分配教练') }}</text></view>
               <StatusBadge :value="trainingClass.active === false ? 'DISABLED' : 'ACTIVE'" />
             </view>
           </view>
@@ -1172,9 +1257,9 @@ onShow(load)
         </view>
         <view class="form-grid">
           <view><text class="field-label">容量（人）</text><input v-model="classCapacity" class="form-input" type="number" /></view>
-          <view><text class="field-label">主教练用户 ID（选填）</text><input v-model="classCoachId" class="form-input" placeholder="例如 user-coach" /></view>
+          <picker :range="coachOptions" range-key="displayName" @change="changeClassCoach"><view><text class="field-label">主教练（选填）</text><view class="picker-value">{{ coachDisplayName(classCoachId, '暂不指定') }} ›</view></view></picker>
         </view>
-        <view><text class="field-label">助教用户 ID（选填）</text><input v-model="classAssistantId" class="form-input" placeholder="未安排可留空" /></view>
+        <picker :range="coachOptions" range-key="displayName" @change="changeClassAssistant"><view><text class="field-label">助教（选填）</text><view class="picker-value">{{ coachDisplayName(classAssistantId, '暂不指定') }} ›</view></view></picker>
         <view class="form-grid three-columns">
           <view><text class="field-label">教练成本/课（元）</text><input v-model="classCoachCostYuan" class="form-input" type="digit" /></view>
           <view><text class="field-label">助教成本/课（元）</text><input v-model="classAssistantCostYuan" class="form-input" type="digit" /></view>
@@ -1212,7 +1297,7 @@ onShow(load)
     </template>
 
     <view class="section-title">今日课表 <text class="section-note">{{ loading ? '同步中' : `${activeLessons.length} 节` }}</text></view>
-    <view v-for="lesson in lessons" :key="lesson.id" class="card lesson-card">
+    <view v-for="lesson in lessons" :id="opsDeepLinkDomId('coach-lesson', lesson.id)" :key="lesson.id" class="card lesson-card" :class="{ 'deep-link-target': focusedRecord === `coach-lesson:${lesson.id}` }">
       <view class="row"><view><text class="lesson-title">{{ lesson.class?.name || '未命名课程' }}</text><text class="muted">{{ shortDate(lesson.startsAt) }} · 占场 {{ lesson.occupiedCourtHours || 0 }} 小时</text></view><StatusBadge :value="lesson.status" /></view>
       <view v-if="studentsFor(lesson).length" class="student-list">
         <view v-for="student in studentsFor(lesson)" :key="student.id" class="student-row">
@@ -1246,8 +1331,8 @@ onShow(load)
     </view>
     <view v-if="!loading && !lessons.length" class="empty card">今天没有排课</view>
     <view class="section-title">消课冲正流水 <text class="section-note">{{ corrections.length }} 条</text></view>
-    <view v-for="correction in corrections" :key="correction.id" class="card correction-card">
-      <view class="row"><view><text class="student-name">{{ correctionStudentName(correction) }}</text><text class="muted">{{ correction.attendance?.session?.class?.name || '培训课次' }} · 申请人 {{ correction.requestedBy?.displayName || correction.requestedById }}</text></view><StatusBadge :value="correction.status" /></view>
+    <view v-for="correction in corrections" :id="opsDeepLinkDomId('coach-correction', correction.id)" :key="correction.id" class="card correction-card" :class="{ 'deep-link-target': focusedRecord === `coach-correction:${correction.id}` }">
+      <view class="row"><view><text class="student-name">{{ correctionStudentName(correction) }}</text><text class="muted">{{ correction.attendance?.session?.class?.name || '培训课次' }} · 申请人 {{ correction.requestedBy?.displayName || '系统记录' }}</text></view><StatusBadge :value="correction.status" /></view>
       <text class="correction-reason">原因：{{ correction.reason }}</text>
       <view class="evidence-grid">
         <text>原消课：序{{ correction.recognition?.sequence || '-' }} · {{ money(correction.recognition?.effectiveRevenueCents) }}</text>
@@ -1264,12 +1349,12 @@ onShow(load)
     <view v-if="!loading && !corrections.length" class="empty card">暂无消课冲正申请</view>
     <view class="section-title">教练工作边界</view>
     <view class="card boundary"><text class="muted">教练可处理学员出勤、消课与训练反馈；退款审批、库存调整和结算发布由对应岗位处理。</text></view>
-    </template>
   </OperationsFrame>
 </template>
 
 <style scoped>
 .metric-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14rpx; margin-top:22rpx; }.notice { margin-top:20rpx; color:#17653d; background:#e8f4eb; line-height:1.6; }.lesson-card,.correction-card { margin-top:22rpx; padding:24rpx; }.lesson-title,.student-name { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.student-list { margin-top:20rpx; border-top:1rpx solid #edf0ed; }.student-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; padding:18rpx 0; border-bottom:1rpx solid #edf0ed; }.student-main { min-width:0; flex:1; }.student-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8rpx; }.attendance-state { display:block; margin-top:6rpx; color:#17653d; font-size:21rpx; }.state-absent,.state-cancelled { color:#a24c35; }.state-makeup_required { color:#9a6b1c; }.pending-text { color:#9a6b1c; font-size:20rpx; white-space:nowrap; }.inline { min-width:92rpx; min-height:54rpx; margin:0; padding:0 10rpx; line-height:54rpx; font-size:20rpx; }.ghost { color:#69756e; background:#eef2ef; }.ledger-line { display:flex; flex-wrap:wrap; gap:8rpx; margin-top:8rpx; font-size:19rpx; }.ledger-positive { color:#17653d; }.ledger-negative { color:#a24c35; }.correction-reason { display:block; margin-top:16rpx; color:#4d5a52; font-size:23rpx; }.evidence-grid { display:grid; gap:8rpx; margin-top:14rpx; padding:16rpx; border-radius:14rpx; color:#526158; background:#f5f7f5; font-size:21rpx; }.correction-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10rpx; margin-top:16rpx; }.empty-line,.empty { color:#758079; text-align:center; }.empty-line { padding:22rpx 0 4rpx; }.finish { width:100%; margin-top:20rpx; }.boundary { margin-top:0; line-height:1.7; }
-.access-denied { margin-top:22rpx; text-align:center; }.panel-title { display:block; margin-bottom:8rpx; font-size:28rpx; font-weight:800; }.error-panel { display:flex; align-items:center; justify-content:space-between; gap:16rpx; margin-top:22rpx; color:#8a3636; background:#fff4f2; }.error-panel .muted { display:block; line-height:1.5; }.product-scroll { white-space:nowrap; }.product-row { display:flex; gap:14rpx; }.product-card { box-sizing:border-box; width:540rpx; flex:0 0 540rpx; white-space:normal; }.product-name,.class-name { display:block; font-weight:800; }.product-name { max-width:350rpx; overflow:hidden; font-size:28rpx; text-overflow:ellipsis; white-space:nowrap; }.product-price { display:block; margin-top:14rpx; color:#17653d; font-size:30rpx; font-weight:800; }.class-summary { display:grid; gap:10rpx; margin-top:16rpx; padding-top:12rpx; border-top:1rpx solid #edf0ed; }.class-summary-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; }.class-summary-row .muted,.class-empty { display:block; margin-top:5rpx; font-size:20rpx; }.creation-form { display:grid; gap:16rpx; }.form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; }.form-grid.three-columns { grid-template-columns:repeat(3,minmax(0,1fr)); }.field-label { display:block; margin-bottom:8rpx; color:#68756d; font-size:21rpx; }.form-input,.picker-value,.reason-input { box-sizing:border-box; width:100%; color:#244c37; background:#f2f6f3; border:1rpx solid #dfe9e2; border-radius:16rpx; font-size:23rpx; }.form-input,.picker-value { min-height:68rpx; padding:16rpx 18rpx; }.reason-input { min-height:112rpx; padding:16rpx 18rpx; }.guardrail { color:#7b6940; font-size:22rpx; line-height:1.6; }.full-button { width:100%; margin:0; }.court-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10rpx; }.court-choice { display:flex; align-items:center; gap:6rpx; padding:14rpx 10rpx; background:#eef5f0; border:1rpx solid #dce8df; border-radius:14rpx; font-size:21rpx; }.court-choice.blocked { color:#9a7770; background:#f5f1f0; }.court-usage { margin-left:auto; color:#758079; font-size:18rpx; }
+.panel-title { display:block; margin-bottom:8rpx; font-size:28rpx; font-weight:800; }.error-panel { display:flex; align-items:center; justify-content:space-between; gap:16rpx; margin-top:22rpx; color:#8a3636; background:#fff4f2; }.error-panel .muted { display:block; line-height:1.5; }.product-scroll { white-space:nowrap; }.product-row { display:flex; gap:14rpx; }.product-card { box-sizing:border-box; width:540rpx; flex:0 0 540rpx; white-space:normal; }.product-name,.class-name { display:block; font-weight:800; }.product-name { max-width:350rpx; overflow:hidden; font-size:28rpx; text-overflow:ellipsis; white-space:nowrap; }.product-price { display:block; margin-top:14rpx; color:#17653d; font-size:30rpx; font-weight:800; }.class-summary { display:grid; gap:10rpx; margin-top:16rpx; padding-top:12rpx; border-top:1rpx solid #edf0ed; }.class-summary-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; }.class-summary-row .muted,.class-empty { display:block; margin-top:5rpx; font-size:20rpx; }.creation-form { display:grid; gap:16rpx; }.form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; }.form-grid.three-columns { grid-template-columns:repeat(3,minmax(0,1fr)); }.field-label { display:block; margin-bottom:8rpx; color:#68756d; font-size:21rpx; }.form-input,.picker-value,.reason-input { box-sizing:border-box; width:100%; color:#244c37; background:#f2f6f3; border:1rpx solid #dfe9e2; border-radius:16rpx; font-size:23rpx; }.form-input,.picker-value { min-height:68rpx; padding:16rpx 18rpx; }.reason-input { min-height:112rpx; padding:16rpx 18rpx; }.guardrail { color:#7b6940; font-size:22rpx; line-height:1.6; }.full-button { width:100%; margin:0; }.court-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10rpx; }.court-choice { display:flex; align-items:center; gap:6rpx; padding:14rpx 10rpx; background:#eef5f0; border:1rpx solid #dce8df; border-radius:14rpx; font-size:21rpx; }.court-choice.blocked { color:#9a7770; background:#f5f1f0; }.court-usage { margin-left:auto; color:#758079; font-size:18rpx; }
 .trial-card,.rule-card,.active-rule,.rule-blocked { margin-top:18rpx; }.trial-title { display:block; margin-bottom:7rpx; font-size:27rpx; font-weight:800; }.trial-context,.rule-values { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9rpx 16rpx; margin-top:15rpx; padding:15rpx; color:#5c6a61; background:#f4f7f4; border-radius:14rpx; font-size:21rpx; }.assessment-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:9rpx; margin-top:15rpx; }.assessment-grid view { display:flex; justify-content:space-between; padding:12rpx; background:#eef5f0; border-radius:12rpx; font-size:20rpx; }.score { color:#17653d; font-weight:800; }.recommendation { grid-column:1/-1; color:#405b4a; font-size:22rpx; line-height:1.55; }.trial-actions { display:flex; align-items:center; flex-wrap:wrap; gap:9rpx; margin-top:15rpx; }.audit-hint { display:block; margin-top:13rpx; color:#7a725c; font-size:20rpx; line-height:1.5; }.consent-line { display:flex; align-items:center; justify-content:space-between; gap:18rpx; color:#59675e; font-size:22rpx; line-height:1.5; }.consent-line text { flex:1; }.rule-blocked { color:#8b563d; background:#fff5ef; line-height:1.6; }.active-rule { border:1rpx solid #bcd8c5; background:#f1f8f3; }
+.deep-link-target { border-color:#d69a24!important; box-shadow:0 0 0 4rpx rgba(214,154,36,.18); }
 </style>

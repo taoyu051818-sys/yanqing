@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
 import OperationsFrame from "../../../../components/OperationsFrame.vue";
+import { hasOperationsAccess } from "../../../../config/operations";
 import {
   endpoints,
   type VenueClosure,
@@ -110,11 +111,7 @@ function displayTime(value: string) {
 
 async function load() {
   await session.hydrate();
-  if (
-    !session.roles.some((role) =>
-      ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"].includes(role),
-    )
-  ) {
+  if (!hasOperationsAccess(session.roles, "venue")) {
     loadError.value = "当前账号没有场馆维护日历查看权限。";
     return;
   }
@@ -442,6 +439,7 @@ onShow(load);
 
 <template>
   <OperationsFrame
+    access="venue"
     title="场馆维护日历"
     eyebrow="VENUE AVAILABILITY CONTROL"
     :role="roleLabel"
@@ -575,5 +573,9 @@ onShow(load);
 .status-pill { flex:0 0 auto; padding:8rpx 14rpx; border-radius:999rpx; font-size:21rpx; }.status-pill.active { color:#17653d; background:#e7f4eb; }.status-pill.cancelled { color:#707873; background:#eef0ef; }
 .closure-reason { display:block; margin-top:18rpx; font-size:26rpx; line-height:1.55; }.audit-line { display:block; margin-top:9rpx; color:#7b847e; font-size:21rpx; }
 .compact { min-height:68rpx; margin:20rpx 0 0; line-height:68rpx; font-size:24rpx; }
-.section-note { margin-left:10rpx; color:#758079; font-size:22rpx; font-weight:400; }.price-section-title { margin-top:42rpx; }.price-form { display:grid; gap:16rpx; }.price-form-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16rpx; }.price-form-head .muted { display:block; margin-top:8rpx; line-height:1.55; }.small-button { flex:0 0 auto; width:auto; min-height:62rpx; margin:0; padding:0 18rpx; line-height:62rpx; font-size:22rpx; }.price-input { width:100%; min-height:76rpx; padding:0 20rpx; box-sizing:border-box; background:#f5f7f4; border-radius:18rpx; font-size:25rpx; }.weekday-row { display:grid; grid-template-columns:repeat(7,1fr); gap:8rpx; }.weekday { min-width:0; min-height:60rpx; margin:0; padding:0; color:#66736b; background:#f0f3f1; line-height:60rpx; font-size:22rpx; }.weekday.selected { color:#fff; background:#17653d; }.price-list { display:grid; gap:16rpx; }.price-card { margin:0; }.price-value { display:block; margin-top:16rpx; color:#155a37; font-size:27rpx; font-weight:800; }.price-actions { display:grid; grid-template-columns:repeat(2,1fr); gap:12rpx; }.price-actions button { width:100%; }.price-card .closure-reason { color:#8a6030; font-size:22rpx; }
+.section-note { margin-left:10rpx; color:#758079; font-size:22rpx; font-weight:400; }.price-section-title { margin-top:42rpx; }.price-form { display:grid; gap:16rpx; }.price-form-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16rpx; }.price-form-head .muted { display:block; margin-top:8rpx; line-height:1.55; }.small-button { flex:0 0 auto; width:auto; min-height:62rpx; margin:0; padding:0 18rpx; line-height:62rpx; font-size:22rpx; }.price-input { width:100%; min-height:76rpx; padding:0 20rpx; box-sizing:border-box; background:#f5f7f4; border-radius:18rpx; font-size:25rpx; }.weekday-row { display:flex; gap:2rpx; overflow-x:auto; }.weekday { flex:1 0 44px; min-width:44px; min-height:60rpx; margin:0; padding:0; color:#66736b; background:#f0f3f1; line-height:60rpx; font-size:22rpx; }.weekday.selected { color:#fff; background:#17653d; }.price-list { display:grid; gap:16rpx; }.price-card { margin:0; }.price-value { display:block; margin-top:16rpx; color:#155a37; font-size:27rpx; font-weight:800; }.price-actions { display:grid; grid-template-columns:repeat(2,1fr); gap:12rpx; }.price-actions button { width:100%; }.price-card .closure-reason { color:#8a6030; font-size:22rpx; }
+
+@media screen and (max-width: 375px) {
+  .price-form { padding-right: 20rpx; padding-left: 20rpx; }
+}
 </style>

@@ -30,12 +30,6 @@ const finance: AuthUser = {
   displayName: '财务',
   roles: [AppRole.FINANCE],
 };
-const frontDesk: AuthUser = {
-  sub: 'front-1',
-  displayName: '前台',
-  roles: [AppRole.FRONT_DESK],
-};
-
 const now = new Date('2026-08-30T08:00:00.000Z');
 
 const runTransaction = (tx: Record<string, unknown>) =>
@@ -432,7 +426,7 @@ describe('inventory master-data lifecycle', () => {
           reason: '前台销售',
           idempotencyKey: 'disabled-item-sale-1',
         },
-        frontDesk,
+        admin,
       ),
     ).rejects.toThrow('已停用');
   });

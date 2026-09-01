@@ -47,6 +47,51 @@ const NEWCOMER_COUPON_PREFIX = 'NEWCOMER';
 const NEWCOMER_VALIDITY_PARAMETER = 'newcomer.experience.valid_days';
 const DEFAULT_NEWCOMER_VALIDITY_DAYS = 7;
 
+const couponRedemptionResponse = <T extends Record<string, unknown>>(coupon: T) => {
+  const { idempotencyKey: _idempotencyKey, ...response } = coupon;
+  return response;
+};
+
+const allianceSettlementResponse = (settlement: any) => {
+  const detail = settlement.detail && typeof settlement.detail === 'object' && !Array.isArray(settlement.detail)
+    ? settlement.detail as Record<string, unknown>
+    : {};
+  const workflowHistory = Array.isArray(detail.workflowHistory)
+    ? detail.workflowHistory.map((entry: any) => ({
+        action: entry.action,
+        state: entry.state,
+        reason: entry.reason ?? null,
+        at: entry.at,
+      }))
+    : [];
+  return {
+    id: settlement.id,
+    merchantId: settlement.merchantId,
+    merchant: settlement.merchant
+      ? { id: settlement.merchant.id, code: settlement.merchant.code, name: settlement.merchant.name }
+      : undefined,
+    periodStart: settlement.periodStart,
+    periodEnd: settlement.periodEnd,
+    issuedCount: settlement.issuedCount,
+    claimedCount: settlement.claimedCount,
+    redeemedCount: settlement.redeemedCount,
+    effectiveNewCustomers: settlement.effectiveNewCustomers,
+    attributedGmvCents: settlement.attributedGmvCents,
+    attributedGrossProfitCents: settlement.attributedGrossProfitCents,
+    cooperationFeeCents: settlement.cooperationFeeCents,
+    roi: settlement.roi,
+    status: settlement.status,
+    confirmedAt: settlement.confirmedAt ?? null,
+    settledAt: settlement.settledAt ?? null,
+    createdAt: settlement.createdAt,
+    updatedAt: settlement.updatedAt,
+    detail: {
+      workflowState: detail.workflowState ?? settlement.status,
+      workflowHistory,
+    },
+  };
+};
+
 @Injectable()
 export class AllianceService {
   constructor(private readonly prisma: PrismaService) {}
@@ -843,7 +888,7 @@ export class AllianceService {
       if (idempotent.attributedAmountCents !== dto.attributedAmountCents) {
         throw new ConflictException('券核销幂等键已用于不同成交金额');
       }
-      return idempotent;
+      return couponRedemptionResponse(idempotent);
     }
 
     const redeemMerchant = await this.prisma.merchant.findUnique({
@@ -936,7 +981,9 @@ export class AllianceService {
               coupon.id,
             );
           }
-          return tx.couponCode.findUniqueOrThrow({ where: { id: coupon.id } });
+          return couponRedemptionResponse(
+            await tx.couponCode.findUniqueOrThrow({ where: { id: coupon.id } }),
+          );
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -961,7 +1008,7 @@ export class AllianceService {
             throw new ForbiddenException('券核销幂等键已用于其他商户');
           if (duplicate.attributedAmountCents !== dto.attributedAmountCents)
             throw new ConflictException('券核销幂等键已用于不同成交金额');
-          return duplicate;
+          return couponRedemptionResponse(duplicate);
         }
       }
       throw error;
@@ -1065,7 +1112,7 @@ export class AllianceService {
           '该商户结算周期已生成，利润口径不同，请先提出调整申请',
         );
       }
-      return existing;
+      return allianceSettlementResponse(existing);
     }
 
     try {
@@ -1104,7 +1151,7 @@ export class AllianceService {
             } as never,
           },
         });
-        return settlement;
+        return allianceSettlementResponse(settlement);
       });
     } catch (error) {
       // A second worker can pass the preflight before the first one commits.
@@ -1123,7 +1170,7 @@ export class AllianceService {
               '该商户结算周期已生成，利润口径不同，请先提出调整申请',
             );
           }
-          return duplicate;
+          return allianceSettlementResponse(duplicate);
         }
       }
       throw error;
@@ -1155,11 +1202,12 @@ export class AllianceService {
           .filter(Boolean) as string[])
       : undefined;
 
-    return this.prisma.allianceSettlement.findMany({
+    const settlements = await this.prisma.allianceSettlement.findMany({
       where: merchantIds ? { merchantId: { in: merchantIds } } : undefined,
       include: { merchant: { select: { id: true, name: true, code: true } } },
       orderBy: [{ periodEnd: 'desc' }, { createdAt: 'desc' }],
     });
+    return settlements.map(allianceSettlementResponse);
   }
 
   /** Finance submits a calculated draft to the merchant for acknowledgement. */
@@ -1246,7 +1294,7 @@ export class AllianceService {
       // A retried request is safe and returns the already-posted state.  This
       // is important for mobile clients that retry after a weak-network
       // timeout.
-      if (current.status === input.to) return current;
+      if (current.status === input.to) return allianceSettlementResponse(current);
       if (current.status !== input.from) {
         throw new ConflictException(
           `联盟结算单当前状态为 ${current.status}，不能执行${input.action}`,
@@ -1272,7 +1320,7 @@ export class AllianceService {
         const latest = await tx.allianceSettlement.findUnique({
           where: { id: input.id },
         });
-        if (latest?.status === input.to) return latest;
+        if (latest?.status === input.to) return allianceSettlementResponse(latest);
         throw new ConflictException('联盟结算单已被其他操作更新，请刷新后重试');
       }
       const updated = await tx.allianceSettlement.findUniqueOrThrow({
@@ -1290,7 +1338,7 @@ export class AllianceService {
           reason: input.reason,
         },
       });
-      return updated;
+      return allianceSettlementResponse(updated);
     });
   }
 

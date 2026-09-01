@@ -6,14 +6,19 @@ const labels: Record<string, string> = {
   OPEN: '报名中', REGISTRATION: '报名中', RUNNING: '进行中', ISSUED: '待领取',
   CLAIMED: '已领取', REDEEMED: '已核销', ACTIVE: '有效', PENDING: '待处理',
   REFUND_PENDING: '退款待审核', REQUESTED: '待审核', SUCCEEDED: '已完成',
+  FULL: '已满员', IN_PROGRESS: '进行中', PARTIALLY_REFUNDED: '部分退款',
+  WAITLISTED: '候补中', REGISTERED: '已报名', REJECTED: '未通过',
+  FAILED: '处理失败', EXPIRED: '已过期', DISABLED: '已停用', DRAFT: '草稿',
+  LOCKED: '已锁定', REVIEWING: '复核中', RESOLVED: '已解决', DISMISSED: '已排除',
+  SUCCESS: '成功', VOID: '已作废', POSTED: '已过账', SETTLED: '已结算',
 }
 </script>
 
 <template><text class="badge" :class="(props.value || '').toLowerCase()">{{ labels[props.value || ''] || props.value || '—' }}</text></template>
 
 <style scoped>
-.badge { display: inline-flex; padding: 7rpx 14rpx; color: #456052; background: #eef2ef; border-radius: 999rpx; font-size: 22rpx; }
+.badge { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; max-width: 100%; padding: 7rpx 14rpx; color: #456052; background: #eef2ef; border-radius: 999rpx; font-size: 22rpx; line-height: 1.35; text-align: center; overflow-wrap: anywhere; white-space: normal; }
 .paid,.confirmed,.active,.completed,.checked_in,.redeemed { color: #17653d; background: #e5f3e9; }
-.pending_payment,.pending,.refunding,.refund_pending,.requested { color: #9b6300; background: #fff2d6; }
-.cancelled,.refunded { color: #8a3636; background: #fbeaea; }
+.pending_payment,.pending,.refunding,.refund_pending,.requested,.reviewing { color: #9b6300; background: #fff2d6; }
+.cancelled,.refunded,.failed,.rejected,.dismissed,.void { color: #8a3636; background: #fbeaea; }
 </style>

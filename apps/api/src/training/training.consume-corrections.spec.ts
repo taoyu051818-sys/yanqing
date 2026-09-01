@@ -58,6 +58,9 @@ const correctionFixture = (overrides: Record<string, unknown> = {}) => ({
   requestedById: coach.sub,
   reviewedById: null,
   reviewReason: null,
+  requestedAt: new Date('2026-08-20T10:05:00Z'),
+  reviewedAt: null,
+  requestIdempotencyKey: 'correction-secret-request-key',
   reversalRecognitionId: null,
   decisionIdempotencyKey: null,
   recognition: positiveRecognition,
@@ -125,10 +128,10 @@ describe('Training consume corrections', () => {
 
     await expect(
       service.requestConsumeCorrection(command, coach),
-    ).resolves.toBe(correction);
+    ).resolves.toMatchObject({ id: correction.id, status: correction.status });
     await expect(
       service.requestConsumeCorrection(command, coach),
-    ).resolves.toBe(correction);
+    ).resolves.toMatchObject({ id: correction.id, status: correction.status });
     expect(tx.trainingConsumeCorrection.create).toHaveBeenCalledOnce();
     expect(tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -212,6 +215,37 @@ describe('Training consume corrections', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('returns correction workflow fields without ledger idempotency or cost evidence', async () => {
+    const raw = correctionFixture({
+      recognition: {
+        ...positiveRecognition,
+        createdAt: new Date('2026-08-20T10:00:00Z'),
+      },
+      requestedBy: { id: coach.sub, displayName: coach.displayName },
+      reviewedBy: null,
+    });
+    const service = new TrainingService({
+      trainingConsumeCorrection: {
+        findMany: vi.fn().mockResolvedValue([raw]),
+      },
+    } as never);
+
+    const [view] = await service.listConsumeCorrections(coach);
+
+    expect(view).toMatchObject({
+      id: raw.id,
+      recognition: {
+        id: positiveRecognition.id,
+        effectiveRevenueCents: positiveRecognition.effectiveRevenueCents,
+      },
+      requestedBy: { displayName: coach.displayName },
+    });
+    expect(view).not.toHaveProperty('requestIdempotencyKey');
+    expect(view.recognition).not.toHaveProperty('idempotencyKey');
+    expect(view.recognition).not.toHaveProperty('contractRateBps');
+    expect(view.recognition).not.toHaveProperty('venueContributionCents');
+  });
+
   it('does not replay a request idempotency key across actors', async () => {
     const correction = correctionFixture();
     const service = new TrainingService({
@@ -258,7 +292,7 @@ describe('Training consume corrections', () => {
         },
         coach,
       ),
-    ).resolves.toBe(correction);
+    ).resolves.toMatchObject({ id: correction.id, status: correction.status });
 
     const activeService = new TrainingService({
       trainingConsumeCorrection: {
@@ -574,7 +608,7 @@ describe('Training consume corrections', () => {
         { reason: '证据不足', idempotencyKey: 'correction-reject-1' },
         admin,
       ),
-    ).resolves.toBe(rejected);
+    ).resolves.toMatchObject({ id: rejected.id, status: rejected.status });
     expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled();
     expect(tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -633,7 +667,7 @@ describe('Training consume corrections', () => {
         },
         admin,
       ),
-    ).resolves.toBe(decided);
+    ).resolves.toMatchObject({ id: decided.id, status: decided.status });
     await expect(
       service.rejectConsumeCorrection(
         decided.id,

@@ -53,11 +53,20 @@ async function createOpenEvent(suffix: string) {
   return created;
 }
 
+async function issuePartnerInvite(eventId: string) {
+  const invite = await request<{ partnerInviteCode: string }>(
+    "POST",
+    `/events/${eventId}/partner-invites`,
+  );
+  return invite.partnerInviteCode;
+}
+
 describe("event mock waitlist, payment deadline and cancellation", () => {
   beforeEach(() => storage.clear());
 
   it("keeps a full event registration in FIFO without an order, then promotes and pays it once", async () => {
     const created = await createOpenEvent(`QUEUE-${Date.now()}`);
+    const partnerInviteCode = await issuePartnerInvite(created.id);
     const detail = getEventDetail(created.id);
     detail.status = "FULL";
     detail.teams = Array.from({ length: 12 }, (_, index) => ({
@@ -75,11 +84,15 @@ describe("event mock waitlist, payment deadline and cancellation", () => {
     saveEventDetail(detail);
 
     await login("MEMBER");
+    await expect(
+      request("POST", `/events/${created.id}/partner-invites/preview`, {
+        partnerInviteCode,
+      }),
+    ).resolves.toMatchObject({ partnerDisplayName: "赛事管理员" });
     const beforeOrders = getOrders().length;
     const command = {
       name: "候补双打队",
-      playerAName: "小林",
-      playerBName: "小周",
+      partnerInviteCode,
       category: "MIXED_DOUBLES",
       sourceChannel: "MINI_PROGRAM",
       creationIdempotencyKey: "event-mock-waitlist-command-1",
@@ -98,18 +111,34 @@ describe("event mock waitlist, payment deadline and cancellation", () => {
     expect(waitlisted).toMatchObject({
       status: "WAITLISTED",
       waitlistPosition: 1,
-      registration: { orderId: null },
+      registration: {
+        name: "候补双打队",
+        category: "MIXED_DOUBLES",
+        status: "WAITLISTED",
+      },
     });
+    expect(JSON.stringify(waitlisted)).not.toMatch(
+      /orderId|playerAUserId|playerBUserId|captainId|creationCommandHash/,
+    );
     expect(replay).toEqual(waitlisted);
     expect(getOrders()).toHaveLength(beforeOrders);
     await expect(
+      request("POST", `/events/${created.id}/partner-invites/preview`, {
+        partnerInviteCode,
+      }),
+    ).rejects.toThrow("已使用或已过期");
+    await expect(
       request("POST", `/events/${created.id}/register`, {
         ...command,
-        playerBName: "另一个队员",
+        partnerInviteCode: `${partnerInviteCode}x`,
       }),
     ).rejects.toThrow("幂等键已用于");
 
     const latest = getEventDetail(created.id);
+    const persistedWaitlisted = latest.teams.find(
+      (team: any) => team.name === command.name,
+    );
+    expect(persistedWaitlisted?.id).toBeTruthy();
     latest.teams[0].status = "REFUNDED";
     saveEventDetail(latest);
     await login("EVENT_MANAGER");
@@ -136,7 +165,7 @@ describe("event mock waitlist, payment deadline and cancellation", () => {
     });
     expect(
       getEventDetail(created.id).teams.find(
-        (team: any) => team.id === waitlisted.registration.id,
+        (team: any) => team.id === persistedWaitlisted!.id,
       ),
     ).toMatchObject({ status: "PAID", paymentDueAt: null });
   });
@@ -223,8 +252,12 @@ describe("event mock waitlist, payment deadline and cancellation", () => {
       event: { status: "CANCELLED", cancelReason: "场馆临时停电" },
       cancelledPendingOrders: 1,
       cancelledWaitlist: 1,
-      refundRequests: [{ status: "REQUESTED", amountCents: 8_800 }],
+      refundRequestCount: 1,
+      refundRequestedCents: 8_800,
     });
+    expect(JSON.stringify(cancelled)).not.toMatch(
+      /cancelIdempotencyKey|cancelCommandHash|cancelPolicySnapshot|requestedById|orderId/,
+    );
     expect(replay).toMatchObject({ idempotent: true });
     expect(
       getOrders().find((order) => order.id === pendingOrder.id)?.status,
@@ -234,9 +267,12 @@ describe("event mock waitlist, payment deadline and cancellation", () => {
     );
 
     await login("FINANCE");
+    const refundId = getOrders().find((order) => order.id === paidOrder.id)
+      ?.refunds?.[0]?.id;
+    expect(refundId).toBeTruthy();
     await request(
       "POST",
-      `/orders/refunds/${cancelled.refundRequests[0].id}/approve`,
+      `/orders/refunds/${refundId}/approve`,
       { reason: "财务复核同意赛事取消退款" },
     );
     expect(
@@ -262,11 +298,11 @@ describe("event mock waitlist, payment deadline and cancellation", () => {
 
   it("keeps a paid self-withdrawal seat until finance succeeds, then promotes FIFO exactly once", async () => {
     const created = await createOpenEvent(`SELF-REFUND-${Date.now()}`);
+    const partnerInviteCode = await issuePartnerInvite(created.id);
     await login("MEMBER");
     const order = await request("POST", `/events/${created.id}/register`, {
       name: "伤病退出队",
-      playerAName: "会员甲",
-      playerBName: "搭档乙",
+      partnerInviteCode,
       category: "MIXED_DOUBLES",
       sourceChannel: "MINI_PROGRAM",
       creationIdempotencyKey: "event-self-refund-register-1",
@@ -348,11 +384,11 @@ describe("event mock waitlist, payment deadline and cancellation", () => {
 
   it("restores a paid registration when finance rejects self-withdrawal", async () => {
     const created = await createOpenEvent(`SELF-REJECT-${Date.now()}`);
+    const partnerInviteCode = await issuePartnerInvite(created.id);
     await login("MEMBER");
     const order = await request("POST", `/events/${created.id}/register`, {
       name: "退款驳回队",
-      playerAName: "队长甲",
-      playerBName: "搭档乙",
+      partnerInviteCode,
       category: "MEN_DOUBLES",
       sourceChannel: "MINI_PROGRAM",
       creationIdempotencyKey: "event-self-reject-register-1",

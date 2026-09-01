@@ -11,11 +11,6 @@ import {
 } from '../generated/prisma/client.js';
 import { InventoryOperationsService } from './inventory-operations.service.js';
 
-const frontDesk: AuthUser = {
-  sub: 'front-1',
-  displayName: '前台',
-  roles: [AppRole.FRONT_DESK],
-};
 const admin: AuthUser = {
   sub: 'admin-1',
   displayName: '管理员',
@@ -66,7 +61,12 @@ describe('InventoryOperationsService', () => {
         },
       ],
     };
-    const receipt = { id: 'receipt-1', purchaseOrderId: order.id };
+    const receipt = {
+      id: 'receipt-1',
+      purchaseOrderId: order.id,
+      idempotencyKey: 'receipt-key-1',
+      operatorId: admin.sub,
+    };
     const tx = {
       purchaseOrder: {
         findUnique: vi.fn().mockResolvedValue(order),
@@ -97,16 +97,17 @@ describe('InventoryOperationsService', () => {
     };
     const service = new InventoryOperationsService(prisma as never);
 
-    await expect(
-      service.receivePurchaseOrder(
-        order.id,
-        {
-          lines: [{ lineId: 'line-1', quantity: 4 }],
-          idempotencyKey: 'receipt-key-1',
-        },
-        frontDesk,
-      ),
-    ).resolves.toMatchObject({ id: receipt.id });
+    const response = await service.receivePurchaseOrder(
+      order.id,
+      {
+        lines: [{ lineId: 'line-1', quantity: 4 }],
+        idempotencyKey: 'receipt-key-1',
+      },
+      admin,
+    );
+    expect(response).toMatchObject({ id: receipt.id });
+    expect(response).not.toHaveProperty('idempotencyKey');
+    expect(response).not.toHaveProperty('operatorId');
     expect(tx.inventoryItem.updateMany).toHaveBeenCalledWith({
       where: { id: 'item-1', stock: 3 },
       data: { stock: { increment: 4 } },
@@ -155,7 +156,7 @@ describe('InventoryOperationsService', () => {
           lines: [{ lineId: 'line-1', quantity: 2 }],
           idempotencyKey: 'receipt-key-2',
         },
-        frontDesk,
+        admin,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.inventoryItem.updateMany).not.toHaveBeenCalled();
@@ -174,13 +175,17 @@ describe('InventoryOperationsService', () => {
     };
     const service = new InventoryOperationsService(transactional(tx) as never);
 
-    await expect(
-      service.postOperation(
-        operation.id,
-        { idempotencyKey: operation.postIdempotencyKey },
-        frontDesk,
-      ),
-    ).resolves.toBe(operation);
+    const response = await service.postOperation(
+      operation.id,
+      { idempotencyKey: operation.postIdempotencyKey },
+      admin,
+    );
+    expect(response).toEqual({
+      id: operation.id,
+      type: operation.type,
+      status: operation.status,
+    });
+    expect(response).not.toHaveProperty('postIdempotencyKey');
     expect(tx.inventoryStockBalance.update).not.toHaveBeenCalled();
   });
 
@@ -226,7 +231,7 @@ describe('InventoryOperationsService', () => {
     };
     const service = new InventoryOperationsService(transactional(tx) as never);
 
-    await service.startStocktake('stocktake-1', frontDesk);
+    await service.startStocktake('stocktake-1', admin);
     expect(tx.stocktakeLine.create).toHaveBeenCalledTimes(2);
     expect(tx.stocktakeLine.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ batchCode: 'BATCH-A', bookQuantity: 2 }),
@@ -236,7 +241,7 @@ describe('InventoryOperationsService', () => {
     });
     expect(tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        actorId: frontDesk.sub,
+        actorId: admin.sub,
         action: 'STOCKTAKE_STARTED',
         oldValue: { status: 'DRAFT' },
         newValue: { status: 'COUNTING' },

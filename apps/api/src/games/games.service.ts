@@ -44,6 +44,7 @@ import {
   orderCreationCommandHash,
   type OrderCreationFields,
 } from '../orders/order-creation-idempotency.js'
+import { orderResponse } from '../orders/order-response.js'
 import { completeOrderFulfillment } from '../orders/order-fulfillment.js'
 import {
   assertOperationTimeWindow,
@@ -52,6 +53,73 @@ import {
 
 const serial = (prefix: string) =>
   `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`
+
+const gameCommandResponse = (game: any) => ({
+  id: game.id,
+  code: game.code,
+  title: game.title,
+  level: game.level,
+  status: game.status,
+  startsAt: game.startsAt,
+  endsAt: game.endsAt,
+  capacity: game.capacity,
+  feeCents: game.feeCents,
+  newcomerOnly: game.newcomerOnly,
+  description: game.description,
+  cancelReason: game.cancelReason,
+  cancelledAt: game.cancelledAt,
+})
+
+const gameCancellationResponse = (value: any) => {
+  const policy =
+    value?.game?.cancelPolicySnapshot &&
+    typeof value.game.cancelPolicySnapshot === 'object'
+      ? value.game.cancelPolicySnapshot
+      : {}
+  return {
+    game: gameCommandResponse(value.game),
+    cancelledBookingCount: Number(value.cancelledBookingCount ?? 0),
+    cancelledPendingOrders: Number(
+      value.cancelledPendingOrders ?? policy.pendingOrderCount ?? 0,
+    ),
+    cancelledRegistrationCount: Number(
+      value.cancelledRegistrationCount ??
+        value.cancelledRegistrationIds?.length ??
+        policy.registrationCount ??
+        0,
+    ),
+    refundRequestCount: Number(
+      value.refundRequestCount ??
+        value.refundRequests?.length ??
+        policy.refundRequestCount ??
+        0,
+    ),
+    refundRequestedCents: Number(
+      value.refundRequests?.reduce(
+        (total: number, refund: any) => total + Number(refund.amountCents || 0),
+        0,
+      ) ??
+        policy.refundRequestedCents ??
+        0,
+    ),
+    idempotent: Boolean(value.idempotent),
+  }
+}
+
+const gameRegistrationCommandResponse = (registration: any) => ({
+  id: registration.id,
+  status: registration.status,
+  checkedInAt: registration.checkedInAt,
+})
+
+const gameRegistrationResponse = (value: any) => {
+  if (!value?.registration) return orderResponse(value)
+  return {
+    status: value.status ?? value.registration.status,
+    waitlistPosition: value.waitlistPosition ?? null,
+    registration: { status: value.registration.status },
+  }
+}
 
 const isPrismaErrorCode = (error: unknown, code: string): boolean =>
   typeof error === 'object' &&
@@ -262,23 +330,67 @@ export class GamesService {
 
   list() {
     return this.prisma.game.findMany({
-      include: {
-        host: { select: { id: true, displayName: true, avatarUrl: true } },
+      where: {
+        status: { in: [GameStatus.OPEN, GameStatus.FULL, GameStatus.IN_PROGRESS, GameStatus.COMPLETED] },
+      },
+      select: {
+        id: true,
+        title: true,
+        level: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        capacity: true,
+        feeCents: true,
+        newcomerOnly: true,
+        description: true,
+        host: { select: { displayName: true, avatarUrl: true } },
         _count: {
           select: {
             registrations: { where: { status: { in: [...GAME_SEAT_STATUSES] } } },
           },
         },
-        courtBookings: { include: { court: true } },
       },
       orderBy: { startsAt: 'desc' },
     })
   }
 
-  myHosted(actor: AuthUser) {
+  managed(actor: AuthUser) {
+    const canManageAll = actor.roles.some((role) =>
+      [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never),
+    )
+    if (!canManageAll && !actor.roles.includes(AppRole.HOST)) {
+      throw new ForbiddenException('当前角色无权访问球局经营列表')
+    }
     return this.prisma.game.findMany({
-      where: { hostId: actor.sub },
-      include: { registrations: { include: { user: { select: { displayName: true } } } }, hostRewards: true },
+      where: canManageAll ? undefined : { hostId: actor.sub },
+      select: {
+        id: true,
+        code: true,
+        title: true,
+        level: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        capacity: true,
+        feeCents: true,
+        newcomerOnly: true,
+        description: true,
+        cancelReason: true,
+        cancelledAt: true,
+        host: { select: { displayName: true, avatarUrl: true } },
+        registrations: {
+          select: {
+            id: true,
+            status: true,
+            checkedInAt: true,
+            createdAt: true,
+            user: { select: { displayName: true, avatarUrl: true } },
+            order: { select: { status: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
       orderBy: { startsAt: 'desc' },
     })
   }
@@ -503,7 +615,7 @@ export class GamesService {
         })
         if (!game) throw new NotFoundException('球局不存在')
         this.assertGameOperator(game.hostId, actor)
-        if (game.status === GameStatus.OPEN) return game
+        if (game.status === GameStatus.OPEN) return gameCommandResponse(game)
         if (GAME_STATUSES_NOT_PUBLISHABLE.includes(game.status)) {
           throw new ConflictException(`球局当前状态为 ${game.status}，不能发布`)
         }
@@ -526,7 +638,7 @@ export class GamesService {
         })
         if (changed.count !== 1) {
           const latest = await tx.game.findUnique({ where: { id: gameId } })
-          if (latest?.status === GameStatus.OPEN) return latest
+          if (latest?.status === GameStatus.OPEN) return gameCommandResponse(latest)
           throw new ConflictException('球局已被其他操作更新，请刷新后重试')
         }
         const published = await tx.game.findUniqueOrThrow({ where: { id: gameId } })
@@ -542,7 +654,7 @@ export class GamesService {
             reason,
           },
         })
-        return published
+        return gameCommandResponse(published)
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     )
@@ -581,7 +693,7 @@ export class GamesService {
       ) {
         throw new ConflictException('球局取消幂等键已用于不同命令')
       }
-      return { game: existing, idempotent: true }
+      return gameCancellationResponse({ game: existing, idempotent: true })
     }
     const existingReplay = await replay()
     if (existingReplay) return existingReplay
@@ -598,7 +710,7 @@ export class GamesService {
               current.cancelledById === actor.sub &&
               current.cancelCommandHash === commandHash
             ) {
-              return { game: current, idempotent: true }
+              return gameCancellationResponse({ game: current, idempotent: true })
             }
             throw new ConflictException('球局已经由另一取消命令处理')
           }
@@ -827,13 +939,13 @@ export class GamesService {
               } as never,
             },
           })
-          return {
+          return gameCancellationResponse({
             game,
             cancelledBookingCount: cancelledBookings.count,
             cancelledPendingOrders,
             cancelledRegistrationIds,
             refundRequests,
-          }
+          })
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       )
@@ -850,13 +962,14 @@ export class GamesService {
   }
 
   async register(gameId: string, dto: RegisterGameDto, actor: AuthUser) {
-    return executeOrderCreation(this.prisma, {
+    const order = await executeOrderCreation(this.prisma, {
       memberId: actor.sub,
       creationIdempotencyKey: dto.creationIdempotencyKey,
       command: { kind: 'GAME_REGISTRATION', gameId, sourceChannel: dto.sourceChannel },
       loadExisting: (id) => this.prisma.order.findUniqueOrThrow({ where: { id }, include: { gameRegistration: true } }),
       create: (creation) => this.registerOnce(gameId, dto, actor, creation),
     })
+    return gameRegistrationResponse(order)
   }
 
   private async registerOnce(gameId: string, dto: RegisterGameDto, actor: AuthUser, creation: OrderCreationFields) {
@@ -1033,11 +1146,10 @@ export class GamesService {
     if (!actor.roles.some((role) => [
       AppRole.HOST,
       AppRole.FRONT_DESK,
-      AppRole.FINANCE,
       AppRole.ADMIN,
       AppRole.SUPER_ADMIN,
     ].includes(role as never))) {
-      throw new ForbiddenException('仅本局主理人、前台、财务或管理员可处理球局候补')
+      throw new ForbiddenException('仅本局主理人、前台或管理员可处理球局候补')
     }
     return this.prisma.$transaction(
       async (tx) => {
@@ -1045,7 +1157,6 @@ export class GamesService {
         if (!game) throw new NotFoundException('球局不存在')
         const hostOnly = actor.roles.includes(AppRole.HOST) && !actor.roles.some((role) => [
           AppRole.FRONT_DESK,
-          AppRole.FINANCE,
           AppRole.ADMIN,
           AppRole.SUPER_ADMIN,
         ].includes(role as never))
@@ -1063,15 +1174,23 @@ export class GamesService {
     dto: GameCheckInDto = {},
   ) {
     return this.prisma.$transaction(async (tx) => {
-      const registration = await tx.gameRegistration.findUnique({
-        where: { gameId_userId: { gameId, userId } },
+      const registrationQuery = {
         include: {
           game: {
             select: { id: true, hostId: true, status: true, startsAt: true },
           },
           order: { select: { id: true, status: true, paidCents: true, refundedCents: true } },
         },
-      })
+      }
+      const registration = tx.gameRegistration.findFirst
+        ? await tx.gameRegistration.findFirst({
+            where: { gameId, OR: [{ id: userId }, { userId }] },
+            ...registrationQuery,
+          })
+        : await tx.gameRegistration.findUnique({
+            where: { gameId_userId: { gameId, userId } },
+            ...registrationQuery,
+          })
       if (!registration) throw new NotFoundException('报名记录不存在')
       // Front desk staff may scan a member on behalf of the host.  A user
       // carrying only the HOST role, however, remains restricted to games they
@@ -1081,7 +1200,8 @@ export class GamesService {
       // A repeated scan is a safe no-op.  This matters when the front desk
       // retries after a network timeout and prevents the audit stream from
       // pretending that the member checked in multiple times.
-      if (registration.status === RegistrationStatus.CHECKED_IN) return registration
+      if (registration.status === RegistrationStatus.CHECKED_IN)
+        return gameRegistrationCommandResponse(registration)
       if (registration.status !== RegistrationStatus.PAID) {
         throw new ConflictException('报名未支付或不存在')
       }
@@ -1129,7 +1249,7 @@ export class GamesService {
           } as never,
         },
       })
-      return updated
+      return gameRegistrationCommandResponse(updated)
     })
   }
 

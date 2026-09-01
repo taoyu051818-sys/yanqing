@@ -308,7 +308,18 @@ describe('OrdersService refund controls', () => {
       { sub: order.memberId, displayName: '会员', roles: [AppRole.MEMBER] },
     )
 
-    expect(result).toBe(original)
+    expect(result).toEqual({
+      id: original.id,
+      status: original.status,
+      amountCents: original.amountCents,
+      reason: original.reason,
+      requestedAt: undefined,
+      approvedAt: null,
+      completedAt: null,
+    })
+    expect(result).not.toHaveProperty('idempotencyKey')
+    expect(result).not.toHaveProperty('orderId')
+    expect(result).not.toHaveProperty('requestedById')
     expect(tx.refund.create).not.toHaveBeenCalled()
     expect(tx.order.updateMany).not.toHaveBeenCalled()
   })
@@ -590,5 +601,60 @@ describe('OrdersService front-desk payment and refund gate', () => {
         objectType: 'Refund',
       }),
     })
+  })
+})
+
+describe('OrdersService goods payment stock gate', () => {
+  it('rejects payment initiation after stock reaches zero', async () => {
+    const goodsOrder = {
+      id: 'goods-order-empty',
+      orderNo: 'GD001',
+      memberId: 'member-goods',
+      status: OrderStatus.PENDING,
+      businessType: BusinessType.GOODS,
+      payableCents: 8_800,
+      items: [{
+        id: 'order-item-empty',
+        itemId: 'goods-empty',
+        name: '售罄羽毛球',
+        quantity: 1,
+      }],
+      membership: null,
+      member: { openId: 'openid-goods' },
+    }
+    const tx = {
+      order: { findUnique: vi.fn().mockResolvedValue(goodsOrder) },
+      inventoryItem: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: 'goods-empty',
+          name: '售罄羽毛球',
+          stock: 0,
+        }]),
+      },
+      payment: { create: vi.fn() },
+    }
+    const prisma = {
+      payment: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn(async (work: (value: typeof tx) => unknown) => work(tx)),
+    }
+    const wechatPay = { createJsapiPayment: vi.fn() }
+    const service = new OrdersService(
+      prisma as never,
+      { get: vi.fn().mockReturnValue('wechat') } as never,
+      { finalize: vi.fn() } as never,
+      wechatPay as never,
+    )
+
+    await expect(service.pay(goodsOrder.id, {
+      channel: PaymentChannel.WECHAT,
+      idempotencyKey: 'goods-empty-payment-1',
+    }, {
+      sub: goodsOrder.memberId,
+      displayName: '商品会员',
+      roles: [AppRole.MEMBER],
+    })).rejects.toThrow('售罄羽毛球 库存不足，无法支付')
+
+    expect(tx.payment.create).not.toHaveBeenCalled()
+    expect(wechatPay.createJsapiPayment).not.toHaveBeenCalled()
   })
 })

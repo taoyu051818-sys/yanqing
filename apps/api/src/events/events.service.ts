@@ -33,10 +33,12 @@ import {
   RegistrationStatus,
   SourceChannel,
   SubjectAccount,
+  UserStatus,
 } from '../generated/prisma/client.js';
 import { applyInventoryDelta } from '../inventory/inventory-balance.js';
 import { orderCreationCommandHash } from '../orders/order-creation-idempotency.js';
 import { completeOrderFulfillment } from '../orders/order-fulfillment.js';
+import { orderResponse } from '../orders/order-response.js';
 import type {
   CancelEventDto,
   CancelEventRegistrationDto,
@@ -91,6 +93,104 @@ const isPrismaErrorCode = (error: unknown, code: string): boolean =>
 
 const SCORE_CONCURRENCY_MESSAGE = '比分已被其他操作提交，请刷新后重试';
 
+const eventRegistrationResponse = (value: any) => {
+  if (value?.orderNo || value?.businessType) return orderResponse(value);
+  if (!value?.registration) return value;
+  return {
+    status: value.status ?? value.registration.status,
+    waitlistPosition: value.waitlistPosition ?? null,
+    registration: {
+      name: value.registration.name,
+      category: value.registration.category,
+      status: value.registration.status,
+      paymentDueAt: value.registration.paymentDueAt,
+    },
+  };
+};
+
+const prizeAwardResponse = (value: any) => ({
+  id: value.id,
+  awardName: value.awardName,
+  finalRank: value.finalRank,
+  recipientNames: value.recipientNames,
+  quantity: value.quantity,
+  status: value.status,
+  note: value.note,
+  receivedByName: value.receivedByName,
+  receiptNote: value.receiptNote,
+  issuedAt: value.issuedAt,
+  receivedAt: value.receivedAt,
+  team: value.team
+    ? { id: value.team.id, name: value.team.name, finalRank: value.team.finalRank }
+    : undefined,
+  inventoryItem: value.inventoryItem
+    ? {
+        id: value.inventoryItem.id,
+        sku: value.inventoryItem.sku,
+        name: value.inventoryItem.name,
+      }
+    : undefined,
+  operator: value.operator
+    ? { id: value.operator.id, displayName: value.operator.displayName }
+    : undefined,
+  signedBy: value.signedBy
+    ? { id: value.signedBy.id, displayName: value.signedBy.displayName }
+    : undefined,
+});
+
+const eventCommandResponse = (event: any) => ({
+  id: event.id,
+  code: event.code,
+  name: event.name,
+  status: event.status,
+  startsAt: event.startsAt,
+  endsAt: event.endsAt,
+  cancelReason: event.cancelReason,
+  cancelledAt: event.cancelledAt,
+});
+
+const eventCancellationResponse = (value: any) => {
+  const policy =
+    value?.event?.cancelPolicySnapshot &&
+    typeof value.event.cancelPolicySnapshot === 'object'
+      ? value.event.cancelPolicySnapshot
+      : {};
+  return {
+    event: eventCommandResponse(value.event),
+    cancelledPendingOrders: Number(
+      value.cancelledPendingOrders ?? policy.pendingOrders ?? 0,
+    ),
+    cancelledWaitlist: Number(
+      value.cancelledWaitlist ?? policy.waitlistedTeams ?? 0,
+    ),
+    refundRequestCount: Number(
+      value.refundRequestCount ??
+        value.refundRequests?.length ??
+        policy.refundRequestCount ??
+        0,
+    ),
+    refundRequestedCents: Number(
+      value.refundRequests?.reduce(
+        (total: number, refund: any) => total + Number(refund.amountCents || 0),
+        0,
+      ) ??
+        policy.refundRequestedCents ??
+        0,
+    ),
+    idempotent: Boolean(value.idempotent),
+  };
+};
+
+const eventTeamCommandResponse = (team: any) => ({
+  id: team.id,
+  name: team.name,
+  category: team.category,
+  status: team.status,
+  checkedInAt: team.checkedInAt,
+  cancellationPending: Boolean(team.cancellationPending),
+  order: team.order ? { status: team.order.status } : undefined,
+});
+
 const EVENT_STATUSES_NOT_STARTABLE: readonly EventStatus[] = [
   EventStatus.DRAFT,
   EventStatus.CANCELLED,
@@ -125,6 +225,17 @@ const MATCH_STATUSES_ACCEPTING_SCORE: readonly MatchStatus[] = [
 ];
 
 export const EVENT_PAYMENT_RESERVATION_MINUTES = 15;
+export const EVENT_PARTNER_INVITE_TTL_MINUTES = 15;
+
+const eventPartnerInviteHash = (value: string): string =>
+  createHash('sha256').update(value).digest('hex');
+
+const ASSISTED_EVENT_REGISTRATION_ROLES: readonly AppRole[] = [
+  AppRole.FRONT_DESK,
+  AppRole.EVENT_MANAGER,
+  AppRole.ADMIN,
+  AppRole.SUPER_ADMIN,
+];
 
 const EVENT_SEAT_STATUSES: readonly RegistrationStatus[] = [
   RegistrationStatus.REGISTERED,
@@ -536,6 +647,232 @@ export class EventsService {
     }
   }
 
+  private isMemberSelfService(actor: AuthUser): boolean {
+    return (
+      actor.roles.includes(AppRole.MEMBER) &&
+      !actor.roles.some((role) =>
+        ASSISTED_EVENT_REGISTRATION_ROLES.includes(role),
+      )
+    );
+  }
+
+  private async resolvePartnerInvite(
+    client: Pick<
+      Prisma.TransactionClient,
+      'eventPartnerInvite' | 'eventTeam'
+    >,
+    eventId: string,
+    partnerInviteCode: string,
+    actor: AuthUser,
+    now: Date,
+  ) {
+    const invite = await client.eventPartnerInvite.findUnique({
+      where: { tokenHash: eventPartnerInviteHash(partnerInviteCode) },
+      include: {
+        partner: {
+          select: {
+            id: true,
+            displayName: true,
+            status: true,
+            deletedAt: true,
+            memberProfile: { select: { id: true } },
+          },
+        },
+      },
+    });
+    if (
+      !invite ||
+      invite.eventId !== eventId ||
+      invite.revokedAt ||
+      invite.consumedAt ||
+      invite.expiresAt <= now
+    ) {
+      throw new ConflictException('搭档授权码无效、已使用或已过期');
+    }
+    if (
+      invite.partner.status !== UserStatus.ACTIVE ||
+      invite.partner.deletedAt ||
+      !invite.partner.memberProfile
+    ) {
+      throw new ConflictException('授权搭档账号不存在或已停用');
+    }
+    if (invite.partnerId === actor.sub) {
+      throw new ConflictException('不能使用自己生成的搭档授权码');
+    }
+    const duplicate = await client.eventTeam.findFirst({
+      where: {
+        eventId,
+        status: {
+          notIn: [
+            RegistrationStatus.CANCELLED,
+            RegistrationStatus.REFUNDED,
+          ],
+        },
+        OR: [
+          { captainId: invite.partnerId },
+          { playerAUserId: invite.partnerId },
+          { playerBUserId: invite.partnerId },
+        ],
+      },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new ConflictException('授权搭档已参加本赛事或正在候补');
+    }
+    return invite;
+  }
+
+  async createPartnerInvite(eventId: string, actor: AuthUser) {
+    if (!actor.roles.includes(AppRole.MEMBER)) {
+      throw new ForbiddenException('只有会员账号可以生成赛事搭档授权码');
+    }
+    const now = new Date();
+    const [event, partner, duplicate] = await Promise.all([
+      this.prisma.event.findUnique({
+        where: { id: eventId },
+        select: {
+          id: true,
+          status: true,
+          startsAt: true,
+          registrationEndsAt: true,
+        },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: actor.sub },
+        select: {
+          id: true,
+          displayName: true,
+          status: true,
+          deletedAt: true,
+          memberProfile: { select: { id: true } },
+        },
+      }),
+      this.prisma.eventTeam.findFirst({
+        where: {
+          eventId,
+          status: {
+            notIn: [
+              RegistrationStatus.CANCELLED,
+              RegistrationStatus.REFUNDED,
+            ],
+          },
+          OR: [
+            { captainId: actor.sub },
+            { playerAUserId: actor.sub },
+            { playerBUserId: actor.sub },
+          ],
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (
+      !event ||
+      (event.status !== EventStatus.OPEN && event.status !== EventStatus.FULL)
+    ) {
+      throw new NotFoundException('赛事不在报名期');
+    }
+    if (now >= event.registrationEndsAt || now >= event.startsAt) {
+      throw new ConflictException('赛事报名已截止');
+    }
+    if (
+      !partner ||
+      partner.status !== UserStatus.ACTIVE ||
+      partner.deletedAt ||
+      !partner.memberProfile
+    ) {
+      throw new NotFoundException('会员不存在或已停用');
+    }
+    if (duplicate) {
+      throw new ConflictException('当前账号已参加本赛事或正在候补');
+    }
+
+    const partnerInviteCode = `EP_${randomBytes(18).toString('base64url')}`;
+    const expiresAt = new Date(
+      Math.min(
+        now.getTime() + EVENT_PARTNER_INVITE_TTL_MINUTES * 60_000,
+        event.registrationEndsAt.getTime(),
+        event.startsAt.getTime(),
+      ),
+    );
+    await this.prisma.$transaction(async (tx) => {
+      await tx.eventPartnerInvite.updateMany({
+        where: {
+          eventId,
+          partnerId: actor.sub,
+          revokedAt: null,
+          consumedAt: null,
+        },
+        data: { revokedAt: now },
+      });
+      const invite = await tx.eventPartnerInvite.create({
+        data: {
+          eventId,
+          partnerId: actor.sub,
+          tokenHash: eventPartnerInviteHash(partnerInviteCode),
+          expiresAt,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.sub,
+          actorRole: actor.roles[0],
+          action: 'EVENT_PARTNER_INVITE_CREATED',
+          objectType: 'EventPartnerInvite',
+          objectId: invite.id,
+          newValue: {
+            eventId,
+            partnerId: actor.sub,
+            expiresAt: expiresAt.toISOString(),
+          } as never,
+        },
+      });
+    });
+    return {
+      partnerInviteCode,
+      partnerDisplayName: partner.displayName,
+      expiresAt,
+    };
+  }
+
+  async previewPartnerInvite(
+    eventId: string,
+    partnerInviteCode: string,
+    actor: AuthUser,
+  ) {
+    if (!actor.roles.includes(AppRole.MEMBER)) {
+      throw new ForbiddenException('只有会员账号可以确认赛事搭档');
+    }
+    const now = new Date();
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: {
+        status: true,
+        startsAt: true,
+        registrationEndsAt: true,
+      },
+    });
+    if (
+      !event ||
+      (event.status !== EventStatus.OPEN && event.status !== EventStatus.FULL)
+    ) {
+      throw new NotFoundException('赛事不在报名期');
+    }
+    if (now >= event.registrationEndsAt || now >= event.startsAt) {
+      throw new ConflictException('赛事报名已截止');
+    }
+    const invite = await this.resolvePartnerInvite(
+      this.prisma,
+      eventId,
+      normaliseText(partnerInviteCode),
+      actor,
+      now,
+    );
+    return {
+      partnerDisplayName: invite.partner.displayName,
+      expiresAt: invite.expiresAt,
+    };
+  }
+
   private assertPeopleRange(teamCount: number, capacityPeople: number): void {
     const people = teamCount * 2;
     if (people < EVENT_MINIMUM_PEOPLE) {
@@ -680,22 +1017,180 @@ export class EventsService {
     }
   }
 
-  list() {
+  async list() {
     return this.prisma.event.findMany({
-      include: { _count: { select: { teams: true } } },
+      where: {
+        status: {
+          in: [
+            EventStatus.OPEN,
+            EventStatus.FULL,
+            EventStatus.IN_PROGRESS,
+            EventStatus.COMPLETED,
+          ],
+        },
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        startsAt: true,
+        registrationEndsAt: true,
+        status: true,
+        capacityPeople: true,
+        minimumPeople: true,
+        totalRounds: true,
+        currentRound: true,
+        feeCents: true,
+        memberFeeCents: true,
+        sponsor: true,
+      },
       orderBy: { startsAt: 'desc' },
     });
   }
 
-  detail(eventId: string) {
+  async detail(eventId: string) {
+    const event = await this.prisma.event.findFirstOrThrow({
+      where: {
+        id: eventId,
+        status: {
+          in: [
+            EventStatus.OPEN,
+            EventStatus.FULL,
+            EventStatus.IN_PROGRESS,
+            EventStatus.COMPLETED,
+          ],
+        },
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        startsAt: true,
+        registrationEndsAt: true,
+        status: true,
+        capacityPeople: true,
+        minimumPeople: true,
+        totalRounds: true,
+        currentRound: true,
+        feeCents: true,
+        memberFeeCents: true,
+        sponsor: true,
+        teams: {
+          where: {
+            status: RegistrationStatus.COMPLETED,
+            finalRank: { not: null },
+          },
+          select: {
+            name: true,
+            category: true,
+            points: true,
+            wins: true,
+            losses: true,
+            scoreDiff: true,
+            finalRank: true,
+          },
+          orderBy: { finalRank: 'asc' },
+        },
+      },
+    });
+    const { teams, ...summary } = event;
+    return {
+      ...summary,
+      standings: event.status === EventStatus.COMPLETED ? teams : [],
+    };
+  }
+
+  managedList() {
+    return this.prisma.event.findMany({
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        startsAt: true,
+        registrationEndsAt: true,
+        status: true,
+        capacityPeople: true,
+        minimumPeople: true,
+        totalRounds: true,
+        currentRound: true,
+        feeCents: true,
+        memberFeeCents: true,
+        prizePool: true,
+        sponsor: true,
+        cancelReason: true,
+        cancelledAt: true,
+        _count: { select: { teams: true } },
+      },
+      orderBy: { startsAt: 'desc' },
+    });
+  }
+
+  managedDetail(eventId: string) {
     return this.prisma.event.findUniqueOrThrow({
       where: { id: eventId },
-      include: {
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        startsAt: true,
+        registrationEndsAt: true,
+        status: true,
+        capacityPeople: true,
+        minimumPeople: true,
+        totalRounds: true,
+        currentRound: true,
+        feeCents: true,
+        memberFeeCents: true,
+        prizePool: true,
+        sponsor: true,
+        cancelReason: true,
+        cancelledAt: true,
         teams: {
-          include: { order: { select: { status: true } } },
+          select: {
+            id: true,
+            name: true,
+            playerAName: true,
+            playerBName: true,
+            category: true,
+            seed: true,
+            status: true,
+            waitlistedAt: true,
+            promotedAt: true,
+            paymentDueAt: true,
+            cancelReason: true,
+            cancelRequestedAt: true,
+            cancellationPending: true,
+            cancellationResolvedAt: true,
+            cancelledAt: true,
+            checkedInAt: true,
+            points: true,
+            wins: true,
+            losses: true,
+            scoreDiff: true,
+            finalRank: true,
+            eventPointsAwarded: true,
+            order: { select: { status: true } },
+          },
           orderBy: [{ points: 'desc' }, { scoreDiff: 'desc' }, { seed: 'asc' }],
         },
-        matches: { orderBy: [{ round: 'asc' }, { createdAt: 'asc' }] },
+        matches: {
+          select: {
+            id: true,
+            round: true,
+            courtLabel: true,
+            teamAId: true,
+            teamBId: true,
+            startingScoreA: true,
+            startingScoreB: true,
+            scoreA: true,
+            scoreB: true,
+            status: true,
+            correctionReason: true,
+            submittedAt: true,
+            confirmedAt: true,
+          },
+          orderBy: [{ round: 'asc' }, { createdAt: 'asc' }],
+        },
       },
     });
   }
@@ -718,13 +1213,12 @@ export class EventsService {
             status: true,
             payableCents: true,
             paidCents: true,
-            refunds: {
-              orderBy: { requestedAt: 'desc' },
-              select: {
-                id: true,
-                idempotencyKey: true,
-                amountCents: true,
-                reason: true,
+              refunds: {
+                orderBy: { requestedAt: 'desc' },
+                select: {
+                  id: true,
+                  amountCents: true,
+                  reason: true,
                 status: true,
                 requestedAt: true,
                 completedAt: true,
@@ -736,8 +1230,32 @@ export class EventsService {
       orderBy: { createdAt: 'desc' },
     });
     if (!registration) return null;
+    const registrationView = {
+      id: registration.id,
+      name: registration.name,
+      playerAName: registration.playerAName,
+      playerBName: registration.playerBName,
+      category: registration.category,
+      status: registration.status,
+      paymentDueAt: registration.paymentDueAt,
+      waitlistedAt: registration.waitlistedAt,
+      promotedAt: registration.promotedAt,
+      cancellationPending: registration.cancellationPending,
+      cancelReason: registration.cancelReason,
+      cancelRequestedAt: registration.cancelRequestedAt,
+      cancellationResolvedAt: registration.cancellationResolvedAt,
+      cancelledAt: registration.cancelledAt,
+      checkedInAt: registration.checkedInAt,
+      points: registration.points,
+      wins: registration.wins,
+      losses: registration.losses,
+      scoreDiff: registration.scoreDiff,
+      finalRank: registration.finalRank,
+      eventPointsAwarded: registration.eventPointsAwarded,
+      order: registration.order ? orderResponse(registration.order) : null,
+    };
     if (registration.status !== RegistrationStatus.WAITLISTED) {
-      return { registration, waitlistPosition: null };
+      return { registration: registrationView, waitlistPosition: null };
     }
     const ahead = await this.prisma.eventTeam.count({
       where: {
@@ -752,7 +1270,7 @@ export class EventsService {
         ],
       },
     });
-    return { registration, waitlistPosition: ahead + 1 };
+    return { registration: registrationView, waitlistPosition: ahead + 1 };
   }
 
   async listPrizeAwards(eventId: string) {
@@ -761,7 +1279,7 @@ export class EventsService {
       select: { id: true },
     });
     if (!event) throw new NotFoundException('赛事不存在');
-    return this.prisma.eventPrizeAward.findMany({
+    const awards = await this.prisma.eventPrizeAward.findMany({
       where: { eventId },
       include: {
         team: { select: { id: true, name: true, finalRank: true } },
@@ -771,6 +1289,7 @@ export class EventsService {
       },
       orderBy: [{ finalRank: 'asc' }, { issuedAt: 'asc' }],
     });
+    return awards.map(prizeAwardResponse);
   }
 
   async issuePrize(eventId: string, dto: IssueEventPrizeDto, actor: AuthUser) {
@@ -803,7 +1322,7 @@ export class EventsService {
     });
     if (existing) {
       this.assertPrizeReplay(existing, eventId, dto, awardName, note);
-      return existing;
+      return prizeAwardResponse(existing);
     }
 
     try {
@@ -814,7 +1333,7 @@ export class EventsService {
           });
           if (duplicate) {
             this.assertPrizeReplay(duplicate, eventId, dto, awardName, note);
-            return duplicate;
+            return prizeAwardResponse(duplicate);
           }
 
           const event = await tx.event.findUnique({
@@ -926,7 +1445,7 @@ export class EventsService {
               reason: note,
             },
           });
-          return award;
+          return prizeAwardResponse(award);
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -946,7 +1465,7 @@ export class EventsService {
         });
         if (replay) {
           this.assertPrizeReplay(replay, eventId, dto, awardName, note);
-          return replay;
+          return prizeAwardResponse(replay);
         }
         const sameAward = await this.prisma.eventPrizeAward.findUnique({
           where: {
@@ -993,7 +1512,7 @@ export class EventsService {
               receiptIdempotencyKey,
               receiptNote,
             );
-            return current;
+            return prizeAwardResponse(current);
           }
           const receivedAt = new Date();
           const changed = await tx.eventPrizeAward.updateMany({
@@ -1018,7 +1537,7 @@ export class EventsService {
                 receiptIdempotencyKey,
                 receiptNote,
               );
-              return latest;
+              return prizeAwardResponse(latest);
             }
             throw new ConflictException(
               '奖品签收状态已被其他操作更新，请刷新后重试',
@@ -1044,7 +1563,7 @@ export class EventsService {
               reason: receiptNote,
             },
           });
-          return received;
+          return prizeAwardResponse(received);
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -1063,7 +1582,7 @@ export class EventsService {
             receiptIdempotencyKey,
             receiptNote,
           );
-          return latest;
+          return prizeAwardResponse(latest);
         }
         const duplicateReceipt = await this.prisma.eventPrizeAward.findUnique({
           where: { receiptIdempotencyKey },
@@ -1252,13 +1771,39 @@ export class EventsService {
   }
 
   async register(eventId: string, dto: RegisterEventTeamDto, actor: AuthUser) {
-    this.assertFixedDoubles(dto, 'create');
-    const playerAName = normaliseText(dto.playerAName);
-    const playerBName = normaliseText(dto.playerBName);
+    const memberSelfService = this.isMemberSelfService(actor);
+    const partnerInviteCode = normaliseOptionalText(dto.partnerInviteCode);
+    let playerAName = normaliseText(dto.playerAName);
+    let playerBName = normaliseText(dto.playerBName);
     const teamName = normaliseText(dto.name);
     if (!teamName) throw new BadRequestException('队伍名称不能为空');
-    const playerAUserId = normaliseOptionalText(dto.playerAUserId);
-    const playerBUserId = normaliseOptionalText(dto.playerBUserId);
+    let playerAUserId = normaliseOptionalText(dto.playerAUserId);
+    let playerBUserId = normaliseOptionalText(dto.playerBUserId);
+    if (memberSelfService) {
+      if (!partnerInviteCode) {
+        throw new BadRequestException('会员报名必须填写搭档本人生成的授权码');
+      }
+      if (playerAUserId && playerAUserId !== actor.sub) {
+        throw new ForbiddenException('会员报名不能替其他账号占用队长席位');
+      }
+      if (playerBUserId) {
+        throw new ForbiddenException('会员报名不能直接指定搭档账号');
+      }
+      playerAName = normaliseText(actor.displayName);
+      playerBName = '';
+      playerAUserId = actor.sub;
+      playerBUserId = undefined;
+    } else {
+      this.assertFixedDoubles(
+        {
+          playerAName,
+          playerBName,
+          playerAUserId,
+          playerBUserId,
+        },
+        'create',
+      );
+    }
     const sourceChannel = dto.sourceChannel ?? SourceChannel.MINI_PROGRAM;
     const creationIdempotencyKey = normaliseOptionalText(
       dto.creationIdempotencyKey,
@@ -1270,12 +1815,19 @@ export class EventsService {
       kind: 'EVENT_REGISTRATION',
       eventId,
       name: teamName,
-      playerAName,
-      playerBName,
+      playerAName: memberSelfService ? null : playerAName,
+      playerBName: memberSelfService ? null : playerBName,
       playerAUserId: playerAUserId ?? null,
       playerBUserId: playerBUserId ?? null,
       category: dto.category,
       sourceChannel,
+      ...(memberSelfService
+        ? {
+            partnerInviteTokenHash: eventPartnerInviteHash(
+              partnerInviteCode!,
+            ),
+          }
+        : {}),
     });
 
     const replay = async () => {
@@ -1340,7 +1892,7 @@ export class EventsService {
       });
     };
     const existingReplay = await replay();
-    if (existingReplay) return existingReplay;
+    if (existingReplay) return eventRegistrationResponse(existingReplay);
 
     const preflightEvent = await this.prisma.event.findUnique({
       where: { id: eventId },
@@ -1365,7 +1917,7 @@ export class EventsService {
     });
 
     try {
-      return await this.prisma.$transaction(
+      const result = await this.prisma.$transaction(
         async (tx) => {
           const event = tx.event?.findUnique
             ? await tx.event.findUnique({ where: { id: eventId } })
@@ -1382,6 +1934,53 @@ export class EventsService {
           if (now >= event.registrationEndsAt || now >= event.startsAt) {
             throw new ConflictException('赛事报名已截止');
           }
+          let resolvedPlayerAName = playerAName;
+          let resolvedPlayerBName = playerBName;
+          let resolvedPlayerAUserId = playerAUserId;
+          let resolvedPlayerBUserId = playerBUserId;
+          let partnerInviteId: string | undefined;
+          if (memberSelfService) {
+            const partnerInvite = await this.resolvePartnerInvite(
+              tx,
+              eventId,
+              partnerInviteCode!,
+              actor,
+              now,
+            );
+            resolvedPlayerAName = normaliseText(actor.displayName);
+            resolvedPlayerBName = normaliseText(
+              partnerInvite.partner.displayName,
+            );
+            resolvedPlayerAUserId = actor.sub;
+            resolvedPlayerBUserId = partnerInvite.partnerId;
+            partnerInviteId = partnerInvite.id;
+          }
+          this.assertFixedDoubles(
+            {
+              playerAName: resolvedPlayerAName,
+              playerBName: resolvedPlayerBName,
+              playerAUserId: resolvedPlayerAUserId,
+              playerBUserId: resolvedPlayerBUserId,
+            },
+            'create',
+          );
+          const consumePartnerInvite = async (teamId: string) => {
+            if (!partnerInviteId) return;
+            const claimed = await tx.eventPartnerInvite.updateMany({
+              where: {
+                id: partnerInviteId,
+                revokedAt: null,
+                consumedAt: null,
+                expiresAt: { gt: now },
+              },
+              data: { consumedAt: now, consumedTeamId: teamId },
+            });
+            if (claimed.count !== 1) {
+              throw new ConflictException(
+                '搭档授权码已被其他报名使用，请刷新后重试',
+              );
+            }
+          };
           const profile = tx.memberProfile?.findUnique
             ? await tx.memberProfile.findUnique({
                 where: { userId: actor.sub },
@@ -1424,9 +2023,10 @@ export class EventsService {
             where: { eventId, status: RegistrationStatus.WAITLISTED },
           });
 
-          const knownPlayerIds = [playerAUserId, playerBUserId].filter(
-            (value): value is string => Boolean(value),
-          );
+          const knownPlayerIds = [
+            resolvedPlayerAUserId,
+            resolvedPlayerBUserId,
+          ].filter((value): value is string => Boolean(value));
           if (knownPlayerIds.length) {
             const duplicateParticipant = await tx.eventTeam.findFirst({
               where: {
@@ -1438,6 +2038,7 @@ export class EventsService {
                   ],
                 },
                 OR: knownPlayerIds.flatMap((userId) => [
+                  { captainId: userId },
                   { playerAUserId: userId },
                   { playerBUserId: userId },
                 ]),
@@ -1463,10 +2064,10 @@ export class EventsService {
             eventId,
             captainId: actor.sub,
             name: teamName,
-            playerAName,
-            playerBName,
-            playerAUserId: playerAUserId ?? actor.sub,
-            playerBUserId: playerBUserId ?? null,
+            playerAName: resolvedPlayerAName,
+            playerBName: resolvedPlayerBName,
+            playerAUserId: resolvedPlayerAUserId ?? actor.sub,
+            playerBUserId: resolvedPlayerBUserId ?? null,
             category: dto.category,
             sourceChannel,
             listAmountCents: event.feeCents,
@@ -1488,6 +2089,7 @@ export class EventsService {
                 waitlistedAt: now,
               },
             });
+            await consumePartnerInvite(registration.id);
             await tx.event.updateMany({
               where: {
                 id: eventId,
@@ -1562,6 +2164,10 @@ export class EventsService {
             },
             include: { eventTeam: true },
           });
+          if (!created.eventTeam?.id) {
+            throw new ConflictException('赛事报名队伍创建失败');
+          }
+          await consumePartnerInvite(created.eventTeam.id);
           await tx.auditLog.create({
             data: {
               actorId: actor.sub,
@@ -1595,10 +2201,11 @@ export class EventsService {
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
+      return eventRegistrationResponse(result);
     } catch (error) {
       if (creationIdempotencyKey && isPrismaErrorCode(error, 'P2002')) {
         const concurrent = await replay();
-        if (concurrent) return concurrent;
+        if (concurrent) return eventRegistrationResponse(concurrent);
       }
       if (isPrismaErrorCode(error, 'P2034')) {
         throw new ConflictException('赛事报名发生并发冲突，请使用原命令重试');
@@ -2001,7 +2608,7 @@ export class EventsService {
       ) {
         throw new ConflictException('赛事取消幂等键已用于不同命令');
       }
-      return { event: existing, idempotent: true };
+      return eventCancellationResponse({ event: existing, idempotent: true });
     };
     const existingReplay = await replay();
     if (existingReplay) return existingReplay;
@@ -2019,7 +2626,10 @@ export class EventsService {
               current.cancelledById === actor.sub &&
               current.cancelCommandHash === commandHash
             ) {
-              return { event: current, idempotent: true };
+              return eventCancellationResponse({
+                event: current,
+                idempotent: true,
+              });
             }
             throw new ConflictException('赛事已经由另一取消命令处理');
           }
@@ -2256,12 +2866,12 @@ export class EventsService {
               } as never,
             },
           });
-          return {
+          return eventCancellationResponse({
             event,
             cancelledPendingOrders,
             cancelledWaitlist,
             refundRequests,
-          };
+          });
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -2300,7 +2910,8 @@ export class EventsService {
       ) {
         throw new ConflictException('参赛报名尚未支付');
       }
-      if (team.status === RegistrationStatus.CHECKED_IN) return team;
+      if (team.status === RegistrationStatus.CHECKED_IN)
+        return eventTeamCommandResponse(team);
       if (
         team.cancellationPending ||
         team.order?.status === OrderStatus.REFUND_PENDING
@@ -2342,7 +2953,7 @@ export class EventsService {
           } as never,
         },
       });
-      return updated;
+      return eventTeamCommandResponse(updated);
     });
   }
 
@@ -2811,12 +3422,25 @@ export class EventsService {
   }
 
   async correctScore(matchId: string, dto: CorrectScoreDto, actor: AuthUser) {
-    return this.prisma.$transaction(
-      async (tx) => {
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
         const match = await tx.eventMatch.findUnique({
           where: { id: matchId },
         });
         if (!match?.teamBId) throw new NotFoundException('对阵不存在');
+        const event = await tx.event.findUnique({
+          where: { id: match.eventId },
+          select: { status: true },
+        });
+        if (!event) throw new NotFoundException('赛事不存在');
+        if (event.status !== EventStatus.IN_PROGRESS) {
+          throw new ConflictException(
+            event.status === EventStatus.COMPLETED
+              ? '赛事已完赛封账，不能再纠正比分'
+              : '当前赛事不在进行中，不能纠正比分',
+          );
+        }
         if (match.round < 1 || match.round > EVENT_TOTAL_ROUNDS) {
           throw new ConflictException('赛事轮次数据无效，不能纠正比分');
         }
@@ -2872,9 +3496,17 @@ export class EventsService {
           },
         });
         return tx.eventMatch.findUniqueOrThrow({ where: { id: matchId } });
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      if (isPrismaErrorCode(error, 'P2034')) {
+        throw new ConflictException(
+          '赛事封账或比分已被其他操作更新，请刷新后重试',
+        );
+      }
+      throw error;
+    }
   }
 
   async finish(eventId: string, actor: AuthUser) {

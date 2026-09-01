@@ -9,6 +9,7 @@ import {
   getHostApplications,
   saveGames,
   saveEventDetail,
+  saveEvents,
 } from "./state";
 
 const storage = new Map<string, unknown>();
@@ -110,6 +111,75 @@ describe("community host/game/event operation entrypoints", () => {
     ).rejects.toThrow("本局主理人");
   });
 
+  it("scopes the management list to the host while administrators receive every game", async () => {
+    const date = shanghaiDate(2);
+    const games = getGames();
+    games.unshift({
+      id: "other-host-managed",
+      title: "其他主理人球局",
+      hostId: "another-host",
+      host: { id: "another-host", displayName: "其他主理人" },
+      status: "OPEN",
+      capacity: 4,
+      startsAt: `${date}T18:00:00+08:00`,
+      endsAt: `${date}T20:00:00+08:00`,
+      registrations: [],
+    });
+    saveGames(games);
+
+    await login("HOST");
+    const hostList = await request<any[]>("GET", "/games/managed");
+    expect(hostList.map((item) => item.id)).not.toContain("other-host-managed");
+    expect(hostList.some((item) => item.host?.displayName === "周末主理人阿凯")).toBe(true);
+
+    await login("ADMIN");
+    const adminList = await request<any[]>("GET", "/games/managed");
+    expect(adminList.map((item) => item.id)).toEqual(
+      expect.arrayContaining(["game-weekend", "other-host-managed"]),
+    );
+
+    await login("MEMBER");
+    await expect(request("GET", "/games/managed")).rejects.toThrow("无权");
+  });
+
+  it("keeps public game reads published and free of operations fields", async () => {
+    const games = getGames();
+    games.unshift(
+      {
+        id: "draft-hidden",
+        title: "未发布草稿",
+        status: "DRAFT",
+        hostId: "host-secret",
+        courtBookings: [{ id: "booking-secret" }],
+      },
+      {
+        id: "cancelled-hidden",
+        title: "已取消球局",
+        status: "CANCELLED",
+        cancelReason: "内部原因",
+      },
+    );
+    saveGames(games);
+
+    const publicGames = await request<any[]>("GET", "/games");
+
+    expect(publicGames.map((game) => game.id)).not.toEqual(
+      expect.arrayContaining(["draft-hidden", "cancelled-hidden"]),
+    );
+    expect(publicGames.length).toBeGreaterThan(0);
+    expect(publicGames[0]).not.toHaveProperty("hostId");
+    expect(publicGames[0]).not.toHaveProperty("registrations");
+    expect(publicGames[0]).not.toHaveProperty("courtBookings");
+    expect(publicGames[0].host).not.toHaveProperty("id");
+  });
+
+  it("blocks finance from manually promoting a game waitlist", async () => {
+    await login("FINANCE");
+    await expect(
+      request("POST", "/games/game-weekend/promote-waitlist"),
+    ).rejects.toThrow("无权");
+  });
+
   it("runs event-manager create → publish while rejecting member mutation", async () => {
     const startsDate = shanghaiDate(7);
     const deadlineDate = shanghaiDate(6);
@@ -137,6 +207,82 @@ describe("community host/game/event operation entrypoints", () => {
     expect(getEvents().find((item) => item.id === created.id)).toMatchObject({
       status: "OPEN",
     });
+  });
+
+  it("projects public events while preserving protected management detail", async () => {
+    const base = getEventDetail("event-yanqing-open");
+    const completed = {
+      ...base,
+      id: "event-public-result",
+      code: "EV-PUBLIC-RESULT",
+      name: "公开赛果",
+      status: "COMPLETED",
+      teams: [
+        {
+          id: "team-secret",
+          captainId: "captain-secret",
+          playerAUserId: "member-a",
+          playerBUserId: "member-b",
+          orderId: "order-secret",
+          name: "冠军队",
+          category: "MIXED_DOUBLES",
+          status: "COMPLETED",
+          points: 10,
+          wins: 5,
+          losses: 0,
+          scoreDiff: 30,
+          finalRank: 1,
+        },
+      ],
+      matches: [{ id: "match-secret", teamAId: "team-secret" }],
+    };
+    const draft = {
+      ...base,
+      id: "event-draft-hidden",
+      code: "EV-DRAFT-HIDDEN",
+      name: "赛事草稿",
+      status: "DRAFT",
+    };
+    const cancelled = {
+      ...base,
+      id: "event-cancelled-hidden",
+      code: "EV-CANCEL-HIDDEN",
+      name: "取消赛事",
+      status: "CANCELLED",
+    };
+    saveEvents([completed, draft, cancelled, ...getEvents()]);
+    saveEventDetail(completed);
+    saveEventDetail(draft);
+    saveEventDetail(cancelled);
+
+    const publicEvents = await request<any[]>("GET", "/events");
+    expect(publicEvents.map((event) => event.id)).not.toEqual(
+      expect.arrayContaining([draft.id, cancelled.id]),
+    );
+    expect(publicEvents.find((event) => event.id === completed.id)).not.toHaveProperty("teams");
+
+    const publicDetail = await request<any>("GET", `/events/${completed.id}`);
+    expect(publicDetail).not.toHaveProperty("teams");
+    expect(publicDetail).not.toHaveProperty("matches");
+    expect(publicDetail.standings[0]).toEqual(
+      expect.objectContaining({ name: "冠军队", finalRank: 1 }),
+    );
+    expect(publicDetail.standings[0]).not.toHaveProperty("id");
+    expect(publicDetail.standings[0]).not.toHaveProperty("captainId");
+    await expect(request("GET", `/events/${draft.id}`)).rejects.toThrow("不存在");
+
+    await expect(request("GET", "/events/managed")).rejects.toThrow("无权");
+    await login("EVENT_MANAGER");
+    const managed = await request<any>("GET", `/events/managed/${completed.id}`);
+    expect(managed.teams[0]).toMatchObject({
+      id: "team-secret",
+      name: "冠军队",
+    });
+    expect(managed.teams[0]).not.toHaveProperty("captainId");
+    expect(managed.teams[0]).not.toHaveProperty("playerAUserId");
+    expect(managed.teams[0]).not.toHaveProperty("playerBUserId");
+    expect(managed.teams[0]).not.toHaveProperty("orderId");
+    expect(managed.matches[0]).toHaveProperty("id", "match-secret");
   });
 
   it("lets an event manager replace one complete unplayed pairing round with an idempotent audit", async () => {

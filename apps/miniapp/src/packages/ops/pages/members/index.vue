@@ -1,27 +1,43 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { computed, nextTick, reactive, ref } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import OperationsFrame from '../../../../components/OperationsFrame.vue'
 import MetricCard from '../../../../components/MetricCard.vue'
+import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
+import type { Member360View, MemberDirectoryItem } from '../../../../types/domain'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
 import { money } from '../../../../utils/format'
+import {
+  findOpsDeepLinkRecord,
+  opsDeepLinkDomId,
+  parseOpsDeepLinkQuery,
+  type OpsDeepLinkQuery,
+} from '../../../../utils/work-item-deep-link'
 
 const session = useSessionStore()
-const members = ref<any[]>([])
+const members = ref<MemberDirectoryItem[]>([])
 const leads = ref<any[]>([])
 const hostApplications = ref<any[]>([])
 const rechargePlans = ref<any[]>([])
 const membershipProducts = ref<any[]>([])
-const customer = ref<any>(null)
+const customer = ref<Member360View | null>(null)
 const query = ref('')
 const loading = ref(false)
+const loadError = ref('')
+const membersLoaded = ref(false)
+const leadsLoaded = ref(false)
+const hostApplicationsLoaded = ref(false)
+const rechargePlansLoaded = ref(false)
 const membershipProductSubmitting = ref(false)
 const membershipProductError = ref('')
 const membershipProductSource = ref<any>(null)
 const selectedId = ref('')
 const tab = ref<'members' | 'leads' | 'membershipProducts' | 'rechargePlans'>('members')
+const deepLinkQuery = ref<OpsDeepLinkQuery>({})
+const deepLinkHandled = ref(false)
+const focusedRecord = ref('')
 const sourceOptions = [
   { value: 'STORE_VISIT', label: '到店' }, { value: 'DOUYIN', label: '抖音' },
   { value: 'MEITUAN', label: '美团' }, { value: 'REFERRAL', label: '直接推荐' },
@@ -49,6 +65,23 @@ const leadLabels: Record<string, string> = {
   NEW: '新线索', CONTACTING: '跟进中', TRIAL_RESERVED: '已约体验', ATTENDED: '已到店',
   CONVERTED: '已转会员', LOST: '已流失', ARCHIVED: '已归档',
 }
+const accountLabels: Record<string, string> = {
+  CASH_PRINCIPAL: '现金本金', GIFT_BALANCE: '赠送余额', BADMINTON_COIN: '羽毛球币',
+  EVENT_POINTS: '成人赛事积分', GROWTH_POINTS: '青少年成长积分', YOUTH_GROWTH_POINTS: '青少年成长积分',
+}
+const memberLevelLabels: Record<string, string> = {
+  EXPERIENCE: '体验会员', BASIC: '基础会员', REGULAR: '普通会员', GOLD: '金卡会员',
+  BLACK: '黑金会员', STAFF: '员工会员',
+}
+const benefitLabels: Record<string, string> = {
+  booking: '订场权益', discount: '会员折扣', guest: '同行权益', training: '培训权益',
+  event: '赛事权益', additional: '其他权益',
+}
+const accountLabel = (type?: string) => accountLabels[type || ''] || '其他账户'
+const memberLevelLabel = (level?: string) => memberLevelLabels[level || ''] || '普通会员'
+const leadSourceLabel = (source?: string) => sourceOptions.find((item) => item.value === source)?.label || '其他来源'
+const accountBalance = (account: any) =>
+  ['CASH_PRINCIPAL', 'GIFT_BALANCE'].includes(account.type) ? money(account.balance) : `${account.balance || 0}`
 const canViewLeads = computed(() => session.roles.some((role) => ['FRONT_DESK', 'COACH', 'ADMIN', 'SUPER_ADMIN'].includes(role)))
 const canWriteLeads = computed(() => session.roles.some((role) => ['FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'].includes(role)))
 const canReviewHosts = computed(() => session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
@@ -75,32 +108,89 @@ const metrics = computed(() => [
 
 async function load() {
   await session.hydrate()
+  if (!hasOperationsAccess(session.roles, 'members')) return
   loading.value = true
+  loadError.value = ''
+  membersLoaded.value = false
+  leadsLoaded.value = false
+  hostApplicationsLoaded.value = false
+  rechargePlansLoaded.value = false
   membershipProductError.value = ''
-  try {
-    const [memberResult, leadResult, hostResult, rechargePlanResult, membershipProductResult] = await Promise.all([
-      endpoints.members(),
-      canViewLeads.value ? endpoints.customerLeads() : Promise.resolve({ items: [] }),
-      canReviewHosts.value ? endpoints.hostApplications() : Promise.resolve([]),
-      canManageRechargePlans.value ? endpoints.manageRechargePlans() : Promise.resolve([]),
-      canViewMembershipProducts.value
-        ? endpoints.manageMembershipProducts().catch((cause: any) => {
-            membershipProductError.value = cause?.message || '会员产品版本加载失败'
-            return []
-          })
-        : Promise.resolve([]),
-    ])
-    members.value = memberResult.items || []
-    leads.value = leadResult.items || []
-    hostApplications.value = hostResult || []
-    rechargePlans.value = rechargePlanResult || []
-    membershipProducts.value = membershipProductResult || []
-  } catch (cause: any) {
-    uni.showToast({ title: cause.message || '客户数据加载失败', icon: 'none' })
-  } finally { loading.value = false }
+  const results = await Promise.allSettled([
+    endpoints.members(),
+    canViewLeads.value ? endpoints.customerLeads() : Promise.resolve({ items: [] }),
+    canReviewHosts.value ? endpoints.hostApplications() : Promise.resolve([]),
+    canManageRechargePlans.value ? endpoints.manageRechargePlans() : Promise.resolve([]),
+    canViewMembershipProducts.value ? endpoints.manageMembershipProducts() : Promise.resolve([]),
+  ])
+  const [memberResult, leadResult, hostResult, rechargePlanResult, membershipProductResult] = results
+  if (memberResult.status === 'fulfilled') {
+    members.value = memberResult.value.items || []
+    membersLoaded.value = true
+  }
+  if (leadResult.status === 'fulfilled') {
+    leads.value = leadResult.value.items || []
+    leadsLoaded.value = true
+  }
+  if (hostResult.status === 'fulfilled') {
+    hostApplications.value = hostResult.value || []
+    hostApplicationsLoaded.value = true
+  }
+  if (rechargePlanResult.status === 'fulfilled') {
+    rechargePlans.value = rechargePlanResult.value || []
+    rechargePlansLoaded.value = true
+  }
+  if (membershipProductResult.status === 'fulfilled') membershipProducts.value = membershipProductResult.value || []
+  else if (canViewMembershipProducts.value) membershipProductError.value = membershipProductResult.reason?.message || '会员产品版本加载失败'
+  const failedSources = [
+    memberResult.status === 'rejected' ? '会员目录' : '',
+    canViewLeads.value && leadResult.status === 'rejected' ? '客户线索' : '',
+    canReviewHosts.value && hostResult.status === 'rejected' ? '主理人申请' : '',
+    canManageRechargePlans.value && rechargePlanResult.status === 'rejected' ? '充值计划' : '',
+  ].filter(Boolean)
+  if (failedSources.length) loadError.value = `${failedSources.join('、')}加载失败；未同步列表不会按空数据展示。`
+  loading.value = false
+  await applyMemberDeepLink()
 }
 
-async function selectMember(member: any) {
+async function applyMemberDeepLink() {
+  if (deepLinkHandled.value || !deepLinkQuery.value.focus) return
+  const focus = deepLinkQuery.value.focus
+  let record: any = null
+  let prefix = ''
+  let label = '客户记录'
+  if (focus === 'lead') {
+    tab.value = 'leads'
+    record = findOpsDeepLinkRecord(leads.value, deepLinkQuery.value, ['id'])
+    prefix = 'lead'
+    label = '客户线索'
+  } else if (focus === 'host-application') {
+    tab.value = 'members'
+    record = findOpsDeepLinkRecord(hostApplications.value, deepLinkQuery.value, ['id', 'userId'])
+    prefix = 'host-application'
+    label = '主理人申请'
+  } else if (focus === 'member') {
+    tab.value = 'members'
+    record = findOpsDeepLinkRecord(members.value as any[], deepLinkQuery.value, ['id'])
+    prefix = 'member'
+    label = '会员'
+    if (record) await selectMember(record)
+  } else {
+    deepLinkHandled.value = true
+    uni.showToast({ title: `无法识别客户待办类型：${focus}`, icon: 'none' })
+    return
+  }
+  deepLinkHandled.value = true
+  if (!record) {
+    uni.showToast({ title: `未找到待办对应的${label}，可能已处理或无权查看`, icon: 'none' })
+    return
+  }
+  focusedRecord.value = `${prefix}:${record.id}`
+  await nextTick()
+  uni.pageScrollTo({ selector: `#${opsDeepLinkDomId(prefix, record.id)}`, duration: 250 })
+}
+
+async function selectMember(member: MemberDirectoryItem) {
   selectedId.value = member.id
   uni.setStorageSync('yanqing_selected_member', member)
   try {
@@ -178,11 +268,11 @@ async function requestAccountAdjustment() {
   if (!selectedId.value || !accounts.length) return uni.showToast({ title: '客户账户未载入', icon: 'none' })
   let selected: any
   try {
-    const result = await uni.showActionSheet({ itemList: accounts.map((account: any) => `${account.type} · 当前 ${account.balance}`) })
+    const result = await uni.showActionSheet({ itemList: accounts.map((account: any) => `${accountLabel(account.type)} · 当前 ${accountBalance(account)}`) })
     selected = accounts[result.tapIndex]
   } catch { return }
   const amountInput = await uni.showModal({
-    title: `调整 ${selected.type}`,
+    title: `调整${accountLabel(selected.type)}`,
     content: '', editable: true,
     placeholderText: ['CASH_PRINCIPAL', 'GIFT_BALANCE'].includes(selected.type) ? '输入增减金额（元，如 -20）' : '输入增减数量（如 -20）',
   })
@@ -310,7 +400,7 @@ function changeMemberLevel(event: any) {
 function membershipBenefits(product: any) {
   const entries = Object.entries(product?.benefits || {})
   if (!entries.length) return '未配置权益说明'
-  return entries.map(([key, value]) => `${key}：${String(value)}`).join('；')
+  return entries.map(([key, value]) => `${benefitLabels[key] || '其他权益'}：${String(value)}`).join('；')
 }
 
 async function refreshMembershipProducts(message?: string) {
@@ -419,32 +509,42 @@ function changeSource(event: any) {
   createForm.sourceChannel = sourceOptions[Number(event.detail.value)]?.value || 'STORE_VISIT'
 }
 
+onLoad((options) => {
+  deepLinkQuery.value = parseOpsDeepLinkQuery(options)
+})
 onShow(load)
 </script>
 
 <template>
-  <OperationsFrame title="客户经营" eyebrow="CRM & MEMBER 360" role="前台 / 教练 / 财务" description="线索先进入责任队列，跟进记录只追加；转化后关联现有会员并进入客户360。">
+  <OperationsFrame access="members" title="客户经营" eyebrow="CRM & MEMBER 360" role="前台 / 教练 / 财务" description="线索先进入责任队列，跟进记录只追加；转化后关联现有会员并进入客户360。">
     <view class="metric-grid"><MetricCard v-for="item in metrics" :key="item[0]" :label="item[0]" :value="item[1]" :note="item[2]" /></view>
+    <view v-if="loadError" class="card load-error"><view><text class="member-name">客户数据未完整同步</text><text class="muted block">{{ loadError }}</text></view><button class="secondary retry-button" :disabled="loading" @tap="load">重新加载</button></view>
     <view class="tabs card"><button class="tab" :class="{ active: tab === 'members' }" @tap="tab = 'members'">会员360</button><button v-if="canViewLeads" class="tab" :class="{ active: tab === 'leads' }" @tap="tab = 'leads'">客户线索</button><button v-if="canViewMembershipProducts" class="tab" :class="{ active: tab === 'membershipProducts' }" @tap="tab = 'membershipProducts'">会员产品</button><button v-if="canManageRechargePlans" class="tab" :class="{ active: tab === 'rechargePlans' }" @tap="tab = 'rechargePlans'">充值计划</button></view>
-    <view v-if="tab === 'members' || tab === 'leads'" class="search-card card"><input v-model="query" class="input" :placeholder="tab === 'members' ? '输入姓名或手机号查询会员' : '搜索姓名、来源活动'" confirm-type="search" /></view>
+    <view v-if="tab === 'members' || tab === 'leads'" class="search-card card"><input v-model="query" class="input" :placeholder="tab === 'members' ? '输入姓名或手机号后四位查询会员' : '搜索姓名、来源活动'" confirm-type="search" /></view>
 
     <template v-if="tab === 'members'">
       <view v-if="canReviewHosts" class="card host-queue">
         <view class="section-title">主理人申请 <text class="section-note">{{ hostApplications.length }} 条待审批</text></view>
-        <view v-for="application in hostApplications" :key="application.id" class="host-row">
+        <view v-for="application in hostApplications" :id="opsDeepLinkDomId('host-application', application.id)" :key="application.id" class="host-row" :class="{ 'deep-link-target': focusedRecord === `host-application:${application.id}` }">
           <view><text class="member-name">{{ application.user?.displayName }}</text><text class="muted">{{ application.user?.phone || '未登记手机号' }} · 到店 {{ application.user?.memberProfile?.visitCount || 0 }} 次</text></view>
           <view class="actions"><button size="mini" @tap="reviewHost(application, true)">批准</button><button size="mini" @tap="reviewHost(application, false)">驳回</button></view>
         </view>
-        <text v-if="!hostApplications.length" class="muted">当前没有待审批主理人申请</text>
+        <text v-if="!loading && hostApplicationsLoaded && !hostApplications.length" class="muted">当前没有待审批主理人申请</text>
       </view>
-      <view class="section-title">会员列表 <text class="section-note">{{ loading ? '同步中' : `${filteredMembers.length} 人` }}</text></view>
-      <view v-for="member in filteredMembers" :key="member.id" class="card member-row" :class="{ selected: selectedId === member.id }" @tap="selectMember(member)"><view><text class="member-name">{{ member.displayName || '未命名会员' }}</text><text class="muted">{{ member.phone || '联系方式按角色隐藏' }} · {{ member.level || member.memberProfile?.level || '普通会员' }}</text></view><text class="select-mark">{{ selectedId === member.id ? '已载入' : '查看360' }}</text></view>
+      <view class="section-title">会员列表 <text class="section-note">{{ loading ? '同步中' : membersLoaded ? `${filteredMembers.length} 人` : '未同步' }}</text></view>
+      <view v-for="member in filteredMembers" :id="opsDeepLinkDomId('member', member.id)" :key="member.id" class="card member-row" :class="{ selected: selectedId === member.id, 'deep-link-target': focusedRecord === `member:${member.id}` }" @tap="selectMember(member)"><view><text class="member-name">{{ member.displayName || '未命名会员' }}</text><text class="muted">{{ member.phone || '联系方式按角色隐藏' }} · {{ memberLevelLabel(member.level || member.memberProfile?.level) }}</text></view><text class="select-mark">{{ selectedId === member.id ? '已载入' : '查看360' }}</text></view>
+      <view v-if="!loading && membersLoaded && !filteredMembers.length" class="card empty">{{ query.trim() ? '没有匹配的会员' : '当前服务范围内暂无会员' }}</view>
       <view v-if="customer" class="card customer-card">
         <view class="section-title">{{ customer.member?.displayName }} · 客户360</view>
         <text class="muted">订单 {{ customer.recentOrders?.length || 0 }} · 培训 {{ customer.recentTraining?.length || 0 }} · 球局 {{ customer.recentGames?.length || 0 }} · 赛事 {{ customer.recentEvents?.length || 0 }} · 券 {{ customer.recentCoupons?.length || 0 }}</text>
-        <view v-if="customer.accounts?.length" class="account-grid"><view v-for="account in customer.accounts" :key="account.id" class="account"><text>{{ account.type }}</text><text class="account-value">{{ account.balance }}</text></view></view>
+        <view v-if="customer.paymentSummary" class="account-grid">
+          <view class="account"><text>储值可支付合计</text><text class="account-value">{{ money(customer.paymentSummary.storedValueAvailableCents) }}</text></view>
+          <view class="account"><text>可用羽毛球币</text><text class="account-value">{{ customer.paymentSummary.badmintonCoinAvailable }}</text></view>
+        </view>
+        <view v-if="customer.accounts?.length" class="account-grid"><view v-for="account in customer.accounts" :key="account.id" class="account"><text>{{ accountLabel(account.type) }}</text><text class="account-value">{{ accountBalance(account) }}</text></view></view>
         <button v-if="canRequestAdjustments && customer.accounts?.length" class="secondary adjustment-button" @tap="requestAccountAdjustment">提交账户调整申请</button>
-        <text v-if="customer.financialsRedacted" class="privacy">教练视图仅展示本班培训信息，财务、订单、账户及联系方式已隐藏。</text>
+        <text v-if="customer.privacyScope === 'FRONT_DESK_LIMITED'" class="privacy">前台视图仅展示脱敏联系方式、现场履约信息及可支付额度汇总；账户构成、赛事积分、成长积分和财务明细已隐藏。</text>
+        <text v-else-if="customer.privacyScope === 'COACH_ASSIGNED'" class="privacy">教练视图仅展示本班培训信息，财务、订单、账户及联系方式已隐藏。</text>
       </view>
     </template>
 
@@ -457,13 +557,14 @@ onShow(load)
         <input v-model="createForm.campaign" class="input field" placeholder="来源活动，例如周末体验课" />
         <button class="primary" @tap="createLead">建立线索</button>
       </view>
-      <view class="section-title">线索队列 <text class="section-note">{{ filteredLeads.length }} 条</text></view>
-      <view v-for="lead in filteredLeads" :key="lead.id" class="card lead-card">
-        <view class="lead-head"><view><text class="member-name">{{ lead.displayName }}</text><text class="muted">{{ lead.phone || '联系方式按角色隐藏' }} · {{ lead.campaign || lead.sourceChannel }}</text></view><text class="lead-status">{{ leadLabels[lead.status] || lead.status }}</text></view>
+      <view class="section-title">线索队列 <text class="section-note">{{ loading ? '同步中' : leadsLoaded ? `${filteredLeads.length} 条` : '未同步' }}</text></view>
+      <view v-for="lead in filteredLeads" :id="opsDeepLinkDomId('lead', lead.id)" :key="lead.id" class="card lead-card" :class="{ 'deep-link-target': focusedRecord === `lead:${lead.id}` }">
+        <view class="lead-head"><view><text class="member-name">{{ lead.displayName }}</text><text class="muted">{{ lead.phone || '联系方式按角色隐藏' }} · {{ lead.campaign || leadSourceLabel(lead.sourceChannel) }}</text></view><text class="lead-status">{{ leadLabels[lead.status] || '状态更新中' }}</text></view>
         <text class="muted block">负责人：{{ lead.owner?.displayName || '待认领' }} · 下次跟进：{{ lead.nextFollowUpAt ? new Date(lead.nextFollowUpAt).toLocaleString() : '未安排' }}</text>
         <text v-if="lead.followUps?.[0]" class="follow-up">最近：{{ lead.followUps[0].content }}</text>
         <view v-if="canWriteLeads && !['CONVERTED', 'LOST', 'ARCHIVED'].includes(lead.status)" class="actions"><button size="mini" @tap="claim(lead)">认领</button><button size="mini" @tap="assign(lead)">分配</button><button size="mini" @tap="followUp(lead)">跟进推进</button><button size="mini" @tap="convert(lead)">转会员</button><button size="mini" @tap="lose(lead)">流失</button></view>
       </view>
+      <view v-if="!loading && leadsLoaded && !filteredLeads.length" class="card empty">{{ query.trim() ? '没有匹配的客户线索' : '当前没有客户线索' }}</view>
     </template>
     <template v-else-if="tab === 'membershipProducts'">
       <view v-if="canManageMembershipProducts" class="card membership-product-form">
@@ -488,9 +589,9 @@ onShow(load)
       <view v-else-if="loading" class="card empty">正在同步会员产品版本…</view>
       <view v-else-if="!membershipProducts.length" class="card empty">尚未配置会员产品版本</view>
       <view v-for="product in membershipProducts" v-else :key="product.id" class="card plan-row">
-        <view class="plan-head"><view><text class="member-name">{{ product.name }}</text><text class="muted">{{ product.code }} · v{{ product.version }} · {{ product.level }} · {{ money(product.priceCents) }} / {{ product.durationDays }}天</text></view><text class="lead-status" :class="{ disabled: !product.enabled }">{{ product.enabled ? '已启用' : '已停用' }}</text></view>
+        <view class="plan-head"><view><text class="member-name">{{ product.name }}</text><text class="muted">{{ product.code }} · 第{{ product.version }}版 · {{ memberLevelLabel(product.level) }} · {{ money(product.priceCents) }} / {{ product.durationDays }}天</text></view><text class="lead-status" :class="{ disabled: !product.enabled }">{{ product.enabled ? '已启用' : '已停用' }}</text></view>
         <text class="benefit-line">{{ membershipBenefits(product) }}</text>
-        <text class="muted block">有效期：{{ new Date(product.effectiveFrom).toLocaleDateString() }} 至 {{ product.effectiveTo ? new Date(product.effectiveTo).toLocaleDateString() : '长期' }} · 创建人 {{ product.createdBy?.displayName || product.createdById }}</text>
+        <text class="muted block">有效期：{{ new Date(product.effectiveFrom).toLocaleDateString() }} 至 {{ product.effectiveTo ? new Date(product.effectiveTo).toLocaleDateString() : '长期' }} · 创建人 {{ product.createdBy?.displayName || '系统记录' }}</text>
         <text v-if="product.transitions?.[0]" class="follow-up">最近变更：{{ product.transitions[0].reason }} · {{ product.transitions[0].actor?.displayName }}</text>
         <view v-if="canManageMembershipProducts" class="product-actions"><button class="secondary status-button" :disabled="membershipProductSubmitting" @tap="beginMembershipProductVersion(product)">基于此版本派生</button><button class="secondary status-button" :disabled="membershipProductSubmitting" @tap="setMembershipProductStatus(product)">{{ product.enabled ? '停用产品' : '启用产品' }}</button></view>
       </view>
@@ -508,19 +609,96 @@ onShow(load)
       </view>
       <view class="section-title">充值计划版本 <text class="section-note">{{ rechargePlans.length }} 个</text></view>
       <view v-for="plan in rechargePlans" :key="plan.id" class="card plan-row">
-        <view class="plan-head"><view><text class="member-name">{{ plan.name }}</text><text class="muted">{{ plan.code }} · v{{ plan.version }} · 本金 {{ money(plan.principalCents) }} · 赠送 {{ money(plan.giftCents) }}</text></view><text class="lead-status" :class="{ disabled: !plan.enabled }">{{ plan.enabled ? '已启用' : '已停用' }}</text></view>
-        <text class="muted block">有效期：{{ new Date(plan.effectiveFrom).toLocaleDateString() }} 至 {{ plan.effectiveTo ? new Date(plan.effectiveTo).toLocaleDateString() : '长期' }} · 创建人 {{ plan.createdBy?.displayName || plan.createdById }}</text>
+        <view class="plan-head"><view><text class="member-name">{{ plan.name }}</text><text class="muted">{{ plan.code }} · 第{{ plan.version }}版 · 本金 {{ money(plan.principalCents) }} · 赠送 {{ money(plan.giftCents) }}</text></view><text class="lead-status" :class="{ disabled: !plan.enabled }">{{ plan.enabled ? '已启用' : '已停用' }}</text></view>
+        <text class="muted block">有效期：{{ new Date(plan.effectiveFrom).toLocaleDateString() }} 至 {{ plan.effectiveTo ? new Date(plan.effectiveTo).toLocaleDateString() : '长期' }} · 创建人 {{ plan.createdBy?.displayName || '系统记录' }}</text>
         <text v-if="plan.transitions?.[0]" class="follow-up">最近变更：{{ plan.transitions[0].reason }} · {{ plan.transitions[0].actor?.displayName }}</text>
         <button class="secondary status-button" @tap="setRechargePlanStatus(plan)">{{ plan.enabled ? '停用计划' : '启用计划' }}</button>
       </view>
+      <view v-if="!loading && rechargePlansLoaded && !rechargePlans.length" class="card empty">尚未配置充值计划版本</view>
     </template>
     <view class="card boundary"><text class="muted">线索跟进记录不可删除；教练仅能查看分配给自己或本班会员关联线索，且看不到账户和联系方式。</text></view>
   </OperationsFrame>
 </template>
 
 <style scoped>
-.metric-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14rpx; margin-top:22rpx; }.tabs { display:flex; flex-wrap:wrap; gap:12rpx; margin-top:22rpx; padding:10rpx; }.tab { flex:1 1 42%; margin:0; background:#f3f5f3; color:#5f6e65; }.tab.active { color:#fff; background:#17653d; }.search-card,.customer-card,.lead-form,.host-queue { margin-top:18rpx; padding:20rpx; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.member-row,.lead-card { margin-top:14rpx; padding:22rpx 24rpx; }.member-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; }.member-row.selected { border-color:#17653d; background:#f1f8f2; }.member-name { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; }.select-mark,.lead-status { color:#17653d; font-size:23rpx; }.account-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10rpx; margin-top:18rpx; }.account { padding:14rpx; background:#f4f7f4; border-radius:12rpx; font-size:20rpx; }.account-value { display:block; margin-top:6rpx; font-size:28rpx; font-weight:800; }.privacy,.follow-up { display:block; margin-top:14rpx; color:#8a6030; font-size:22rpx; line-height:1.6; }.field { margin-top:12rpx; }.picker { padding:20rpx; border:1rpx solid #dce5df; border-radius:12rpx; color:#405449; }.lead-head,.host-row { display:flex; justify-content:space-between; gap:12rpx; }.host-row { align-items:center; padding:18rpx 0; border-bottom:1rpx solid #edf1ee; }.block { display:block; margin-top:12rpx; }.actions { display:flex; flex-wrap:wrap; gap:10rpx; margin-top:16rpx; }.host-row .actions { margin-top:0; }.actions button { margin:0; }.boundary { margin-top:22rpx; line-height:1.7; }
-.adjustment-button { margin-top:16rpx; }
-.recharge-plan-form { margin-top:18rpx; }.amount-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12rpx; }.create-plan,.status-button { margin-top:16rpx; }.plan-row { margin-top:14rpx; }.plan-head { display:flex; justify-content:space-between; gap:14rpx; }.lead-status.disabled { color:#8b4b41; }
-.membership-product-form,.readonly-note { margin-top:18rpx; }.form-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16rpx; }.compact-action { flex:0 0 auto; width:auto; margin:0; padding:0 18rpx; }.benefit-line { display:block; margin-top:14rpx; color:#405449; font-size:23rpx; line-height:1.6; }.product-actions { display:grid; grid-template-columns:repeat(2,1fr); gap:12rpx; }.product-actions button { width:100%; margin-top:16rpx; }.product-error { color:#8f2828; background:#fff5f3; }
+.metric-grid,
+.account-grid,
+.amount-grid,
+.product-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12rpx;
+}
+.metric-grid { margin-top: 22rpx; gap: 14rpx; }
+.tabs { display: flex; flex-wrap: wrap; gap: 12rpx; margin-top: 22rpx; padding: 10rpx; }
+.tab { flex: 1 1 42%; min-height: 44px; margin: 0; color: #5f6e65; background: #f3f5f3; line-height: 1.3; }
+.tab.active { color: #fff; background: #17653d; }
+.search-card,
+.customer-card,
+.lead-form,
+.host-queue { margin-top: 18rpx; padding: 20rpx; }
+.section-note { color: #758079; font-size: 22rpx; font-weight: 400; }
+.member-row,
+.lead-card { margin-top: 14rpx; padding: 22rpx 24rpx; }
+.member-row,
+.lead-head,
+.host-row,
+.plan-head,
+.form-heading,
+.load-error { display: flex; justify-content: space-between; gap: 12rpx; }
+.member-row { align-items: center; }
+.member-row > view:first-child,
+.lead-head > view:first-child,
+.host-row > view:first-child,
+.plan-head > view:first-child,
+.form-heading > view:first-child,
+.load-error > view:first-child { flex: 1; min-width: 0; }
+.member-row.selected { background: #f1f8f2; border-color: #17653d; }
+.deep-link-target { border-color: #d69a24 !important; box-shadow: 0 0 0 4rpx rgba(214, 154, 36, 0.18); }
+.member-name { display: block; margin-bottom: 8rpx; font-size: 29rpx; font-weight: 800; overflow-wrap: anywhere; }
+.select-mark,
+.lead-status { flex: 0 0 auto; max-width: 34%; color: #17653d; font-size: 23rpx; text-align: right; overflow-wrap: anywhere; }
+.account-grid { margin-top: 18rpx; gap: 10rpx; }
+.account { min-width: 0; padding: 14rpx; background: #f4f7f4; border-radius: 12rpx; font-size: 20rpx; overflow-wrap: anywhere; }
+.account-value { display: block; margin-top: 6rpx; font-size: 28rpx; font-weight: 800; overflow-wrap: anywhere; }
+.privacy,
+.follow-up { display: block; margin-top: 14rpx; color: #8a6030; font-size: 22rpx; line-height: 1.6; overflow-wrap: anywhere; }
+.field { margin-top: 12rpx; }
+.picker { box-sizing: border-box; min-height: 44px; padding: 20rpx; color: #405449; border: 1rpx solid #dce5df; border-radius: 12rpx; overflow-wrap: anywhere; }
+.host-row { align-items: center; padding: 18rpx 0; border-bottom: 1rpx solid #edf1ee; }
+.block { display: block; margin-top: 12rpx; overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 16rpx; }
+.host-row .actions { flex: 0 0 auto; margin-top: 0; }
+.actions button,
+.status-button,
+.compact-action,
+.retry-button { box-sizing: border-box; min-height: 44px; margin: 0; line-height: 1.3; white-space: normal; }
+.boundary { margin-top: 22rpx; line-height: 1.7; }
+.adjustment-button,
+.create-plan { margin-top: 16rpx; }
+.recharge-plan-form,
+.membership-product-form,
+.readonly-note { margin-top: 18rpx; }
+.plan-row { margin-top: 14rpx; }
+.plan-head,
+.form-heading { align-items: flex-start; gap: 14rpx; }
+.lead-status.disabled { color: #8b4b41; }
+.compact-action { flex: 0 0 auto; width: auto; padding: 0 18rpx; }
+.benefit-line { display: block; margin-top: 14rpx; color: #405449; font-size: 23rpx; line-height: 1.6; overflow-wrap: anywhere; }
+.product-actions button { width: 100%; margin-top: 16rpx; }
+.product-error,
+.load-error { color: #8f2828; background: #fff5f3; }
+.load-error { align-items: flex-start; margin-top: 18rpx; padding: 20rpx; }
+.retry-button { flex: 0 0 auto; width: auto; padding: 0 18rpx; }
+.empty { color: #758079; text-align: center; overflow-wrap: anywhere; }
+
+@media screen and (max-width: 420px) {
+  .load-error,
+  .form-heading { flex-direction: column; }
+  .retry-button,
+  .compact-action { width: 100%; }
+  .host-row { align-items: flex-start; flex-direction: column; }
+  .host-row .actions { width: 100%; }
+  .host-row .actions button { flex: 1 1 0; min-width: 0; }
+}
 </style>

@@ -249,8 +249,15 @@ describe('TrainingService session audit', () => {
     };
     const service = new TrainingService(prisma as never);
 
-    await expect(service.createSession(dto, admin)).resolves.toBe(session);
-    await expect(service.createSession(dto, admin)).resolves.toBe(session);
+    const first = await service.createSession(dto, admin);
+    const replay = await service.createSession(dto, admin);
+    expect(first).toEqual({
+      id: session.id,
+      status: TrainingSessionStatus.SCHEDULED,
+    });
+    expect(replay).toEqual(first);
+    expect(first).not.toHaveProperty('coachCostCents');
+    expect(first).not.toHaveProperty('attendances');
 
     expect(transaction).toHaveBeenCalledOnce();
     expect(sessionCreate).toHaveBeenCalledOnce();
@@ -373,12 +380,14 @@ describe('TrainingService session audit', () => {
       idempotencyKey: 'training-session-complete-1',
     };
 
-    await expect(
-      service.completeSession(session.id, admin, command),
-    ).resolves.toMatchObject({ status: TrainingSessionStatus.COMPLETED });
-    await expect(
-      service.completeSession(session.id, admin, command),
-    ).resolves.toMatchObject({ status: TrainingSessionStatus.COMPLETED });
+    const first = await service.completeSession(session.id, admin, command);
+    const replay = await service.completeSession(session.id, admin, command);
+    expect(first).toEqual({
+      id: session.id,
+      status: TrainingSessionStatus.COMPLETED,
+    });
+    expect(replay).toEqual(first);
+    expect(first).not.toHaveProperty('class');
 
     expect(update).toHaveBeenCalledOnce();
     expect(auditCreate).toHaveBeenCalledOnce();

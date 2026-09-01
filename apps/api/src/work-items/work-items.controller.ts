@@ -21,6 +21,10 @@ class WorkItemsQueryDto {
 @ApiBearerAuth()
 @Controller('work-items')
 @Roles(
+  // Members may call the shared endpoint, but the service deliberately
+  // returns an empty list for non-operators.  Keeping the route reachable
+  // makes that contract observable without exposing any operating data.
+  AppRole.MEMBER,
   AppRole.FRONT_DESK,
   AppRole.COACH,
   AppRole.EVENT_MANAGER,
