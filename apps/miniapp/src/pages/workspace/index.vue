@@ -108,7 +108,7 @@ onShow(load)
 <template>
   <view class="page safe-bottom">
     <view v-if="isOperator" class="workspace-header">
-      <text class="eyebrow">BUSINESS WORKSPACE</text>
+      <view class="header-topline"><text class="eyebrow">BUSINESS WORKSPACE</text><text class="live-status">经营在线</text></view>
       <text class="title">经营工作台</text>
       <text class="operator">{{ displayRoles }} · 延庆金羽主馆</text>
       <text class="copy">先处理当前岗位待办，再进入业务中心；经营分析与业务操作保持分离。</text>
@@ -124,20 +124,21 @@ onShow(load)
     </view>
 
     <template v-if="isOperator">
-      <view class="section-title">我的工作</view>
+      <view class="section-heading"><text class="section-title">我的工作</text><text class="section-note">按优先级处理</text></view>
       <view class="quick-list">
-        <view v-for="action in quickActions" :key="action.key" class="quick-card" @tap="openRoute(action.route)">
+        <view v-for="(action, index) in quickActions" :key="action.key" class="quick-card" role="button" tabindex="0" :aria-label="`${action.title}，${action.description}`" hover-class="is-pressed" @tap="openRoute(action.route)" @keyup.enter="openRoute(action.route)">
+          <text class="quick-priority">{{ index === 0 ? '优先' : '常用' }}</text>
           <view><text class="quick-title">{{ action.title }}</text><text class="quick-note">{{ action.description }}</text></view>
-          <text class="module-arrow">›</text>
+          <text class="module-arrow" aria-hidden="true">›</text>
         </view>
       </view>
 
-      <view class="section-title">业务中心</view>
+      <view class="section-heading"><text class="section-title">业务中心</text><text class="section-note">{{ filteredCenters.length }} 个可用</text></view>
       <view class="search-box">
         <input v-model="searchQuery" confirm-type="search" placeholder="搜索业务中心" />
       </view>
       <view v-if="filteredCenters.length" class="module-list">
-        <view v-for="center in filteredCenters" :key="center.key" class="module card" @tap="openRoute(center.route)">
+        <view v-for="center in filteredCenters" :key="center.key" class="module card" role="button" tabindex="0" :aria-label="`${center.title}，${center.description}`" hover-class="is-pressed" @tap="openRoute(center.route)" @keyup.enter="openRoute(center.route)">
           <view class="module-copy"><text class="module-title">{{ center.title }}</text><text class="muted">{{ center.description }}</text></view>
           <text class="module-arrow">›</text>
         </view>
@@ -160,21 +161,28 @@ onShow(load)
 </template>
 
 <style scoped>
-.workspace-header { padding: 36rpx 32rpx; color: #fff; background: linear-gradient(145deg,#153d29,#237249); border-radius: 30rpx; }
+.workspace-header { position: relative; overflow: hidden; padding: 36rpx 32rpx; color: #fff; background: linear-gradient(145deg,#103b27,#17653d 72%,#6f6b2a 140%); border: 1rpx solid rgba(255,255,255,.12); border-radius: 30rpx; box-shadow: 0 18rpx 44rpx rgba(22,61,41,.16); }
+.workspace-header::after { position:absolute; right:-90rpx; bottom:-130rpx; width:290rpx; height:290rpx; border:40rpx solid rgba(255,255,255,.045); border-radius:50%; content:''; }
+.header-topline { position: relative; z-index: 1; display:flex; align-items:center; justify-content:space-between; gap:16rpx; }
 .eyebrow { display: block; opacity: .64; font-size: 19rpx; letter-spacing: 3rpx; }
+.live-status { flex:0 0 auto; padding:6rpx 13rpx; color:#fff3c8; background:rgba(255,255,255,.1); border:1rpx solid rgba(255,243,200,.2); border-radius:999rpx; font-size:20rpx; }
 .title { display: block; margin: 18rpx 0 10rpx; font-size: 45rpx; font-weight: 800; }
 .operator { display: block; color: #e8d28a; font-size: 22rpx; }
 .copy { display: block; margin-top: 18rpx; color: rgba(255,255,255,.76); font-size: 24rpx; line-height: 1.6; }
 .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14rpx; margin-top: 20rpx; }
+.section-heading { display:flex; align-items:baseline; justify-content:space-between; gap:18rpx; margin:38rpx 0 18rpx; }
+.section-heading .section-title { margin:0; }
+.section-note { color:#6a776e; font-size:22rpx; }
 .quick-list,.module-list { display: grid; gap: 14rpx; }
-.quick-card { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; padding: 26rpx 28rpx; color: #fff; background: #17653d; border-radius: 24rpx; }
+.quick-card { position:relative; display: flex; align-items: center; justify-content: space-between; gap: 18rpx; min-height:92rpx; padding: 30rpx 28rpx 26rpx; color: #fff; background: linear-gradient(135deg,#17653d,#205f40); border:1rpx solid rgba(255,255,255,.1); border-radius: 24rpx; box-shadow:0 10rpx 28rpx rgba(23,101,61,.12); }
 .quick-card > view { flex: 1; min-width: 0; }
+.quick-priority { position:absolute; top:0; left:28rpx; padding:3rpx 12rpx; color:#fff3c8; background:rgba(255,255,255,.13); border-radius:0 0 10rpx 10rpx; font-size:18rpx; letter-spacing:1rpx; }
 .quick-title { display: block; font-size: 30rpx; font-weight: 800; }
 .quick-note { display: block; margin-top: 8rpx; color: rgba(255,255,255,.72); font-size: 22rpx; line-height: 1.5; overflow-wrap: anywhere; }
 .quick-card .module-arrow { color: #e8d28a; }
-.search-box { padding: 0 22rpx; margin-bottom: 16rpx; background: #fff; border-radius: 20rpx; }
+.search-box { padding: 0 22rpx; margin-bottom: 16rpx; background: #fff; border: 1rpx solid rgba(28,63,43,.1); border-radius: 20rpx; box-shadow:0 5rpx 16rpx rgba(26,56,38,.035); }
 .search-box input { height: 82rpx; font-size: 25rpx; }
-.module { display: flex; align-items: center; justify-content: space-between; margin: 0; }
+.module { display: flex; align-items: center; justify-content: space-between; min-height:82rpx; margin: 0; }
 .module-copy { min-width: 0; }
 .module-title { display: block; margin-bottom: 8rpx; font-size: 30rpx; font-weight: 800; }
 .module-arrow { flex: 0 0 auto; color: #17653d; font-size: 40rpx; }
@@ -189,6 +197,7 @@ onShow(load)
 .scope .muted,.member-tip .muted { display: block; margin-top: 12rpx; line-height: 1.6; }
 .member-button,.member-tip button { width: 100%; margin-top: 22rpx; }
 .empty { color: #758079; text-align: center; }
+.is-pressed { opacity:.84; }
 
 @media screen and (max-width: 420px) {
   .workspace-header { padding:30rpx 26rpx; }
