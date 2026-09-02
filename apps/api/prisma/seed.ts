@@ -85,6 +85,12 @@ const seedUsers = [
     roles: [AppRole.MEMBER, AppRole.FINANCE],
   },
   {
+    phone: '13800000009',
+    displayName: '赛事管理员小赛',
+    primaryRole: AppRole.EVENT_MANAGER,
+    roles: [AppRole.MEMBER, AppRole.EVENT_MANAGER],
+  },
+  {
     phone: '13800000008',
     displayName: '延庆超级管理员',
     primaryRole: AppRole.SUPER_ADMIN,

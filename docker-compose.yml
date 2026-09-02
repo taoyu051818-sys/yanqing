@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: yanqing
       POSTGRES_PASSWORD: yanqing_dev_password
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - yanqing_postgres:/var/lib/postgresql/data
     healthcheck:

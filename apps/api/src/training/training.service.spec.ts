@@ -1055,6 +1055,12 @@ describe('TrainingService attendance workflow', () => {
   it('assigns a leave record to a later session without consuming another lesson', async () => {
     const { prisma, tx, updated } = attendancePrisma({
       status: AttendanceStatus.MAKEUP_REQUIRED,
+      session: {
+        startsAt: new Date('2026-08-29T10:00:00.000Z'),
+        endsAt: new Date('2026-08-29T11:00:00.000Z'),
+        classId: 'class-1',
+        class: { name: '成人进阶班', coachId: coach.sub, assistantId: null },
+      },
     });
     const target = {
       id: 'session-2',

@@ -12,6 +12,8 @@ import {
 import { withPendingCreationKey } from '../../utils/pending-creation-key'
 
 const session = useSessionStore()
+const isRemoteStaging = !isMockMode && import.meta.env.VITE_ENABLE_REMOTE_DEV_LOGIN === 'true'
+const canSwitchTestIdentity = isMockMode || isRemoteStaging
 const manualInviteCode = ref('')
 const bindingReferral = ref(false)
 const referralInviteCode = ref('')
@@ -49,7 +51,7 @@ const hasMemberProfile = computed(() => Boolean(session.user?.memberProfile))
 const openErasureRequest = computed(() => erasureRequests.value.find((item) => item.status === 'REQUESTED'))
 const latestErasureRequest = computed(() => erasureRequests.value[0])
 const menus = computed(() => [
-  ...(isMockMode ? [{ title: '管理员演示通道', subtitle: '切换会员、前台、教练、主理人、商户和管理端', url: '/packages/admin/pages/switch/index' }] : []),
+  ...(canSwitchTestIdentity ? [{ title: '管理员验收通道', subtitle: '切换会员、前台、教练、主理人、商户和管理端', url: '/packages/admin/pages/switch/index' }] : []),
   { title: '我的订单', subtitle: '支付、退款及消费记录', url: '/pages/order/index' },
   { title: '我的资产', subtitle: '余额、羽球币、赛事积分与成长积分', url: '/pages/wallet/index' },
   { title: '我的课程', subtitle: '课包、消课台账、退费与试听记录', url: '/pages/training/index?tab=mine' },
@@ -329,8 +331,8 @@ onShow(async () => {
 .profile-copy .muted { display: block; margin-top: 10rpx; color: rgba(255,255,255,.72); }
 .name { display: block; font-size: 35rpx; font-weight: 800; overflow-wrap: anywhere; }
 .level { flex: 0 1 auto; max-width: 180rpx; padding: 8rpx 14rpx; color: #e8d28a; border: 1rpx solid rgba(232,210,138,.5); border-radius: 999rpx; font-size: 20rpx; line-height: 1.4; text-align: center; overflow-wrap: anywhere; }
-.account-strip { display: flex; gap: 14rpx; overflow-x: auto; padding: 6rpx 0 24rpx; }
-.account { flex: 0 0 200rpx; padding: 24rpx; background: #fff; border-radius: 22rpx; }
+.account-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14rpx; padding: 6rpx 0 24rpx; }
+.account { min-width: 0; padding: 24rpx; background: #fff; border-radius: 22rpx; }
 .account-value { display: block; margin-bottom: 10rpx; color: #184c30; font-size: 29rpx; font-weight: 800; overflow-wrap: anywhere; }
 .operator-entry { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; padding: 26rpx 28rpx; margin-bottom: 22rpx; color: #fff; background: #17653d; border-radius: 24rpx; }
 .operator-entry-title { display: block; font-size: 30rpx; font-weight: 800; }

@@ -5,10 +5,11 @@ import { useSessionStore } from '../../stores/session'
 import { isMockMode } from '../../services/http'
 
 const session = useSessionStore()
-// A remote API must never expose the development identity shortcut, even
-// when the bundle is launched with a local dev server.  The mock transport is
-// the explicit, opt-in test environment for this channel.
-const isDev = isMockMode
+// Remote identity switching is opt-in and reserved for the isolated staging
+// channel. Production builds do not receive this flag and keep the shortcut
+// hidden even when they happen to be served from a developer machine.
+const isRemoteStaging = !isMockMode && import.meta.env.VITE_ENABLE_REMOTE_DEV_LOGIN === 'true'
+const isDev = isMockMode || isRemoteStaging
 const error = ref('')
 const developmentRoles: Array<{ role: AppRole; label: string }> = [
   { role: 'MEMBER', label: '会员' }, { role: 'FRONT_DESK', label: '前台' },
@@ -45,6 +46,7 @@ async function loginDev(role: AppRole) {
 
 <template>
   <view class="login-page safe-bottom">
+    <text v-if="isRemoteStaging" class="staging-banner">香港裸 IP 联调环境 · 仅测试数据</text>
     <view class="brand-mark">金羽</view>
     <text class="title">延庆金羽羽毛球</text>
     <text class="copy">会员服务、竞技社交与本地生活权益，一次登录全部连接。</text>
@@ -53,7 +55,7 @@ async function loginDev(role: AppRole) {
 
     <view v-if="isDev" class="dev card">
       <text class="dev-title">开发联调入口</text>
-      <text class="muted">仅开发构建显示。请先执行数据库种子数据。</text>
+      <text class="muted">{{ isRemoteStaging ? '连接隔离测试库，操作不会进入正式数据。' : '仅开发构建显示。请先执行数据库种子数据。' }}</text>
       <view class="role-grid">
         <button v-for="item in developmentRoles" :key="item.role" class="secondary role" @tap="loginDev(item.role)">{{ item.label }}</button>
       </view>
@@ -64,6 +66,7 @@ async function loginDev(role: AppRole) {
 
 <style scoped>
 .login-page { min-height: 100vh; box-sizing: border-box; padding: 180rpx 56rpx 40rpx; text-align: center; background: radial-gradient(circle at 70% 10%,#dfeddf,transparent 34%),#f3f6f2; }
+.staging-banner { position: absolute; top: 24rpx; right: 24rpx; left: 24rpx; padding: 12rpx 18rpx; color: #7a5410; background: #fff3cf; border: 1rpx solid #e6c66e; border-radius: 999rpx; font-size: 22rpx; }
 .brand-mark { display: grid; place-items: center; width: 132rpx; height: 132rpx; margin: 0 auto 34rpx; color: #fff; background: linear-gradient(145deg,#164b30,#c1a149); border-radius: 38rpx; font-size: 38rpx; font-weight: 800; }
 .title { display: block; font-size: 48rpx; font-weight: 800; }
 .copy { display: block; margin: 24rpx 20rpx 60rpx; color: #667169; font-size: 27rpx; line-height: 1.7; }

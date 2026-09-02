@@ -70,4 +70,62 @@ uni-textarea,
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18rpx; }
 .input { min-height: 78rpx; padding: 0 22rpx; background: #f5f7f4; border-radius: 18rpx; }
 .safe-bottom { padding-bottom: calc(28rpx + env(safe-area-inset-bottom)); }
+
+/* #ifdef H5 */
+/*
+ * The H5 build is a desktop acceptance surface for a mobile-first product.
+ * On a desktop we deliberately keep one 390px mobile canvas instead of
+ * stretching business pages into an accidental desktop layout. Real mobile
+ * browsers and the WeChat build continue to use their native viewport width.
+ */
+@media (min-width: 600px) {
+  html {
+    min-height: 100%;
+    background: #dfe6df;
+  }
+
+  body {
+    min-height: 100%;
+    margin: 0;
+    background:
+      radial-gradient(circle at 18% 10%, rgba(193, 161, 73, .16), transparent 28%),
+      radial-gradient(circle at 82% 22%, rgba(23, 101, 61, .13), transparent 30%),
+      #e9eeea;
+  }
+
+  #app,
+  uni-app {
+    width: 390px !important;
+    min-height: 100vh;
+    margin-right: auto;
+    margin-left: auto;
+    background: #f3f6f2;
+  }
+
+  #app {
+    position: relative;
+    transform: translateZ(0);
+    box-shadow: 0 0 0 1px rgba(24, 34, 28, .08), 0 24px 72px rgba(24, 34, 28, .18);
+  }
+
+  uni-page {
+    right: auto !important;
+    left: 0 !important;
+    width: 100% !important;
+    transform: none;
+  }
+
+  uni-page-head .uni-page-head,
+  uni-tabbar.uni-tabbar-bottom {
+    right: auto !important;
+    left: 0 !important;
+    width: 100% !important;
+    transform: none;
+  }
+
+  uni-tabbar.uni-tabbar-bottom .uni-tabbar {
+    width: 100% !important;
+  }
+}
+/* #endif */
 </style>

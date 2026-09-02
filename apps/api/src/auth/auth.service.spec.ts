@@ -57,6 +57,43 @@ describe('AuthService login status checks', () => {
     }))
   })
 
+  it('prefers an exact primary role when switching development identities', async () => {
+    const savedUser = user({
+      displayName: '延庆会员小林',
+      primaryRole: AppRole.MEMBER,
+      roles: [{ role: AppRole.MEMBER }],
+    })
+    const { service, prisma } = setup(savedUser)
+
+    const result = await service.devLogin({ role: AppRole.MEMBER })
+
+    expect(result.user.displayName).toBe('延庆会员小林')
+    expect(prisma.user.findFirst).toHaveBeenCalledTimes(1)
+    expect(prisma.user.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { primaryRole: AppRole.MEMBER },
+    }))
+  })
+
+  it('falls back to a secondary role only when no primary-role account exists', async () => {
+    const eventManager = user({
+      displayName: '赛事管理员',
+      primaryRole: AppRole.ADMIN,
+      roles: [{ role: AppRole.MEMBER }, { role: AppRole.EVENT_MANAGER }],
+    })
+    const { service, prisma } = setup(eventManager)
+    prisma.user.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(eventManager)
+
+    const result = await service.devLogin({ role: AppRole.EVENT_MANAGER })
+
+    expect(result.user.roles).toContain(AppRole.EVENT_MANAGER)
+    expect(prisma.user.findFirst).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: { primaryRole: AppRole.EVENT_MANAGER },
+    }))
+    expect(prisma.user.findFirst).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: { roles: { some: { role: AppRole.EVENT_MANAGER } } },
+    }))
+  })
+
   it('returns a safe session DTO without persisted identity fields', async () => {
     const avatarUrl = 'https://example.test/avatar.png'
     const memberProfile = { level: 'GOLD' }

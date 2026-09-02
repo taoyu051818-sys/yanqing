@@ -33,6 +33,7 @@ const canViewAnalytics = computed(() =>
   session.roles.some((role) => ['FINANCE', 'ADMIN', 'SUPER_ADMIN'].includes(role)),
 )
 const canViewInventory = computed(() => hasOperationsAccess(session.roles, 'inventory'))
+const canViewTraining = computed(() => hasOperationsAccess(session.roles, 'training'))
 const filteredCenters = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
   if (!query) return availableCenters.value
@@ -66,7 +67,7 @@ const quickActions = computed(() => [
 ])
 const todayMetrics = computed(() => [
   ['统一待办', String(todoCount.value)],
-  ['今日课程', String(trainingCount.value)],
+  ...(canViewTraining.value ? [['今日课程', String(trainingCount.value)]] : []),
   ...(canViewInventory.value ? [['低库存项', String(lowStockCount.value)]] : []),
   ['可用中心', String(availableCenters.value.length)],
 ])
@@ -78,7 +79,9 @@ async function load() {
   loading.value = true
   loadError.value = ''
   const [workItems, sessions, lowStock] = await Promise.allSettled([
-    endpoints.workItems(100), endpoints.trainingSessions(), canViewInventory.value ? endpoints.lowStock() : Promise.resolve([]),
+    endpoints.workItems(100),
+    canViewTraining.value ? endpoints.trainingSessions() : Promise.resolve([]),
+    canViewInventory.value ? endpoints.lowStock() : Promise.resolve([]),
   ])
   if (workItems.status === 'fulfilled') {
     const payload: any = workItems.value
@@ -90,7 +93,7 @@ async function load() {
   if (lowStock.status === 'fulfilled') lowStockCount.value = lowStock.value.length
   const failedSources = [
     workItems.status === 'rejected' ? '统一待办' : '',
-    sessions.status === 'rejected' ? '培训课表' : '',
+    canViewTraining.value && sessions.status === 'rejected' ? '培训课表' : '',
     canViewInventory.value && lowStock.status === 'rejected' ? '库存预警' : '',
   ].filter(Boolean)
   if (failedSources.length) loadError.value = `${failedSources.join('、')}暂未同步，当前数字不代表真实为 0。`

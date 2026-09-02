@@ -9,6 +9,8 @@ import type { AppRole } from '../../../../types/domain'
 
 const session = useSessionStore()
 const switching = ref<AppRole | null>(null)
+const isRemoteStaging = !isMockMode && import.meta.env.VITE_ENABLE_REMOTE_DEV_LOGIN === 'true'
+const canSwitchIdentity = isMockMode || isRemoteStaging
 const roleNames: Record<AppRole, string> = {
   MEMBER: '会员端', FRONT_DESK: '前台端', COACH: '教练端', HOST: '主理人端', MERCHANT: '商户端',
   FINANCE: '财务端', EVENT_MANAGER: '赛事端', ADMIN: '管理员端', SUPER_ADMIN: '超级管理端',
@@ -27,8 +29,8 @@ function localizedRoleDescription(description: string) {
 }
 
 onShow(() => {
-  if (!isMockMode) {
-    uni.showToast({ title: '远程环境不开放身份切换', icon: 'none' })
+  if (!canSwitchIdentity) {
+    uni.showToast({ title: '当前环境不开放身份切换', icon: 'none' })
     setTimeout(() => uni.switchTab({ url: '/pages/home/index' }), 250)
   }
 })
@@ -64,7 +66,7 @@ async function resetDemo() {
     <view class="hero">
       <text class="eyebrow">ADMIN DEMO CHANNEL</text>
       <text class="title">身份与端口切换</text>
-      <text class="copy">当前为 {{ roleNames[current] }}。模拟模式不会访问外部服务器，所有操作仅保存在本机微信缓存。</text>
+      <text class="copy">当前为 {{ roleNames[current] }}。{{ isRemoteStaging ? '香港联调环境连接隔离测试库，所有操作仅用于验收。' : '模拟模式不会访问外部服务器，所有操作仅保存在本机微信缓存。' }}</text>
     </view>
     <view class="section-title">选择体验端</view>
     <view class="role-list">
@@ -76,7 +78,7 @@ async function resetDemo() {
         <text class="state">{{ switching === item.role ? '切换中' : current === item.role ? '当前' : '进入 ›' }}</text>
       </view>
     </view>
-    <button class="secondary reset" @tap="resetDemo">重置本机演示数据</button>
+    <button v-if="isMockMode" class="secondary reset" @tap="resetDemo">重置本机演示数据</button>
     <view class="tip">正式环境默认关闭身份切换；如需验收，应仅向受授权的测试人员开放。</view>
   </view>
 </template>

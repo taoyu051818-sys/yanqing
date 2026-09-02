@@ -77,15 +77,20 @@ export class AuthService {
     if (this.config.get<string>('NODE_ENV') === 'production') {
       throw new UnauthorizedException('生产环境禁用开发登录')
     }
-    const user = dto.userId
+    let user = dto.userId
       ? await this.prisma.user.findUnique({ where: { id: dto.userId }, include: { roles: true } })
       : await this.prisma.user.findFirst({
-          where: dto.role
-            ? { OR: [{ primaryRole: dto.role }, { roles: { some: { role: dto.role } } }] }
-            : { primaryRole: AppRole.MEMBER },
+          where: { primaryRole: dto.role || AppRole.MEMBER },
           include: { roles: true },
           orderBy: { createdAt: 'asc' },
         })
+    if (!user && dto.role) {
+      user = await this.prisma.user.findFirst({
+        where: { roles: { some: { role: dto.role } } },
+        include: { roles: true },
+        orderBy: { createdAt: 'asc' },
+      })
+    }
     if (!user) throw new UnauthorizedException('测试用户不存在或已停用')
     this.assertLoginAllowed(user)
     return this.issueToken(user)

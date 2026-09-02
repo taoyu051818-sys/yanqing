@@ -55,6 +55,8 @@ curl http://127.0.0.1:3200/api/v1/health
 
 容器启动会先执行 `prisma migrate deploy`。上线应配置反向代理 HTTPS、每日数据库快照、7/30/180 天备份层级、日志脱敏和可观测性告警。
 
+ICP备案完成前的香港裸 IP H5 联调环境使用独立 Compose 文件、隔离测试库和显式测试身份，详见 [香港裸 IP H5 联调环境](staging-raw-ip.md)。该环境不承载真实数据，也不能替代微信小程序合法域名和 HTTPS 真机验收。
+
 ## 上线闸门
 
 - 将 `NODE_ENV` 设为 `production`，确认开发登录返回 401。
