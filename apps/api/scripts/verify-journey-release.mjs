@@ -31,7 +31,7 @@ try {
   } }));
   const [member, outsider, staff] = users;
   const makeOrder = (businessType, extra = {}) => prisma.order.create({ data: {
-    orderNo: 'REL-' + randomUUID(), memberId: member.id, businessType, subjectAccount: 'VENUE', sourceChannel: 'MINIAPP',
+    orderNo: 'REL-' + randomUUID(), memberId: member.id, businessType, subjectAccount: 'VENUE', sourceChannel: 'MINI_PROGRAM',
     title: '隔离发布验收', listAmountCents: 1000, payableCents: 1000, parameterSnapshot: {}, ...extra,
   } });
   const goods = await makeOrder('GOODS');
@@ -105,7 +105,9 @@ try {
   check('startup expiry closes stale recharge and writes system audit');
   const coupons = await request(member, 'GET', '/alliance/coupons/me', null, 200);
   assert.equal(coupons.find(item => item.id === coupon.id).bookingUsage.eligible, false);
-  await request(member, 'GET', '/orders/' + oldCouponOrder.id + '/payment-options', null, 409);
+  const blockedQuote = await request(member, 'GET', '/orders/' + oldCouponOrder.id + '/payment-options', null, 200);
+  assert(blockedQuote.options.length > 0);
+  assert(blockedQuote.options.every(item => !item.enabled && item.reason.includes('商户')));
   await request(member, 'POST', '/orders/' + oldCouponOrder.id + '/pay', { channel: 'GIFT_BALANCE', idempotencyKey: 'release-invalid-coupon-pay' }, 409);
   check('merchant-only coupons are blocked in wallet, old order preflight and actual payment');
   const payOrder = await makeOrder('GOODS');
