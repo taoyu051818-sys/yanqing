@@ -402,6 +402,7 @@ export class AllianceService {
               merchantId: created.merchantId,
               code: created.code,
               issueLimit: created.issueLimit,
+              allowVenueBooking: created.allowVenueBooking,
               validFrom: created.validFrom,
               validTo: created.validTo,
             } as never,
@@ -429,6 +430,7 @@ export class AllianceService {
       kind: action,
       templateId,
       enabled: dto.enabled,
+      allowVenueBooking: dto.allowVenueBooking,
       reason,
     });
 
@@ -476,7 +478,7 @@ export class AllianceService {
               enabled: template.enabled,
               updatedAt: template.updatedAt,
             },
-            data: { enabled: dto.enabled },
+            data: { enabled: dto.enabled, ...(dto.allowVenueBooking === undefined ? {} : { allowVenueBooking: dto.allowVenueBooking }) },
           });
           if (changed.count !== 1)
             throw new ConflictException('券模板状态已由其他管理员变更');
@@ -487,8 +489,8 @@ export class AllianceService {
               action,
               objectType: 'CouponTemplate',
               objectId: templateId,
-              oldValue: { enabled: template.enabled } as never,
-              newValue: { enabled: dto.enabled, commandHash } as never,
+              oldValue: { enabled: template.enabled, allowVenueBooking: template.allowVenueBooking } as never,
+              newValue: { enabled: dto.enabled, allowVenueBooking: dto.allowVenueBooking ?? template.allowVenueBooking, commandHash } as never,
               reason,
               requestId,
             },
@@ -541,8 +543,8 @@ export class AllianceService {
     }
   }
 
-  listMyCoupons(actor: AuthUser) {
-    return this.prisma.couponCode.findMany({
+  async listMyCoupons(actor: AuthUser) {
+    const coupons = await this.prisma.couponCode.findMany({
       where: { holderId: actor.sub },
       // A member only needs the benefit and public partner identity.  Never
       // serialize the merchant contact or settlement rule through the nested
@@ -567,6 +569,7 @@ export class AllianceService {
             activityName: true,
             benefitDescription: true,
             faceValueCents: true,
+            allowVenueBooking: true,
             validFrom: true,
             validTo: true,
             enabled: true,
@@ -584,6 +587,18 @@ export class AllianceService {
         },
       },
       orderBy: [{ status: 'asc' }, { expiresAt: 'asc' }],
+    });
+    const now = new Date();
+    return coupons.map(coupon => {
+      const template = coupon.template;
+      const newcomer = template.code.startsWith('NEWCOMER');
+      const reason = coupon.status !== 'CLAIMED' ? '此券不在可使用状态'
+        : coupon.expiresAt <= now || template.validTo <= now ? '此券已过期'
+        : !template.enabled || template.merchant.status !== 'ACTIVE' ? '券活动或商户已暂停'
+        : template.validFrom > now ? '尚未到使用时间'
+        : !newcomer && !template.allowVenueBooking ? '仅限所属商户消费，不可抵扣订场' : '';
+      return { ...coupon, bookingUsage: { eligible: !reason, reason,
+        label: newcomer ? '新客体验订场（限适用时段）' : template.allowVenueBooking ? '商户消费 / 订场抵扣' : '仅限所属商户消费' } };
     });
   }
 

@@ -126,15 +126,21 @@ describe('WorkItemsService', () => {
     ]);
     expect(result[0]).toMatchObject({
       objectId: 'refund-1',
+      group: 'REFUND',
       priority: 100,
       amountCents: 6800,
     });
     expect(result[1]).toMatchObject({
       objectId: 'adjustment-1',
+      group: 'REFUND',
       priority: 98,
       amountCents: -1200,
     });
-    expect(result[2]).toMatchObject({ objectId: 'settlement-1', priority: 70 });
+    expect(result[2]).toMatchObject({
+      objectId: 'settlement-1',
+      group: 'RECONCILIATION',
+      priority: 70,
+    });
     expect(prisma.accountAdjustmentRequest.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ requestedById: { not: actor.sub } }),
@@ -311,6 +317,7 @@ describe('WorkItemsService', () => {
     expect(result).toEqual([
       expect.objectContaining({
         kind: 'EVENT_PRIZE_RECEIPT',
+        group: 'EVENT',
         objectId: 'award-1',
         priority: 82,
         action: '/events/event-1/prizes/award-1/receive',

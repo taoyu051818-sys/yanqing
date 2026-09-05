@@ -4,7 +4,7 @@
 
 ## 已实现范围
 
-- 20 片场地、8 个时段、版本化价格规则、10 分钟锁场、支付后确认、扫码签到和到期履约确认。
+- 20 片场地、17 个一小时时段（07:00–24:00）、版本化价格规则、10 分钟锁场、支付后确认、扫码签到和到期履约确认。
 - 会员等级、版本化会员产品与充值计划、现金本金/赠送余额/羽毛球币/成人赛事积分/青少年成长积分五账户隔离；充值金额与赠送额只取服务端当前有效计划。
 - 一层直接推荐分享入口、冷/热启动归因、登录后一次性绑定；有效首单观察期结束后邀请人和新客按独立参数获得羽球币，双方流水和经营转化均可追溯。
 - 主理人申请与审批、球局创建/报名/签到、按实际到场人数结算激励。
@@ -58,7 +58,7 @@ VITE_DATA_MODE=remote
 pnpm dev:miniapp
 ```
 
-然后在微信开发者工具导入 `apps/miniapp/dist/dev/mp-weixin`。生产构建执行 `pnpm build:miniapp`，导入 `apps/miniapp/dist/build/mp-weixin`。当前仓库已配置测试 AppID `wxa457599ec4c27ad1`，构建产物的 `project.config.json` 固定为微信小程序模式（`compileType: "miniprogram"`）。正式发布前必须在 `apps/miniapp/src/manifest.json` 的 `mp-weixin.appid` 换成发布方有权限的 AppID，并在微信公众平台配置 HTTPS API 业务域名。
+然后在微信开发者工具导入 `apps/miniapp/dist/dev/mp-weixin`。生产构建执行 `pnpm build:miniapp`，导入 `apps/miniapp/dist/build/mp-weixin`。当前仓库已配置项目 AppID `wx25610460bc96894b`，构建产物的 `project.config.json` 固定为微信小程序模式（`compileType: "miniprogram"`）。必须在微信公众平台为该小程序配置 HTTPS API 合法域名，并确保上传微信号具有该 AppID 的开发者权限。
 
 微信开发者工具导入、测试 AppID、模拟/远端联调、角色切换、上传和真机验收请按 [docs/wechat-devtools.md](docs/wechat-devtools.md) 操作；不要导入 `apps/miniapp` 源码目录或 `dist` 上一级目录。
 

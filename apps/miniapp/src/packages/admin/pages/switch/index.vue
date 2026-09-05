@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
-import { roleOptions } from '../../../../services/mock/core'
-import { resetCatalogState } from '../../../../services/mock/state'
+import { resetCatalogState } from '@miniapp/mock/state'
 import { isMockMode } from '../../../../services/http'
 import { useSessionStore } from '../../../../stores/session'
 import type { AppRole } from '../../../../types/domain'
@@ -20,6 +19,10 @@ const roleLabels: Record<AppRole, string> = {
   FINANCE: '财务', EVENT_MANAGER: '赛事管理员', ADMIN: '管理员', SUPER_ADMIN: '超级管理员',
 }
 const current = computed(() => session.user?.primaryRole || 'MEMBER')
+// The test menu is role metadata, not a dependency on mock identities or seeds.
+const roleOptions = Object.entries(roleLabels).map(([role, label]) => ({
+  role: role as AppRole, label, description: role,
+}))
 
 function localizedRoleDescription(description: string) {
   return description
@@ -36,6 +39,7 @@ onShow(() => {
 })
 
 async function switchRole(role: AppRole) {
+  if (!canSwitchIdentity || switching.value) return
   switching.value = role
   try {
     await session.loginForDevelopment(role)
@@ -48,6 +52,7 @@ async function switchRole(role: AppRole) {
 }
 
 async function resetDemo() {
+  if (!isMockMode) return
   const result = await uni.showModal({
     title: '确认重置演示数据？',
     content: '本机产生的模拟订单和经营资料将恢复为初始状态，此操作不会影响服务器数据。',
@@ -66,7 +71,7 @@ async function resetDemo() {
     <view class="hero">
       <text class="eyebrow">ADMIN DEMO CHANNEL</text>
       <text class="title">身份与端口切换</text>
-      <text class="copy">当前为 {{ roleNames[current] }}。{{ isRemoteStaging ? '香港联调环境连接隔离测试库，所有操作仅用于验收。' : '模拟模式不会访问外部服务器，所有操作仅保存在本机微信缓存。' }}</text>
+      <text class="copy">当前为 {{ roleNames[current] }}。{{ isRemoteStaging ? '域名验收环境连接隔离测试库，所有操作仅用于验收。' : '模拟模式不会访问外部服务器，所有操作仅保存在本机微信缓存。' }}</text>
     </view>
     <view class="section-title">选择体验端</view>
     <view class="role-list">

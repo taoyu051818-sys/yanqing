@@ -1,7 +1,9 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
+  IsIn,
   IsDateString,
   IsEnum,
   IsNotEmpty,
@@ -130,6 +132,27 @@ export class EventTeamCheckInDto {
 }
 
 export class RegisterEventTeamDto {
+  @IsOptional()
+  @IsIn(['MANUAL', 'INVITE'])
+  registrationMode?: 'MANUAL' | 'INVITE';
+
+  @IsOptional()
+  @IsBoolean()
+  captainPlays?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  consent?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => normalizeParticipantPhone(value))
+  @Matches(/^1[3-9]\d{9}$/, { message: '请填写选手一的11位手机号' })
+  playerAPhone?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => normalizeParticipantPhone(value))
+  @Matches(/^1[3-9]\d{9}$/, { message: '请填写选手二的11位手机号' })
+  playerBPhone?: string;
   @IsString()
   @IsNotEmpty()
   @MaxLength(80)
@@ -154,9 +177,8 @@ export class RegisterEventTeamDto {
   playerBUserId?: string;
 
   /**
-   * Member self-service registration must use an event-scoped code generated
-   * by the partner's own authenticated account. Staff-side registrations keep
-   * the explicit name/id fields for assisted on-site entry.
+   * Optional account-authorized partner. MANUAL instead records two consenting
+   * participants' names/contact numbers without creating a partner login.
    */
   @IsOptional()
   @IsString()
@@ -184,6 +206,47 @@ export class EventPartnerInviteCodeDto {
   @MaxLength(100)
   @Matches(/^EP_[A-Za-z0-9_-]+$/)
   partnerInviteCode: string;
+}
+
+export const normalizeParticipantPhone = (value: unknown): string =>
+  typeof value === 'string'
+    ? value.replace(/[\s-]/g, '').replace(/^\+?86(?=1\d{10}$)/, '')
+    : '';
+
+export class CreateEventTeamInviteDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  name: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  playerAName: string;
+
+  @Transform(({ value }) => normalizeParticipantPhone(value))
+  @Matches(/^1[3-9]\d{9}$/, { message: '请填写选手一的11位手机号' })
+  playerAPhone: string;
+
+  @IsEnum(TeamCategory)
+  category: TeamCategory;
+
+  @Equals(true, { message: '请确认已征得参赛者同意' })
+  consent: boolean;
+}
+
+export class AcceptEventTeamInviteDto extends EventPartnerInviteCodeDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  playerBName: string;
+
+  @Transform(({ value }) => normalizeParticipantPhone(value))
+  @Matches(/^1[3-9]\d{9}$/, { message: '请填写你的11位手机号' })
+  playerBPhone: string;
+
+  @Equals(true, { message: '请确认同意与该队长组队参赛' })
+  consent: boolean;
 }
 
 export class SubmitScoreDto {

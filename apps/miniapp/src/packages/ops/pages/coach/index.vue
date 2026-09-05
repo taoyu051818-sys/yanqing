@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import OperationsFrame from '../../../../components/OperationsFrame.vue'
+import OperationsFrame from '../../components/OperationsFrame.vue'
+import OperationTask from '../../components/OperationTask.vue'
+import { useOperationTask, reasonField } from '../../components/operation-task'
 import MetricCard from '../../../../components/MetricCard.vue'
 import StatusBadge from '../../../../components/StatusBadge.vue'
 import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
 import type { CourtAvailability } from '../../../../types/domain'
-import { money, shortDate } from '../../../../utils/format'
+import { idempotencyKey, money, shortDate } from '../../../../utils/format'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
 import {
   findOpsDeepLinkRecord,
@@ -17,6 +19,7 @@ import {
   type OpsDeepLinkQuery,
 } from '../../../../utils/work-item-deep-link'
 
+const task = useOperationTask()
 const session = useSessionStore()
 const lessons = ref<any[]>([])
 const enrollments = ref<any[]>([])
@@ -37,6 +40,8 @@ const errorMessage = ref('')
 const deepLinkQuery = ref<OpsDeepLinkQuery>({})
 const deepLinkHandled = ref(false)
 const focusedRecord = ref('')
+const managementView = ref('')
+const managementViewHandled = ref(false)
 
 const productCode = ref('')
 const productName = ref('')
@@ -49,6 +54,12 @@ const audienceOptions = [
   { label: '成人', value: 'ADULT' },
   { label: '青少年', value: 'YOUTH' },
 ]
+const editingProductId = ref('')
+const editProductName = ref('')
+const editProductTotalSessions = ref('')
+const editProductValidityDays = ref('')
+const editProductPriceYuan = ref('')
+const editProductReason = ref('')
 
 const classCode = ref('')
 const className = ref('')
@@ -197,12 +208,14 @@ const blockedCourtIds = computed(() => {
   return blocked
 })
 
-const activeLessons = computed(() => lessons.value.filter((item) => item.status !== 'COMPLETED'))
+const activeLessons = computed(() =>
+  lessons.value.filter((item) => !['COMPLETED', 'CANCELLED'].includes(item.status)),
+)
 const activeStudents = computed(() =>
   enrollments.value.filter((item) => ['ACTIVE', 'PARTIALLY_REFUNDED'].includes(item.status)),
 )
 const metrics = computed(() => [
-  ['今日课程', String(activeLessons.value.length), '按课表'],
+  ['待处理课次', String(activeLessons.value.length), '含今日与已排课'],
   ['待签到学员', String(activeStudents.value.length), '可消课课包'],
   ['已消课', String(enrollments.value.reduce((total, item) => total + Number(item.usedSessions || 0), 0)), '累计课次'],
   ['待冲正复核', String(requestedCorrections.value.length), '不可变流水'],
@@ -275,6 +288,11 @@ async function load() {
   if (canCreateSession.value) await loadCourtAvailability()
   loading.value = false
   await applyCoachDeepLink()
+  if (managementView.value === 'products' && !managementViewHandled.value) {
+    managementViewHandled.value = true
+    await nextTick()
+    uni.pageScrollTo({ selector: '#training-product-management', duration: 280 })
+  }
 }
 
 async function applyCoachDeepLink() {
@@ -343,7 +361,7 @@ async function loadCourtAvailability() {
 function requiredReason(value: string) {
   const reason = value.trim()
   if (reason.length < 2 || reason.length > 300) {
-    throw new Error('创建原因必须填写 2-300 个字符。')
+    throw new Error('操作原因必须填写 2-300 个字符。')
   }
   return reason
 }
@@ -434,6 +452,77 @@ async function createProduct() {
     }
   } catch (cause: any) {
     errorMessage.value = cause?.message || '课程产品表单校验失败。'
+  }
+}
+
+function beginProductEdit(product: any) {
+  editingProductId.value = product.id
+  editProductName.value = product.name || ''
+  editProductTotalSessions.value = String(product.totalSessions || '')
+  editProductValidityDays.value = String(product.validityDays || '')
+  editProductPriceYuan.value = (Number(product.priceCents || 0) / 100).toFixed(2)
+  editProductReason.value = ''
+}
+
+function cancelProductEdit() {
+  editingProductId.value = ''
+  editProductReason.value = ''
+}
+
+async function updateProduct(product: any, enabled = product.enabled !== false) {
+  if (!canConfigureTraining.value || actionKey.value) return
+  errorMessage.value = ''
+  try {
+    const isEditing = editingProductId.value === product.id
+    let reason = editProductReason.value
+    if (!isEditing) {
+      task.start({ title: enabled ? '启用课程产品' : '停用课程产品',
+        description: product.name + (enabled ? ' · 恢复销售与开班。' : ' · 停止后续销售，历史订单和课包不删除。'),
+        confirmText: enabled ? '确认启用' : '确认停用', fields: [reasonField('变更依据')],
+        submit: async ({ reason }) => {
+          await withPendingCreationKey('training.product.status.' + product.id, { enabled, reason }, idempotencyKey => endpoints.updateTrainingProduct(product.id, { enabled, reason, idempotencyKey }))
+          await load(); return '课程产品状态已更新，审计已记录。'
+        },
+      })
+      return
+    }
+    reason = requiredReason(reason)
+    const command = isEditing
+      ? {
+          name: editProductName.value.trim(),
+          totalSessions: positiveInteger(editProductTotalSessions.value, '总课次'),
+          validityDays: positiveInteger(editProductValidityDays.value, '有效期天数'),
+          priceCents: yuanToCents(editProductPriceYuan.value, '课程售价', true),
+          enabled,
+          reason,
+        }
+      : { enabled, reason }
+    if ('name' in command && (!command.name || command.name.length > 100)) {
+      throw new Error('产品名称不能为空且最多 100 个字符。')
+    }
+    const modal = await uni.showModal({
+      title: isEditing ? '确认保存课程设置' : `确认${enabled ? '启用' : '停用'}课程产品`,
+      content: isEditing
+        ? `${command.name}\n${command.totalSessions} 课次 · 有效 ${command.validityDays} 天 · ${money(command.priceCents)}\n原因：${reason}`
+        : `${product.name}\n${enabled ? '启用后可继续销售和开班。' : '停用后不再对会员销售，历史订单和课包不会删除。'}\n原因：${reason}`,
+      confirmText: isEditing ? '保存设置' : (enabled ? '确认启用' : '确认停用'),
+    })
+    if (!modal.confirm) return
+    actionKey.value = `product-update:${product.id}`
+    uni.showLoading({ title: '保存中', mask: true })
+    await endpoints.updateTrainingProduct(product.id, {
+      ...command,
+      idempotencyKey: idempotencyKey(`training-product-${product.id}`),
+    })
+    actionMessage.value = `${product.name} 的课程设置已更新并写入审计记录。`
+    cancelProductEdit()
+    await load()
+    uni.showToast({ title: '设置已保存', icon: 'success' })
+  } catch (cause: any) {
+    errorMessage.value = cause?.message || '课程产品设置保存失败。'
+  } finally {
+    uni.hideLoading()
+    actionKey.value = ''
   }
 }
 
@@ -618,139 +707,53 @@ async function createTrial() {
   }
 }
 
-async function transitionTrial(trial: any, action: 'check-in' | 'no-show' | 'lost' | 'cancel') {
+function transitionTrial(trial: any, action: 'check-in' | 'no-show' | 'lost' | 'cancel') {
   if (actionKey.value) return
   const labels = { 'check-in': '确认到场', 'no-show': '登记未到', lost: '确认流失', cancel: '取消试听' }
-  const result = await uni.showModal({
-    title: labels[action],
-    content: '',
-    editable: true,
-    placeholderText: '请填写事实原因（2-300字）',
-    confirmText: '提交',
+  task.start({ title: labels[action], description: (trial.student?.name || trial.member?.displayName || trial.lead?.displayName || '当前学员') + ' · 按现场事实提交，时间窗口由服务器校验。',
+    confirmText: labels[action], fields: [reasonField('核实依据', action === 'check-in' ? ['已核对学员本人到场'] : action === 'no-show' ? ['已结束且未到场，已尝试联系'] : action === 'lost' ? ['暂时无培训计划','时间无法安排'] : ['学员行程有变','场馆安排调整'])],
+    submit: async ({ reason }) => {
+      if (action === 'check-in' || action === 'no-show') {
+        const gate = await operationWindowReason({ startsAt: action === 'check-in' ? trial.scheduledStartsAt : trial.scheduledEndsAt, endsAt: trial.scheduledEndsAt, earlyMinutes: action === 'check-in' ? 30 : 0, lateMinutes: action === 'check-in' ? 120 : 240, reason, label: labels[action] })
+        if (!gate.allowed) throw new Error('当前不在允许操作时间，请核对预约')
+      }
+      const handlers = { 'check-in': endpoints.checkInTrainingTrial, 'no-show': endpoints.noShowTrainingTrial, lost: endpoints.loseTrainingTrial, cancel: endpoints.cancelTrainingTrial }
+      await withPendingCreationKey('training.trial.' + trial.id + '.' + action, { reason }, idempotencyKey => handlers[action](trial.id, { reason, idempotencyKey }))
+      await load(); return '试听已' + labels[action] + '，状态与审计已记录。'
+    },
   })
-  if (!result.confirm) return
-  let reason = String(result.content || '').trim()
-  if (reason.length < 2 || reason.length > 300) {
-    uni.showToast({ title: '原因须为2-300字', icon: 'none' })
-    return
-  }
-  if (action === 'check-in' || action === 'no-show') {
-    const gate = await operationWindowReason({
-      startsAt: action === 'check-in' ? trial.scheduledStartsAt : trial.scheduledEndsAt,
-      endsAt: action === 'check-in' ? trial.scheduledEndsAt : trial.scheduledEndsAt,
-      earlyMinutes: action === 'check-in' ? 30 : 0,
-      lateMinutes: action === 'check-in' ? 120 : 240,
-      reason,
-      label: action === 'check-in' ? '试听签到' : '试听未到',
-    })
-    if (!gate.allowed) return
-    reason = gate.reason || reason
-  }
-  const command = { reason }
-  const apiByAction = {
-    'check-in': endpoints.checkInTrainingTrial,
-    'no-show': endpoints.noShowTrainingTrial,
-    lost: endpoints.loseTrainingTrial,
-    cancel: endpoints.cancelTrainingTrial,
-  }
-  actionKey.value = `trial-${action}-${trial.id}`
-  try {
-    await withPendingCreationKey(`training.trial.${trial.id}.${action}`, command, (idempotencyKey) =>
-      apiByAction[action](trial.id, { reason, idempotencyKey }),
-    )
-    actionMessage.value = `试听 ${trial.trialNo} 已${labels[action]}，状态证据与审计已记录。`
-    await load()
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || '试听状态操作失败。'
-  } finally {
-    actionKey.value = ''
-  }
 }
 
-async function assessTrial(trial: any) {
+function assessTrial(trial: any) {
   if (!canAssessTrials.value || actionKey.value) return
-  const dimensions = []
-  for (const dimension of [
-    { key: 'movement', label: '步法与移动' },
-    { key: 'racket', label: '持拍与击球' },
-    { key: 'fitness', label: '体能与协调' },
-  ]) {
-    const scoreResult = await uni.showModal({
-      title: `${dimension.label}评分`,
-      content: '3',
-      editable: true,
-      placeholderText: '请输入1-5分',
-      confirmText: '下一项',
-    })
-    if (!scoreResult.confirm) return
-    const score = Number(scoreResult.content)
-    if (!Number.isInteger(score) || score < 1 || score > 5) {
-      uni.showToast({ title: '评分必须是1-5整数', icon: 'none' })
-      return
-    }
-    dimensions.push({ ...dimension, score })
-  }
-  const suggestion = await uni.showModal({
-    title: '训练建议',
-    content: '',
-    editable: true,
-    placeholderText: '请填写分班或训练建议（2-500字）',
-    confirmText: '提交测评',
+  const dimensions = [{ key: 'movement', label: '步法与移动' }, { key: 'racket', label: '持拍与击球' }, { key: 'fitness', label: '体能与协调' }]
+  task.start({ title: '试听测评', description: (trial.student?.name || trial.member?.displayName || trial.lead?.displayName || '当前学员') + ' · 三项评分与训练建议一起提交。', confirmText: '确认提交测评',
+    fields: [
+      ...dimensions.map(item => ({ ...item, kind: 'choices' as const, options: [1,2,3,4,5].map(score => ({ value: String(score), label: score + '分' })) })),
+      { key: 'recommendation', label: '分班或训练建议', min: 2, max: 500 },
+    ],
+    submit: async values => {
+      const command = { dimensions: dimensions.map(item => ({ ...item, score: Number(values[item.key]) })), recommendation: values.recommendation, reason: '教练完成现场结构化测评' }
+      await withPendingCreationKey('training.trial.' + trial.id + '.assess', command, idempotencyKey => endpoints.assessTrainingTrial(trial.id, { ...command, idempotencyKey }))
+      await load(); return '测评已提交，等待管理员确认转正式课或后续跟进。'
+    },
   })
-  if (!suggestion.confirm) return
-  const recommendation = String(suggestion.content || '').trim()
-  if (recommendation.length < 2 || recommendation.length > 500) {
-    uni.showToast({ title: '训练建议须为2-500字', icon: 'none' })
-    return
-  }
-  const command = { dimensions, recommendation, reason: '教练完成现场结构化测评' }
-  actionKey.value = `trial-assess-${trial.id}`
-  try {
-    await withPendingCreationKey(`training.trial.${trial.id}.assess`, command, (idempotencyKey) =>
-      endpoints.assessTrainingTrial(trial.id, { ...command, idempotencyKey }),
-    )
-    actionMessage.value = `试听 ${trial.trialNo} 测评已提交，等待管理员确认转课或流失。`
-    await load()
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || '试听测评提交失败。'
-  } finally {
-    actionKey.value = ''
-  }
 }
 
-async function convertTrial(trial: any) {
+function convertTrial(trial: any) {
   if (!canConvertTrials.value || actionKey.value) return
-  const candidates = enrollments.value.filter((item) => {
-    if (!['ACTIVE', 'PARTIALLY_REFUNDED'].includes(item.status)) return false
-    if ((item.productId || item.product?.id) !== trial.productId) return false
-    if (trial.studentId) return item.studentId === trial.studentId && item.buyerId === trial.guardianId
-    return !item.studentId && item.buyerId === (trial.memberId || trial.lead?.convertedMemberId)
+  const candidates = enrollments.value.filter(item => ['ACTIVE','PARTIALLY_REFUNDED'].includes(item.status)
+    && (item.productId || item.product?.id) === trial.productId
+    && (trial.studentId ? item.studentId === trial.studentId && item.buyerId === trial.guardianId : !item.studentId && item.buyerId === (trial.memberId || trial.lead?.convertedMemberId)))
+  if (!candidates.length) { errorMessage.value = '请先完成同产品、同学员的正式报名与支付，再回来关联试听。'; return }
+  task.start({ title: '试听转正式课', description: '选择已付款的正式课合同，核对同一学员及产品后关联。', confirmText: '确认关联正式课',
+    fields: [{ key: 'enrollmentId', label: '正式课合同', kind: 'choices', initial: candidates.length === 1 ? candidates[0].id : '', options: candidates.map(item => ({ value: item.id, label: item.product?.name || trial.product?.name, description: item.enrollmentNo })) }],
+    submit: async ({ enrollmentId }) => {
+      const command = { enrollmentId, reason: '正式课已支付并完成试听归属核对' }
+      await withPendingCreationKey('training.trial.' + trial.id + '.convert', command, idempotencyKey => endpoints.convertTrainingTrial(trial.id, { ...command, idempotencyKey }))
+      await load(); return '试听已关联正式课，归属与转化记录已同步。'
+    },
   })
-  if (!candidates.length) {
-    uni.showModal({ title: '尚不能转正式课', content: '请先完成同产品、同学员/监护人的正式报名与支付激活。', showCancel: false })
-    return
-  }
-  const selected = await new Promise<any | undefined>((resolve) => {
-    uni.showActionSheet({
-      itemList: candidates.map((item) => `${item.enrollmentNo} · ${item.product?.name || trial.product?.name}`),
-      success: ({ tapIndex }) => resolve(candidates[tapIndex]),
-      fail: () => resolve(undefined),
-    })
-  })
-  if (!selected) return
-  const command = { enrollmentId: selected.id, reason: '正式课已支付并完成试听归属核对' }
-  actionKey.value = `trial-convert-${trial.id}`
-  try {
-    await withPendingCreationKey(`training.trial.${trial.id}.convert`, command, (idempotencyKey) =>
-      endpoints.convertTrainingTrial(trial.id, { ...command, idempotencyKey }),
-    )
-    actionMessage.value = `试听 ${trial.trialNo} 已转正式课 ${selected.enrollmentNo}。`
-    await load()
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || '试听转正式课失败。'
-  } finally {
-    actionKey.value = ''
-  }
 }
 
 function setRuleHardBlock(event: any) {
@@ -796,36 +799,16 @@ async function createYouthRule() {
   }
 }
 
-async function decideYouthRule(rule: any, decision: 'publish' | 'reject') {
+function decideYouthRule(rule: any, decision: 'publish' | 'reject') {
   if (!canReviewYouthRule.value || actionKey.value) return
-  const result = await uni.showModal({
-    title: decision === 'publish' ? '复核并发布规则' : '驳回规则草案',
-    content: '',
-    editable: true,
-    placeholderText: '请填写独立复核意见（2-300字）',
-    confirmText: decision === 'publish' ? '同意发布' : '确认驳回',
+  task.start({ title: decision === 'publish' ? '复核发布监管规则' : '驳回监管草案', description: '须由独立复核人核对课时、有效期与金额边界。发布按生效时间启用，不改历史合同。',
+    confirmText: decision === 'publish' ? '确认复核发布' : '确认驳回', fields: [reasonField('独立复核意见')],
+    submit: async ({ reason }) => {
+      await withPendingCreationKey('training.youth-rule.' + rule.id + '.' + decision, { reason, decision }, idempotencyKey =>
+        decision === 'publish' ? endpoints.publishYouthTrainingRule(rule.id, { reason, idempotencyKey }) : endpoints.rejectYouthTrainingRule(rule.id, { reason, idempotencyKey }))
+      await load(); return decision === 'publish' ? '规则已复核发布，将按生效时间启用。' : '规则草案已驳回。'
+    },
   })
-  if (!result.confirm) return
-  const reason = String(result.content || '').trim()
-  if (reason.length < 2 || reason.length > 300) {
-    uni.showToast({ title: '复核意见须为2-300字', icon: 'none' })
-    return
-  }
-  const command = { reason, decision }
-  actionKey.value = `youth-rule-${decision}-${rule.id}`
-  try {
-    await withPendingCreationKey(`training.youth-rule.${rule.id}.${decision}`, command, (idempotencyKey) =>
-      decision === 'publish'
-        ? endpoints.publishYouthTrainingRule(rule.id, { reason, idempotencyKey })
-        : endpoints.rejectYouthTrainingRule(rule.id, { reason, idempotencyKey }),
-    )
-    actionMessage.value = decision === 'publish' ? '监管规则已复核发布，将按生效时间启用。' : '监管规则草案已驳回。'
-    await load()
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || '监管规则复核失败。'
-  } finally {
-    actionKey.value = ''
-  }
 }
 
 function recognitionTimeline(lesson: any, enrollment: any) {
@@ -855,55 +838,30 @@ function correctionStudentName(correction: any) {
     || '成人学员'
 }
 
-async function requestCorrection(lesson: any, enrollment: any) {
+function requestCorrection(lesson: any, enrollment: any) {
   if (!canRequestCorrection.value) return
   const recognition = activeRecognition(lesson, enrollment)
-  if (!recognition) {
-    uni.showToast({ title: '没有可冲正的有效消课流水', icon: 'none' }); return
-  }
-  if (activeCorrection(recognition.id)) {
-    uni.showToast({ title: '该流水已有待处理或已批准冲正', icon: 'none' }); return
-  }
-  const modal = await uni.showModal({
-    title: '申请消课冲正', content: '', editable: true,
-    placeholderText: '填写误消原因和核对依据', confirmText: '提交复核',
+  if (!recognition || activeCorrection(recognition.id)) { errorMessage.value = '没有可冲正的消课，或已经有待处理冲正。'; return }
+  task.start({ title: '申请消课冲正', description: (enrollment.student?.name || enrollment.buyer?.displayName || '成人学员') + ' · 申请不立即改变课时和收入，原消课保留，须另一名管理员批准。', confirmText: '确认提交冲正复核',
+    fields: [reasonField('误消原因与核对依据')],
+    submit: async ({ reason }) => {
+      const command = { recognitionId: recognition.id, reason }
+      await withPendingCreationKey('training.consume-correction.' + recognition.id, command, idempotencyKey => endpoints.requestTrainingConsumeCorrection({ ...command, idempotencyKey }))
+      await load(); return '冲正申请已提交；原消课仍有效，请等待另一名管理员复核。'
+    },
   })
-  const reason = modal.content?.trim() || ''
-  if (!modal.confirm || reason.length < 2) return
-  const command = { recognitionId: recognition.id, reason }
-  try {
-    await withPendingCreationKey(`training.consume-correction.${recognition.id}`, command, (idempotencyKey) =>
-      endpoints.requestTrainingConsumeCorrection({ ...command, idempotencyKey }),
-    )
-    actionMessage.value = '冲正申请已提交；原消课仍有效，须由另一名管理员批准后才生成负向流水。'
-    await load()
-  } catch (cause: any) { uni.showToast({ title: cause.message || '冲正申请失败', icon: 'none' }) }
 }
 
-async function decideCorrection(correction: any, action: 'approve' | 'reject') {
-  if (!isChecker.value) return
-  if (isOwnCorrection(correction)) {
-    uni.showToast({ title: '申请人与复核人不能是同一账号', icon: 'none' }); return
-  }
-  const modal = await uni.showModal({
-    title: action === 'approve' ? '批准消课冲正' : '驳回消课冲正', content: '', editable: true,
-    placeholderText: action === 'approve' ? '填写核对凭证和批准依据' : '填写驳回原因',
-    confirmText: action === 'approve' ? '生成负向流水' : '确认驳回',
+function decideCorrection(correction: any, action: 'approve' | 'reject') {
+  if (!isChecker.value || isOwnCorrection(correction)) { errorMessage.value = '申请人与复核人不能是同一账号。'; return }
+  task.start({ title: action === 'approve' ? '批准消课冲正' : '驳回消课冲正', description: correctionStudentName(correction) + (action === 'approve' ? ' · 确认后生成负向流水，回滚该次收入、课时与成长积分，出勤事实仍保留。' : ' · 原消课流水与余额保持不变。'),
+    confirmText: action === 'approve' ? '确认生成负向流水' : '确认驳回', fields: [reasonField('复核凭证与依据')],
+    submit: async ({ reason }) => {
+      await withPendingCreationKey('training.consume-correction.' + correction.id + '.' + action, { correctionId: correction.id, action, reason }, idempotencyKey =>
+        action === 'approve' ? endpoints.approveTrainingConsumeCorrection(correction.id, { reason, idempotencyKey }) : endpoints.rejectTrainingConsumeCorrection(correction.id, { reason, idempotencyKey }))
+      await load(); return action === 'approve' ? '冲正已入账，课时、收入和积分已按负向流水回滚，审计保留。' : '冲正已驳回，原消课继续有效。'
+    },
   })
-  const reason = modal.content?.trim() || ''
-  if (!modal.confirm || reason.length < 2) return
-  const command = { correctionId: correction.id, action, reason }
-  try {
-    await withPendingCreationKey(`training.consume-correction.${correction.id}.${action}`, command, (idempotencyKey) =>
-      action === 'approve'
-        ? endpoints.approveTrainingConsumeCorrection(correction.id, { reason, idempotencyKey })
-        : endpoints.rejectTrainingConsumeCorrection(correction.id, { reason, idempotencyKey }),
-    )
-    actionMessage.value = action === 'approve'
-      ? '冲正已入账：出勤保留为已到场，收入、课时与成长积分已按负向流水回滚。'
-      : '冲正申请已驳回，原消课流水和余额均未变化。'
-    await load()
-  } catch (cause: any) { uni.showToast({ title: cause.message || '冲正复核失败', icon: 'none' }) }
 }
 
 function studentsFor(lesson: any) {
@@ -945,6 +903,52 @@ function isConsumableLesson(lesson: any) {
   return !['COMPLETED', 'CANCELLED'].includes(lesson.status)
 }
 
+function lessonWindowState(
+  lesson: any,
+  kind: 'attendanceWindow' | 'completionWindow',
+) {
+  if (lesson?.[kind]?.state) return lesson[kind].state
+  const startsAt = new Date(
+    kind === 'attendanceWindow' ? lesson?.startsAt : lesson?.endsAt,
+  ).getTime()
+  const endsAt = new Date(lesson?.endsAt).getTime()
+  if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt)) return 'CLOSED'
+  const earlyMinutes = kind === 'attendanceWindow' ? 30 : 0
+  const lateMinutes = kind === 'attendanceWindow' ? 120 : 240
+  if (Date.now() < startsAt - earlyMinutes * 60_000) return 'NOT_OPEN'
+  if (Date.now() <= endsAt + lateMinutes * 60_000) return 'OPEN'
+  return 'CLOSED'
+}
+
+function canUseLessonWindow(
+  lesson: any,
+  kind: 'attendanceWindow' | 'completionWindow',
+) {
+  const state = lessonWindowState(lesson, kind)
+  return (
+    state === 'OPEN' ||
+    (state === 'CLOSED' && lesson?.[kind]?.mayHistoricallyOverride)
+  )
+}
+
+function attendanceWindowHint(lesson: any) {
+  const state = lessonWindowState(lesson, 'attendanceWindow')
+  if (state === 'NOT_OPEN') return '未到点名窗口'
+  if (state === 'CLOSED' && lesson?.attendanceWindow?.mayHistoricallyOverride)
+    return '管理员可补录点名'
+  if (state === 'CLOSED') return '点名窗口已关闭'
+  return ''
+}
+
+function completionActionLabel(lesson: any) {
+  const state = lessonWindowState(lesson, 'completionWindow')
+  if (state === 'NOT_OPEN') return '待下课后确认'
+  if (state === 'CLOSED' && lesson?.completionWindow?.mayHistoricallyOverride)
+    return '补录确认入账'
+  if (state === 'CLOSED') return '确认窗口已关闭'
+  return '确认入账'
+}
+
 function hasUnresolvedAttendance(lesson: any) {
   return studentsFor(lesson).some((enrollment: any) => {
     const attendance = attendanceFor(lesson, enrollment)
@@ -982,142 +986,72 @@ async function operationWindowReason(options: {
   if (options.reason && options.reason.trim().length >= 2) {
     return { allowed: true, reason: options.reason.trim() }
   }
-  const modal = await uni.showModal({
-    title: `${options.label}历史补录`, content: '', editable: true,
-    placeholderText: '填写历史补录原因（2-300字）', confirmText: '确认补录',
-  })
-  const reason = modal.content?.trim() || ''
-  if (!modal.confirm || reason.length < 2 || reason.length > 300) return { allowed: false, reason }
-  return { allowed: true, reason }
+  throw new Error(options.label + '历史补录须填写核对原因（2-300字）')
 }
 
-async function mark(lesson: any, enrollment: any, status: 'ATTENDED' | 'ABSENT' | 'LEAVE' | 'CANCELLED') {
-  let reason: string | undefined
-  if (status === 'LEAVE' || status === 'CANCELLED') {
-    const modal = await uni.showModal({
-      title: status === 'LEAVE' ? '登记请假' : '取消本次课次',
-      editable: true,
-      content: '',
-      placeholderText: '请填写原因',
-    })
-    if (!modal.confirm || !modal.content?.trim()) {
-      uni.showToast({ title: '请填写原因', icon: 'none' })
-      return
-    }
-    reason = modal.content.trim()
-  }
-  const gate = await operationWindowReason({
-    startsAt: lesson.startsAt,
-    endsAt: lesson.endsAt,
-    earlyMinutes: 30,
-    lateMinutes: 120,
-    reason,
-    label: '培训点名',
+function mark(lesson: any, enrollment: any, status: 'ATTENDED' | 'ABSENT' | 'LEAVE' | 'CANCELLED') {
+  const labels = { ATTENDED: '登记到场', ABSENT: '登记缺席', LEAVE: '登记请假', CANCELLED: '取消本次课次' }
+  task.start({ title: labels[status], description: (enrollment.student?.displayName || enrollment.buyer?.displayName || '成人学员') + ' · 只登记出勤，不自动扣课或确认收入。',
+    confirmText: '确认' + labels[status], fields: [reasonField('核对依据', status === 'ATTENDED' ? ['已核对本人到场'] : status === 'ABSENT' ? ['课程结束，未到场且无请假记录'] : ['学员主动请假','课程安排调整'])],
+    submit: async ({ reason }) => {
+      const gate = await operationWindowReason({ startsAt: lesson.startsAt, endsAt: lesson.endsAt, earlyMinutes: 30, lateMinutes: 120, reason, label: '培训点名' })
+      if (!gate.allowed) throw new Error('当前不在允许点名时间，请核对课次')
+      await endpoints.markTrainingAttendance(lesson.id, { enrollmentId: enrollment.id, status, reason, feedback: status === 'ATTENDED' ? '已到场，待提交消课建议' : undefined })
+      await load(); return '出勤状态已更新；到场学员下一步由教练提交消课建议。'
+    },
   })
-  if (!gate.allowed) return
-  reason = gate.reason
-  try {
-    await endpoints.markTrainingAttendance(lesson.id, {
-      enrollmentId: enrollment.id,
-      status,
-      reason,
-      feedback: status === 'ATTENDED' ? '已到场，待提交消课建议' : undefined,
-    })
-    uni.showToast({ title: status === 'ATTENDED' ? '已登记到场' : '出勤状态已更新', icon: 'success' })
-    await load()
-  } catch (cause: any) { uni.showToast({ title: cause.message || '消课失败', icon: 'none' }) }
 }
 
-async function propose(lesson: any, enrollment: any) {
-  if (!isConsumableLesson(lesson)) {
-    uni.showToast({ title: '已结束或已取消的课次不能继续消课', icon: 'none' })
-    return
-  }
-  const modal = await uni.showModal({
-    title: `提交${enrollment.student?.displayName || enrollment.buyer?.displayName || '学员'}消课建议`,
-    editable: true,
-    content: '',
-    placeholderText: '训练反馈（可选）',
+function propose(lesson: any, enrollment: any) {
+  if (!isConsumableLesson(lesson)) { errorMessage.value = '已结束或取消的课次不能继续消课'; return }
+  task.start({ title: '提交消课建议', description: (enrollment.student?.displayName || enrollment.buyer?.displayName || '当前学员') + ' · 提交后须另一位培训主管确认，才扣课包并确认收入。',
+    confirmText: '确认提交消课建议', fields: [{ key: 'feedback', label: '训练反馈', required: false, max: 500, hint: '可以补充本次训练情况，主管复核时可见。' }],
+    submit: async ({ feedback }) => {
+      await endpoints.consumeTraining(lesson.id, { enrollmentId: enrollment.id, feedback: feedback || '已到场，完成本次训练', attendanceStatus: 'PRESENT' })
+      await load(); return '消课建议已提交，课时与收入暂未变化，等待独立确认。'
+    },
   })
-  if (!modal.confirm) return
-  try {
-    await endpoints.consumeTraining(lesson.id, {
-      enrollmentId: enrollment.id,
-      feedback: modal.content?.trim() || '已到场，完成本次训练',
-      attendanceStatus: 'PRESENT',
-    })
-    actionMessage.value = '消课建议已提交，待培训主管确认后才会确认收入和扣减课包。'
-    uni.showToast({ title: '已提交待确认', icon: 'success' })
-    await load()
-  } catch (cause: any) { uni.showToast({ title: cause.message || '提交失败', icon: 'none' }) }
 }
 
-async function confirm(lesson: any, enrollment: any) {
-  if (!isConsumableLesson(lesson)) {
-    uni.showToast({ title: '已结束或已取消的课次不能继续消课', icon: 'none' })
-    return
-  }
-  const attendance = attendanceFor(lesson, enrollment)
-  if (!attendance?.operatorId) {
-    uni.showToast({ title: '须先由教练提交消课建议', icon: 'none' })
-    return
-  }
-  if (attendance.operatorId === session.user?.id) {
-    uni.showToast({ title: '建议提交人与确认人不能是同一账号', icon: 'none' })
-    return
-  }
-  const modal = await uni.showModal({
-    title: '确认消课入账',
-    content: '确认后将扣减 1 次课包、确认本节培训收入并记入 20% 场馆合同流水。',
-  })
-  if (!modal.confirm) return
-  const gate = await operationWindowReason({
-    startsAt: lesson.endsAt,
-    endsAt: lesson.endsAt,
-    earlyMinutes: 0,
-    lateMinutes: 240,
-    label: '确认消课',
-  })
-  if (!gate.allowed) return
-  try {
-    const result: any = await endpoints.confirmTrainingConsume(lesson.id, {
-      enrollmentId: enrollment.id,
-      reason: gate.reason || '已核对点名与教练反馈',
-    })
-    actionMessage.value = `消课已入账：确认收入 ¥${((result?.effectiveRevenueCents || result?.recognizedRevenueCents || 0) / 100).toFixed(2)}，场馆分成 20%，场地费为 ¥0`
-    uni.showToast({ title: '已确认入账', icon: 'success' })
-    await load()
-  } catch (cause: any) { uni.showToast({ title: cause.message || '确认失败', icon: 'none' }) }
-}
-
-async function complete(lesson: any) {
+function confirm(lesson: any, enrollment: any) {
   if (!isConsumableLesson(lesson)) return
-  if (hasUnresolvedAttendance(lesson)) {
-    uni.showToast({ title: '请先完成全部点名和消课确认', icon: 'none' })
-    return
-  }
-  const modal = await uni.showModal({ title: '结束课程', content: '确认本节课程已结束？结束后不可继续消课。' })
-  if (!modal.confirm) return
-  const gate = await operationWindowReason({
-    startsAt: lesson.endsAt,
-    endsAt: lesson.endsAt,
-    earlyMinutes: 0,
-    lateMinutes: 240,
-    label: '课次结课',
+  const attendance = attendanceFor(lesson, enrollment)
+  if (!attendance?.operatorId || attendance.operatorId === session.user?.id) { errorMessage.value = '须由教练先提交建议，且提交人与确认人不同。'; return }
+  task.start({ title: '确认消课入账', description: (enrollment.student?.displayName || enrollment.buyer?.displayName || '当前学员') + ' · 确认扣减1课次并确认本节收入，按原合同快照核算。误操作须通过冲正复核恢复。',
+    confirmText: '确认扣课并入账', fields: [reasonField('独立复核依据', ['已核对点名与教练反馈'])],
+    submit: async ({ reason }) => {
+      const gate = await operationWindowReason({ startsAt: lesson.endsAt, endsAt: lesson.endsAt, earlyMinutes: 0, lateMinutes: 240, reason, label: '确认消课' })
+      if (!gate.allowed) throw new Error('当前不在允许入账时间，请核对课次')
+      const result: any = await endpoints.confirmTrainingConsume(lesson.id, { enrollmentId: enrollment.id, reason })
+      await load(); return '消课已入账，确认收入 ' + money(result?.effectiveRevenueCents || result?.recognizedRevenueCents || 0) + '，课包及审计已同步。'
+    },
   })
-  if (!gate.allowed) return
-  try { await endpoints.completeTrainingSession(lesson.id, gate.reason ? { reason: gate.reason } : {}); uni.showToast({ title: '课程已结束', icon: 'success' }); await load() }
-  catch (cause: any) { uni.showToast({ title: cause.message || '结束失败', icon: 'none' }) }
+}
+
+function complete(lesson: any) {
+  if (!isConsumableLesson(lesson)) return
+  if (hasUnresolvedAttendance(lesson)) { errorMessage.value = '仍有未处理出勤或未确认消课，请逐个处理后结束课次。'; return }
+  task.start({ title: '结束课次', description: '确认该课次全部出勤和消课已处理。结束后不可继续点名或消课，历史证据保留。', confirmText: '确认结束课次',
+    fields: [reasonField('结课依据', ['已核对全部出勤与消课记录'])],
+    submit: async ({ reason }) => {
+      const gate = await operationWindowReason({ startsAt: lesson.endsAt, endsAt: lesson.endsAt, earlyMinutes: 0, lateMinutes: 240, reason, label: '培训结课' })
+      if (!gate.allowed) throw new Error('当前不在允许结课时间')
+      await endpoints.completeTrainingSession(lesson.id, { reason })
+      await load(); return '课次已结束，履约及收入记录可追溯。'
+    },
+  })
 }
 
 onLoad((options) => {
   deepLinkQuery.value = parseOpsDeepLinkQuery(options)
+  managementView.value = typeof options?.view === 'string' ? options.view : ''
 })
 onShow(load)
 </script>
 
 <template>
-  <OperationsFrame access="training" title="培训运营" eyebrow="TRAINING OPERATIONS" :role="roleLabel" description="以课表为主线，按点名、消课建议、主管确认和课后反馈完成培训账本闭环。">
+  <OperationsFrame access="training" icon="training" title="培训运营" eyebrow="TRAINING OPERATIONS" :role="roleLabel" description="以课表为主线，按点名、消课建议、主管确认和课后反馈完成培训账本闭环。">
+    <OperationTask :task="task" />
     <view v-if="errorMessage" class="card error-panel">
       <view><text class="panel-title">操作未完成</text><text class="muted">{{ errorMessage }}</text></view>
       <button class="secondary inline" :disabled="loading || Boolean(actionKey)" @tap="load">重试</button>
@@ -1204,10 +1138,10 @@ onShow(load)
       </view>
     </template>
 
-    <view class="section-title">课程产品与班级 <text class="section-note">{{ activeProducts.length }} 个产品 · {{ activeClasses.length }} 个有效班</text></view>
-    <scroll-view v-if="activeProducts.length" scroll-x class="product-scroll">
+    <view id="training-product-management" class="section-title">课程产品与班级 <text class="section-note">{{ activeProducts.length }} 个在售 · {{ activeClasses.length }} 个有效班</text></view>
+    <scroll-view v-if="products.length" scroll-x class="product-scroll">
       <view class="product-row">
-        <view v-for="product in activeProducts" :key="product.id" class="card product-card">
+        <view v-for="product in products" :key="product.id" class="card product-card" :class="{ 'product-disabled': product.enabled === false }">
           <view class="row"><text class="product-name">{{ product.name }}</text><StatusBadge :value="product.enabled === false ? 'DISABLED' : 'ACTIVE'" /></view>
           <text class="muted">{{ product.audience === 'YOUTH' ? '青少年' : '成人' }} · {{ product.totalSessions }} 课次 · 有效 {{ product.validityDays }} 天</text>
           <text class="product-price">{{ money(product.priceCents) }}</text>
@@ -1218,10 +1152,21 @@ onShow(load)
             </view>
           </view>
           <text v-else class="muted class-empty">尚未创建班级</text>
+          <view v-if="canConfigureTraining" class="product-actions">
+            <button class="secondary inline" :disabled="Boolean(actionKey)" @tap="beginProductEdit(product)">编辑设置</button>
+            <button :class="product.enabled === false ? 'secondary inline' : 'danger inline'" :disabled="Boolean(actionKey)" @tap="updateProduct(product, product.enabled === false)">{{ product.enabled === false ? '重新启用' : '停止销售' }}</button>
+          </view>
+          <view v-if="canConfigureTraining && editingProductId === product.id" class="product-edit" @tap.stop>
+            <view><text class="field-label">产品名称</text><input v-model="editProductName" class="form-input" maxlength="100" /></view>
+            <view class="form-grid"><view><text class="field-label">总课次</text><input v-model="editProductTotalSessions" class="form-input" type="number" /></view><view><text class="field-label">有效期（天）</text><input v-model="editProductValidityDays" class="form-input" type="number" /></view></view>
+            <view><text class="field-label">售价（元）</text><input v-model="editProductPriceYuan" class="form-input" type="digit" /></view>
+            <view><text class="field-label">变更原因（必填）</text><textarea v-model="editProductReason" class="reason-input" maxlength="300" placeholder="说明调价、课次或有效期变更依据" /></view>
+            <view class="product-actions"><button class="secondary inline" :disabled="Boolean(actionKey)" @tap="cancelProductEdit">取消</button><button class="primary inline" :loading="actionKey === `product-update:${product.id}`" :disabled="Boolean(actionKey)" @tap="updateProduct(product, product.enabled !== false)">保存设置</button></view>
+          </view>
         </view>
       </view>
     </scroll-view>
-    <view v-else-if="!loading" class="empty card">暂无有效课程产品</view>
+    <view v-else-if="!loading" class="empty card">暂无课程产品，管理员可在下方创建首个产品。</view>
 
     <template v-if="canConfigureTraining">
       <view class="section-title">创建课程产品 <text class="section-note">仅管理员</text></view>
@@ -1296,7 +1241,7 @@ onShow(load)
       </view>
     </template>
 
-    <view class="section-title">今日课表 <text class="section-note">{{ loading ? '同步中' : `${activeLessons.length} 节` }}</text></view>
+    <view class="section-title">待处理课表 <text class="section-note">{{ loading ? '同步中' : `${activeLessons.length} 节` }}</text></view>
     <view v-for="lesson in lessons" :id="opsDeepLinkDomId('coach-lesson', lesson.id)" :key="lesson.id" class="card lesson-card" :class="{ 'deep-link-target': focusedRecord === `coach-lesson:${lesson.id}` }">
       <view class="row"><view><text class="lesson-title">{{ lesson.class?.name || '未命名课程' }}</text><text class="muted">{{ shortDate(lesson.startsAt) }} · 占场 {{ lesson.occupiedCourtHours || 0 }} 小时</text></view><StatusBadge :value="lesson.status" /></view>
       <view v-if="studentsFor(lesson).length" class="student-list">
@@ -1310,13 +1255,14 @@ onShow(load)
             </view>
           </view>
           <view class="student-actions">
-            <template v-if="isConsumableLesson(lesson) && canMarkAttendance && attendanceStatus(lesson, student) === 'PENDING'">
+            <text v-if="isConsumableLesson(lesson) && canMarkAttendance && attendanceStatus(lesson, student) === 'PENDING' && !canUseLessonWindow(lesson, 'attendanceWindow')" class="pending-text">{{ attendanceWindowHint(lesson) }}</text>
+            <template v-if="isConsumableLesson(lesson) && canMarkAttendance && attendanceStatus(lesson, student) === 'PENDING' && canUseLessonWindow(lesson, 'attendanceWindow')">
               <button class="secondary inline" @tap="mark(lesson, student, 'ATTENDED')">到场</button>
               <button class="ghost inline" @tap="mark(lesson, student, 'ABSENT')">缺席</button>
               <button class="ghost inline" @tap="mark(lesson, student, 'LEAVE')">请假</button>
             </template>
             <button v-if="isConsumableLesson(lesson) && !isRefundPending(student) && canProposeConsume && attendanceStatus(lesson, student) === 'ATTENDED' && !hasPendingProposal(lesson, student) && !(attendanceFor(lesson, student)?.consumedSessions)" class="secondary inline" @tap="propose(lesson, student)">提交消课建议</button>
-            <button v-if="isConsumableLesson(lesson) && !isRefundPending(student) && isChecker && hasPendingProposal(lesson, student)" class="primary inline" :disabled="attendanceFor(lesson, student)?.operatorId === session.user?.id" @tap="confirm(lesson, student)">确认入账</button>
+            <button v-if="isConsumableLesson(lesson) && !isRefundPending(student) && isChecker && hasPendingProposal(lesson, student)" class="primary inline" :disabled="attendanceFor(lesson, student)?.operatorId === session.user?.id || !canUseLessonWindow(lesson, 'completionWindow')" @tap="confirm(lesson, student)">{{ completionActionLabel(lesson) }}</button>
             <text v-if="isRefundPending(student)" class="pending-text">退款待审，暂停消课</text>
             <text v-if="isConsumableLesson(lesson) && isChecker && hasPendingProposal(lesson, student) && attendanceFor(lesson, student)?.operatorId === session.user?.id" class="pending-text">本人提交，须由另一管理员确认</text>
             <text v-if="isConsumableLesson(lesson) && hasPendingProposal(lesson, student) && !isChecker" class="pending-text">待主管确认</text>
@@ -1327,7 +1273,7 @@ onShow(load)
         </view>
       </view>
       <view v-else class="empty-line">本节没有可消课学员</view>
-      <button v-if="canCreateSession && isConsumableLesson(lesson)" class="primary finish" :disabled="hasUnresolvedAttendance(lesson)" @tap="complete(lesson)">{{ hasUnresolvedAttendance(lesson) ? '先完成点名和消课' : '结束本节课程' }}</button>
+      <button v-if="canCreateSession && isConsumableLesson(lesson)" class="primary finish" :disabled="hasUnresolvedAttendance(lesson) || !canUseLessonWindow(lesson, 'completionWindow')" @tap="complete(lesson)">{{ hasUnresolvedAttendance(lesson) ? '先完成点名和消课' : lessonWindowState(lesson, 'completionWindow') === 'NOT_OPEN' ? '待下课后结束' : '结束本节课程' }}</button>
     </view>
     <view v-if="!loading && !lessons.length" class="empty card">今天没有排课</view>
     <view class="section-title">消课冲正流水 <text class="section-note">{{ corrections.length }} 条</text></view>
@@ -1353,8 +1299,12 @@ onShow(load)
 </template>
 
 <style scoped>
-.metric-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14rpx; margin-top:22rpx; }.notice { margin-top:20rpx; color:#17653d; background:#e8f4eb; line-height:1.6; }.lesson-card,.correction-card { margin-top:22rpx; padding:24rpx; }.lesson-title,.student-name { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.student-list { margin-top:20rpx; border-top:1rpx solid #edf0ed; }.student-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; padding:18rpx 0; border-bottom:1rpx solid #edf0ed; }.student-main { min-width:0; flex:1; }.student-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8rpx; }.attendance-state { display:block; margin-top:6rpx; color:#17653d; font-size:21rpx; }.state-absent,.state-cancelled { color:#a24c35; }.state-makeup_required { color:#9a6b1c; }.pending-text { color:#9a6b1c; font-size:20rpx; white-space:nowrap; }.inline { min-width:92rpx; min-height:54rpx; margin:0; padding:0 10rpx; line-height:54rpx; font-size:20rpx; }.ghost { color:#69756e; background:#eef2ef; }.ledger-line { display:flex; flex-wrap:wrap; gap:8rpx; margin-top:8rpx; font-size:19rpx; }.ledger-positive { color:#17653d; }.ledger-negative { color:#a24c35; }.correction-reason { display:block; margin-top:16rpx; color:#4d5a52; font-size:23rpx; }.evidence-grid { display:grid; gap:8rpx; margin-top:14rpx; padding:16rpx; border-radius:14rpx; color:#526158; background:#f5f7f5; font-size:21rpx; }.correction-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10rpx; margin-top:16rpx; }.empty-line,.empty { color:#758079; text-align:center; }.empty-line { padding:22rpx 0 4rpx; }.finish { width:100%; margin-top:20rpx; }.boundary { margin-top:0; line-height:1.7; }
+.metric-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14rpx; margin-top:22rpx; }.notice { margin-top:20rpx; color:#17653d; background:#e8f4eb; line-height:1.6; }.lesson-card,.correction-card { margin-top:22rpx; padding:24rpx; }.lesson-title,.student-name { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.student-list { margin-top:20rpx; border-top:1rpx solid #edf0ed; }.student-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12rpx; padding:18rpx 0; border-bottom:1rpx solid #edf0ed; }.student-main { min-width:0; flex:1 1 100%; }.student-actions { display:flex; min-width:0; max-width:100%; flex:1 1 100%; flex-wrap:wrap; justify-content:flex-start; gap:8rpx; }.attendance-state { display:block; margin-top:6rpx; color:#17653d; font-size:21rpx; }.state-absent,.state-cancelled { color:#a24c35; }.state-makeup_required { color:#9a6b1c; }.pending-text { color:#9a6b1c; font-size:24rpx; white-space:normal; overflow-wrap:anywhere; }.inline { min-width:92rpx; min-height:44px; max-width:100%; margin:0; padding:12rpx 16rpx; line-height:1.55; font-size:26rpx; white-space:normal; }.ghost { color:#69756e; background:#eef2ef; }.ledger-line { display:flex; flex-wrap:wrap; gap:8rpx; margin-top:8rpx; font-size:19rpx; }.ledger-positive { color:#17653d; }.ledger-negative { color:#a24c35; }.correction-reason { display:block; margin-top:16rpx; color:#4d5a52; font-size:23rpx; }.evidence-grid { display:grid; gap:8rpx; margin-top:14rpx; padding:16rpx; border-radius:14rpx; color:#526158; background:#f5f7f5; font-size:21rpx; }.correction-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10rpx; margin-top:16rpx; }.empty-line,.empty { color:#758079; text-align:center; }.empty-line { padding:22rpx 0 4rpx; }.finish { width:100%; margin-top:20rpx; }.boundary { margin-top:0; line-height:1.7; }
 .panel-title { display:block; margin-bottom:8rpx; font-size:28rpx; font-weight:800; }.error-panel { display:flex; align-items:center; justify-content:space-between; gap:16rpx; margin-top:22rpx; color:#8a3636; background:#fff4f2; }.error-panel .muted { display:block; line-height:1.5; }.product-scroll { white-space:nowrap; }.product-row { display:flex; gap:14rpx; }.product-card { box-sizing:border-box; width:540rpx; flex:0 0 540rpx; white-space:normal; }.product-name,.class-name { display:block; font-weight:800; }.product-name { max-width:350rpx; overflow:hidden; font-size:28rpx; text-overflow:ellipsis; white-space:nowrap; }.product-price { display:block; margin-top:14rpx; color:#17653d; font-size:30rpx; font-weight:800; }.class-summary { display:grid; gap:10rpx; margin-top:16rpx; padding-top:12rpx; border-top:1rpx solid #edf0ed; }.class-summary-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; }.class-summary-row .muted,.class-empty { display:block; margin-top:5rpx; font-size:20rpx; }.creation-form { display:grid; gap:16rpx; }.form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; }.form-grid.three-columns { grid-template-columns:repeat(3,minmax(0,1fr)); }.field-label { display:block; margin-bottom:8rpx; color:#68756d; font-size:21rpx; }.form-input,.picker-value,.reason-input { box-sizing:border-box; width:100%; color:#244c37; background:#f2f6f3; border:1rpx solid #dfe9e2; border-radius:16rpx; font-size:23rpx; }.form-input,.picker-value { min-height:68rpx; padding:16rpx 18rpx; }.reason-input { min-height:112rpx; padding:16rpx 18rpx; }.guardrail { color:#7b6940; font-size:22rpx; line-height:1.6; }.full-button { width:100%; margin:0; }.court-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10rpx; }.court-choice { display:flex; align-items:center; gap:6rpx; padding:14rpx 10rpx; background:#eef5f0; border:1rpx solid #dce8df; border-radius:14rpx; font-size:21rpx; }.court-choice.blocked { color:#9a7770; background:#f5f1f0; }.court-usage { margin-left:auto; color:#758079; font-size:18rpx; }
+.product-disabled { opacity:.78; background:#f4f6f4; }
+.product-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10rpx; margin-top:16rpx; }
+.product-actions button { width:100%; }
+.product-edit { display:grid; gap:14rpx; margin-top:16rpx; padding-top:16rpx; border-top:1rpx solid #dfe9e2; }
 .trial-card,.rule-card,.active-rule,.rule-blocked { margin-top:18rpx; }.trial-title { display:block; margin-bottom:7rpx; font-size:27rpx; font-weight:800; }.trial-context,.rule-values { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9rpx 16rpx; margin-top:15rpx; padding:15rpx; color:#5c6a61; background:#f4f7f4; border-radius:14rpx; font-size:21rpx; }.assessment-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:9rpx; margin-top:15rpx; }.assessment-grid view { display:flex; justify-content:space-between; padding:12rpx; background:#eef5f0; border-radius:12rpx; font-size:20rpx; }.score { color:#17653d; font-weight:800; }.recommendation { grid-column:1/-1; color:#405b4a; font-size:22rpx; line-height:1.55; }.trial-actions { display:flex; align-items:center; flex-wrap:wrap; gap:9rpx; margin-top:15rpx; }.audit-hint { display:block; margin-top:13rpx; color:#7a725c; font-size:20rpx; line-height:1.5; }.consent-line { display:flex; align-items:center; justify-content:space-between; gap:18rpx; color:#59675e; font-size:22rpx; line-height:1.5; }.consent-line text { flex:1; }.rule-blocked { color:#8b563d; background:#fff5ef; line-height:1.6; }.active-rule { border:1rpx solid #bcd8c5; background:#f1f8f3; }
 .deep-link-target { border-color:#d69a24!important; box-shadow:0 0 0 4rpx rgba(214,154,36,.18); }
 </style>

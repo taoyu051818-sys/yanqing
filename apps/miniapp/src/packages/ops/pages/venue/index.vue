@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { onShow } from "@dcloudio/uni-app";
+import { computed, nextTick, ref } from "vue";
+import { onLoad, onShow } from "@dcloudio/uni-app";
 
-import OperationsFrame from "../../../../components/OperationsFrame.vue";
+import OperationsFrame from '../../components/OperationsFrame.vue'
+import OperationTask from '../../components/OperationTask.vue'
+import { useOperationTask, reasonField } from '../../components/operation-task'
 import { hasOperationsAccess } from "../../../../config/operations";
 import {
   endpoints,
@@ -13,7 +15,8 @@ import type { CourtAvailability } from "../../../../types/domain";
 import { idempotencyKey, money } from "../../../../utils/format";
 import { withPendingCreationKey } from "../../../../utils/pending-creation-key";
 
-const session = useSessionStore();
+const task = useOperationTask()
+const session = useSessionStore()
 const loading = ref(false);
 const submitting = ref(false);
 const loadError = ref("");
@@ -31,6 +34,8 @@ const pendingCreationKey = ref("");
 const priceRuleSource = ref<any>(null);
 const priceRuleSubmitting = ref(false);
 const priceRuleError = ref("");
+const managementView = ref("");
+const managementViewHandled = ref(false);
 const priceSlotIndex = ref(0);
 const priceRuleForm = ref({
   code: "",
@@ -66,7 +71,7 @@ const affectedCourtCount = computed(
 );
 const priceSlotOptions = computed(() => [
   { id: "", label: "全时段兜底", code: "GLOBAL" },
-  ...priceTimeSlots.value,
+  ...priceTimeSlots.value.filter(slot => slot.enabled),
 ]);
 const selectedPriceSlot = computed(() =>
   priceSlotOptions.value[priceSlotIndex.value] || priceSlotOptions.value[0],
@@ -143,6 +148,11 @@ async function load() {
   } finally {
     loading.value = false;
   }
+  if (managementView.value === "pricing" && !managementViewHandled.value) {
+    managementViewHandled.value = true;
+    await nextTick();
+    uni.pageScrollTo({ selector: "#venue-pricing-management", duration: 280 });
+  }
 }
 
 function changeDate(event: any) {
@@ -200,37 +210,12 @@ async function createClosure() {
   }
 }
 
-async function cancelClosure(item: VenueClosure) {
-  if (!canManage.value || item.status !== "ACTIVE" || submitting.value) return;
-  actionError.value = "";
-  const input = await uni.showModal({
-    title: "填写取消原因",
-    editable: true,
-    placeholderText: "至少 2 个字，将写入审计记录",
-  });
-  const cancelReason = input.content?.trim() || "";
-  if (!input.confirm) return;
-  if (cancelReason.length < 2) {
-    actionError.value = "取消原因至少需要 2 个字。";
-    return;
-  }
-  const confirmed = await uni.showModal({
-    title: "二次确认取消封场",
-    content: `${item.court?.name || item.courtId} · ${displayTime(item.startsAt)}-${displayTime(item.endsAt)}\n取消后该时段会恢复可订；系统不会自动重建此前处理过的预约。`,
-    confirmText: "确认取消",
-    confirmColor: "#a52626",
-  });
-  if (!confirmed.confirm) return;
-  submitting.value = true;
-  try {
-    await endpoints.cancelVenueClosure(item.id, cancelReason);
-    uni.showToast({ title: "封场已取消", icon: "success" });
-    await load();
-  } catch (cause: any) {
-    actionError.value = cause?.message || "封场取消失败，请刷新后重试。";
-  } finally {
-    submitting.value = false;
-  }
+function cancelClosure(item: VenueClosure) {
+  if (!canManage.value || item.status !== 'ACTIVE' || submitting.value) return
+  task.start({ title: '取消封场', description: (item.court?.name || '当前场地') + ' · ' + displayTime(item.startsAt) + ' 至 ' + displayTime(item.endsAt) + '。取消后恢复可订，不自动重建此前已处理预约。',
+    confirmText: '确认恢复可售', fields: [reasonField('取消封场原因', ['场地维护已完成','原活动安排取消'])],
+    submit: async ({ reason }) => { await endpoints.cancelVenueClosure(item.id, reason); await load(); return '封场已取消，符合售卖规则的时段恢复可订。' },
+  })
 }
 
 function priceYuanToCents(value: string) {
@@ -401,50 +386,34 @@ async function createPriceRuleVersion() {
   }
 }
 
-async function setPriceRuleStatus(rule: any) {
-  if (!canManage.value || priceRuleSubmitting.value) return;
-  const enabled = !rule.enabled;
-  const action = enabled ? "启用" : "停用";
-  const input = await uni.showModal({
-    title: `${action}价格规则`,
-    editable: true,
-    placeholderText: `填写${action}原因（至少2个字）`,
-  });
-  const reason = input.content?.trim() || "";
-  if (!input.confirm || reason.length < 2 || reason.length > 300) return;
-  const confirmed = await uni.showModal({
-    title: `二次确认${action}`,
-    content: `${rule.name} · ${rule.code} v${rule.version}\n${enabled ? "启用时会检查同一时段、星期与有效期，拒绝不确定价格。" : "停用只影响后续报价，历史订单快照不变。"}`,
-    confirmText: `确认${action}`,
-    confirmColor: enabled ? "#17653d" : "#a52626",
-  });
-  if (!confirmed.confirm) return;
-  const command = { priceRuleId: rule.id, enabled, reason };
-  actionError.value = "";
-  priceRuleSubmitting.value = true;
-  try {
-    await withPendingCreationKey(`venue.price-rule.status.${rule.id}`, command, (idempotencyKey) =>
-      endpoints.setPriceRuleStatus(rule.id, { enabled, reason, idempotencyKey }),
-    );
-    await refreshPriceRules(`价格规则已${action}`);
-  } catch (cause: any) {
-    actionError.value = cause?.message || `${action}价格规则失败。`;
-  } finally {
-    priceRuleSubmitting.value = false;
-  }
+function setPriceRuleStatus(rule: any) {
+  if (!canManage.value || priceRuleSubmitting.value) return
+  const enabled = !rule.enabled
+  task.start({ title: enabled ? '启用价格规则' : '停用价格规则', description: rule.name + ' · 只影响后续报价，历史订单快照不变；启用会检查时段、星期与有效期冲突。',
+    confirmText: enabled ? '确认启用' : '确认停用', fields: [reasonField('变更依据')],
+    submit: async ({ reason }) => {
+      await withPendingCreationKey('venue.price-rule.status.' + rule.id, { priceRuleId: rule.id, enabled, reason }, idempotencyKey => endpoints.setPriceRuleStatus(rule.id, { enabled, reason, idempotencyKey }))
+      await refreshPriceRules('价格规则已更新'); return '价格规则状态已更新，历史价格证据保留。'
+    },
+  })
 }
 
+onLoad((options) => {
+  managementView.value = typeof options?.view === "string" ? options.view : "";
+});
 onShow(load);
 </script>
 
 <template>
   <OperationsFrame
     access="venue"
+    icon="venue"
     title="场馆维护日历"
     eyebrow="VENUE AVAILABILITY CONTROL"
     :role="roleLabel"
     description="先核对预约，再按真实起止时间封场；封场只改变可售资源，不会静默取消订单或触发退款。"
   >
+    <OperationTask :task="task" />
     <view class="section-title">查看日期</view>
     <view class="card date-card">
       <picker mode="date" :value="selectedDate" :start="shanghaiDate()" @change="changeDate">
@@ -519,7 +488,7 @@ onShow(load);
       </view>
     </view>
 
-    <view class="section-title price-section-title">场馆价格规则 <text class="section-note">版本化主数据</text></view>
+    <view id="venue-pricing-management" class="section-title price-section-title">场馆价格规则 <text class="section-note">版本化主数据</text></view>
     <view v-if="canManage" class="card price-form">
       <view class="price-form-head">
         <view><text class="state-title">{{ priceRuleSource ? `创建 ${priceRuleSource.code} 新版本` : "新建价格规则 v1" }}</text><text class="muted">规则创建后不可覆盖；新版本默认停用，启用时检查时段、星期与有效期冲突。</text></view>
@@ -543,12 +512,12 @@ onShow(load);
     <view v-else-if="!priceRules.length" class="card state-card"><text class="state-title">尚未配置价格规则</text><text class="muted">管理员可先创建停用版本，再核对后启用。</text></view>
     <view v-else class="price-list">
       <view v-for="rule in priceRules" :key="rule.id" class="card price-card">
-        <view class="row"><view><text class="closure-court">{{ rule.name }}</text><text class="closure-time">{{ rule.code }} · v{{ rule.version }} · {{ rule.timeSlot?.label || "全时段兜底" }}</text></view><text class="status-pill" :class="rule.enabled ? 'active' : 'cancelled'">{{ rule.enabled ? "已启用" : "已停用" }}</text></view>
+        <view class="row"><view><text class="closure-court">{{ rule.name }}</text><text class="closure-time">{{ rule.code }} · v{{ rule.version }} · {{ rule.timeSlot?.label || "全时段兜底" }}</text></view><text class="status-pill" :class="rule.enabled && rule.timeSlot?.enabled !== false ? 'active' : 'cancelled'">{{ rule.timeSlot?.enabled === false ? "历史时段已停售" : rule.enabled ? "已启用" : "已停用" }}</text></view>
         <text class="price-value">普通价 {{ money(rule.priceCents) }} · 新客价 {{ rule.newcomerPriceCents == null ? "未配置" : money(rule.newcomerPriceCents) }}</text>
         <text class="audit-line">{{ weekdayLabel(rule.weekdayMask) }} · {{ new Date(rule.effectiveFrom).toLocaleDateString() }} 至 {{ rule.effectiveTo ? new Date(rule.effectiveTo).toLocaleDateString() : "长期" }}</text>
         <text class="audit-line">创建：{{ rule.createdBy?.displayName || rule.createdById }}</text>
         <text v-if="rule.transitions?.[0]" class="closure-reason">最近变更：{{ rule.transitions[0].reason }} · {{ rule.transitions[0].actor?.displayName }}</text>
-        <view v-if="canManage" class="price-actions"><button class="secondary compact" :disabled="priceRuleSubmitting" @tap="beginPriceRuleVersion(rule)">基于此版本派生</button><button class="secondary compact" :disabled="priceRuleSubmitting" @tap="setPriceRuleStatus(rule)">{{ rule.enabled ? "停用规则" : "启用规则" }}</button></view>
+        <view v-if="canManage && rule.timeSlot?.enabled !== false" class="price-actions"><button class="secondary compact" :disabled="priceRuleSubmitting" @tap="beginPriceRuleVersion(rule)">基于此版本派生</button><button class="secondary compact" :disabled="priceRuleSubmitting" @tap="setPriceRuleStatus(rule)">{{ rule.enabled ? "停用规则" : "启用规则" }}</button></view>
       </view>
     </view>
   </OperationsFrame>

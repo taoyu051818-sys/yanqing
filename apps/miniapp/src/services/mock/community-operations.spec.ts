@@ -131,6 +131,11 @@ describe("community host/game/event operation entrypoints", () => {
     const hostList = await request<any[]>("GET", "/games/managed");
     expect(hostList.map((item) => item.id)).not.toContain("other-host-managed");
     expect(hostList.some((item) => item.host?.displayName === "周末主理人阿凯")).toBe(true);
+    expect(hostList[0].checkInWindow).toMatchObject({
+      state: expect.stringMatching(/^(NOT_OPEN|OPEN|CLOSED)$/),
+      mayHistoricallyOverride: false,
+    });
+    expect(hostList[0].checkInWindow).not.toHaveProperty("parameterId");
 
     await login("ADMIN");
     const adminList = await request<any[]>("GET", "/games/managed");
@@ -171,6 +176,45 @@ describe("community host/game/event operation entrypoints", () => {
     expect(publicGames[0]).not.toHaveProperty("registrations");
     expect(publicGames[0]).not.toHaveProperty("courtBookings");
     expect(publicGames[0].host).not.toHaveProperty("id");
+  });
+
+  it("projects only the current member game registration and follows payment", async () => {
+    const registration = await request<any>(
+      "POST",
+      "/games/game-weekend/register",
+      {
+        sourceChannel: "MINI_PROGRAM",
+        creationIdempotencyKey: "game-current-member-projection-1",
+      },
+    );
+
+    let game = (await request<any[]>("GET", "/games")).find(
+      (item) => item.id === "game-weekend",
+    );
+    expect(game.myRegistration).toMatchObject({
+      status: "REGISTERED",
+      orderStatus: "PENDING",
+    });
+    expect(game).not.toHaveProperty("registrations");
+
+    await login("ADMIN");
+    game = (await request<any[]>("GET", "/games")).find(
+      (item) => item.id === "game-weekend",
+    );
+    expect(game.myRegistration).toBeNull();
+
+    await login("MEMBER");
+    await request("POST", `/orders/${registration.id}/pay`, {
+      channel: "CASH_PRINCIPAL",
+      idempotencyKey: "game-current-member-payment-1",
+    });
+    game = (await request<any[]>("GET", "/games")).find(
+      (item) => item.id === "game-weekend",
+    );
+    expect(game.myRegistration).toMatchObject({
+      status: "PAID",
+      orderStatus: "PAID",
+    });
   });
 
   it("blocks finance from manually promoting a game waitlist", async () => {

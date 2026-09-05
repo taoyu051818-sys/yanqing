@@ -1,36 +1,21 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
-import OperationsFrame from "../../../../components/OperationsFrame.vue";
+import OperationsFrame from "../../components/OperationsFrame.vue";
 import MetricCard from "../../../../components/MetricCard.vue";
 import StatusBadge from "../../../../components/StatusBadge.vue";
 import { hasOperationsAccess } from "../../../../config/operations";
+import {
+  workGroupDefinitions,
+  workGroupKey,
+  type WorkGroupDefinition,
+} from "../../../../config/work-items";
 import { endpoints, type WorkItem } from "../../../../services/api";
 import { isMockMode } from "../../../../services/http";
 import { useSessionStore } from "../../../../stores/session";
 import type { AppRole } from "../../../../types/domain";
 import { money, shortDate } from "../../../../utils/format";
 import { resolveWorkItemDestination } from "../../../../utils/work-item-deep-link";
-
-type WorkGroupKey =
-  | "customer"
-  | "refund"
-  | "training"
-  | "event"
-  | "coupon"
-  | "inventory"
-  | "fulfillment"
-  | "reconciliation"
-  | "governance";
-
-type WorkGroupDefinition = {
-  key: WorkGroupKey;
-  title: string;
-  description: string;
-  emptyText: string;
-  route: string;
-  roles: AppRole[];
-};
 
 type DisplayWorkGroup = WorkGroupDefinition & { items: WorkItem[] };
 type ManagementView = "work" | "analytics";
@@ -61,81 +46,6 @@ const roleNames: Partial<Record<AppRole, string>> = {
   ADMIN: "管理员",
   SUPER_ADMIN: "超级管理员",
 };
-
-const workGroupDefinitions: WorkGroupDefinition[] = [
-  {
-    key: "customer",
-    title: "客户经营",
-    description: "线索 SLA、主理人申请与责任交接",
-    emptyText: "暂无逾期线索或主理人申请",
-    route: "/packages/ops/pages/members/index",
-    roles: ["FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    key: "refund",
-    title: "资金复核",
-    description: "账户调整、退款申请和原路冲正",
-    emptyText: "暂无账户调整或退款待复核",
-    route: "/packages/ops/pages/finance/index",
-    roles: ["FINANCE", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    key: "training",
-    title: "培训消课",
-    description: "点名、消课建议和训练反馈",
-    emptyText: "暂无待点名或消课课次",
-    route: "/packages/ops/pages/coach/index",
-    roles: ["COACH", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    key: "event",
-    title: "赛事执行",
-    description: "轮次、比分、奖品出库与签收",
-    emptyText: "暂无赛事比分或奖品待办",
-    route: "/packages/ops/pages/event/index",
-    roles: ["EVENT_MANAGER", "FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    key: "coupon",
-    title: "联盟券",
-    description: "券码领取、核销和归因",
-    emptyText: "暂无券待办，可进入联盟运营查看核销",
-    route: "/packages/ops/pages/merchant/index",
-    roles: ["FRONT_DESK", "MERCHANT", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    key: "inventory",
-    title: "库存预警",
-    description: "低于安全线的商品、培训及赛事耗材",
-    emptyText: "库存均高于安全线",
-    route: "/packages/ops/pages/inventory/index",
-    roles: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    key: "fulfillment",
-    title: "现场履约",
-    description: "待签到、待完成与超时履约异常",
-    emptyText: "暂无待处理履约订单",
-    route: "/packages/ops/pages/frontdesk/index",
-    roles: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    key: "reconciliation",
-    title: "对账与结算",
-    description: "培训分成、联盟账单和履约异常",
-    emptyText: "暂无待处理对账或结算",
-    route: "/packages/ops/pages/finance/index",
-    roles: ["FINANCE", "ADMIN", "SUPER_ADMIN"],
-  },
-  {
-    key: "governance",
-    title: "治理复核",
-    description: "账号注销、匿名化条件与不可逆操作复核",
-    emptyText: "暂无账号注销或数据治理待办",
-    route: "/packages/ops/pages/governance/index?focus=privacy",
-    roles: ["ADMIN", "SUPER_ADMIN"],
-  },
-];
 
 const roleLabel = computed(() => {
   const roles = session.roles;
@@ -172,6 +82,8 @@ const percent = (value: unknown) => {
   const parsed = Number(value || 0);
   return `${Number.isFinite(parsed) ? parsed.toFixed(2).replace(/\.00$/, "") : "0"}%`;
 };
+const basisPointsPercent = (value: unknown) =>
+  percent(Number(value || 0) / 100);
 
 const metrics = computed(() => [
   [
@@ -197,6 +109,22 @@ const metrics = computed(() => [
 ]);
 
 const decisionPanels = computed(() => [
+  {
+    title: "经营分成口径",
+    note: "逐笔使用订单保存的规则版本；退款按原比例反冲",
+    items: [
+      [
+        "已履约净收入基数",
+        money(dashboard.value?.operatingShare?.basisRevenueCents),
+      ],
+      [
+        "期末适用比例",
+        basisPointsPercent(dashboard.value?.operatingShare?.rateAtPeriodEndBps),
+      ],
+      ["本期分成计提", money(dashboard.value?.operatingShare?.accruedCents)],
+      ["会员充值", "预收款，不参与"],
+    ],
+  },
   {
     title: "收款、预收与收入",
     note: "资金流入不等于当期收入",
@@ -243,73 +171,6 @@ const decisionPanels = computed(() => [
     ],
   },
 ]);
-
-const normalizeToken = (value: unknown) =>
-  String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, "_");
-
-const explicitGroupMap: Record<string, WorkGroupKey> = {
-  CUSTOMER: "customer",
-  CUSTOMER_LEAD_SLA: "customer",
-  HOST_APPLICATION_REVIEW: "customer",
-  LEAD: "customer",
-  REFUND: "refund",
-  REFUNDS: "refund",
-  REFUND_REVIEW: "refund",
-  ACCOUNT_ADJUSTMENT_REVIEW: "refund",
-  TRAINING: "training",
-  TRAINING_ATTENDANCE: "training",
-  TRAINING_CONSUME: "training",
-  ATTENDANCE: "training",
-  EVENT: "event",
-  EVENT_SCORE: "event",
-  EVENT_PRIZE_RECEIPT: "event",
-  SCORE: "event",
-  COUPON: "coupon",
-  COUPON_REVIEW: "coupon",
-  COUPON_REDEMPTION: "coupon",
-  ALLIANCE_COUPON: "coupon",
-  INVENTORY: "inventory",
-  LOW_STOCK: "inventory",
-  STOCK: "inventory",
-  RECONCILIATION: "reconciliation",
-  SETTLEMENT: "reconciliation",
-  ALLIANCE_SETTLEMENT: "reconciliation",
-  TRAINING_SETTLEMENT: "reconciliation",
-  ORDER_FULFILLMENT: "fulfillment",
-  DATA_ERASURE_REVIEW: "governance",
-};
-
-function workGroupKey(item: WorkItem): WorkGroupKey | null {
-  const explicit =
-    explicitGroupMap[normalizeToken(item.group)] ||
-    explicitGroupMap[normalizeToken(item.category)];
-  if (explicit) return explicit;
-
-  const kind = explicitGroupMap[normalizeToken(item.kind)];
-  if (kind) return kind;
-
-  // Keep the compatibility parser deliberately conservative. Unknown future
-  // kinds remain visible in the “待识别” notice instead of being assigned to a
-  // misleading business queue.
-  const searchable =
-    `${item.objectType || ""} ${item.title || ""} ${item.description || ""}`.toUpperCase();
-  if (/客户|线索|主理人申请|CUSTOMER|LEAD|HOST_APPLICATION/.test(searchable))
-    return "customer";
-  if (/账户调整|资金复核|退款|ACCOUNT_ADJUSTMENT|REFUND/.test(searchable))
-    return "refund";
-  if (/培训|点名|消课|TRAINING|ATTENDANCE|CONSUME/.test(searchable))
-    return "training";
-  if (/赛事|比分|轮次|EVENT|MATCH|SCORE/.test(searchable)) return "event";
-  if (/券|核销|COUPON|REDEEM/.test(searchable)) return "coupon";
-  if (/库存|安全线|低库存|INVENTORY|STOCK/.test(searchable)) return "inventory";
-  if (/对账|结算|履约|RECONCILIATION|SETTLEMENT|FULFILLMENT/.test(searchable))
-    return "reconciliation";
-  if (/注销|匿名化|DATA_ERASURE|PRIVACY/.test(searchable)) return "governance";
-  return null;
-}
 
 function canSee(roles: AppRole[]) {
   return session.roles.some((role) => roles.includes(role));
@@ -507,6 +368,7 @@ onShow(load);
 <template>
   <OperationsFrame
     access="workQueue"
+    icon="analytics"
     title="经营总览"
     eyebrow="BUSINESS CONTROL"
     :role="roleLabel"

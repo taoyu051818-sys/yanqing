@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { withPendingCreationKey } from "../../../../utils/pending-creation-key"
 import { computed, nextTick, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import MetricCard from "../../../../components/MetricCard.vue";
-import OperationsFrame from "../../../../components/OperationsFrame.vue";
+import OperationsFrame from '../../components/OperationsFrame.vue'
+import OperationTask from '../../components/OperationTask.vue'
+import { useOperationTask, reasonField } from '../../components/operation-task'
 import { hasOperationsAccess } from "../../../../config/operations";
 import { endpoints } from "../../../../services/api";
 import { useSessionStore } from "../../../../stores/session";
@@ -19,7 +22,8 @@ type MasterType = "ITEM" | "SUPPLIER" | "LOCATION";
 type MovementType = "TRANSFER" | "LOSS";
 type UsageType = "TRAINING_USAGE" | "EVENT_USAGE";
 
-const session = useSessionStore();
+const task = useOperationTask()
+const session = useSessionStore()
 const tab = ref<Tab>("STOCK");
 const loading = ref(false);
 const saving = ref(false);
@@ -326,20 +330,7 @@ async function applyInventoryDeepLink() {
   uni.pageScrollTo({ selector: `#${opsDeepLinkDomId(prefix, record.id)}`, duration: 250 });
 }
 
-async function positiveInteger(title: string, placeholder = "请输入数量") {
-  const result = await uni.showModal({
-    title,
-    editable: true,
-    placeholderText: placeholder,
-  });
-  if (!result.confirm) return null;
-  const value = Number(result.content);
-  if (!Number.isInteger(value) || value < 1) {
-    uni.showToast({ title: "请输入正整数", icon: "none" });
-    return null;
-  }
-  return value;
-}
+
 
 async function run(action: () => Promise<unknown>, message: string) {
   try {
@@ -548,37 +539,19 @@ async function loadMasterDetail(record: any) {
   }
 }
 
-async function toggleMasterStatus(record: any) {
-  const enabling = record.enabled === false;
-  const result = await uni.showModal({
-    title: enabling ? "确认启用" : "确认停用",
-    content: enabling
-      ? "启用后可用于新业务单。"
-      : "系统会检查库存、待支付订单和所有未完作业单。",
-    editable: true,
-    placeholderText: "请输入变更原因（至少2个字）",
-  });
-  if (!result.confirm) return;
-  const reason = String(result.content || "").trim();
-  if (reason.length < 2)
-    return uni.showToast({ title: "变更原因至少2个字", icon: "none" });
-  const command = {
-    enabled: enabling,
-    expectedUpdatedAt: record.updatedAt,
-    reason,
-    idempotencyKey: idempotencyKey(
-      `master-${masterType.value.toLowerCase()}-status-${record.id}`,
-    ),
-  };
-  await run(
-    () =>
-      masterType.value === "ITEM"
-        ? endpoints.setInventoryItemStatus(record.id, command)
-        : masterType.value === "SUPPLIER"
-          ? endpoints.setInventorySupplierStatus(record.id, command)
-          : endpoints.setInventoryLocationStatus(record.id, command),
-    enabling ? "已启用" : "已停用",
-  );
+function toggleMasterStatus(record: any) {
+  const enabling = record.enabled === false, type = masterType.value
+  task.start({ title: enabling ? '启用基础资料' : '停用基础资料', description: record.name + (enabling ? ' · 启用后可用于新业务。' : ' · 服务器检查库存和未完成作业，历史不删除。'),
+    confirmText: enabling ? '确认启用' : '确认停用', fields: [reasonField('变更依据')],
+    submit: async ({ reason }) => {
+      const command = { enabled: enabling, expectedUpdatedAt: record.updatedAt, reason }
+      await withPendingCreationKey('inventory.master.' + type + '.' + record.id, command, idempotencyKey => {
+        const payload = { ...command, idempotencyKey }
+        return type === 'ITEM' ? endpoints.setInventoryItemStatus(record.id, payload) : type === 'SUPPLIER' ? endpoints.setInventorySupplierStatus(record.id, payload) : endpoints.setInventoryLocationStatus(record.id, payload)
+      })
+      await load(); return '基础资料状态已更新，关联历史保留。'
+    },
+  })
 }
 
 function usageReferenceLabel(type: UsageType, entry: any) {
@@ -743,31 +716,29 @@ async function submitPurchaseOrder() {
   if (succeeded) showPurchaseForm.value = false;
 }
 
-async function purchaseAction(order: any) {
-  if (order.status === "DRAFT")
-    return run(() => endpoints.submitPurchaseOrder(order.id), "已提交审批");
-  if (order.status === "SUBMITTED")
-    return run(() => endpoints.approvePurchaseOrder(order.id), "采购单已审批");
-  if (["APPROVED", "PARTIAL_RECEIVED"].includes(order.status)) {
-    const line = order.lines.find(
-      (entry: any) => entry.receivedQuantity < entry.orderedQuantity,
-    );
-    if (!line) return;
-    const remaining = line.orderedQuantity - line.receivedQuantity;
-    const quantity = await positiveInteger(
-      `收货 ${line.item?.name || "采购商品"}`,
-      `未收 ${remaining}`,
-    );
-    if (!quantity) return;
-    return run(
-      () =>
-        endpoints.receivePurchaseOrder(order.id, {
-          lines: [{ lineId: line.id, quantity }],
-          idempotencyKey: idempotencyKey(`receipt-${order.id}`),
-        }),
-      "收货已过账",
-    );
+function purchaseAction(order: any) {
+  if (['DRAFT','SUBMITTED'].includes(order.status)) {
+    const submit = order.status === 'DRAFT'
+    task.start({ title: submit ? '提交采购审批' : '批准采购单', description: (order.purchaseNo || order.orderNo || '当前采购单') + ' · 请核对明细、供应商和数量。审批不会直接增加库存。',
+      confirmText: submit ? '确认提交' : '确认批准', fields: [],
+      submit: async () => { if (submit) await endpoints.submitPurchaseOrder(order.id); else await endpoints.approvePurchaseOrder(order.id); await load(); return submit ? '采购已提交审批。' : '采购已审批，下一步按实收数量入库。' },
+    }); return
   }
+  const lines = (order.lines || []).filter((line: any) => line.receivedQuantity < line.orderedQuantity)
+  if (!lines.length) return
+  task.start({ title: '采购收货', description: '选择本次实际到货商品并填写数量；分批收货按实际入库，不默认收齐。',
+    confirmText: '确认本批收货入账', fields: [
+      { key: 'lineId', label: '到货商品', kind: 'choices', initial: lines.length === 1 ? lines[0].id : '', options: lines.map((line: any) => ({ value: line.id, label: line.item?.name || '采购商品', description: '尚未收货 ' + (line.orderedQuantity - line.receivedQuantity) })) },
+      { key: 'quantity', label: '实收数量', kind: 'number' },
+    ],
+    submit: async ({ lineId, quantity }) => {
+      const line = lines.find((item: any) => item.id === lineId)
+      if (Number(quantity) > line.orderedQuantity - line.receivedQuantity) throw new Error('实收不能超过剩余采购数量')
+      const command = { lines: [{ lineId, quantity: Number(quantity) }] }
+      await withPendingCreationKey('inventory.receipt.' + order.id, command, idempotencyKey => endpoints.receivePurchaseOrder(order.id, { ...command, idempotencyKey }))
+      await load(); return '本批收货已过账，采购进度与库存已同步。'
+    },
+  })
 }
 
 function purchaseActionLabel(order: any) {
@@ -806,40 +777,29 @@ async function submitStocktake() {
   if (succeeded) showStocktakeForm.value = false;
 }
 
-async function stocktakeAction(document: any) {
-  if (document.status === "DRAFT")
-    return run(() => endpoints.startStocktake(document.id), "已开始盘点");
-  if (document.status === "COUNTING") {
-    const line = document.lines.find(
-      (entry: any) => entry.countedQuantity === null,
-    );
-    if (line) {
-      const result = await uni.showModal({
-        title: `实盘 ${line.item?.name || "商品"}`,
-        content: `账面 ${line.bookQuantity}`,
-        editable: true,
-        placeholderText: "输入实盘数量",
-      });
-      if (!result.confirm) return;
-      const counted = Number(result.content);
-      if (!Number.isInteger(counted) || counted < 0)
-        return uni.showToast({ title: "数量必须为非负整数", icon: "none" });
-      return run(
-        () => endpoints.countStocktakeLine(document.id, line.id, counted),
-        "实盘数已保存",
-      );
+function stocktakeAction(document: any) {
+  if (document.status === 'COUNTING') {
+    const lines = document.lines.filter((line: any) => line.countedQuantity === null)
+    if (lines.length) {
+      task.start({ title: '登记实盘数量', description: '选择本次已清点商品，账面数量仅供核对。录入不会立即改变库存，差异须复核后过账。',
+        confirmText: '确认保存实盘数', fields: [
+          { key: 'lineId', label: '已清点商品', kind: 'choices', initial: lines.length === 1 ? lines[0].id : '', options: lines.map((line: any) => ({ value: line.id, label: line.item?.name || '商品', description: '账面 ' + line.bookQuantity })) },
+          { key: 'counted', label: '实际数量（可填0）', kind: 'number', min: 0 },
+        ],
+        submit: async ({ lineId, counted }) => { await endpoints.countStocktakeLine(document.id, lineId, Number(counted)); await load(); return '实盘数已保存，请继续清点剩余商品。' },
+      }); return
     }
-    return run(() => endpoints.submitStocktake(document.id), "已提交复核");
   }
-  if (document.status === "REVIEW")
-    return run(
-      () =>
-        endpoints.postStocktake(
-          document.id,
-          idempotencyKey(`stocktake-${document.id}`),
-        ),
-      "盘点差异已过账",
-    );
+  const label = document.status === 'DRAFT' ? '开始盘点' : document.status === 'COUNTING' ? '提交盘点复核' : '复核并过账差异'
+  task.start({ title: label, description: '当前盘点单 · 过账将按已复核差异更新库存，并保留不可覆盖的流水。',
+    confirmText: '确认' + label, fields: [],
+    submit: async () => {
+      if (document.status === 'DRAFT') await endpoints.startStocktake(document.id)
+      else if (document.status === 'COUNTING') await endpoints.submitStocktake(document.id)
+      else await withPendingCreationKey('inventory.stocktake.' + document.id, { documentId: document.id }, idempotencyKey => endpoints.postStocktake(document.id, idempotencyKey))
+      await load(); return '盘点单已' + label + '。'
+    },
+  })
 }
 
 function openMovementForm(type: MovementType) {
@@ -958,11 +918,13 @@ onShow(load);
 <template>
   <OperationsFrame
     access="inventory"
+    icon="inventory"
     title="库存作业中心"
     eyebrow="INVENTORY OPERATIONS"
     role="前台预警 / 管理员作业"
     description="前台仅查看低库存预警；完整库存、进价、供应商与采购作业仅向管理员开放。"
   >
+    <OperationTask :task="task" />
     <view class="metric-grid"
       ><MetricCard
         v-for="metric in metrics"

@@ -54,7 +54,7 @@ describe("mock work item deep links", () => {
 
     expect(getCustomerLeads().some((item) => item.id === byKind("CUSTOMER_LEAD_SLA").objectId)).toBe(true);
     expect(getHostApplications().some((item) => item.id === byKind("HOST_APPLICATION_REVIEW").objectId)).toBe(true);
-    expect(getTrainingSessions().some((item) => item.id === byKind("TRAINING_ATTENDANCE").metadata.sessionId)).toBe(true);
+    expect(getTrainingSessions().some((item) => item.id === byKind("TRAINING_SESSION_OPERATION").metadata.sessionId)).toBe(true);
     const eventItem = byKind("EVENT_SCORE");
     expect(getEvents().some((item) => item.id === eventItem.metadata.eventId)).toBe(true);
     expect(getEventDetail(eventItem.metadata.eventId).matches.some((item: any) => item.id === eventItem.objectId)).toBe(true);

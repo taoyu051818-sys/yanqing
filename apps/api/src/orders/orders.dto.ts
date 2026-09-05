@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer'
+import { Transform, Type } from 'class-transformer'
 import {
   IsEnum,
   IsInt,
@@ -12,6 +12,11 @@ import {
 
 import { BusinessType, OrderStatus, PaymentChannel } from '../generated/prisma/enums.js'
 
+// Older mini-program builds serialized an absent optional query as a literal
+// "undefined". Normalize only empty sentinels, never an unknown enum value.
+const optionalFilter = ({ value }: { value: unknown }) =>
+  value === '' || value === 'undefined' || value === 'null' ? undefined : value
+
 export class OrderQueryDto {
   @Type(() => Number)
   @IsInt()
@@ -24,16 +29,24 @@ export class OrderQueryDto {
   @Max(100)
   pageSize = 20
 
+  @Transform(optionalFilter)
   @IsOptional()
-  @IsEnum(BusinessType)
+  @IsEnum(BusinessType, { message: '订单类型筛选无效，请重新选择' })
   businessType?: BusinessType
 
+  @Transform(optionalFilter)
   @IsOptional()
-  @IsEnum(OrderStatus)
+  @IsEnum(OrderStatus, { message: '订单状态筛选无效，请重新选择' })
   status?: OrderStatus
 }
 
 export class PayOrderDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  expectedDebitAmount?: number
+
   @IsEnum(PaymentChannel)
   channel: PaymentChannel
 
@@ -41,6 +54,19 @@ export class PayOrderDto {
   @MinLength(8)
   @MaxLength(100)
   idempotencyKey: string
+}
+
+export class CancelPendingOrderDto {
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  idempotencyKey: string
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  reason?: string
 }
 
 export class RequestRefundDto {

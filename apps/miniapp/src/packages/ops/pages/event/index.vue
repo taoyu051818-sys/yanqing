@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
-import OperationsFrame from "../../../../components/OperationsFrame.vue";
+import OperationsFrame from '../../components/OperationsFrame.vue'
+import OperationTask from '../../components/OperationTask.vue'
+import { useOperationTask, reasonField } from '../../components/operation-task'
 import MetricCard from "../../../../components/MetricCard.vue";
 import { hasOperationsAccess } from "../../../../config/operations";
-import { presentPrizePool } from "../../../../config/event-presentation";
+import { presentPrizePool } from "../../config/event-presentation";
 import { endpoints } from "../../../../services/api";
 import { useSessionStore } from "../../../../stores/session";
 import type { AppRole } from "../../../../types/domain";
@@ -40,6 +42,9 @@ interface EventTeam {
   name: string;
   playerAName: string;
   playerBName: string;
+  playerAPhone?: string | null;
+  playerBPhone?: string | null;
+  captainPlays?: boolean;
   status: string;
   category?: string;
   points?: number;
@@ -54,6 +59,10 @@ interface EventTeam {
   cancellationPending?: boolean;
   cancellationResolvedAt?: string | null;
   order?: { status?: string } | null;
+}
+
+function showParticipantContacts(team: EventTeam) {
+  uni.showModal({ title: '参赛联系资料', content: team.playerAName + '：' + (team.playerAPhone || '未填写') + '\n' + team.playerBName + '：' + (team.playerBPhone || '未填写') + '\n仅供场馆办理本次赛事，请勿公开转发。', showCancel: false })
 }
 
 interface EventMatch {
@@ -145,7 +154,8 @@ const STATUS_LABELS: Record<string, string> = {
   RECEIVED: "已签收",
 };
 
-const session = useSessionStore();
+const task = useOperationTask()
+const session = useSessionStore()
 const eventList = ref<EventSummary[]>([]);
 const selectedEventId = ref("");
 const eventDetail = ref<EventDetail | null>(null);
@@ -602,20 +612,13 @@ async function runAction(
   }
 }
 
-async function publishEvent() {
-  const event = eventDetail.value;
-  if (!event || !showPublish.value) return;
-  const modal = await uni.showModal({
-    title: "发布赛事",
-    content: `确认发布“${event.name}”？发布后进入报名期。`,
-    editable: true,
-    placeholderText: "可填写发布说明（选填）",
-  });
-  if (!modal.confirm) return;
-  const reason = String(modal.content || "").trim();
-  await runAction(`publish:${event.id}`, "赛事已发布", () =>
-    endpoints.publishEvent(event.id, reason ? { reason } : {}),
-  );
+function publishEvent() {
+  const event = eventDetail.value
+  if (!event || !showPublish.value) return
+  task.start({ title: '发布赛事', description: event.name + ' · 发布后进入报名期，请先核对时间、费用、名额和规则。',
+    confirmText: '确认发布赛事', fields: [{ key: 'reason', label: '发布说明', required: false, max: 300 }],
+    submit: async ({ reason }) => { await endpoints.publishEvent(event.id, reason ? { reason } : {}); await load(event.id); return '赛事已发布，用户可报名。' },
+  })
 }
 
 async function promoteWaitlist() {
@@ -626,38 +629,16 @@ async function promoteWaitlist() {
   );
 }
 
-async function cancelEvent() {
-  const event = eventDetail.value;
-  if (!event || !showCancel.value) return;
-  const reasonModal = await uni.showModal({
-    title: "填写赛事取消原因",
-    editable: true,
-    placeholderText: "至少2个字，将写入审计与会员通知",
-  });
-  if (!reasonModal.confirm) return;
-  const reason = String(reasonModal.content || "").trim();
-  if (reason.length < 2) {
-    uni.showToast({ title: "取消原因至少2个字", icon: "none" });
-    return;
-  }
-  const confirmed = await uni.showModal({
-    title: "二次确认取消赛事",
-    content: `${event.name}\n待支付订单与候补将取消；已支付订单只生成退款申请，仍须由另一名财务/管理员审批。\n原因：${reason}`,
-    confirmText: "确认取消",
-    confirmColor: "#a33f35",
-  });
-  if (!confirmed.confirm) return;
-  await runAction(
-    `cancel:${event.id}`,
-    "赛事已取消，退款申请已转财务复核",
-    () =>
-      withPendingCreationKey(
-        "event.cancel",
-        { eventId: event.id, reason },
-        (idempotencyKey) =>
-          endpoints.cancelEvent(event.id, { reason, idempotencyKey }),
-      ),
-  );
+function cancelEvent() {
+  const event = eventDetail.value
+  if (!event || !showCancel.value) return
+  task.start({ title: '取消整场赛事', description: event.name + ' · 待付订单与候补取消，已付报名生成退款申请，仍须另一名财务或管理员审批。',
+    confirmText: '确认取消整场赛事', fields: [reasonField('取消原因', ['成赛人数不足','场馆临时维护','组织安排有变'])],
+    submit: async ({ reason }) => {
+      await withPendingCreationKey('event.cancel', { eventId: event.id, reason }, idempotencyKey => endpoints.cancelEvent(event.id, { reason, idempotencyKey }))
+      await load(event.id); return '赛事已取消，退款申请已转财务复核，尚不代表已到账。'
+    },
+  })
 }
 
 async function createEvent() {
@@ -746,61 +727,21 @@ async function nextRound() {
   );
 }
 
-async function correctPairings() {
-  const event = eventDetail.value;
-  if (!event || !pairingsEditable.value) return;
-  const leftIndex = Number(pairingLeftIndex.value);
-  const rightIndex = Number(pairingRightIndex.value);
-  const left = currentRoundMatches.value[leftIndex];
-  const right = currentRoundMatches.value[rightIndex];
-  if (!left || !right || left.id === right.id) {
-    uni.showToast({ title: "请选择两场不同的对阵", icon: "none" });
-    return;
-  }
-  const reasonModal = await uni.showModal({
-    title: "人工调整本轮配对",
-    content: `${teamName(left.teamAId)} 的对手与 ${teamName(right.teamAId)} 的对手互换。`,
-    editable: true,
-    placeholderText: "填写异常原因（至少2个字）",
-  });
-  if (!reasonModal.confirm) return;
-  const reason = String(reasonModal.content || "").trim();
-  if (reason.length < 2) {
-    uni.showToast({ title: "请填写至少2个字的调整原因", icon: "none" });
-    return;
-  }
-  const pairings = currentRoundMatches.value.map((match) => ({
-    teamAId: match.teamAId,
-    teamBId:
-      match.id === left.id
-        ? right.teamBId || undefined
-        : match.id === right.id
-          ? left.teamBId || undefined
-          : match.teamBId || undefined,
-    courtLabel: match.courtLabel || undefined,
-  }));
-  const command = {
-    eventId: event.id,
-    round: currentRound.value,
-    pairings,
-    reason,
-  };
-  await runAction(
-    `pairings:${event.id}:${currentRound.value}`,
-    "本轮配对已人工调整并留痕",
-    () =>
-      withPendingCreationKey(
-        "event.correct-pairings",
-        command,
-        (idempotencyKey) =>
-          endpoints.correctEventPairings(event.id, currentRound.value, {
-            pairings,
-            reason,
-            idempotencyKey,
-          }),
-      ),
-    currentRound.value,
-  );
+function correctPairings() {
+  const event = eventDetail.value
+  if (!event || !pairingsEditable.value) return
+  const left = currentRoundMatches.value[Number(pairingLeftIndex.value)], right = currentRoundMatches.value[Number(pairingRightIndex.value)]
+  if (!left || !right || left.id === right.id) { errorMessage.value = '请选择两场不同的对阵'; return }
+  const round = currentRound.value
+  const pairings = currentRoundMatches.value.map(match => ({ teamAId: match.teamAId,
+    teamBId: (match.id === left.id ? right.teamBId : match.id === right.id ? left.teamBId : match.teamBId) || undefined, courtLabel: match.courtLabel || undefined }))
+  task.start({ title: '调整本轮配对', description: teamName(left.teamAId) + ' 的对手与 ' + teamName(right.teamAId) + ' 的对手互换。服务器重新核验队伍冲突，不改已录比分。',
+    confirmText: '确认交换对手', fields: [reasonField('异常原因与调整依据')],
+    submit: async ({ reason }) => {
+      await withPendingCreationKey('event.correct-pairings', { eventId: event.id, round, pairings, reason }, idempotencyKey => endpoints.correctEventPairings(event.id, round, { pairings, reason, idempotencyKey }))
+      await load(event.id, round, false); return '本轮配对已调整，修改记录可追溯。'
+    },
+  })
 }
 
 function canCheckInTeam(team: EventTeam) {
@@ -816,42 +757,15 @@ function canCheckInTeam(team: EventTeam) {
   );
 }
 
-async function checkIn(team: EventTeam) {
-  const event = eventDetail.value;
-  if (!event || !canCheckInTeam(team)) return;
-  const modal = await uni.showModal({
-    title: "确认队伍签到",
-    content: `${team.name} · ${team.playerAName} / ${team.playerBName}`,
-  });
-  if (!modal.confirm) return;
-  const startsAt = new Date(event.startsAt || 0).getTime();
-  if (Number.isFinite(startsAt) && Date.now() < startsAt - 30 * 60_000) {
-    uni.showToast({ title: "未到签到窗口，不能提前签到", icon: "none" });
-    return;
-  }
-  let overrideReason: string | undefined;
-  if (Number.isFinite(startsAt) && Date.now() > startsAt + 30 * 60_000) {
-    if (!hasAnyRole(["ADMIN", "SUPER_ADMIN"])) {
-      uni.showToast({ title: "已过签到窗口，请由管理员历史补录", icon: "none" });
-      return;
-    }
-    const override = await uni.showModal({
-      title: "历史补录签到",
-      content: "",
-      editable: true,
-      placeholderText: "填写迟到补录原因（2-300字）",
-      confirmText: "确认补录",
-    });
-    overrideReason = String(override.content || "").trim();
-    if (!override.confirm || overrideReason.length < 2) return;
-  }
-  await runAction(`checkin:${team.id}`, "队伍已签到", () =>
-    endpoints.checkInEventTeam(
-      event.id,
-      team.id,
-      overrideReason ? { overrideReason } : {},
-    ),
-  );
+function checkIn(team: EventTeam) {
+  const event = eventDetail.value
+  if (!event || !canCheckInTeam(team)) return
+  const start = new Date(event.startsAt || '').getTime(), historical = Date.now() > start + 30 * 60000
+  if (Date.now() < start - 30 * 60000 || (historical && !hasAnyRole(['ADMIN','SUPER_ADMIN']))) { errorMessage.value = '当前不在签到窗口，请核对时间或联系管理员。'; return }
+  task.start({ title: historical ? '历史补录队伍签到' : '确认队伍签到', description: team.name + ' · ' + team.playerAName + ' / ' + team.playerBName + '。请核对两名选手实际到场。',
+    confirmText: '确认队伍到场', fields: historical ? [reasonField('历史补录依据')] : [],
+    submit: async ({ reason }) => { await endpoints.checkInEventTeam(event.id, team.id, historical ? { overrideReason: reason } : {}); await load(event.id); return '队伍签到已记录，重复签到会被阻止。' },
+  })
 }
 
 function parseScore(raw: unknown, match: EventMatch): [number, number] | null {
@@ -877,7 +791,7 @@ function parseScore(raw: unknown, match: EventMatch): [number, number] | null {
 
 function teamName(teamId: string | null) {
   if (!teamId) return "轮空";
-  return teams.value.find((team) => team.id === teamId)?.name || teamId;
+  return teams.value.find((team) => team.id === teamId)?.name || "未命名队伍";
 }
 
 function canSubmitScore(match: EventMatch) {
@@ -897,73 +811,30 @@ function canCorrectScore(match: EventMatch) {
   );
 }
 
-async function requestScore(match: EventMatch, title: string) {
-  const modal = await uni.showModal({
-    title,
-    editable: true,
-    placeholderText: `例如 21:${Math.max(match.startingScoreB, 18)}`,
-  });
-  if (!modal.confirm) return null;
-  const parsed = parseScore(modal.content, match);
-  if (!parsed) {
-    uni.showToast({
-      title: "比分须以21分结束、不得并列且不能低于让分",
-      icon: "none",
-    });
-    return null;
-  }
-  return parsed;
-}
 
-async function score(match: EventMatch) {
-  if (!canSubmitScore(match)) return;
-  const result = await requestScore(match, "录入最终比分");
-  if (!result) return;
-  const [scoreA, scoreB] = result;
-  const modal = await uni.showModal({
-    title: "确认比分",
-    content: `${teamName(match.teamAId)} ${scoreA}:${scoreB} ${teamName(match.teamBId)}。确认后如需修改必须走纠错。`,
-  });
-  if (!modal.confirm) return;
-  await runAction(
-    `score:${match.id}`,
-    "比分已确认",
-    () => endpoints.scoreEventMatch(match.id, scoreA, scoreB),
-    match.round,
-  );
-}
 
-async function correctScore(match: EventMatch) {
-  if (!canCorrectScore(match)) return;
-  const result = await requestScore(match, "录入纠正后比分");
-  if (!result) return;
-  const reasonModal = await uni.showModal({
-    title: "填写纠错原因",
-    editable: true,
-    placeholderText: "至少2个字，将写入审计记录",
-  });
-  if (!reasonModal.confirm) return;
-  const reason = String(reasonModal.content || "").trim();
-  if (reason.length < 2) {
-    uni.showToast({ title: "请填写至少2个字的纠错原因", icon: "none" });
-    return;
-  }
-  const [scoreA, scoreB] = result;
-  if (match.scoreA === scoreA && match.scoreB === scoreB) {
-    uni.showToast({ title: "纠错比分与原比分相同", icon: "none" });
-    return;
-  }
-  const modal = await uni.showModal({
-    title: "确认纠错",
-    content: `${match.scoreA ?? "—"}:${match.scoreB ?? "—"} → ${scoreA}:${scoreB}\n原因：${reason}`,
-  });
-  if (!modal.confirm) return;
-  await runAction(
-    `correct:${match.id}`,
-    "比分已纠正",
-    () => endpoints.correctEventScore(match.id, { scoreA, scoreB, reason }),
-    match.round,
-  );
+function score(match: EventMatch) { if (canSubmitScore(match)) openScoreTask(match, false) }
+
+function correctScore(match: EventMatch) { if (canCorrectScore(match)) openScoreTask(match, true) }
+
+function openScoreTask(match: EventMatch, correction: boolean) {
+  const eventId = eventDetail.value!.id
+  task.start({ title: correction ? '纠正比赛比分' : '录入比赛比分', description: teamName(match.teamAId) + ' 对 ' + teamName(match.teamBId) + ' · ' + (correction ? '原比分 ' + match.scoreA + ':' + match.scoreB + '，更正须留痕。' : '一局21分结束，不得并列，最终分数不能低于让分。'),
+    confirmText: correction ? '确认更正并留痕' : '确认提交比分', fields: [
+      { key: 'scoreA', label: teamName(match.teamAId) + ' 最终得分', kind: 'number', min: match.startingScoreA, max: 21, initial: correction ? String(match.scoreA) : '' },
+      { key: 'scoreB', label: teamName(match.teamBId) + ' 最终得分', kind: 'number', min: match.startingScoreB, max: 21, initial: correction ? String(match.scoreB) : '' },
+      ...(correction ? [reasonField('纠错依据')] : []),
+    ],
+    submit: async values => {
+      const parsed = parseScore(values.scoreA + ':' + values.scoreB, match)
+      if (!parsed) throw new Error('比分须以21分结束、不得并列且不能低于让分')
+      const [scoreA, scoreB] = parsed
+      if (correction && scoreA === match.scoreA && scoreB === match.scoreB) throw new Error('纠正后比分与原比分相同')
+      if (correction) await endpoints.correctEventScore(match.id, { scoreA, scoreB, reason: values.reason })
+      else await endpoints.scoreEventMatch(match.id, scoreA, scoreB)
+      await load(eventId, match.round, false); return correction ? '比分已纠正，排名已重新计算，修改历史保留。' : '比分已提交，状态与排名已同步。'
+    },
+  })
 }
 
 async function finishEvent() {
@@ -1027,32 +898,17 @@ async function issuePrize() {
   );
 }
 
-async function receivePrize(award: EventPrizeAward) {
-  const event = eventDetail.value;
-  if (!event || award.status !== "ISSUED" || !mayOperatePrizes.value) return;
-  const modal = await uni.showModal({
-    title: "奖品签收",
-    content: `${award.awardName} · ${award.inventoryItem?.name || "库存奖品"} × ${award.quantity}`,
-    editable: true,
-    placeholderText: award.recipientNames.join(" / "),
-  });
-  if (!modal.confirm) return;
-  const receivedByName = String(modal.content || "").trim();
-  if (!receivedByName) {
-    uni.showToast({ title: "请填写实际签收人", icon: "none" });
-    return;
-  }
-  await runAction(
-    `receipt:${award.id}`,
-    "奖品已签收",
-    () =>
-      endpoints.receiveEventPrize(event.id, award.id, {
-        receivedByName,
-        idempotencyKey: `event-receipt-${award.id}-${Date.now()}`,
-        note: "赛事工作台现场签收",
-      }),
-    totalRounds.value,
-  );
+function receivePrize(award: EventPrizeAward) {
+  const event = eventDetail.value
+  if (!event || award.status !== 'ISSUED' || !mayOperatePrizes.value) return
+  task.start({ title: '奖品签收', description: award.awardName + ' · ' + (award.inventoryItem?.name || '库存奖品') + ' × ' + award.quantity + '。请选择实际到场签收人。',
+    confirmText: '确认本人签收', fields: [{ key: 'receivedByName', label: '签收人', kind: 'choices', options: award.recipientNames.map(value => ({ value, label: value })) }],
+    submit: async ({ receivedByName }) => {
+      const command = { receivedByName, note: '赛事工作台现场签收' }
+      await withPendingCreationKey('event.receipt.' + award.id, command, idempotencyKey => endpoints.receiveEventPrize(event.id, award.id, { ...command, idempotencyKey }))
+      await load(event.id, totalRounds.value, false); return '奖品已签收，库存出库与签收记录可追溯。'
+    },
+  })
 }
 
 onLoad((options) => {
@@ -1064,11 +920,13 @@ onShow(loadFromPage);
 <template>
   <OperationsFrame
     access="events"
+    icon="event"
     title="赛事运营"
     eyebrow="EVENT OPERATIONS"
     :role="roleLabel"
     description="按赛事状态和岗位权限推进发布、报名签到、五轮瑞士配对、比分确认、纠错和完赛归档。"
   >
+    <OperationTask :task="task" />
     <view v-if="errorMessage" class="card error-panel">
       <view
         ><text class="panel-title">数据未同步</text
@@ -1350,6 +1208,7 @@ onShow(loadFromPage);
             >{{ team.playerAName }} / {{ team.playerBName }} ·
             {{ team.category || "固定双打" }}</text
           >
+          <button v-if="team.playerAPhone || team.playerBPhone" class="secondary" @tap="showParticipantContacts(team)">查看选手联系方式</button>
           <text v-if="team.status === 'WAITLISTED'" class="team-stat"
             >候补不生成订单、不收费；按进入队列时间 FIFO 晋级。</text
           >

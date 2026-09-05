@@ -5,7 +5,13 @@ import {
   clearPendingReferral,
   pendingReferralInvite,
 } from '../services/referral-attribution'
+import {
+  clearAuthSession,
+  saveAuthSession,
+  useAccessToken,
+} from '../services/auth-session'
 import type { AppRole, SessionUser } from '../types/domain'
+import { isMockMode } from '../services/http'
 
 const normalizeRoles = (user?: SessionUser | null): AppRole[] =>
   (user?.roles || []).map((item) => typeof item === 'string' ? item : item.role)
@@ -13,15 +19,15 @@ const normalizeRoles = (user?: SessionUser | null): AppRole[] =>
 export const useSessionStore = defineStore('session', () => {
   const user = ref<SessionUser | null>(null)
   const loading = ref(false)
+  const accessToken = useAccessToken()
   const roles = computed(() => normalizeRoles(user.value))
-  const isAuthenticated = computed(() => Boolean(uni.getStorageSync('yanqing_access_token')))
+  const isAuthenticated = computed(() => Boolean(accessToken.value))
   const isOperator = computed(() => roles.value.some((role) => role !== 'MEMBER'))
   const referralAttribution = ref<'idle' | 'bound' | 'already-bound' | 'failed'>('idle')
   const referralAttributionMessage = ref('')
 
   const saveSession = (result: { accessToken: string; user: SessionUser }) => {
-    uni.setStorageSync('yanqing_access_token', result.accessToken)
-    uni.setStorageSync('yanqing_actor_id', result.user.id)
+    saveAuthSession(result.accessToken, result.user.id)
     user.value = result.user
   }
 
@@ -76,12 +82,25 @@ export const useSessionStore = defineStore('session', () => {
       await applyPendingReferral()
       return true
     }
-    catch { logout(); return false }
+    catch (cause: any) {
+      // A temporary transport/server failure must not destroy a valid session.
+      // Authorization is still checked by the API on every protected action.
+      if (cause?.statusCode === 401 || !isAuthenticated.value) logout()
+      return false
+    }
+  }
+
+  async function updateWechatProfile(displayName: string, avatarFilePath?: string) {
+    loading.value = true
+    try {
+      if (avatarFilePath && !isMockMode) user.value = await endpoints.uploadMyAvatar(avatarFilePath)
+      user.value = await endpoints.updateMyProfile(displayName)
+      return user.value
+    } finally { loading.value = false }
   }
 
   function logout() {
-    uni.removeStorageSync('yanqing_access_token')
-    uni.removeStorageSync('yanqing_actor_id')
+    clearAuthSession()
     user.value = null
     referralAttribution.value = 'idle'
     referralAttributionMessage.value = ''
@@ -90,6 +109,6 @@ export const useSessionStore = defineStore('session', () => {
   return {
     user, roles, loading, isAuthenticated, isOperator,
     referralAttribution, referralAttributionMessage,
-    loginWithWechat, loginForDevelopment, hydrate, applyPendingReferral, logout,
+    loginWithWechat, loginForDevelopment, updateWechatProfile, hydrate, applyPendingReferral, logout,
   }
 })

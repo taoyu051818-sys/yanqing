@@ -37,6 +37,24 @@ export class MemberQueryDto {
   level?: MemberLevel
 }
 
+export class LeadOwnerQueryDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page = 1
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  pageSize = 20
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  keyword?: string
+}
+
 export class AdjustAccountDto {
   @IsEnum(AccountType)
   accountType: AccountType

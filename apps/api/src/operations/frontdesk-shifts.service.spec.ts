@@ -379,6 +379,17 @@ describe('FrontDeskShiftsService', () => {
     expect(tx.payment.count).toHaveBeenCalledWith({
       where: expect.objectContaining({ operatorId: frontDesk.sub }),
     });
+    expect(tx.order.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([
+          expect.objectContaining({
+            businessType: 'VENUE',
+            bookings: { some: expect.objectContaining({ startsAt: { lt: expect.any(Date) } }) },
+          }),
+          expect.objectContaining({ createdById: frontDesk.sub }),
+        ]),
+      }),
+    });
   });
 
   it('replays an already closed shift without producing another snapshot or audit event', async () => {

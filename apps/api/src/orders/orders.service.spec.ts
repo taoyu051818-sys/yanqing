@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common'
 import {
   AppRole,
+  BookingStatus,
   BusinessType,
   OrderStatus,
   PaymentChannel,
@@ -379,6 +380,11 @@ describe('OrdersService front-desk payment and refund gate', () => {
     businessType: BusinessType.VENUE,
     payableCents: 6_800,
     items: [],
+    bookings: [{
+      id: 'booking-cash-1',
+      status: BookingStatus.HELD,
+      holdExpiresAt: new Date(Date.now() + 10 * 60_000),
+    }],
     membership: null,
     member: { openId: null },
   }

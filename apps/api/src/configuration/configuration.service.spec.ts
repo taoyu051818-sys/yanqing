@@ -24,6 +24,18 @@ describe('ConfigurationService contractual parameters', () => {
     }, actor)).rejects.toBeInstanceOf(BadRequestException)
   })
 
+  it('accepts only integer basis points for the administrator-configured operating share', async () => {
+    await expect(service.createVersion({
+      key: 'finance.operating_share_rate_bps', value: 10_001, type: ParameterType.INTEGER,
+      description: 'invalid', reason: '验证经营分成比例边界', effectiveFrom: '2027-01-01T00:00:00+08:00', locked: false,
+    }, actor)).rejects.toBeInstanceOf(BadRequestException)
+
+    await expect(service.createVersion({
+      key: 'finance.operating_share_rate_bps', value: 1_500.5, type: ParameterType.INTEGER,
+      description: 'invalid', reason: '验证经营分成必须为整数基点', effectiveFrom: '2027-01-01T00:00:00+08:00', locked: false,
+    }, actor)).rejects.toBeInstanceOf(BadRequestException)
+  })
+
   it('locks valid training parameters when creating an effective-dated version', async () => {
     const create = vi.fn().mockResolvedValue({ id: 'p1' })
     const transaction = vi.fn(async (work: (tx: any) => unknown) => work({

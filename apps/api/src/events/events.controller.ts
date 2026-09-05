@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
-import { CurrentUser, Roles } from '../common/auth/auth.decorators.js';
+import { CurrentUser, Public, Roles } from '../common/auth/auth.decorators.js';
 import type { AuthUser } from '../common/auth/auth-user.js';
 import { AppRole } from '../generated/prisma/enums.js';
 import {
@@ -16,6 +16,8 @@ import {
   PublishEventDto,
   ReceiveEventPrizeDto,
   RegisterEventTeamDto,
+  CreateEventTeamInviteDto,
+  AcceptEventTeamInviteDto,
   SubmitScoreDto,
 } from './events.dto.js';
 import { EventsService } from './events.service.js';
@@ -100,11 +102,44 @@ export class EventsController {
   }
 
   @Post(':id/partner-invites')
-  createPartnerInvite(
+  createPartnerInvite(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
+    return this.events.createPartnerInvite(id, actor);
+  }
+
+  @Post(':id/team-invites')
+  createTeamInvite(
     @Param('id') id: string,
+    @Body() dto: CreateEventTeamInviteDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.events.createPartnerInvite(id, actor);
+    return this.events.createTeamInvite(id, dto, actor);
+  }
+
+  @Public()
+  @Post(':id/team-invites/preview')
+  previewTeamInvite(
+    @Param('id') id: string,
+    @Body() dto: EventPartnerInviteCodeDto,
+  ) {
+    return this.events.previewTeamInvite(id, dto.partnerInviteCode);
+  }
+
+  @Post(':id/team-invites/context')
+  teamInviteContext(
+    @Param('id') id: string,
+    @Body() dto: EventPartnerInviteCodeDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.events.previewTeamInvite(id, dto.partnerInviteCode, actor);
+  }
+
+  @Post(':id/team-invites/accept')
+  acceptTeamInvite(
+    @Param('id') id: string,
+    @Body() dto: AcceptEventTeamInviteDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.events.acceptTeamInvite(id, dto, actor);
   }
 
   @Post(':id/partner-invites/preview')

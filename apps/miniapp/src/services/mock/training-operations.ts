@@ -459,7 +459,7 @@ const mockTrainingProductSummary = (product: any) =>
 
 export const mockTrainingProductView = (
   product: any,
-  options: { administrator?: boolean; coachOnly?: boolean } = {},
+  options: { showAssignments?: boolean; coachOnly?: boolean } = {},
 ) => ({
   ...mockTrainingProductSummary(product),
   enabled: product.enabled !== false,
@@ -476,7 +476,7 @@ export const mockTrainingProductView = (
       name: trainingClass.name,
       capacity: trainingClass.capacity,
       active: trainingClass.active !== false,
-      ...(options.administrator
+      ...(options.showAssignments
         ? {
             coachId: trainingClass.coachId || null,
             assistantId: trainingClass.assistantId || null,
@@ -610,6 +610,66 @@ export const decorateMockTrainingEnrollment = (
 
 export const mockTrainingSessionView = (session: any) => {
   const trainingClass = classContext(session.classId) || session.class;
+  const observedAt = new Date();
+  const windowConfiguration = (
+    key: string,
+    defaults: { earlyMinutes: number; lateMinutes: number },
+  ) => {
+    const parameter = getSystemParameters()
+      .filter(
+        (item: any) =>
+          item.key === key &&
+          new Date(item.effectiveFrom) <= observedAt &&
+          (!item.effectiveTo || new Date(item.effectiveTo) > observedAt),
+      )
+      .sort((left: any, right: any) =>
+        String(right.effectiveFrom).localeCompare(String(left.effectiveFrom)),
+      )[0];
+    const value = parameter?.value;
+    const valid =
+      value?.version === 1 &&
+      Number.isInteger(value.earlyMinutes) &&
+      value.earlyMinutes >= 0 &&
+      value.earlyMinutes <= 240 &&
+      Number.isInteger(value.lateMinutes) &&
+      value.lateMinutes >= 0 &&
+      value.lateMinutes <= 240;
+    return valid ? value : defaults;
+  };
+  const windowProjection = (
+    startsAt: unknown,
+    endsAt: unknown,
+    configuration: { earlyMinutes: number; lateMinutes: number },
+  ) => {
+    const opensAt = new Date(
+      new Date(String(startsAt)).getTime() -
+        configuration.earlyMinutes * 60_000,
+    );
+    const closesAt = new Date(
+      new Date(String(endsAt)).getTime() + configuration.lateMinutes * 60_000,
+    );
+    const state =
+      observedAt < opensAt
+        ? "NOT_OPEN"
+        : observedAt <= closesAt
+          ? "OPEN"
+          : "CLOSED";
+    return {
+      opensAt: opensAt.toISOString(),
+      closesAt: closesAt.toISOString(),
+      state,
+      mayHistoricallyOverride:
+        state === "CLOSED" && hasRole("ADMIN", "SUPER_ADMIN"),
+    };
+  };
+  const attendanceConfiguration = windowConfiguration(
+    "training.attendance_window.v1",
+    { earlyMinutes: 30, lateMinutes: 120 },
+  );
+  const completionConfiguration = windowConfiguration(
+    "training.completion_window.v1",
+    { earlyMinutes: 0, lateMinutes: 240 },
+  );
   return {
     id: session.id,
     classId: session.classId,
@@ -619,6 +679,16 @@ export const mockTrainingSessionView = (session: any) => {
     courtCount: session.courtCount ?? (session.courtIds || []).length,
     occupiedCourtHours: session.occupiedCourtHours,
     note: session.note || null,
+    attendanceWindow: windowProjection(
+      session.startsAt,
+      session.endsAt,
+      attendanceConfiguration,
+    ),
+    completionWindow: windowProjection(
+      session.endsAt,
+      session.endsAt,
+      completionConfiguration,
+    ),
     class: trainingClass
       ? {
           id: trainingClass.id || session.classId,

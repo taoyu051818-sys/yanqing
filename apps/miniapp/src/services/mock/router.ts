@@ -1,5 +1,7 @@
 import type { AppRole } from "../../types/domain";
-import { mockLogin, mockUser } from "./core";
+import { mockLogin, mockUser, updateMockProfile } from "./core";
+import { assertMockEventContacts, routeMockTeamInvites } from './event-signup';
+import { participantError, participantPhone } from '../../utils/event-signup';
 import {
   buildMockGoodsOrderItemSnapshot,
   mockConsignmentReconciliationTotals,
@@ -672,6 +674,45 @@ const mockCurrentlyEffective = (record: any, now = Date.now()) =>
   new Date(record.effectiveFrom).getTime() <= now &&
   (!record.effectiveTo || new Date(record.effectiveTo).getTime() > now);
 
+const mockOperatingShareSnapshot = (
+  businessType: string,
+  at = new Date(),
+) => {
+  const included = [
+    "VENUE",
+    "GAME",
+    "EVENT",
+    "TRAINING",
+    "GOODS",
+    "MEMBERSHIP",
+  ].includes(businessType);
+  const parameter = included
+    ? getSystemParameters()
+        .filter(
+          (item) =>
+            item.key === "finance.operating_share_rate_bps" &&
+            new Date(item.effectiveFrom) <= at &&
+            (!item.effectiveTo || new Date(item.effectiveTo) > at),
+        )
+        .sort((left, right) =>
+          String(right.effectiveFrom).localeCompare(String(left.effectiveFrom)),
+        )[0]
+    : null;
+  const rateBps = included ? Number(parameter?.value ?? 1_500) : 0;
+  if (!Number.isSafeInteger(rateBps) || rateBps < 0 || rateBps > 10_000)
+    throw new Error("经营分成比例配置无效");
+  return {
+    key: "finance.operating_share_rate_bps",
+    parameterId: parameter?.id || null,
+    rateBps,
+    businessType,
+    included,
+    basis: "REALIZED_NET_REVENUE",
+    effectiveFrom: parameter?.effectiveFrom || null,
+    effectiveTo: parameter?.effectiveTo || null,
+  };
+};
+
 const requireMasterVersion = (current: any, value: unknown) => {
   const expected = text(value);
   if (
@@ -1010,6 +1051,8 @@ const mockOrderResponse = (value: any) => {
     paidAt: value.paidAt,
     completedAt: value.completedAt,
     cancelledAt: value.cancelledAt,
+    paymentExpiresAt:
+      value.status === "PENDING" ? mockPendingDeadline(value) : undefined,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     member: value.member?.displayName
@@ -1083,6 +1126,30 @@ const mockOrderResponse = (value: any) => {
           category: team.category,
           status: team.status,
           paymentDueAt: team.paymentDueAt,
+          event: team.event
+            ? compact({
+                id: team.event.id,
+                name: team.event.name,
+                status: team.event.status,
+                startsAt: team.event.startsAt,
+              })
+            : undefined,
+        })
+      : undefined,
+    gameRegistration: value.gameRegistration
+      ? compact({
+          id: value.gameRegistration.id,
+          status: value.gameRegistration.status,
+          checkedInAt: value.gameRegistration.checkedInAt,
+          game: value.gameRegistration.game
+            ? compact({
+                id: value.gameRegistration.game.id,
+                title: value.gameRegistration.game.title,
+                status: value.gameRegistration.game.status,
+                startsAt: value.gameRegistration.game.startsAt,
+                endsAt: value.gameRegistration.game.endsAt,
+              })
+            : undefined,
         })
       : undefined,
   });
@@ -1667,9 +1734,7 @@ const trainingUnitRevenue = (enrollment: any) => {
   return Math.max(0, Math.round(total / Math.max(1, sessions)));
 };
 const startsAtDate = (date: string, minutes: number) => {
-  const hours = String(Math.floor(minutes / 60)).padStart(2, "0");
-  const mins = String(minutes % 60).padStart(2, "0");
-  return new Date(`${date}T${hours}:${mins}:00+08:00`);
+  return new Date(new Date(`${date}T00:00:00+08:00`).getTime() + minutes * 60_000);
 };
 
 /** Promote exactly one oldest waiting member after a seat is released. */
@@ -1678,6 +1743,8 @@ const promoteMockGameWaitlist = (game: any) => {
   const seated = registrations.filter((item: any) =>
     activeRegistrationStatuses.includes(item.status),
   );
+  game._count = { ...(game._count || {}), registrations: seated.length };
+  if (!['OPEN', 'FULL'].includes(game.status)) return null;
   if (seated.length >= gameCapacity(game)) return null;
   const next = registrations
     .filter((item: any) => item.status === "WAITLISTED" && !item.orderId)
@@ -1708,10 +1775,15 @@ const promoteMockGameWaitlist = (game: any) => {
     refundedCents: 0,
     createdAt: new Date().toISOString(),
     memberId: next.userId,
+    gameRegistration: {
+      id: next.id, status: next.status,
+      game: { id: game.id, title: game.title, status: game.status, startsAt: game.startsAt, endsAt: game.endsAt },
+    },
     parameterSnapshot: {
       gameId: game.id,
       hostId: game.hostId,
       promotedFromWaitlist: true,
+      operatingShare: mockOperatingShareSnapshot("GAME"),
     },
   };
   return { order, registration: next };
@@ -1792,6 +1864,7 @@ const promoteMockEventWaitlist = (
         eventTeamId: next.id,
         promotedFromWaitlist: true,
         paymentDueAt,
+        operatingShare: mockOperatingShareSnapshot("EVENT", now),
       },
     };
     Object.assign(next, {
@@ -1814,8 +1887,7 @@ const couponMerchantId = (coupon: any) =>
   coupon.template?.merchantId ||
   coupon.template?.merchant?.id;
 const couponTemplate = (coupon: any) =>
-  coupon.template ||
-  getCouponTemplates().find((item) => item.id === coupon.templateId);
+  getCouponTemplates().find((item) => item.id === coupon.templateId) || coupon.template;
 const requireEvent = (eventId: string) => {
   if (!getEvents().some((event) => event.id === eventId))
     throw new Error("赛事不存在");
@@ -1825,7 +1897,56 @@ const requireEvent = (eventId: string) => {
 const PUBLIC_GAME_STATUSES = ["OPEN", "FULL", "IN_PROGRESS", "COMPLETED"];
 const PUBLIC_EVENT_STATUSES = ["OPEN", "FULL", "IN_PROGRESS", "COMPLETED"];
 
-const publicGame = (game: any) => ({
+const publishedGameDetail = (id: string) => {
+  const game = getGames().find((item) => item.id === id && [...PUBLIC_GAME_STATUSES, 'CANCELLED'].includes(item.status));
+  if (!game) throw Object.assign(new Error('球局不存在或尚未发布'), { statusCode: 404 });
+  return game;
+};
+
+const gameDetail = (game: any) => {
+  const rows = game.registrations || [];
+  const pendingCount = rows.filter((item: any) => item.status === 'REGISTERED').length;
+  const confirmedCount = rows.filter((item: any) => ['PAID', 'CHECKED_IN', 'COMPLETED'].includes(item.status)).length;
+  const courts = getMockVenueCourts();
+  const courtIds = getVenueBookings().filter((item) => item.gameId === game.id).map((item) => item.courtId);
+  return {
+    id: game.id, title: game.title, level: game.level, status: game.status,
+    startsAt: game.startsAt, endsAt: game.endsAt || null, capacity: game.capacity, feeCents: game.feeCents,
+    newcomerOnly: Boolean(game.newcomerOnly), description: game.description || null,
+    host: game.host ? { displayName: game.host.displayName, avatarUrl: game.host.avatarUrl || null } : null,
+    courtNames: courts.filter((court: any) => courtIds.includes(court.id)).map((court: any) => court.name),
+    occupiedCount: pendingCount + confirmedCount, confirmedCount, pendingCount,
+    waitlistCount: rows.filter((item: any) => item.status === 'WAITLISTED').length,
+  };
+};
+
+const gameParticipants = (game: any) => {
+  if (!uni.getStorageSync('yanqing_access_token')) throw Object.assign(new Error('请登录后查看球友'), { statusCode: 401 });
+  const user = mockUser();
+  const rows = [...(game.registrations || [])].sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')) || String(a.id).localeCompare(String(b.id)));
+  const mine = rows.find((item) => item.userId === user.id);
+  const order = mine?.orderId ? getOrders().find((item) => item.id === mine.orderId && item.memberId === user.id) : null;
+  return {
+    participants: rows.filter((item) => ['PAID', 'CHECKED_IN', 'COMPLETED'].includes(item.status)).map((item) => ({
+      displayName: item.userId === user.id ? user.displayName : item.user?.displayName || item.displayName || '球友',
+      avatarUrl: (item.userId === user.id ? user.avatarUrl : item.user?.avatarUrl || item.avatarUrl) || null,
+      isMe: item.userId === user.id,
+    })),
+    myRegistration: mine ? {
+      id: mine.id, status: mine.status, order: order ? { id: order.id, status: order.status } : null,
+      waitlistPosition: mine.status === 'WAITLISTED' ? rows.filter((item) => item.status === 'WAITLISTED').findIndex((item) => item.id === mine.id) + 1 : null,
+    } : null,
+  };
+};
+
+const publicGame = (game: any) => {
+  const registration = (game.registrations || []).find(
+    (item: any) => item.userId === mockUser().id,
+  );
+  const order = registration?.orderId
+    ? getOrders().find((item: any) => item.id === registration.orderId)
+    : null;
+  return {
   id: game.id,
   title: game.title,
   level: game.level,
@@ -1845,7 +1966,15 @@ const publicGame = (game: any) => ({
   _count: {
     registrations: Number(game._count?.registrations || 0),
   },
-});
+  myRegistration: registration
+    ? {
+        id: registration.id,
+        status: registration.status,
+        orderStatus: order?.status || null,
+      }
+    : null,
+  };
+};
 
 const publicEvent = (event: any) => ({
   id: event.id,
@@ -1865,6 +1994,7 @@ const publicEvent = (event: any) => ({
 
 const publicEventRegistration = (registration: any, order?: any) => ({
   id: registration.id,
+  isCaptain: registration.captainId === mockUser().id,
   name: registration.name,
   playerAName: registration.playerAName,
   playerBName: registration.playerBName,
@@ -1947,7 +2077,23 @@ const publicEventDetail = (event: any) => ({
       : [],
 });
 
-const managedGame = (game: any) => ({
+const managedGame = (game: any) => {
+  const observedAt = new Date();
+  const configuration = mockOperationWindow(
+    "operations.game_check_in_window.v1",
+    { earlyMinutes: 30, lateMinutes: 30 },
+    observedAt,
+  );
+  const scheduled = new Date(game.startsAt).getTime();
+  const opensAt = new Date(scheduled - configuration.earlyMinutes * 60_000);
+  const closesAt = new Date(scheduled + configuration.lateMinutes * 60_000);
+  const state =
+    observedAt < opensAt
+      ? "NOT_OPEN"
+      : observedAt <= closesAt
+        ? "OPEN"
+        : "CLOSED";
+  return {
   id: game.id,
   code: game.code,
   title: game.title,
@@ -1986,7 +2132,15 @@ const managedGame = (game: any) => ({
       order: order ? { status: order.status } : null,
     };
   }),
-});
+  checkInWindow: {
+    opensAt: opensAt.toISOString(),
+    closesAt: closesAt.toISOString(),
+    state,
+    mayHistoricallyOverride:
+      state === "CLOSED" && hasMockRole("ADMIN", "SUPER_ADMIN"),
+  },
+  };
+};
 
 const gameCommandResponse = (game: any) => ({
   id: game.id,
@@ -2106,6 +2260,9 @@ const managedEventDetail = (event: any) => ({
       name: team.name,
       playerAName: team.playerAName,
       playerBName: team.playerBName,
+      playerAPhone: team.playerAPhone || null,
+      playerBPhone: team.playerBPhone || null,
+      captainPlays: team.captainPlays !== false,
       category: team.category,
       seed: team.seed,
       status: team.status,
@@ -2504,17 +2661,93 @@ const mockDataErasureRequestView = (
     : null,
 });
 
+function mockPendingDeadline(order: any) {
+  const domain = order.bookings?.[0]?.holdExpiresAt || order.eventTeam?.paymentDueAt || order.trainingEnrollment?.seatReservedUntil;
+  if (domain) return domain;
+  return ['GAME','TRAINING','MEMBERSHIP','RECHARGE','GOODS'].includes(order.businessType) && order.createdAt
+    ? new Date(new Date(order.createdAt).getTime() + 15 * 60_000).toISOString() : null;
+}
+function mockPaymentOptions(order: any) {
+  const deadline = mockPendingDeadline(order), now = Date.now();
+  let reason = order.status !== 'PENDING' ? '订单已不在待付款状态' : deadline && new Date(deadline).getTime() <= now ? '支付保留期已过，请重新下单' : '';
+  if (order.businessType === 'VENUE' && order.parameterSnapshot?.couponId) {
+    const coupon = getCoupons().find(item => item.id === order.parameterSnapshot.couponId);
+    const template = coupon && couponTemplate(coupon);
+    if (template && !template.code?.startsWith('NEWCOMER') && !template.allowVenueBooking) reason ||= '此商户券不可抵扣订场，请取消后重新下单';
+  }
+  if (order.businessType === 'GOODS') for (const item of order.items || []) {
+    const goods = getGoods().find(row => row.id === item.itemId);
+    if (!goods || !goods.enabled || goods.stock < item.quantity) reason ||= '商品库存不足或已下架';
+  }
+  const parameter = activeMockParameter('badminton_coin.cent_value');
+  const centValue = typeof parameter?.value === 'number' ? parameter.value : 1;
+  return { orderId: order.id, payableCents: order.payableCents, paymentExpiresAt: deadline,
+    quotedAt: new Date().toISOString(), options: ['WECHAT','CASH_PRINCIPAL','GIFT_BALANCE','BADMINTON_COIN'].map(channel => {
+      const account = mockUser().accounts?.find(item => item.type === channel);
+      const availableBalance = Math.max(0, Number(account?.balance || 0) - Number(account?.frozenBalance || 0));
+      const debitAmount = channel === 'BADMINTON_COIN' ? Math.ceil(order.payableCents / (centValue > 0 ? centValue : 1)) : order.payableCents;
+      const unavailable = reason || (channel !== 'WECHAT' && order.businessType === 'RECHARGE' ? '充值不能使用已有余额支付'
+        : channel === 'BADMINTON_COIN' && (!Number.isFinite(centValue) || centValue <= 0) ? '抵扣规则暂不可用'
+        : channel !== 'WECHAT' && availableBalance < debitAmount ? '可用余额不足（冻结余额不可使用）' : '');
+      return { channel, enabled: !unavailable, reason: unavailable, debitAmount, availableBalance, unit: channel === 'BADMINTON_COIN' ? 'COIN' : 'CENT' };
+    }),
+  };
+}
+function expireMockPurchases() {
+  const orders = getOrders(), games = getGames(), enrollments = getEnrollments();
+  let changed = false;
+  const pendingEvents = [...new Set(orders.filter(order => order.status === 'PENDING' && order.businessType === 'EVENT').map(order => order.eventId || order.parameterSnapshot?.eventId).filter(Boolean))];
+  for (const eventId of pendingEvents) {
+    const detail = requireEvent(eventId);
+    if (!(detail.teams || []).some((team: any) => team.status === 'REGISTERED' && team.paymentDueAt && new Date(team.paymentDueAt).getTime() <= Date.now() && orders.some(order => order.id === team.orderId && order.status === 'PENDING'))) continue;
+    const result = promoteMockEventWaitlist(detail, orders);
+    if (result.expiredCount || result.promotions.length) { saveEventDetail(detail); changed = true; }
+  }
+  for (const order of [...orders]) {
+    if (order.status !== 'PENDING' || !['GAME','TRAINING','MEMBERSHIP','RECHARGE','GOODS'].includes(order.businessType)) continue;
+    const deadline = mockPendingDeadline(order);
+    if (!deadline || new Date(deadline).getTime() > Date.now()) continue;
+    if (order.businessType === 'GAME') {
+      const game = games.find(item => item.registrations?.some((row: any) => row.orderId === order.id));
+      const registration = game?.registrations?.find((row: any) => row.orderId === order.id);
+      if (registration?.status !== 'REGISTERED') continue;
+      registration.status = 'CANCELLED';
+      const promoted = promoteMockGameWaitlist(game);
+      if (promoted) orders.unshift(promoted.order);
+    }
+    if (order.businessType === 'TRAINING') {
+      const enrollment = enrollments.find(item => item.orderId === order.id || item.id === order.trainingEnrollmentId);
+      if (enrollment) { enrollment.status = 'CANCELLED'; enrollment.seatReservedUntil = null; }
+    }
+    if (order.businessType === 'MEMBERSHIP' && order.membership) order.membership.status = 'CANCELLED';
+    order.status = 'CANCELLED'; order.cancelledAt = new Date().toISOString();
+    changed = true;
+    saveMockMasterAudit({ action: order.businessType + '_ORDER_AUTO_CANCELLED', objectType: 'Order', objectId: order.id,
+      requestId: 'AUTO:PURCHASE_ORDER:' + order.id, commandHash: 'expired', oldValue: { status: 'PENDING' },
+      newValue: { status: 'CANCELLED' }, reason: '订单支付保留期届满' });
+  }
+  if (changed) { saveOrders(orders); saveGames(games); saveEnrollments(enrollments); }
+}
+
 export async function mockRequest<T>(
   method: string,
   url: string,
   data: any = {},
 ): Promise<T> {
   await new Promise((resolve) => setTimeout(resolve, 120));
+  expireMockPurchases();
   if (url === "/auth/wechat-login") return ok(mockLogin("MEMBER"));
   if (url === "/auth/dev-login")
     return ok(mockLogin((data.role || "MEMBER") as AppRole));
   if (url === "/auth/me") return ok(mockUser());
+  if (url === "/auth/profile" && method === "PATCH") {
+    const displayName = text(data.displayName);
+    if (!displayName || displayName.length > 40) throw new Error("微信昵称需为1-40个字符");
+    return ok(updateMockProfile(displayName));
+  }
   const trainingOperation = routeMockTrainingOperations(method, url, data);
+  const teamInviteOperation = routeMockTeamInvites(method, url, data);
+  if (teamInviteOperation.handled) return ok(teamInviteOperation.value);
   if (trainingOperation.handled) return ok(trainingOperation.value);
   const consignmentOperation = routeMockConsignmentSettlement(
     method,
@@ -2546,6 +2779,14 @@ export async function mockRequest<T>(
       throw new Error("培训计入场馆合同收入比例锁定为20%");
     if (key === "training.venue_fee_cents" && Number(data.value) !== 0)
       throw new Error("培训不得另收场地费");
+    if (
+      key === "finance.operating_share_rate_bps" &&
+      (text(data.type) !== "INTEGER" ||
+        !Number.isSafeInteger(data.value) ||
+        Number(data.value) < 0 ||
+        Number(data.value) > 10_000)
+    )
+      throw new Error("经营分成比例必须为0-10000的整数基点");
     const parameters = getSystemParameters();
     const current = parameters
       .filter((item) => item.key === key)
@@ -3360,7 +3601,15 @@ export async function mockRequest<T>(
 
     const allOrders = getOrders();
     const operationalOrders = allOrders.filter(
-      (order) => order.createdById === shift.operatorId,
+      (order) =>
+        order.createdById === shift.operatorId ||
+        (order.businessType === "VENUE" &&
+          (order.bookings || []).some(
+            (booking: any) =>
+              booking.status !== "CANCELLED" &&
+              mockShanghaiBusinessDate(new Date(booking.startsAt)) ===
+                shift.businessDateLabel,
+          )),
     );
     const cashOrders = allOrders.filter(
       (order) =>
@@ -3404,9 +3653,13 @@ export async function mockRequest<T>(
     if (expectedCashCents < 0)
       throw new Error("现金退款超过备用金与现金收款，请先由财务核对异常");
     const pendingOrders = operationalOrders.filter((order) =>
-      ["PENDING", "PAID", "REFUND_PENDING", "PARTIALLY_REFUNDED"].includes(
-        order.status,
-      ),
+      [
+        "PENDING",
+        "PAID",
+        "CHECKED_IN",
+        "REFUND_PENDING",
+        "PARTIALLY_REFUNDED",
+      ].includes(order.status),
     );
     const pendingRefunds = allOrders.flatMap((order) =>
       (order.refunds || [])
@@ -3585,6 +3838,24 @@ export async function mockRequest<T>(
   if (url === "/work-items") {
     const roles = mockRoles();
     if (roles.every((role) => role === "MEMBER")) return ok([]);
+    const workItemGroup = (kind: string) =>
+      ({
+        CUSTOMER_LEAD_SLA: "CUSTOMER",
+        HOST_APPLICATION_REVIEW: "CUSTOMER",
+        ACCOUNT_ADJUSTMENT_REVIEW: "REFUND",
+        REFUND_REVIEW: "REFUND",
+        TRAINING_CONSUME_CORRECTION_REVIEW: "TRAINING",
+        TRAINING_SESSION_OPERATION: "TRAINING",
+        TRAINING_ATTENDANCE: "TRAINING",
+        TRAINING_SETTLEMENT: "RECONCILIATION",
+        CONSIGNMENT_SETTLEMENT: "RECONCILIATION",
+        EVENT_SCORE: "EVENT",
+        ALLIANCE_SETTLEMENT: "RECONCILIATION",
+        GAME_OPERATION: "FULFILLMENT",
+        ORDER_FULFILLMENT: "FULFILLMENT",
+        LOW_STOCK: "INVENTORY",
+        DATA_ERASURE_REVIEW: "GOVERNANCE",
+      })[kind];
     const customerItems = getCustomerLeads()
       .filter(
         (lead) =>
@@ -3736,25 +4007,103 @@ export async function mockRequest<T>(
     const fulfillmentItems = getOrders()
       .filter(
         (order) =>
-          order.businessType === "VENUE" &&
-          ["PENDING", "PAID", "CHECKED_IN", "REFUND_PENDING"].includes(
-            order.status,
-          ),
+          ["VENUE", "EVENT"].includes(order.businessType) &&
+          ["PAID", "CHECKED_IN", "REFUND_PENDING"].includes(order.status),
       )
-      .map((order) => ({
-        id: `order-fulfillment:${order.id}`,
-        kind: "ORDER_FULFILLMENT",
-        objectType: "Order",
-        objectId: order.id,
-        status: order.status,
-        priority: order.status === "PAID" ? 85 : 65,
-        title: `场地订单待履约 · ${order.orderNo}`,
-        description: order.title || "待现场处理",
-        ownerRoles: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
-        createdAt: order.createdAt,
-        action: `/packages/ops/pages/frontdesk/index?focus=order&orderId=${order.id}`,
-        metadata: { orderId: order.id },
-      }));
+      .map((order) => {
+        const page =
+          order.businessType === "GAME"
+            ? "host"
+            : order.businessType === "EVENT"
+              ? "event"
+              : "frontdesk";
+        const ownerRoles =
+          order.businessType === "GAME"
+            ? ["HOST", "ADMIN", "SUPER_ADMIN"]
+            : order.businessType === "EVENT"
+              ? ["EVENT_MANAGER", "ADMIN", "SUPER_ADMIN"]
+              : ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"];
+        return {
+          id: `order-fulfillment:${order.id}`,
+          kind: "ORDER_FULFILLMENT",
+          objectType: "Order",
+          objectId: order.id,
+          status: order.status,
+          priority: order.status === "CHECKED_IN" ? 85 : 75,
+          title: `${order.status === "CHECKED_IN" ? "已签到待完成" : "已开场待签到"} · ${order.orderNo}`,
+          description: order.title || "待现场处理",
+          ownerRoles,
+          createdAt: order.createdAt,
+          action: `/packages/ops/pages/${page}/index?focus=fulfillment&orderId=${order.id}`,
+          metadata: { orderId: order.id, businessType: order.businessType },
+        };
+      });
+    const gameOperationItems = getGames()
+      .filter(
+        (game) =>
+          ["OPEN", "FULL", "IN_PROGRESS"].includes(game.status) &&
+          new Date(game.startsAt) <= new Date() &&
+          (!roles.includes("HOST") ||
+            hasMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN") ||
+            game.hostId === mockUser().id),
+      )
+      .map((game) => {
+        const registrations = (game.registrations || []).filter((entry: any) =>
+          ["PAID", "CHECKED_IN"].includes(entry.status),
+        );
+        const ended = new Date(game.endsAt) <= new Date();
+        return {
+          id: `game-operation:${game.id}`,
+          kind: "GAME_OPERATION",
+          objectType: "Game",
+          objectId: game.id,
+          status: game.status,
+          priority: ended ? 90 : 84,
+          title: `${ended ? "球局待完赛" : "球局现场待处理"} · ${game.title}`,
+          description: `${registrations.length} 名已支付/签到 · 主理人现场队列`,
+          ownerRoles: ["HOST", "FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
+          createdAt: game.startsAt,
+          dueAt: ended ? game.endsAt : game.startsAt,
+          action: `/packages/ops/pages/host/index?focus=game&gameId=${game.id}`,
+          metadata: { gameId: game.id, hostId: game.hostId },
+        };
+      });
+    const trainingSessionItems = getTrainingSessions()
+      .filter(
+        (trainingSession) =>
+          ["SCHEDULED", "IN_PROGRESS"].includes(trainingSession.status) &&
+          new Date(trainingSession.startsAt).getTime() <= Date.now(),
+      )
+      .map((trainingSession) => {
+        const pendingAttendanceCount = getEnrollments().filter(
+          (enrollment) =>
+            enrollment.classId === trainingSession.classId &&
+            (enrollment.attendances || []).some(
+              (attendance: any) =>
+                attendance.sessionId === trainingSession.id &&
+                attendance.status === "PENDING",
+            ),
+        ).length;
+        const ended = new Date(trainingSession.endsAt).getTime() <= Date.now();
+        return {
+          id: `training-session-operation:${trainingSession.id}`,
+          kind: "TRAINING_SESSION_OPERATION",
+          objectType: "TrainingSession",
+          objectId: trainingSession.id,
+          status: trainingSession.status,
+          priority: ended ? 91 : 83,
+          title: `${ended ? "课次待结课" : "课次待点名"} · ${trainingSession.class?.name || "培训课次"}`,
+          description: `${pendingAttendanceCount} 名待登记 · 完成点名后提交消课建议`,
+          ownerRoles: ["COACH", "FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
+          createdAt: trainingSession.startsAt,
+          dueAt: ended ? trainingSession.endsAt : trainingSession.startsAt,
+          action: `/packages/ops/pages/coach/index?focus=session&sessionId=${trainingSession.id}`,
+          metadata: {
+            sessionId: trainingSession.id,
+            pendingAttendanceCount,
+          },
+        };
+      });
     const lowStockItems = getGoods()
       .filter(
         (item) =>
@@ -3801,22 +4150,9 @@ export async function mockRequest<T>(
       ...trainingSettlementItems,
       ...consignmentSettlementItems,
       ...refundItems,
+      ...gameOperationItems,
       ...fulfillmentItems,
-      {
-        id: "training:mock-1",
-        kind: "TRAINING_ATTENDANCE",
-        objectType: "TrainingAttendance",
-        objectId: "attendance-1",
-        status: "PENDING",
-        priority: 80,
-        title: "培训点名/消课 · 周三晚进阶班",
-        description: "1 名学员待登记出勤或提交消课建议",
-        ownerRoles: ["COACH", "FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
-        createdAt: new Date().toISOString(),
-        action:
-          "/packages/ops/pages/coach/index?focus=attendance&id=attendance-1&sessionId=session-1",
-        metadata: { attendanceId: "attendance-1", sessionId: "session-1" },
-      },
+      ...trainingSessionItems,
       {
         id: "event:mock-1",
         kind: "EVENT_SCORE",
@@ -3851,7 +4187,10 @@ export async function mockRequest<T>(
     return ok(
       items.filter((item) =>
         item.ownerRoles.some((role: string) => roles.includes(role as AppRole)),
-      ),
+      ).map((item) => ({
+        ...item,
+        group: workItemGroup(item.kind),
+      })),
     );
   }
   if (url === "/venues/closures" && method === "GET") {
@@ -4520,6 +4859,7 @@ export async function mockRequest<T>(
           slotPeriod: slot.period,
         };
       } else {
+        if (!template?.allowVenueBooking) throw new Error('此券仅限所属商户消费，不可抵扣订场');
         payableCents = Math.max(
           0,
           payableCents - Number(template?.faceValueCents || 0),
@@ -4534,6 +4874,7 @@ export async function mockRequest<T>(
       id: newId("booking"),
       orderId,
       courtId: court.id,
+      court: { id: court.id, name: court.name },
       memberId: targetMember.id,
       status: "HELD",
       startsAt: startsAt.toISOString(),
@@ -4583,6 +4924,7 @@ export async function mockRequest<T>(
         operatorAssisted: assisted,
         frontDeskShiftId: assistedShift?.id || null,
         adminEmergencyBypass: assisted && !assistedShift,
+        operatingShare: mockOperatingShareSnapshot("VENUE"),
       },
     };
     saveVenueBookings([booking, ...getVenueBookings()]);
@@ -4591,9 +4933,14 @@ export async function mockRequest<T>(
   }
   if (url === "/orders") {
     const mine = getOrders().filter(
-      (order) => order.memberId === mockUser().id || !order.memberId,
+      (order) => (order.memberId === mockUser().id || !order.memberId) &&
+        (!data.status || order.status === data.status) &&
+        (!data.businessType || order.businessType === data.businessType),
     );
-    return ok({ items: mine.map(mockOrderResponse), total: mine.length });
+    const page = Math.max(1, Number(data.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(data.pageSize) || 20));
+    const sorted = [...mine].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return ok({ items: sorted.slice((page - 1) * pageSize, page * pageSize).map(mockOrderResponse), total: mine.length, page, pageSize });
   }
   if (url === "/orders/admin/all") {
     requireMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
@@ -4601,6 +4948,12 @@ export async function mockRequest<T>(
       items: getOrders().map(mockOrderResponse),
       total: getOrders().length,
     });
+  }
+  const optionsMatch = url.match(/^\/orders\/([^/]+)\/payment-options$/);
+  if (optionsMatch && method === 'GET') {
+    const order = getOrders().find(item => item.id === optionsMatch[1]);
+    if (!order || (order.memberId && order.memberId !== mockUser().id)) throw new Error('订单不存在或不属于当前账号');
+    return ok(mockPaymentOptions(order));
   }
   const orderDetailMatch = url.match(/^\/orders\/([^/]+)$/);
   if (orderDetailMatch && method === "GET") {
@@ -4612,6 +4965,90 @@ export async function mockRequest<T>(
       !hasMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN")
     )
       throw new Error("无权查看该订单");
+    return ok(mockOrderResponse(order));
+  }
+  const cancelPendingOrderMatch = url.match(/^\/orders\/([^/]+)\/cancel$/);
+  if (cancelPendingOrderMatch && method === "POST") {
+    requireIdempotencyKey(data.idempotencyKey, "取消订单幂等键");
+    const orders = getOrders();
+    const order = orders.find((item) => item.id === cancelPendingOrderMatch[1]);
+    if (!order) throw new Error("订单不存在");
+    if (
+      order.memberId &&
+      order.memberId !== mockUser().id &&
+      !hasMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN")
+    ) {
+      throw new Error("仅会员本人、前台或管理员可取消待支付订单");
+    }
+    if (!['VENUE', 'GAME', 'TRAINING', 'MEMBERSHIP', 'RECHARGE', 'GOODS'].includes(order.businessType))
+      throw new Error('请从赛事报名详情退出');
+    if (order.status === "CANCELLED") return ok(mockOrderResponse(order));
+    if (order.status !== "PENDING")
+      throw new Error("订单已进入支付或履约流程，不能直接取消");
+    if (order.businessType === 'GAME') {
+      const games = getGames();
+      const game = games.find((item) => (item.registrations || []).some((row: any) => row.orderId === order.id));
+      const registration = game?.registrations?.find((item: any) => item.orderId === order.id);
+      if (!game || registration?.status !== 'REGISTERED') throw new Error('球局报名状态已经变化，请刷新后重试');
+      if (Number(order.paidCents || 0) > 0) throw new Error('订单已经支付，请刷新后按退款流程处理');
+      order.status = 'CANCELLED';
+      order.cancelledAt = new Date().toISOString();
+      order.paymentStatus = order.paymentStatus ? 'CLOSED' : order.paymentStatus;
+      registration.status = 'CANCELLED';
+      if (order.gameRegistration) order.gameRegistration.status = 'CANCELLED';
+      const promoted = promoteMockGameWaitlist(game);
+      saveGames(games);
+      saveOrders(promoted ? [promoted.order, ...orders] : orders);
+      saveMockMasterAudit({
+        action: 'GAME_ORDER_CANCELLED_BY_USER', objectType: 'Order', objectId: order.id,
+        requestId: text(data.idempotencyKey), oldValue: { status: 'PENDING' },
+        commandHash: creationCommandHash({ kind: 'GAME_ORDER_CANCEL', orderId: order.id, reason: text(data.reason) || '用户取消待支付球局订单' }),
+        newValue: { status: 'CANCELLED', gameId: game.id, registrationStatus: 'CANCELLED', promotedRegistrationId: promoted?.registration.id || null },
+        reason: text(data.reason) || '用户取消待支付球局订单',
+      });
+      return ok(mockOrderResponse(order));
+    }
+    const cancelledAt = new Date().toISOString();
+    if (order.businessType === 'TRAINING') {
+      const enrollments = getEnrollments();
+      const enrollment = enrollments.find(item => item.orderId === order.id || item.id === order.trainingEnrollmentId);
+      if (!enrollment || enrollment.status !== 'PENDING_PAYMENT') throw new Error('课程报名状态已经变化');
+      enrollment.status = 'CANCELLED'; enrollment.seatReservedUntil = null;
+      saveEnrollments(enrollments);
+    }
+    if (order.businessType === 'MEMBERSHIP' && order.membership) order.membership.status = 'CANCELLED';
+    order.status = "CANCELLED";
+    order.cancelledAt = cancelledAt;
+    order.paymentStatus = order.paymentStatus ? "CLOSED" : order.paymentStatus;
+    order.bookings = (order.bookings || []).map((booking: any) => ({
+      ...booking,
+      status: booking.status === "HELD" ? "CANCELLED" : booking.status,
+      holdExpiresAt: null,
+    }));
+    saveVenueBookings(getVenueBookings().map((booking: any) =>
+      booking.orderId === order.id && booking.status === "HELD"
+        ? { ...booking, status: "CANCELLED", holdExpiresAt: null }
+        : booking,
+    ));
+    saveOrders(orders);
+    saveMockMasterAudit({
+      action: order.businessType + "_ORDER_CANCELLED_BY_USER",
+      objectType: "Order",
+      objectId: order.id,
+      requestId: text(data.idempotencyKey),
+      commandHash: creationCommandHash({
+        kind: order.businessType + "_ORDER_CANCEL",
+        orderId: order.id,
+        reason: text(data.reason) || "用户取消待支付订单",
+      }),
+      oldValue: { status: "PENDING" },
+      newValue: {
+        status: "CANCELLED",
+        bookingStatus: "CANCELLED",
+        cancelledAt,
+      },
+      reason: text(data.reason) || "用户取消待支付订单",
+    });
     return ok(mockOrderResponse(order));
   }
   const payMatch = url.match(/^\/orders\/([^/]+)\/pay$/);
@@ -4691,6 +5128,9 @@ export async function mockRequest<T>(
       return ok(mockPaymentCommandResponse(order));
     if (order.status !== "PENDING")
       throw new Error(`订单当前状态为 ${order.status}，不能支付`);
+    const option = mockPaymentOptions(order).options.find(item => item.channel === channel);
+    if (option && !option.enabled) throw new Error(option.reason);
+    if (option && data.expectedDebitAmount !== undefined && data.expectedDebitAmount !== option.debitAmount) throw new Error('抵扣报价已变化，请重新核对');
     const paymentShift =
       channel === "OFFLINE_CASH" ? requireMockOpenFrontDeskShift() : null;
     let trainingEnrollmentToActivate: any;
@@ -4787,6 +5227,21 @@ export async function mockRequest<T>(
       saveInventoryBalances(balances);
       if (movements.length)
         saveInventoryTransactions([...movements, ...transactions]);
+    }
+    if (['CASH_PRINCIPAL','GIFT_BALANCE','BADMINTON_COIN'].includes(channel)) {
+      const accountBook = getMemberAccounts();
+      const memberId = order.memberId || mockUser().id;
+      const accounts = accountBook[memberId] || mockUser().accounts?.map(item => ({ ...item })) || [];
+      const account = accounts.find(item => item.type === channel)!;
+      const amount = option!.debitAmount, balanceBefore = account.balance;
+      account.balance -= amount; account.version = Number(account.version || 0) + 1;
+      accountBook[memberId] = accounts;
+      saveMemberAccounts(accountBook);
+      saveMemberAccountTransactions([{ id: newId('account-txn'), accountId: account.id, kind: 'DEBIT',
+        amount: -amount, balanceBefore, balanceAfter: account.balance, reasonCode: 'ORDER_PAYMENT',
+        orderId: order.id, operatorId: mockUser().id, idempotencyKey: 'ACCOUNT:' + paymentKey,
+        createdAt: new Date().toISOString(), metadata: { paymentChannel: channel, cashValueCents: order.payableCents },
+      }, ...getMemberAccountTransactions()]);
     }
     order.status = "PAID";
     order.paidCents = order.payableCents;
@@ -5241,6 +5696,25 @@ export async function mockRequest<T>(
       saveMemberAccounts(accountBook);
       saveMemberAccountTransactions(transactions);
     }
+    // Restore the original asset, using the captured debit rather than today's coin rate.
+    const paymentDebit = getMemberAccountTransactions().find(item => item.orderId === order.id && item.reasonCode === 'ORDER_PAYMENT');
+    if (paymentDebit) {
+      const transactions = getMemberAccountTransactions();
+      const ledgerKey = 'ORDER-REFUND:' + refund.id;
+      if (!transactions.some(item => item.idempotencyKey === ledgerKey)) {
+        const book = getMemberAccounts(), account = (book[order.memberId] || []).find(item => item.id === paymentDebit.accountId);
+        if (!account) throw new Error('原支付账户不存在，退款需人工核查');
+        const originalUnits = Math.abs(Number(paymentDebit.amount)), paid = Number(order.paidCents);
+        const previousRefund = Number(order.refundedCents || 0), nextRefund = previousRefund + Number(refund.amountCents);
+        const amount = Math.floor(originalUnits * nextRefund / paid) - Math.floor(originalUnits * previousRefund / paid);
+        const balanceBefore = Number(account.balance);
+        account.balance += amount; account.version = Number(account.version || 0) + 1;
+        transactions.unshift({ id: newId('account-txn'), accountId: account.id, kind: 'REVERSAL', amount,
+          balanceBefore, balanceAfter: account.balance, orderId: order.id, reasonCode: 'ORDER_REFUND',
+          reason: refund.reason, idempotencyKey: ledgerKey, operatorId: mockUser().id, createdAt: new Date().toISOString() });
+        saveMemberAccounts(book); saveMemberAccountTransactions(transactions);
+      }
+    }
     refund.status = "SUCCEEDED";
     refund.approvedAt = new Date().toISOString();
     refund.completedAt = refund.approvedAt;
@@ -5568,6 +6042,11 @@ export async function mockRequest<T>(
   const reviewHostMatch = url.match(
     /^\/games\/hosts\/([^/]+)\/(approve|reject)$/,
   );
+  const gameDetailMatch = url.match(/^\/games\/([^/]+)(\/participants)?$/);
+  if (gameDetailMatch && method === 'GET') {
+    const game = publishedGameDetail(decodeURIComponent(gameDetailMatch[1]));
+    return ok(gameDetailMatch[2] ? gameParticipants(game) : gameDetail(game));
+  }
   if (reviewHostMatch && method === "POST") {
     requireMockRole("ADMIN", "SUPER_ADMIN");
     const [, userId, action] = reviewHostMatch;
@@ -5660,6 +6139,7 @@ export async function mockRequest<T>(
             userId,
             displayName: mockUser().displayName,
             status: "WAITLISTED",
+            createdAt: new Date().toISOString(),
           };
       game.registrations = existing
         ? registrations.map((item: any) =>
@@ -5688,6 +6168,7 @@ export async function mockRequest<T>(
           displayName: mockUser().displayName,
           status: "REGISTERED",
           orderId,
+          createdAt: new Date().toISOString(),
         };
     game.registrations = existing
       ? registrations.map((item: any) =>
@@ -5712,7 +6193,22 @@ export async function mockRequest<T>(
       createdAt: new Date().toISOString(),
       memberId: userId,
       member: { displayName: mockUser().displayName },
-      parameterSnapshot: { gameId: game.id, hostId: game.hostId },
+      gameRegistration: {
+        id: registration.id,
+        status: registration.status,
+        game: {
+          id: game.id,
+          title: game.title,
+          status: game.status,
+          startsAt: game.startsAt,
+          endsAt: game.endsAt,
+        },
+      },
+      parameterSnapshot: {
+        gameId: game.id,
+        hostId: game.hostId,
+        operatingShare: mockOperatingShareSnapshot("GAME"),
+      },
     };
     saveGames(list);
     const orders = getOrders();
@@ -6419,12 +6915,16 @@ export async function mockRequest<T>(
   }
   const registerEventMatch = url.match(/^\/events\/([^/]+)\/register$/);
   if (registerEventMatch && method === "POST") {
-    const memberSelfService = isMockMemberSelfService();
+    const memberSelfService = isMockMemberSelfService() || Boolean(data.registrationMode);
+    if (memberSelfService) requireMockRole("MEMBER");
+    const manual = data.registrationMode === 'MANUAL';
+    const captainPlays = manual ? data.captainPlays !== false : true;
+    let playerAPhone = participantPhone(data.playerAPhone), playerBPhone = participantPhone(data.playerBPhone);
     const creation = beginMockOrderCreation(data.creationIdempotencyKey, {
       kind: "EVENT_REGISTRATION",
       eventId: registerEventMatch[1],
       name: text(data.name),
-      ...(memberSelfService
+      ...(memberSelfService && !manual
         ? { partnerInviteCode: text(data.partnerInviteCode) }
         : {
             playerAName: text(data.playerAName),
@@ -6434,6 +6934,7 @@ export async function mockRequest<T>(
           }),
       category: text(data.category),
       sourceChannel: text(data.sourceChannel) || "MINI_PROGRAM",
+      ...(manual ? { registrationMode: 'MANUAL', captainPlays, playerAPhone, playerBPhone, consent: data.consent } : {}),
     });
     if (creation.tracked && creation.replayed) return ok(creation.response);
     const detail = requireEvent(registerEventMatch[1]);
@@ -6451,7 +6952,14 @@ export async function mockRequest<T>(
     let playerBUserId = text(data.playerBUserId);
     let partnerInvite: any = null;
     let partnerInviteBook: any[] = [];
-    if (memberSelfService) {
+    if (memberSelfService && manual) {
+      if (text(data.partnerInviteCode) || text(data.playerBUserId) || (text(data.playerAUserId) && data.playerAUserId !== mockUser().id)) throw new Error('代填报名不能直接绑定他人账号或同时使用邀请')
+      if (data.consent !== true) throw new Error('请确认已征得两位选手同意')
+      const error = participantError(playerAName, playerAPhone) || participantError(playerBName, playerBPhone)
+      if (error) throw new Error(error)
+      playerAUserId = captainPlays ? mockUser().id : ''
+      playerBUserId = ''
+    } else if (memberSelfService) {
       const partnerInviteCode = text(data.partnerInviteCode);
       if (!partnerInviteCode)
         throw new Error("会员报名必须填写搭档本人生成的授权码");
@@ -6477,14 +6985,19 @@ export async function mockRequest<T>(
         throw new Error("搭档授权码无效、已使用或已过期");
       if (partnerInvite.partnerId === mockUser().id)
         throw new Error("不能使用自己生成的搭档授权码");
-      playerAName = mockUser().displayName;
-      playerBName = partnerInvite.partnerDisplayName;
+      if (!partnerInvite.partnerId) throw new Error('搭档尚未确认邀请')
+      if (partnerInvite.captainId && partnerInvite.captainId !== mockUser().id) throw new Error('这份邀请只能由发起的队长提交报名')
+      if (partnerInvite.captainId && (partnerInvite.teamName !== teamName || partnerInvite.category !== data.category)) throw new Error('队名或组别与邀请不一致，请重新发起')
+      playerAName = partnerInvite.playerAName || mockUser().displayName;
+      playerBName = partnerInvite.playerBName || partnerInvite.partnerDisplayName;
+      playerAPhone = partnerInvite.playerAPhone || '';
+      playerBPhone = partnerInvite.playerBPhone || '';
       playerAUserId = mockUser().id;
       playerBUserId = partnerInvite.partnerId;
     }
     if (!teamName || !playerAName || !playerBName)
       throw new Error("固定双打必须填写队名和两名队员");
-    if (playerAName.toLocaleLowerCase() === playerBName.toLocaleLowerCase())
+    if (playerAName.toLocaleLowerCase() === playerBName.toLocaleLowerCase() && !(playerAPhone && playerBPhone && playerAPhone !== playerBPhone))
       throw new Error("固定双打的两名队员不能相同");
     if (playerBUserId && playerAUserId === playerBUserId)
       throw new Error("固定双打的两名账号不能相同");
@@ -6506,6 +7019,7 @@ export async function mockRequest<T>(
     );
     if (existing) throw new Error("当前用户已参加本赛事");
     const participantIds = [playerAUserId, playerBUserId].filter(Boolean);
+    assertMockEventContacts(detail, [playerAPhone, playerBPhone], participantIds);
     const duplicateParticipant = (detail.teams || []).some(
       (team: any) =>
         [...activeTeamStatuses, "WAITLISTED"].includes(team.status) &&
@@ -6531,6 +7045,7 @@ export async function mockRequest<T>(
       captainId: currentUserId,
       playerAUserId,
       playerBUserId: playerBUserId || null,
+      ...(manual || playerAPhone || playerBPhone ? { registrationMode: manual ? 'MANUAL' : 'INVITE', captainPlays, playerAPhone, playerBPhone } : {}),
       orderId,
       createdAt,
       waitlistedAt: shouldWaitlist ? createdAt : null,
@@ -6550,6 +7065,12 @@ export async function mockRequest<T>(
       partnerInvite.consumedAt = createdAt;
       partnerInvite.consumedTeamId = team.id;
       saveEventPartnerInvites(partnerInviteBook);
+    } else if (manual) {
+      const outstanding = getEventPartnerInvites();
+      outstanding.forEach((item: any) => {
+        if (item.eventId === detail.id && item.captainId === currentUserId && !item.consumedAt && !item.revokedAt) item.revokedAt = createdAt;
+      });
+      saveEventPartnerInvites(outstanding);
     }
     detail.teams = [...(detail.teams || []), team];
     if (shouldWaitlist) {
@@ -6579,10 +7100,20 @@ export async function mockRequest<T>(
       createdAt,
       memberId: currentUserId,
       member: { displayName: mockUser().displayName },
+      eventTeam: {
+        ...team,
+        event: {
+          id: detail.id,
+          name: detail.name,
+          status: detail.status,
+          startsAt: detail.startsAt,
+        },
+      },
       parameterSnapshot: {
         eventId: detail.id,
         eventTeamId: team.id,
         paymentDueAt: team.paymentDueAt,
+        operatingShare: mockOperatingShareSnapshot("EVENT"),
       },
     };
     saveOrders([createdOrder, ...orders]);
@@ -7419,10 +7950,17 @@ export async function mockRequest<T>(
   if (url === "/training/products" && method === "GET")
     return ok(
       getTrainingProducts()
-        .filter((product) => product.enabled !== false)
+        .filter((product) =>
+          hasMockRole("ADMIN", "SUPER_ADMIN") || product.enabled !== false,
+        )
         .map((product) =>
           mockTrainingProductView(product, {
-            administrator: hasMockRole("ADMIN", "SUPER_ADMIN"),
+            showAssignments: hasMockRole(
+              "FRONT_DESK",
+              "COACH",
+              "ADMIN",
+              "SUPER_ADMIN",
+            ),
             coachOnly:
               hasMockRole("COACH") && !hasMockRole("ADMIN", "SUPER_ADMIN"),
           }),
@@ -8017,6 +8555,7 @@ export async function mockRequest<T>(
         totalSessions: product.totalSessions,
         seatReservedUntil,
         youthRegulatoryValidation,
+        operatingShare: mockOperatingShareSnapshot("TRAINING"),
       },
     };
     saveOrders([order, ...getOrders()]);
@@ -9077,6 +9616,7 @@ export async function mockRequest<T>(
       action,
       templateId: template.id,
       enabled,
+      allowVenueBooking: data.allowVenueBooking,
       reason,
     });
     const replay = getAuditLogs().find((item) => item.requestId === requestId);
@@ -9095,6 +9635,10 @@ export async function mockRequest<T>(
       throw new Error("停用商户的券模板不能启用");
     const oldEnabled = template.enabled !== false;
     template.enabled = enabled;
+    if (data.allowVenueBooking !== undefined) {
+      if (typeof data.allowVenueBooking !== 'boolean') throw new Error('适用范围无效');
+      template.allowVenueBooking = data.allowVenueBooking;
+    }
     template.updatedAt = new Date().toISOString();
     saveCouponTemplates(templates);
     saveAuditLogs([
@@ -9258,6 +9802,7 @@ export async function mockRequest<T>(
                   activityName: template.activityName,
                   benefitDescription: template.benefitDescription,
                   faceValueCents: template.faceValueCents,
+                  allowVenueBooking: template.allowVenueBooking === true,
                   validFrom: template.validFrom,
                   validTo: template.validTo,
                   enabled: template.enabled !== false,
@@ -10145,6 +10690,7 @@ export async function mockRequest<T>(
         benefits: product.benefits,
         effectiveFrom: product.effectiveFrom,
         effectiveTo: product.effectiveTo,
+        operatingShare: mockOperatingShareSnapshot("MEMBERSHIP", now),
       },
       membership: {
         status: "FROZEN",
@@ -10197,6 +10743,7 @@ export async function mockRequest<T>(
         giftCents: plan.giftCents,
         effectiveFrom: plan.effectiveFrom,
         effectiveTo: plan.effectiveTo || null,
+        operatingShare: mockOperatingShareSnapshot("RECHARGE", now),
       },
       items: [
         {
@@ -11578,6 +12125,7 @@ export async function mockRequest<T>(
       parameterSnapshot: {
         pricing: "SERVER_SNAPSHOT",
         itemCount: items.length,
+        operatingShare: mockOperatingShareSnapshot("GOODS"),
       },
     };
     saveOrders([order, ...getOrders()]);
@@ -11970,6 +12518,16 @@ export async function mockRequest<T>(
       accountTypesLimited: coachOnly || frontDeskLimited,
     });
   }
+  if (url === '/members/leads/owners' && method === 'GET') {
+    requireMockRole('FRONT_DESK', 'ADMIN', 'SUPER_ADMIN');
+    const allowed = ['FRONT_DESK','COACH','ADMIN','SUPER_ADMIN'];
+    const items = getGovernanceUsers().map((user): Record<string, any> => ({ ...user, roles: [...new Set([user.primaryRole, ...(user.roles || []).map((role: any) => typeof role === 'string' ? role : role.role)].filter((role: string) => allowed.includes(role)))] }))
+      .filter(user => user.status === 'ACTIVE' && !user.deletedAt && user.roles.length && user.displayName.includes(text(data.keyword)));
+    const page = Math.max(1, Number(data.page) || 1), pageSize = Math.min(50, Number(data.pageSize) || 20);
+    return ok({ items: items.slice((page - 1) * pageSize, page * pageSize).map(user => ({
+      id: user.id, displayName: user.displayName, roles: user.roles.filter((role: string) => allowed.includes(role)),
+    })), total: items.length, page, pageSize });
+  }
   if (url === "/members/leads" && method === "GET") {
     requireMockRole("FRONT_DESK", "COACH", "ADMIN", "SUPER_ADMIN");
     const coachOnly =
@@ -12038,7 +12596,7 @@ export async function mockRequest<T>(
             displayName:
               data.ownerId === mockUser().id
                 ? mockUser().displayName
-                : "已分配员工",
+                : getGovernanceUsers().find(user => user.id === data.ownerId)?.displayName || "待核对员工",
           }
         : null,
       convertedMemberId: null,
@@ -12170,6 +12728,36 @@ export async function mockRequest<T>(
   }
   if (url === "/dashboard") {
     requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
+    const shareParameter = getSystemParameters()
+      .filter(
+        (item) =>
+          item.key === "finance.operating_share_rate_bps" &&
+          new Date(item.effectiveFrom) <= new Date() &&
+          (!item.effectiveTo || new Date(item.effectiveTo) > new Date()),
+      )
+      .sort((left, right) =>
+        String(right.effectiveFrom).localeCompare(String(left.effectiveFrom)),
+      )[0];
+    const operatingShareRateBps = Number(shareParameter?.value ?? 1_500);
+    const trainingRecognitionDelta = getEnrollments()
+      .flatMap((enrollment) => enrollment.attendances || [])
+      .flatMap((attendance: any) => attendance.revenueRecognitions || [])
+      .reduce(
+        (total: { revenueCents: number; venueContributionCents: number }, recognition: any) => ({
+          revenueCents:
+            total.revenueCents + Number(recognition.effectiveRevenueCents || 0),
+          venueContributionCents:
+            total.venueContributionCents +
+            Number(recognition.venueContributionCents || 0),
+        }),
+        { revenueCents: 0, venueContributionCents: 0 },
+      );
+    const trainingConfirmedRevenueCents =
+      1_680_000 + trainingRecognitionDelta.revenueCents;
+    const trainingVenueContributionCents =
+      336_000 + trainingRecognitionDelta.venueContributionCents;
+    const realizedRevenueCents =
+      5_358_000 + trainingRecognitionDelta.revenueCents;
     return ok({
       period: {
         start: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
@@ -12193,13 +12781,27 @@ export async function mockRequest<T>(
           TRAINING: 620_000,
           GOODS: 368_000,
           MEMBERSHIP: 98_000,
-          RECHARGE: 800_000,
+          RECHARGE: 0,
           ALLIANCE: 0,
         },
         venueBusinessRevenueCents: 3_678_000,
-        trainingConfirmedRevenueCents: 1_680_000,
-        realizedRevenueCents: 5_358_000,
-        venueContractRevenueCents: 4_014_000,
+        trainingConfirmedRevenueCents,
+        realizedRevenueCents,
+        venueContractRevenueCents:
+          4_014_000 + trainingRecognitionDelta.venueContributionCents,
+      },
+      operatingShare: {
+        basis: "REALIZED_NET_REVENUE",
+        basisRevenueCents: realizedRevenueCents,
+        accruedCents: Math.round(
+          (realizedRevenueCents * operatingShareRateBps) / 10_000,
+        ),
+        defaultRateBps: 1_500,
+        rateAtPeriodEndBps: operatingShareRateBps,
+        rateParameterId: shareParameter?.id || null,
+        rechargeIncluded: false,
+        recognitionBasis:
+          "逐笔使用订单创建时保存的分成规则；履约确认计提，退款按原订单比例反冲，充值不参与",
       },
       venue: {
         courtCount: 20,
@@ -12240,17 +12842,20 @@ export async function mockRequest<T>(
       training: {
         newSignups: 6,
         prepaidCollectedCents: 620_000,
-        confirmedRevenueCents: 1680000,
-        unusedBalanceCents: 3_860_000,
-        cumulativeConfirmedRevenueCents: 18_620_000,
+        confirmedRevenueCents: trainingConfirmedRevenueCents,
+        unusedBalanceCents:
+          3_860_000 - trainingRecognitionDelta.revenueCents,
+        cumulativeConfirmedRevenueCents:
+          18_620_000 + trainingRecognitionDelta.revenueCents,
         refundedCents: 88_000,
         cumulativeRefundedCents: 426_000,
-        venueContributionCents: 336000,
+        venueContributionCents: trainingVenueContributionCents,
         contractRateBps: 2_000,
         venueFeeCents: 0,
         trainingPayableVenueCents: 0,
         directCostCents: 486_000,
-        cashContributionMarginCents: 1_194_000,
+        cashContributionMarginCents:
+          1_194_000 + trainingRecognitionDelta.revenueCents,
         occupiedCourtHours: 48,
         resourceEfficiencyCentsPerCourtHour: 24_875,
         coachOutput: [
@@ -12258,9 +12863,10 @@ export async function mockRequest<T>(
             coachId: "user-coach",
             classNames: ["周三晚进阶班", "周末青少年班"],
             completedSessions: 8,
-            confirmedRevenueCents: 1_680_000,
+            confirmedRevenueCents: trainingConfirmedRevenueCents,
             directCostCents: 486_000,
-            cashContributionCents: 1_194_000,
+            cashContributionCents:
+              1_194_000 + trainingRecognitionDelta.revenueCents,
           },
         ],
       },
@@ -12296,23 +12902,39 @@ export async function mockRequest<T>(
         lowStockCount: 1,
       },
       contract: {
-        trainingEffectiveRevenueCents: 1_680_000,
+        trainingEffectiveRevenueCents: trainingConfirmedRevenueCents,
         trainingContractRateBps: 2_000,
-        trainingVenueContributionCents: 336_000,
+        trainingVenueContributionCents: trainingVenueContributionCents,
         trainingVenueFeeCents: 0,
         venueBusinessRevenueCents: 3_678_000,
-        venueContractRevenueCents: 4_014_000,
+        venueContractRevenueCents:
+          4_014_000 + trainingRecognitionDelta.venueContributionCents,
       },
       contractSettlements: getTrainingSettlements(),
     });
   }
   if (url === "/training/financial-summary") {
     requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
+    const recognitionDelta = getEnrollments()
+      .flatMap((enrollment) => enrollment.attendances || [])
+      .flatMap((attendance: any) => attendance.revenueRecognitions || [])
+      .reduce(
+        (total: { revenueCents: number; venueContributionCents: number }, recognition: any) => ({
+          revenueCents:
+            total.revenueCents + Number(recognition.effectiveRevenueCents || 0),
+          venueContributionCents:
+            total.venueContributionCents +
+            Number(recognition.venueContributionCents || 0),
+        }),
+        { revenueCents: 0, venueContributionCents: 0 },
+      );
     return ok({
-      effectiveRevenueCents: 1680000,
-      confirmedRevenueCents: 1680000,
-      venueContractContributionCents: 336000,
-      venueContributionCents: 336000,
+      effectiveRevenueCents: 1_680_000 + recognitionDelta.revenueCents,
+      confirmedRevenueCents: 1_680_000 + recognitionDelta.revenueCents,
+      venueContractContributionCents:
+        336_000 + recognitionDelta.venueContributionCents,
+      venueContributionCents:
+        336_000 + recognitionDelta.venueContributionCents,
       venueFeeCents: 0,
     });
   }

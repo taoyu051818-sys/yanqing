@@ -1,4 +1,7 @@
-import { UnauthorizedException } from '@nestjs/common'
+import { BadRequestException, UnauthorizedException } from '@nestjs/common'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import { AppRole, UserStatus } from '../generated/prisma/enums.js'
@@ -14,17 +17,18 @@ const user = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
-const setup = (savedUser: ReturnType<typeof user> | null) => {
+const setup = (savedUser: ReturnType<typeof user> | null, configValues: Record<string, string> = {}) => {
   const prisma = {
     user: {
       findUnique: vi.fn().mockResolvedValue(savedUser),
       findUniqueOrThrow: vi.fn().mockResolvedValue(savedUser),
       findFirst: vi.fn().mockResolvedValue(savedUser),
+      update: vi.fn().mockResolvedValue(savedUser),
     },
   }
   const jwt = { signAsync: vi.fn().mockResolvedValue('signed-token') }
   const config = {
-    get: vi.fn((key: string, fallback?: string) => key === 'NODE_ENV' ? 'development' : fallback),
+    get: vi.fn((key: string, fallback?: string) => configValues[key] ?? (key === 'NODE_ENV' ? 'development' : fallback)),
   }
   return { service: new AuthService(prisma as never, jwt as never, config as never), prisma, jwt }
 }
@@ -138,5 +142,47 @@ describe('AuthService login status checks', () => {
     for (const field of ['openId', 'unionId', 'phone', 'status', 'deletedAt', 'createdAt']) {
       expect(selection).not.toHaveProperty(field)
     }
+  })
+
+  it('trims and saves a user-confirmed WeChat nickname', async () => {
+    const savedUser = user({ avatarUrl: null, referrerId: null, memberProfile: {}, accounts: [] })
+    const { service, prisma } = setup(savedUser)
+
+    await service.updateProfile(savedUser.id, { displayName: '  金羽小林  ' })
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: savedUser.id },
+      data: { displayName: '金羽小林' },
+    })
+  })
+
+  it('stores only verified avatar image bytes under a generated file name', async () => {
+    const uploadRoot = await mkdtemp(join(tmpdir(), 'yanqing-avatar-'))
+    const savedUser = user({ avatarUrl: null, referrerId: null, memberProfile: {}, accounts: [] })
+    const { service, prisma } = setup(savedUser, { UPLOAD_DIR: uploadRoot })
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0])
+    try {
+      await service.updateAvatar(savedUser.id, {
+        buffer: png, size: png.length, mimetype: 'image/png', originalname: 'unsafe-name.png',
+      } as Express.Multer.File)
+      const files = await readdir(join(uploadRoot, 'avatars'))
+      expect(files).toHaveLength(1)
+      expect(files[0]).toMatch(/^[0-9a-f-]+\.png$/)
+      expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: { avatarUrl: expect.stringMatching(/^\/uploads\/avatars\/[0-9a-f-]+\.png$/) },
+      }))
+    } finally {
+      await rm(uploadRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a file whose bytes are not a supported avatar image', async () => {
+    const savedUser = user({ avatarUrl: null })
+    const { service, prisma } = setup(savedUser)
+
+    await expect(service.updateAvatar(savedUser.id, {
+      buffer: Buffer.from('not-an-image'), size: 12, mimetype: 'image/png',
+    } as Express.Multer.File)).rejects.toBeInstanceOf(BadRequestException)
+    expect(prisma.user.update).not.toHaveBeenCalled()
   })
 })

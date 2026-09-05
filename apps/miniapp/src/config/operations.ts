@@ -4,6 +4,7 @@ export type OperationsCenter = {
   key: string;
   title: string;
   description: string;
+  icon: string;
   route: string;
   roles: AppRole[];
 };
@@ -47,6 +48,7 @@ export const operationsCenters: OperationsCenter[] = [
     key: "today",
     title: "今日营业",
     description: "开班、现场队列、订单履约与岗位交接",
+    icon: "work",
     route: "/packages/ops/pages/frontdesk/index",
     roles: operationsAccessRoles.today,
   },
@@ -54,6 +56,7 @@ export const operationsCenters: OperationsCenter[] = [
     key: "venue",
     title: "场馆资源",
     description: "封场维护、资源占用、价格与可售状态",
+    icon: "venue",
     route: "/packages/ops/pages/venue/index",
     roles: operationsAccessRoles.venue,
   },
@@ -61,6 +64,7 @@ export const operationsCenters: OperationsCenter[] = [
     key: "members",
     title: "客户与会员",
     description: "线索、客户 360、会员权益与服务记录",
+    icon: "members",
     route: "/packages/ops/pages/members/index",
     roles: operationsAccessRoles.members,
   },
@@ -68,6 +72,7 @@ export const operationsCenters: OperationsCenter[] = [
     key: "training",
     title: "培训运营",
     description: "试听、课表、签到、消课与训练反馈",
+    icon: "training",
     route: "/packages/ops/pages/coach/index",
     roles: operationsAccessRoles.training,
   },
@@ -75,6 +80,7 @@ export const operationsCenters: OperationsCenter[] = [
     key: "games",
     title: "球局运营",
     description: "发布报名、候补、现场签到与激励结算",
+    icon: "sport",
     route: "/packages/ops/pages/host/index",
     roles: operationsAccessRoles.games,
   },
@@ -82,6 +88,7 @@ export const operationsCenters: OperationsCenter[] = [
     key: "events",
     title: "赛事运营",
     description: "队伍、轮次、比分、排名与奖品签收",
+    icon: "event",
     route: "/packages/ops/pages/event/index",
     roles: operationsAccessRoles.events,
   },
@@ -89,6 +96,7 @@ export const operationsCenters: OperationsCenter[] = [
     key: "alliance",
     title: "联盟运营",
     description: "商户、券码核销、消费归因与周期结算",
+    icon: "shop",
     route: "/packages/ops/pages/merchant/index",
     roles: operationsAccessRoles.alliance,
   },
@@ -96,6 +104,7 @@ export const operationsCenters: OperationsCenter[] = [
     key: "inventory",
     title: "商品与库存",
     description: "前台查看低库存预警；管理员处理采购、盘点与库存作业",
+    icon: "inventory",
     route: "/packages/ops/pages/inventory/index",
     roles: operationsAccessRoles.inventory,
   },
@@ -103,6 +112,7 @@ export const operationsCenters: OperationsCenter[] = [
     key: "finance",
     title: "财务结算",
     description: "收款、退款、日结、分成、结算与导出",
+    icon: "finance",
     route: "/packages/ops/pages/finance/index",
     roles: operationsAccessRoles.finance,
   },
@@ -110,6 +120,7 @@ export const operationsCenters: OperationsCenter[] = [
     key: "governance",
     title: "治理与权限",
     description: "员工身份、岗位权限、参数、风险与审计",
+    icon: "governance",
     route: "/packages/ops/pages/governance/index",
     roles: operationsAccessRoles.governance,
   },

@@ -50,6 +50,7 @@ describe('referral attribution capture', () => {
     expect(referralSharePayload(inviteCode, '小林')).toEqual({
       title: '小林邀请你使用延庆金羽小程序',
       path: `/pages/home/index?invite=${inviteCode}`,
+      imageUrl: '/static/share/miniapp-card.jpg',
     })
     expect(referralSharePayload(inviteCode, '小林').path).not.toContain('referrerId')
   })

@@ -1,3 +1,5 @@
+import { SHARE_CARD_IMAGES } from '../config/share'
+
 const PENDING_INVITE_KEY = 'yanqing_pending_referral_invite'
 const LEGACY_REFERRER_KEY = 'yanqing_pending_referrer_id'
 const MIN_INVITE_CODE_LENGTH = 20
@@ -70,4 +72,5 @@ export const referralSharePayload = (
 ) => ({
   title: `${displayName || '好友'}邀请你使用延庆金羽小程序`,
   path: referralSharePath(inviteCode),
+  imageUrl: SHARE_CARD_IMAGES.miniapp,
 })

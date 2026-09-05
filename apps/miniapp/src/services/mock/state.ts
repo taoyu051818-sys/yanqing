@@ -9,6 +9,7 @@ import {
   trainingProducts as seedTrainingProducts,
   trainingSessions as seedTrainingSessions,
 } from "./catalog";
+import { hourlyVenueSlots } from './venue-catalog';
 
 type JsonRecord = Record<string, any>;
 
@@ -272,6 +273,7 @@ const initialDataErasureRequests = (): JsonRecord[] => [{
 }];
 
 const initialSystemParameters = (): JsonRecord[] => [
+  { id: "parameter-operating-share-rate", key: "finance.operating_share_rate_bps", value: 1500, type: "INTEGER", description: "按已履约净收入计提的经营分成比例", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
   { id: "parameter-training-rate", key: "training.contract_rate_bps", value: 2000, type: "INTEGER", description: "培训有效流水计入场馆合同收入比例", locked: true, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
   { id: "parameter-training-venue-fee", key: "training.venue_fee_cents", value: 0, type: "INTEGER", description: "培训场地费硬禁用", locked: true, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
   { id: "parameter-newcomer-valid-days", key: "newcomer.experience.valid_days", value: 7, type: "INTEGER", description: "新客体验权益领取后有效天数", locked: false, effectiveFrom: "2026-01-01T00:00:00+08:00", effectiveTo: null },
@@ -346,21 +348,19 @@ const initialMembershipProducts = (): JsonRecord[] =>
   }));
 
 const initialPriceRules = (): JsonRecord[] => {
-  const labels = ["晨练", "上午一", "上午二", "午间", "下午一", "下午二", "晚场一", "晚场二"];
-  const prices = [6_800, 6_800, 6_800, 6_800, 6_800, 6_800, 8_800, 8_800];
-  return labels.map((label, index) => ({
-    id: `price-rule-${index + 1}`,
-    code: `PRICE_S${index + 1}`,
+  return hourlyVenueSlots.map((slot) => ({
+    id: `price-rule-${slot.code}`,
+    code: `PRICE_${slot.code}`,
     version: 1,
-    name: `${label}基础价`,
-    timeSlotId: `slot-${index + 1}`,
+    name: `${slot.label} 每小时场地价`,
+    timeSlotId: slot.id,
     weekdayMask: 127,
-    priceCents: prices[index],
-    newcomerPriceCents: index < 6 ? 4_800 : null,
+    priceCents: slot.priceCents,
+    newcomerPriceCents: Math.round(slot.priceCents * 0.7),
     effectiveFrom: "2026-01-01T00:00:00+08:00",
     effectiveTo: "2099-01-01T00:00:00+08:00",
     enabled: true,
-    creationIdempotencyKey: `SEED:PRICE_S${index + 1}:V1`,
+    creationIdempotencyKey: `SEED:PRICE_${slot.code}:V1`,
     creationCommandHash: "b".repeat(64),
     createdById: "user-admin",
     createdBy: { id: "user-admin", displayName: "金羽管理员" },
@@ -677,7 +677,26 @@ export function recomputeEventStandings(detail: JsonRecord) {
 }
 
 export function getEnrollments(): JsonRecord[] {
-  return read<JsonRecord[]>(KEYS.enrollments, seedEnrollments as JsonRecord[]);
+  const enrollments = read<JsonRecord[]>(
+    KEYS.enrollments,
+    seedEnrollments as JsonRecord[],
+  );
+  const seeded = (seedEnrollments as JsonRecord[])[0];
+  const currentAttendance = seeded?.attendances?.find(
+    (item: JsonRecord) => item.id === "attendance-current",
+  );
+  const target = enrollments.find((item) => item.id === seeded?.id);
+  if (
+    currentAttendance &&
+    target &&
+    !(target.attendances || []).some(
+      (item: JsonRecord) => item.id === currentAttendance.id,
+    )
+  ) {
+    target.attendances = [...(target.attendances || []), clone(currentAttendance)];
+    write(KEYS.enrollments, enrollments);
+  }
+  return enrollments;
 }
 export function saveEnrollments(value: JsonRecord[]) {
   return write(KEYS.enrollments, value);
@@ -700,10 +719,30 @@ export function saveStudents(value: JsonRecord[]) {
   return write(KEYS.students, value);
 }
 export function getTrainingSessions(): JsonRecord[] {
-  return read<JsonRecord[]>(
+  const sessions = read<JsonRecord[]>(
     KEYS.trainingSessions,
     seedTrainingSessions as JsonRecord[],
   );
+  const currentFixture = (seedTrainingSessions as JsonRecord[]).find(
+    (item) => item.id === "session-current",
+  );
+  if (
+    currentFixture &&
+    !sessions.some((item) => item.id === currentFixture.id)
+  ) {
+    sessions.push(clone(currentFixture));
+    write(KEYS.trainingSessions, sessions);
+  } else if (currentFixture) {
+    const rollingFixture = sessions.find(
+      (item) => item.id === currentFixture.id && item.status === "IN_PROGRESS",
+    );
+    if (rollingFixture) {
+      rollingFixture.startsAt = currentFixture.startsAt;
+      rollingFixture.endsAt = currentFixture.endsAt;
+      write(KEYS.trainingSessions, sessions);
+    }
+  }
+  return sessions;
 }
 export function saveTrainingSessions(value: JsonRecord[]) {
   return write(KEYS.trainingSessions, value);
@@ -760,6 +799,8 @@ const defaultCouponTemplates = (): JsonRecord[] =>
   seedCoupons.map((coupon: any, index) => ({
     id: coupon.templateId || `coupon-template-${index + 1}`,
     code: coupon.template?.code || `COUPON-${index + 1}`,
+    name: coupon.template?.name || coupon.template?.benefitDescription || "商户专属消费券",
+    allowVenueBooking: false,
     merchantId:
       coupon.merchantId ||
       coupon.template?.merchantId ||
@@ -971,7 +1012,27 @@ export function saveMembershipProducts(value: JsonRecord[]) {
 }
 
 export function getPriceRules(): JsonRecord[] {
-  return read<JsonRecord[]>(KEYS.priceRules, initialPriceRules());
+  const rules = read<JsonRecord[]>(KEYS.priceRules, initialPriceRules());
+  const legacy = rules.filter(rule => /^slot-[1-8]$/.test(rule.timeSlotId));
+  if (!legacy.length || uni.getStorageSync('yanqing_mock_hourly_catalog_v1')) return rules;
+  // Upgrade only the old mock tariff catalogue, preserving bookings, orders,
+  // custom rule versions and their total price. Never reset user test data.
+  const upgraded = rules.filter(rule => !legacy.includes(rule));
+  for (const rule of legacy) {
+    const firstHour = 7 + (Number(rule.timeSlotId.slice(5)) - 1) * 2;
+    for (let offset = 0; offset < 2; offset++) {
+      const code = `H${String(firstHour + offset).padStart(2, '0')}`;
+      const split = (cents: number) => Math.floor(cents * (offset + 1) / 2) - Math.floor(cents * offset / 2);
+      upgraded.push({ ...rule, id: `${rule.id}_${code}`, code: `${rule.code}_${code}`, timeSlotId: `slot-${code}`,
+        name: `${firstHour + offset}:00 每小时场地价`, priceCents: split(rule.priceCents),
+        newcomerPriceCents: rule.newcomerPriceCents == null ? null : split(rule.newcomerPriceCents),
+        creationIdempotencyKey: `HOURLY:${rule.id}:${code}`, transitions: [] });
+    }
+  }
+  if (!upgraded.some(rule => rule.timeSlotId === 'slot-H23')) upgraded.push(initialPriceRules().find(rule => rule.timeSlotId === 'slot-H23')!);
+  write(KEYS.priceRules, upgraded);
+  uni.setStorageSync('yanqing_mock_hourly_catalog_v1', true);
+  return upgraded;
 }
 
 export function savePriceRules(value: JsonRecord[]) {

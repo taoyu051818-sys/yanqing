@@ -15,6 +15,7 @@ import {
   CreateLeadDto,
   LeadFunnelQueryDto,
   LeadQueryDto,
+  LeadOwnerQueryDto,
   LoseLeadDto,
   MemberQueryDto,
   ReviewAccountAdjustmentDto,
@@ -42,6 +43,12 @@ export class MembersController {
   @Roles(AppRole.FRONT_DESK, AppRole.COACH, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   leads(@Query() query: LeadQueryDto, @CurrentUser() actor: AuthUser) {
     return this.members.listLeads(query, actor)
+  }
+
+  @Get('leads/owners')
+  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  leadOwners(@Query() query: LeadOwnerQueryDto, @CurrentUser() actor: AuthUser) {
+    return this.members.leadOwners(query, actor)
   }
 
   @Get('leads/funnel')

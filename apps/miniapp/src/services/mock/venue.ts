@@ -1,20 +1,6 @@
 import type { CourtAvailability } from '../../types/domain'
 import { getPriceRules, getVenueBookings, getVenueClosures, saveVenueBookings } from './state'
-
-const slotLabels = ['晨练', '上午一', '上午二', '午间', '下午一', '下午二', '晚场一', '晚场二']
-
-function shanghaiDate(value: unknown): string {
-  const date = new Date(String(value || ''))
-  if (Number.isNaN(date.getTime())) return ''
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date)
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
-  return `${values.year}-${values.month}-${values.day}`
-}
+import { hourlyVenueSlots } from './venue-catalog'
 
 export function availability(date: string): CourtAvailability {
   const courts = getMockVenueCourts().map((court) => ({
@@ -23,18 +9,14 @@ export function availability(date: string): CourtAvailability {
     usage: court.usage,
     enabled: court.enabled,
   }))
-  const starts = [420, 540, 660, 780, 900, 1020, 1140, 1260]
-  const slots = starts.map((startMinutes, index) => {
-    const period: NonNullable<CourtAvailability['slots'][number]['period']> =
-      index === 0 ? 'EARLY' : index < 6 ? 'DAYTIME' : 'PRIME'
-    const slotId = `slot-${index + 1}`
-    const rule = resolveMockPriceRule(date, slotId)
+  const slots = hourlyVenueSlots.map((slot) => {
+    const rule = resolveMockPriceRule(date, slot.id)
     return {
-      id: slotId,
-      label: slotLabels[index],
-      startMinutes,
-      endMinutes: startMinutes + 120,
-      period,
+      id: slot.id,
+      label: slot.label,
+      startMinutes: slot.startMinutes,
+      endMinutes: slot.endMinutes,
+      period: slot.period,
       enabled: true,
       price: rule ? {
         priceCents: rule.priceCents,
@@ -46,18 +28,16 @@ export function availability(date: string): CourtAvailability {
     { courtId: 'court-2', startsAt: `${date}T09:00:00+08:00`, endsAt: `${date}T11:00:00+08:00`, status: 'CONFIRMED', usage: 'PUBLIC' },
     { courtId: 'court-8', startsAt: `${date}T19:00:00+08:00`, endsAt: `${date}T21:00:00+08:00`, status: 'CONFIRMED', usage: 'PUBLIC' },
   ]
-  const now = Date.now()
+  // getOrders performs the shared mock expiry transition before availability
+  // reads the booking ledger, keeping both views consistent.
+  getOrders()
+  const dayStart = new Date(`${date}T00:00:00+08:00`).getTime()
+  const dayEnd = dayStart + 86_400_000
   const persisted = getVenueBookings()
-  // A held booking has a ten-minute expiry just like the API.  Prune expired
-  // holds on read so retries cannot permanently hide a court slot.
   const activePersisted = persisted.filter((booking) => {
     if (booking.status === 'CANCELLED') return false
-    if (booking.status === 'HELD' && booking.holdExpiresAt && new Date(booking.holdExpiresAt).getTime() <= now) return false
-    return shanghaiDate(booking.startsAt) === date
+    return new Date(booking.startsAt).getTime() < dayEnd && new Date(booking.endsAt).getTime() > dayStart
   })
-  if (activePersisted.length !== persisted.filter((booking) => booking.status !== 'CANCELLED').length) {
-    saveVenueBookings(persisted.filter((booking) => booking.status !== 'CANCELLED' && !(booking.status === 'HELD' && booking.holdExpiresAt && new Date(booking.holdExpiresAt).getTime() <= now)))
-  }
   const bookings = [...seedBookings, ...activePersisted].map((booking) => ({
     courtId: booking.courtId,
     startsAt: booking.startsAt,
@@ -65,8 +45,6 @@ export function availability(date: string): CourtAvailability {
     status: booking.status,
     usage: booking.usage,
   }))
-  const dayStart = new Date(`${date}T00:00:00+08:00`).getTime()
-  const dayEnd = dayStart + 86_400_000
   const closures = getVenueClosures()
     .filter((closure) =>
       closure.status === 'ACTIVE' &&
@@ -117,7 +95,42 @@ export const seedOrders = [
 ]
 
 export function getOrders() {
-  return (uni.getStorageSync('yanqing_mock_orders') as any[]) || seedOrders.map((item) => ({ ...item }))
+  const orders = (uni.getStorageSync('yanqing_mock_orders') as any[]) || seedOrders.map((item) => ({ ...item }))
+  const now = Date.now()
+  const bookings = getVenueBookings()
+  const expiredOrderIds = new Set(
+    bookings
+      .filter((booking: any) =>
+        booking.status === 'HELD' &&
+        booking.holdExpiresAt &&
+        new Date(booking.holdExpiresAt).getTime() <= now,
+      )
+      .map((booking: any) => booking.orderId)
+      .filter(Boolean),
+  )
+  if (!expiredOrderIds.size) return orders
+  const cancelledAt = new Date(now).toISOString()
+  const updatedOrders = orders.map((order) =>
+    expiredOrderIds.has(order.id) && order.status === 'PENDING'
+      ? {
+          ...order,
+          status: 'CANCELLED',
+          cancelledAt,
+          bookings: (order.bookings || []).map((booking: any) => ({
+            ...booking,
+            status: booking.status === 'HELD' ? 'CANCELLED' : booking.status,
+            holdExpiresAt: null,
+          })),
+        }
+      : order,
+  )
+  uni.setStorageSync('yanqing_mock_orders', updatedOrders)
+  saveVenueBookings(bookings.map((booking: any) =>
+    expiredOrderIds.has(booking.orderId) && booking.status === 'HELD'
+      ? { ...booking, status: 'CANCELLED', holdExpiresAt: null }
+      : booking,
+  ))
+  return updatedOrders
 }
 
 export function saveOrders(orders: any[]) { uni.setStorageSync('yanqing_mock_orders', orders) }

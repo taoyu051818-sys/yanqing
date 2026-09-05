@@ -127,10 +127,10 @@ describe("commercial master data mock state machines", () => {
 
   it("versions a price rule, rejects ambiguity, then changes availability after an audited cutover", async () => {
     const rules = await request<any[]>("GET", "/venues/price-rules/manage");
-    const source = rules.find((rule) => rule.id === "price-rule-1");
+    const source = rules.find((rule) => rule.id === "price-rule-H07");
     const created = await request("POST", `/venues/price-rules/${source.id}/versions`, {
       name: "晨练基础价2027",
-      timeSlotId: "slot-1",
+      timeSlotId: "slot-H07",
       weekdayMask: 127,
       priceCents: 7_200,
       newcomerPriceCents: 5_000,
@@ -160,7 +160,7 @@ describe("commercial master data mock state machines", () => {
     const availability = await request<any>("GET", "/venues/availability", {
       date: "2026-08-30",
     });
-    expect(availability.slots.find((slot: any) => slot.id === "slot-1").price)
+    expect(availability.slots.find((slot: any) => slot.id === "slot-H07").price)
       .toEqual({
         priceCents: 7_200,
         newcomerPriceCents: 5_000,
@@ -171,7 +171,7 @@ describe("commercial master data mock state machines", () => {
     const created = await request("POST", "/venues/price-rules", {
       code: "PRICE_S1_COMPETING",
       name: "晨练竞争价格",
-      timeSlotId: "slot-1",
+      timeSlotId: "slot-H07",
       weekdayMask: 2,
       priceCents: 6_600,
       newcomerPriceCents: 4_600,

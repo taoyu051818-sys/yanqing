@@ -231,3 +231,13 @@ Before delivering any UI code, verify:
 - [ ] Responsive: 375px, 768px, 1024px, 1440px
 - [ ] No content hidden behind fixed navbars
 - [ ] No horizontal scroll on mobile
+
+---
+
+## Mini Program Icon Implementation
+
+- Use the local Lucide asset set through `AppIcon.vue`; do not mix icon families or use Unicode arrows as structural controls.
+- Pair navigation and status icons with visible text. Icon-only controls must provide an accessible label and a 44 × 44 px touch target.
+- Use semantic tones only: primary for actions, muted for navigation hints, accent for restrained emphasis, danger for failures, and inverse on dark surfaces.
+- Native tab bar artwork is generated as PNG; in-page artwork stays as optimized SVG. Regenerate both with `pnpm icons:miniapp`.
+- The desktop H5 acceptance shell must pin the root unit at phone density, otherwise uni-app `rpx` scales from the desktop viewport and invalidates layout testing.

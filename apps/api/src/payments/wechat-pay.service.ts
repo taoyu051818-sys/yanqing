@@ -4,6 +4,7 @@ import {
   createVerify,
   randomBytes,
 } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import {
   BadGatewayException,
@@ -93,10 +94,7 @@ export class WechatPayService {
     const appId = this.required('WECHAT_APP_ID');
     const mchId = this.required('WECHAT_PAY_MCH_ID');
     const serialNo = this.required('WECHAT_PAY_SERIAL_NO');
-    const privateKey = this.required('WECHAT_PAY_PRIVATE_KEY').replace(
-      /\\n/g,
-      '\n',
-    );
+    const privateKey = this.privateKey();
     const notifyUrl = this.required('WECHAT_PAY_NOTIFY_URL');
     const body = JSON.stringify({
       appid: appId,
@@ -120,15 +118,17 @@ export class WechatPayService {
       headers: {
         authorization,
         accept: 'application/json',
+        'accept-encoding': 'identity',
         'content-type': 'application/json',
         'user-agent': 'yanqing-badminton/1.0',
+        ...this.wechatpaySerialHeader(),
       },
       body,
     });
-    const result = (await response.json()) as {
+    const result = await this.readWechatJson<{
       prepay_id?: string;
       message?: string;
-    };
+    }>(response);
     if (!response.ok || !result.prepay_id)
       throw new BadGatewayException(result.message || '微信支付下单失败');
     const payTimestamp = Math.floor(Date.now() / 1000).toString();
@@ -169,17 +169,31 @@ export class WechatPayService {
       },
     });
     const response = await this.signedRequest('POST', path, body);
-    const result = (await response.json()) as {
+    const result = await this.readWechatJson<{
       refund_id?: string;
       status?: string;
       message?: string;
-    };
+    }>(response);
     if (!response.ok || !result.refund_id)
       throw new BadGatewayException(result.message || '微信退款申请失败');
     return {
       refundId: result.refund_id,
       status: result.status || 'PROCESSING',
     };
+  }
+
+  async closeOrder(orderNo: string) {
+    const path = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderNo)}/close`;
+    const body = JSON.stringify({ mchid: this.required('WECHAT_PAY_MCH_ID') });
+    const response = await this.signedRequest('POST', path, body);
+    const result = await this.readWechatJson<{ code?: string; message?: string }>(response);
+    if (!response.ok) {
+      if (result.code === 'ORDERPAID') {
+        throw new ConflictException('微信支付已经完成，正在同步支付结果，请稍后刷新');
+      }
+      throw new BadGatewayException(result.message || '微信支付订单关闭失败');
+    }
+    return { closed: true };
   }
 
   async handleNotification(
@@ -189,16 +203,21 @@ export class WechatPayService {
     const timestamp = this.header(headers, 'wechatpay-timestamp');
     const nonce = this.header(headers, 'wechatpay-nonce');
     const signature = this.header(headers, 'wechatpay-signature');
-    if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300)
+    const serial = this.header(headers, 'wechatpay-serial');
+    const timestampSeconds = Number(timestamp);
+    if (
+      !Number.isFinite(timestampSeconds) ||
+      Math.abs(Date.now() / 1000 - timestampSeconds) > 300
+    )
       throw new UnauthorizedException('微信支付通知已过期');
-    const publicCert = this.required('WECHAT_PAY_PLATFORM_CERT').replace(
-      /\\n/g,
-      '\n',
+    this.verifyWechatSignature(
+      rawBody.toString('utf8'),
+      timestamp,
+      nonce,
+      signature,
+      serial,
+      '微信支付通知验签失败',
     );
-    const verifier = createVerify('RSA-SHA256');
-    verifier.update(`${timestamp}\n${nonce}\n${rawBody.toString('utf8')}\n`);
-    if (!verifier.verify(publicCert, signature, 'base64'))
-      throw new UnauthorizedException('微信支付通知验签失败');
     const notification = JSON.parse(
       rawBody.toString('utf8'),
     ) as WechatNotification;
@@ -465,8 +484,7 @@ export class WechatPayService {
                       orderId: refund.orderId,
                       objectType: 'Refund',
                       objectId: refund.id,
-                      summary:
-                        '微信退款已成功，充值账户余额不足，差额待追缴',
+                      summary: '微信退款已成功，充值账户余额不足，差额待追缴',
                       evidence: {
                         recoveryKey: `RECHARGE-REFUND-RECOVERY:${refund.id}`,
                         externalRefundTerminal: true,
@@ -699,10 +717,7 @@ export class WechatPayService {
         where: { idempotencyKey },
       });
       if (existing) {
-        const recoveredCents = Math.min(
-          amount,
-          Math.max(0, -existing.amount),
-        );
+        const recoveredCents = Math.min(amount, Math.max(0, -existing.amount));
         recovery.push({
           accountType: type,
           requestedCents: amount,
@@ -817,10 +832,7 @@ export class WechatPayService {
   private async signedRequest(method: string, path: string, body: string) {
     const mchId = this.required('WECHAT_PAY_MCH_ID');
     const serialNo = this.required('WECHAT_PAY_SERIAL_NO');
-    const privateKey = this.required('WECHAT_PAY_PRIVATE_KEY').replace(
-      /\\n/g,
-      '\n',
-    );
+    const privateKey = this.privateKey();
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const nonce = randomBytes(16).toString('hex');
     const signature = this.rsaSign(
@@ -833,11 +845,96 @@ export class WechatPayService {
       headers: {
         authorization,
         accept: 'application/json',
+        'accept-encoding': 'identity',
         'content-type': 'application/json',
         'user-agent': 'yanqing-badminton/1.0',
+        ...this.wechatpaySerialHeader(),
       },
       body,
     });
+  }
+
+  private async readWechatJson<T>(response: Response): Promise<T> {
+    const rawBody = await response.text();
+    if (response.ok) {
+      this.verifyWechatSignature(
+        rawBody,
+        this.responseHeader(response.headers, 'wechatpay-timestamp'),
+        this.responseHeader(response.headers, 'wechatpay-nonce'),
+        this.responseHeader(response.headers, 'wechatpay-signature'),
+        this.responseHeader(response.headers, 'wechatpay-serial'),
+        '微信支付响应验签失败',
+      );
+    }
+    if (!rawBody) return {} as T;
+    try {
+      return JSON.parse(rawBody) as T;
+    } catch {
+      throw new BadGatewayException('微信支付返回了无效响应');
+    }
+  }
+
+  private verifyWechatSignature(
+    rawBody: string,
+    timestamp: string,
+    nonce: string,
+    signature: string,
+    serial: string,
+    failureMessage: string,
+  ) {
+    const verifier = createVerify('RSA-SHA256');
+    verifier.update(`${timestamp}\n${nonce}\n${rawBody}\n`);
+    if (
+      !verifier.verify(this.wechatVerificationKey(serial), signature, 'base64')
+    )
+      throw new UnauthorizedException(failureMessage);
+  }
+
+  private wechatVerificationKey(serial: string): string {
+    const publicKeyId = this.config.get<string>('WECHAT_PAY_PUBLIC_KEY_ID');
+    const publicKey = this.optionalPem(
+      'WECHAT_PAY_PUBLIC_KEY',
+      'WECHAT_PAY_PUBLIC_KEY_PATH',
+    );
+    if (publicKeyId || publicKey) {
+      if (!publicKeyId || !publicKey)
+        throw new BadGatewayException('微信支付公钥配置不完整');
+      if (serial !== publicKeyId)
+        throw new UnauthorizedException('微信支付签名公钥ID不匹配');
+      return publicKey;
+    }
+    return this.pem(
+      'WECHAT_PAY_PLATFORM_CERT',
+      'WECHAT_PAY_PLATFORM_CERT_PATH',
+    );
+  }
+
+  private wechatpaySerialHeader(): Record<string, string> {
+    const publicKeyId = this.config.get<string>('WECHAT_PAY_PUBLIC_KEY_ID');
+    return publicKeyId ? { 'Wechatpay-Serial': publicKeyId } : {};
+  }
+
+  private privateKey(): string {
+    return this.pem('WECHAT_PAY_PRIVATE_KEY', 'WECHAT_PAY_PRIVATE_KEY_PATH');
+  }
+
+  private optionalPem(valueKey: string, pathKey: string): string | undefined {
+    const inlineValue = this.config.get<string>(valueKey);
+    if (inlineValue) return inlineValue.replace(/\\n/g, '\n');
+    const path = this.config.get<string>(pathKey);
+    if (!path) return undefined;
+    try {
+      return readFileSync(path, 'utf8');
+    } catch {
+      throw new BadGatewayException(`${pathKey} 无法读取`);
+    }
+  }
+
+  private pem(valueKey: string, pathKey: string): string {
+    const value = this.optionalPem(valueKey, pathKey);
+    if (!value)
+      throw new BadGatewayException(`${valueKey} 或 ${pathKey} 尚未配置`);
+    return value;
   }
 
   private rsaSign(message: string, privateKey: string) {
@@ -854,6 +951,12 @@ export class WechatPayService {
     const normalized = Array.isArray(value) ? value[0] : value;
     if (!normalized) throw new UnauthorizedException(`缺少 ${name}`);
     return normalized;
+  }
+
+  private responseHeader(headers: Headers, name: string) {
+    const value = headers.get(name);
+    if (!value) throw new UnauthorizedException(`微信支付响应缺少 ${name}`);
+    return value;
   }
 
   private required(key: string) {

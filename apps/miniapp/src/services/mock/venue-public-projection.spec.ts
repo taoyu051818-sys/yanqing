@@ -96,15 +96,20 @@ describe("venue public mock projections", () => {
     const order = await request<any>("POST", "/venues/bookings", {
       date,
       courtId: "court-1",
-      slotId: "slot-3",
+      slotId: "slot-H11",
       sourceChannel: "MINI_PROGRAM",
       creationIdempotencyKey: "venue-public-price-requery-1",
     });
     expectNoPrivateVenueFields(order);
+    expect(order.bookings?.[0]).toMatchObject({
+      court: { id: "court-1", name: "1号场" },
+    });
+    expect(order.bookings?.[0].startsAt).toBeTruthy();
+    expect(order.bookings?.[0].endsAt).toBeTruthy();
     expect(getOrders().find((item) => item.id === order.id)?.parameterSnapshot)
       .toMatchObject({
-        priceRuleId: getPriceRules().find((rule) => rule.timeSlotId === "slot-3")?.id,
-        priceRuleCode: "PRICE_S3",
+        priceRuleId: getPriceRules().find((rule) => rule.timeSlotId === "slot-H11")?.id,
+        priceRuleCode: "PRICE_H11",
         priceRuleVersion: 1,
       });
   });

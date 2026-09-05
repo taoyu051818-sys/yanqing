@@ -20,12 +20,6 @@ const accounts = [
   { id: 'account-growth', type: 'GROWTH_POINTS', balance: 860, frozenBalance: 0 },
 ]
 
-export const roleOptions = Object.entries(roleProfiles).map(([role, profile]) => ({
-  role: role as AppRole,
-  label: profile.name,
-  description: profile.roles.join(' / '),
-}))
-
 export function currentRole(): AppRole {
   return (uni.getStorageSync('yanqing_mock_role') as AppRole) || 'MEMBER'
 }
@@ -37,9 +31,26 @@ export function setCurrentRole(role: AppRole) {
 
 function persistedProfile(userId: string) {
   const persistedUsers = uni.getStorageSync('yanqing_mock_governance_users')
-  return Array.isArray(persistedUsers)
+  const governanceProfile = Array.isArray(persistedUsers)
     ? persistedUsers.find((item: any) => item?.id === userId)
     : null
+  const profileOverrides = uni.getStorageSync('yanqing_mock_profile_overrides') || {}
+  const profileOverride = profileOverrides[userId]
+  return governanceProfile || profileOverride
+    ? { ...(governanceProfile || {}), ...(profileOverride || {}) }
+    : null
+}
+
+export function updateMockProfile(displayName: string, avatarUrl?: string) {
+  const user = mockUser()
+  const profileOverrides = uni.getStorageSync('yanqing_mock_profile_overrides') || {}
+  profileOverrides[user.id] = {
+    ...(profileOverrides[user.id] || {}),
+    displayName,
+    ...(avatarUrl ? { avatarUrl } : {}),
+  }
+  uni.setStorageSync('yanqing_mock_profile_overrides', profileOverrides)
+  return mockUser()
 }
 
 export function mockUser(role = currentRole()): SessionUser {
@@ -87,7 +98,7 @@ export function mockUser(role = currentRole()): SessionUser {
 export function mockLogin(role: AppRole) {
   const profile = roleProfiles[role] || roleProfiles.MEMBER
   const persistedUser = persistedProfile(profile.id)
-  if (persistedUser && persistedUser.status !== 'ACTIVE') {
+  if (persistedUser && ((persistedUser.status && persistedUser.status !== 'ACTIVE') || persistedUser.deletedAt)) {
     throw new Error('用户不存在、已停用或已删除')
   }
   setCurrentRole(role)

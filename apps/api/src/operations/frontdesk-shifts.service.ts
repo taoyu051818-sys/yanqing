@@ -10,6 +10,8 @@ import type { AuthUser } from '../common/auth/auth-user.js';
 import { PrismaService } from '../database/prisma.service.js';
 import {
   AppRole,
+  BookingStatus,
+  BusinessType,
   FrontDeskShiftStatus,
   OrderStatus,
   PaymentChannel,
@@ -49,6 +51,7 @@ const SHIFT_HISTORY_ROLES = [
 const PENDING_ORDER_STATUSES = [
   OrderStatus.PENDING,
   OrderStatus.PAID,
+  OrderStatus.CHECKED_IN,
   OrderStatus.REFUND_PENDING,
   OrderStatus.PARTIALLY_REFUNDED,
 ] as const;
@@ -399,9 +402,24 @@ export class FrontDeskShiftsService {
     closingCashCents: number,
     day: BusinessDay,
   ): Promise<ShiftSnapshot> {
-    const orderWhere: Prisma.OrderWhereInput = {
-      createdById: operatorId,
-      createdAt: { gte: day.start, lt: day.end },
+    const pendingOrderWhere: Prisma.OrderWhereInput = {
+      status: { in: [...PENDING_ORDER_STATUSES] },
+      OR: [
+        {
+          businessType: BusinessType.VENUE,
+          bookings: {
+            some: {
+              startsAt: { lt: day.end },
+              endsAt: { gt: day.start },
+              status: { not: BookingStatus.CANCELLED },
+            },
+          },
+        },
+        {
+          createdById: operatorId,
+          createdAt: { gte: day.start, lt: day.end },
+        },
+      ],
     };
     const [
       cashPayments,
@@ -439,10 +457,10 @@ export class FrontDeskShiftsService {
         _sum: { amountCents: true },
       }),
       tx.order.count({
-        where: { ...orderWhere, status: { in: [...PENDING_ORDER_STATUSES] } },
+        where: pendingOrderWhere,
       }),
       tx.order.findMany({
-        where: { ...orderWhere, status: { in: [...PENDING_ORDER_STATUSES] } },
+        where: pendingOrderWhere,
         select: {
           id: true,
           orderNo: true,

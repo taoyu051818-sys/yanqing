@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
-import OperationsFrame from "../../../../components/OperationsFrame.vue";
+import OperationsFrame from '../../components/OperationsFrame.vue'
+import OperationTask from '../../components/OperationTask.vue'
+import { useOperationTask, reasonField } from '../../components/operation-task'
 import MetricCard from "../../../../components/MetricCard.vue";
 import StatusBadge from "../../../../components/StatusBadge.vue";
 import {
   visibleFinancePageExportScopes,
   type FinancePageExportScope,
-} from "../../../../config/governance";
+} from "../../config/governance";
 import { hasOperationsAccess } from "../../../../config/operations";
 import { endpoints, type ReconciliationPeriod } from "../../../../services/api";
 import { isMockMode } from "../../../../services/http";
@@ -35,7 +37,8 @@ type LoadSource =
   | "adjustments"
   | "shifts";
 
-const session = useSessionStore();
+const task = useOperationTask()
+const session = useSessionStore()
 const dashboard = ref<Record<string, any> | null>(null);
 const orders = ref<any[]>([]);
 const training = ref<Record<string, any> | null>(null);
@@ -551,115 +554,42 @@ async function runAction(
   }
 }
 
-async function askReason(
-  title: string,
-  placeholder: string,
-): Promise<string | null> {
-  const modal = await uni.showModal({
-    title,
-    content: "",
-    editable: true,
-    placeholderText: placeholder,
-    confirmText: "继续",
-  });
-  if (!modal.confirm) return null;
-  const reason = modal.content?.trim() || "";
-  if (reason.length < 2) {
-    uni.showToast({ title: "原因至少填写 2 个字", icon: "none" });
-    return null;
-  }
-  return reason;
+
+
+function approveRefund(refund: any) {
+  task.start({ title: '批准退款', description: refund.order.orderNo + ' · ' + money(refund.amountCents) + '。确认后按原支付路径处理；申请批准不等于已到账。',
+    confirmText: '确认批准退款', fields: [reasonField('复核依据')],
+    submit: async ({ reason }) => { await endpoints.approveRefund(refund.id, { reason }); await load(); return '退款已批准，后续以退款状态为准。' },
+  })
 }
 
-async function approveRefund(refund: any) {
-  const reason = await askReason(
-    `批准退款 ${refund.refundNo || ""}`,
-    "填写核对依据或批准原因（必填）",
-  );
-  if (!reason) return;
-  const confirmed = await uni.showModal({
-    title: "确认批准退款",
-    content: `${refund.order.orderNo} · ${money(refund.amountCents)}。批准后将按原支付路径处理，原因：${reason}`,
-    confirmText: "确认批准",
-  });
-  if (!confirmed.confirm) return;
-  await runAction(
-    `refund-approve:${refund.id}`,
-    `退款 ${refund.refundNo || refund.id} 已批准并进入退款处理`,
-    "退款批准失败",
-    () => endpoints.approveRefund(refund.id, { reason }),
-  );
+function rejectRefund(refund: any) {
+  task.start({ title: '驳回退款', description: refund.order.orderNo + ' · ' + money(refund.amountCents) + '。驳回原因将保留在退款记录，资金不会退回。',
+    confirmText: '确认驳回退款', fields: [reasonField('复核依据')],
+    submit: async ({ reason }) => { await endpoints.rejectRefund(refund.id, { reason }); await load(); return '退款已驳回，原因已记录。' },
+  })
 }
 
-async function rejectRefund(refund: any) {
-  const reason = await askReason(
-    `驳回退款 ${refund.refundNo || ""}`,
-    "填写驳回原因（必填，将进入审计）",
-  );
-  if (!reason) return;
-  const confirmed = await uni.showModal({
-    title: "确认驳回退款",
-    content: `${refund.order.orderNo} · ${money(refund.amountCents)}。驳回原因：${reason}`,
-    confirmText: "确认驳回",
-  });
-  if (!confirmed.confirm) return;
-  await runAction(
-    `refund-reject:${refund.id}`,
-    `退款 ${refund.refundNo || refund.id} 已驳回`,
-    "退款驳回失败",
-    () => endpoints.rejectRefund(refund.id, { reason }),
-  );
+function reviewAdjustment(request: any, approved: boolean) {
+  if (isOwnAdjustment(request)) { actionError.value = '不能复核自己的账户调整申请'; return }
+  task.start({ title: approved ? '批准账户调整' : '驳回账户调整',
+    description: (request.account?.user?.displayName || '当前会员') + ' · ' + accountDelta(request) + (approved ? '。入账后只可提交反向调整，不能覆盖历史。' : '。本次不改动余额。'),
+    confirmText: approved ? '确认复核入账' : '确认驳回', fields: [reasonField('核对凭证与依据')],
+    submit: async ({ reason }) => {
+      if (approved) await endpoints.approveAccountAdjustment(request.id, reason)
+      else await endpoints.rejectAccountAdjustment(request.id, reason)
+      await load(); return approved ? '账户调整已复核入账，余额及审计已同步。' : '账户调整申请已驳回，余额不变。'
+    },
+  })
 }
 
-async function reviewAdjustment(request: any, approved: boolean) {
-  const reason = await askReason(
-    approved ? "批准账户调整" : "驳回账户调整",
-    approved ? "填写核对原始凭证或批准依据" : "填写驳回原因",
-  );
-  if (!reason) return;
-  const confirmed = await uni.showModal({
-    title: approved ? "确认调整入账" : "确认驳回申请",
-    content: `${request.account?.user?.displayName || "会员"} · ${accountDelta(request)}。${approved ? "入账后只可提交反向调整，不能覆盖历史。" : "本次申请不会改动余额。"}`,
-    confirmText: approved ? "复核入账" : "确认驳回",
-  });
-  if (!confirmed.confirm) return;
-  await runAction(
-    `account-adjustment-${approved ? "approve" : "reject"}:${request.id}`,
-    approved ? "账户调整已复核入账" : "账户调整申请已驳回",
-    approved ? "账户调整入账失败" : "账户调整驳回失败",
-    () =>
-      approved
-        ? endpoints.approveAccountAdjustment(request.id, reason)
-        : endpoints.rejectAccountAdjustment(request.id, reason),
-  );
-}
-
-async function reviewShiftVariance(shift: any) {
-  if (!canFinanceAction.value || shift.varianceReviewedAt) return;
-  if ([shift.operatorId, shift.closedById].includes(session.user?.id)) {
-    uni.showToast({
-      title: "班次操作人或关班人不能复核自己的差异",
-      icon: "none",
-    });
-    return;
-  }
-  const reason = await askReason(
-    "复核现金差异",
-    "填写盘点凭证、差异原因及处理结论",
-  );
-  if (!reason) return;
-  const confirmed = await uni.showModal({
-    title: "确认现金差异复核",
-    content: `${shift.operator?.displayName || "前台"} · 账面 ${money(shift.expectedCashCents)} · 实点 ${money(shift.closingCashCents)} · 差异 ${money(shift.cashVarianceCents)}。复核原因：${reason}`,
-    confirmText: "确认复核",
-  });
-  if (!confirmed.confirm) return;
-  await runAction(
-    `shift-variance-review:${shift.id}`,
-    "前台现金差异已复核并写入审计",
-    "现金差异复核失败",
-    () => endpoints.reviewFrontDeskShiftVariance(shift.id, { reason }),
-  );
+function reviewShiftVariance(shift: any) {
+  if (!canFinanceAction.value || shift.varianceReviewedAt) return
+  if ([shift.operatorId, shift.closedById].includes(session.user?.id)) { actionError.value = '班次操作人和关班人不能复核自己的差异'; return }
+  task.start({ title: '复核现金差异', description: (shift.operator?.displayName || '前台') + ' · 账面 ' + money(shift.expectedCashCents) + ' · 实点 ' + money(shift.closingCashCents) + ' · 差异 ' + money(shift.cashVarianceCents),
+    confirmText: '确认独立复核', fields: [reasonField('盘点凭证、原因及处理结论')],
+    submit: async ({ reason }) => { await endpoints.reviewFrontDeskShiftVariance(shift.id, { reason }); await load(); return '现金差异已独立复核，依据已写入审计。' },
+  })
 }
 
 function accountDelta(request: any) {
@@ -691,63 +621,21 @@ function onTrainingPeriodEndChange(event: any) {
   );
 }
 
-async function askNonnegativeMoney(
-  title: string,
-  placeholder: string,
-): Promise<number | null> {
-  const modal = await uni.showModal({
-    title,
-    content: "",
-    editable: true,
-    placeholderText: placeholder,
-    confirmText: "下一步",
-  });
-  if (!modal.confirm) return null;
-  const value = modal.content?.trim() || "0";
-  if (!/^\d+(\.\d{1,2})?$/.test(value)) {
-    uni.showToast({ title: "请输入非负金额，最多两位小数", icon: "none" });
-    return null;
-  }
-  return Math.round(Number(value) * 100);
-}
 
-async function createTrainingSettlementDraft() {
-  if (trainingPeriodEndDate.value <= trainingPeriodStartDate.value) {
-    uni.showToast({ title: "结束日期必须晚于开始日期", icon: "none" });
-    return;
-  }
-  const acquisitionCostCents = await askNonnegativeMoney(
-    "本账期获客成本",
-    "输入金额（元），无则填 0",
-  );
-  if (acquisitionCostCents === null) return;
-  const marketingCostCents = await askNonnegativeMoney(
-    "本账期营销成本",
-    "输入金额（元），无则填 0",
-  );
-  if (marketingCostCents === null) return;
-  const command = {
-    periodStart: new Date(
-      `${trainingPeriodStartDate.value}T00:00:00+08:00`,
-    ).toISOString(),
-    periodEnd: new Date(
-      `${trainingPeriodEndDate.value}T00:00:00+08:00`,
-    ).toISOString(),
-    acquisitionCostCents,
-    marketingCostCents,
-  };
-  const confirmed = await uni.showModal({
-    title: "确认生成培训结算草稿",
-    content: `${trainingPeriodStartDate.value} 至 ${trainingPeriodEndDate.value}（结束日不含）· 获客 ${money(acquisitionCostCents)} · 营销 ${money(marketingCostCents)}。营业日锁定后仍可按周/月生成结算单。`,
-    confirmText: "生成草稿",
-  });
-  if (!confirmed.confirm) return;
-  await runAction(
-    `training-settlement-create:${trainingPeriodStartDate.value}:${trainingPeriodEndDate.value}`,
-    "培训结算草稿已生成，待提交复核",
-    "培训结算草稿生成失败",
-    () => endpoints.createTrainingSettlement(command),
-  );
+
+function createTrainingSettlementDraft() {
+  const start = trainingPeriodStartDate.value, end = trainingPeriodEndDate.value
+  if (end <= start) { actionError.value = '结束日期必须晚于开始日期'; return }
+  task.start({ title: '生成培训结算草稿', description: start + ' 至 ' + end + '（结束日不含）。核对本账期成本，草稿生成后仍须独立复核。',
+    confirmText: '确认生成草稿', fields: [
+      { key: 'acquisition', label: '获客成本（元）', kind: 'money', initial: '0' },
+      { key: 'marketing', label: '营销成本（元）', kind: 'money', initial: '0' },
+    ],
+    submit: async values => {
+      await endpoints.createTrainingSettlement({ periodStart: new Date(start + 'T00:00:00+08:00').toISOString(), periodEnd: new Date(end + 'T00:00:00+08:00').toISOString(), acquisitionCostCents: Math.round(Number(values.acquisition) * 100), marketingCostCents: Math.round(Number(values.marketing) * 100) })
+      await load(); return '培训结算草稿已生成，下一步提交独立复核。'
+    },
+  })
 }
 
 function trainingSettlementPeriod(settlement: any) {
@@ -790,55 +678,17 @@ function trainingSettlementLatestNote(settlement: any) {
     .join(" · ");
 }
 
-async function changeTrainingSettlement(
-  settlement: any,
-  action: "submit" | "confirm" | "settle" | "return" | "void",
-) {
-  if (
-    ["confirm", "settle", "return"].includes(action) &&
-    isOwnTrainingSettlement(settlement)
-  ) {
-    uni.showToast({ title: "制单人不能复核自己的结算单", icon: "none" });
-    return;
-  }
-  const labels = {
-    submit: ["提交培训结算", "填写数据核对依据", "提交复核"],
-    confirm: ["确认培训结算", "填写消课、成本和合同口径复核依据", "确认通过"],
-    settle: ["培训结算入账", "填写付款/收款凭证或入账依据", "确认入账"],
-    return: ["退回培训结算", "填写差异项和退回原因", "确认退回"],
-    void: ["作废培训草稿", "填写作废原因", "确认作废"],
-  } as const;
-  const reason = await askReason(labels[action][0], labels[action][1]);
-  if (!reason) return;
-  const confirmed = await uni.showModal({
-    title: labels[action][0],
-    content: `${trainingSettlementPeriod(settlement)} · 场馆合同分成 ${money(settlement.venueContributionCents)}。本次原因：${reason}。状态变更将写入不可覆盖的审计历史。`,
-    confirmText: labels[action][2],
-  });
-  if (!confirmed.confirm) return;
-  const command = { action, reason, fromStatus: settlement.status };
-  await runAction(
-    `training-settlement-${action}:${settlement.id}`,
-    `培训结算已${action === "submit" ? "提交复核" : action === "confirm" ? "确认" : action === "settle" ? "结算入账" : action === "return" ? "退回草稿" : "作废"}`,
-    "培训结算状态更新失败",
-    () =>
-      withPendingCreationKey(
-        `training.settlement.${settlement.id}.${action}`,
-        command,
-        (idempotencyKey) => {
-          const payload = { reason, idempotencyKey };
-          if (action === "submit")
-            return endpoints.submitTrainingSettlement(settlement.id, payload);
-          if (action === "confirm")
-            return endpoints.confirmTrainingSettlement(settlement.id, payload);
-          if (action === "settle")
-            return endpoints.settleTrainingSettlement(settlement.id, payload);
-          if (action === "return")
-            return endpoints.returnTrainingSettlement(settlement.id, payload);
-          return endpoints.voidTrainingSettlement(settlement.id, payload);
-        },
-      ),
-  );
+function changeTrainingSettlement(settlement: any, action: 'submit' | 'confirm' | 'settle' | 'return' | 'void') {
+  if (['confirm','settle','return'].includes(action) && isOwnTrainingSettlement(settlement)) { actionError.value = '制单人不能复核自己的结算单'; return }
+  const labels = { submit: '提交复核', confirm: '复核确认', settle: '结算入账', return: '退回草稿', void: '作废草稿' }
+  task.start({ title: '培训结算 · ' + labels[action], description: trainingSettlementPeriod(settlement) + ' · 场馆合同分成 ' + money(settlement.venueContributionCents) + '。状态变更和操作人写入审计，不覆盖历史。',
+    confirmText: '确认' + labels[action], fields: [reasonField(action === 'settle' ? '付款/收款凭证与入账依据' : '核对依据')],
+    submit: async ({ reason }) => {
+      const handlers = { submit: endpoints.submitTrainingSettlement, confirm: endpoints.confirmTrainingSettlement, settle: endpoints.settleTrainingSettlement, return: endpoints.returnTrainingSettlement, void: endpoints.voidTrainingSettlement }
+      await withPendingCreationKey('training.settlement.' + settlement.id + '.' + action, { action, reason, fromStatus: settlement.status }, idempotencyKey => handlers[action](settlement.id, { reason, idempotencyKey }))
+      await load(); return '培训结算已' + labels[action] + '。'
+    },
+  })
 }
 
 function onConsignmentPeriodStartChange(event: any) {
@@ -853,137 +703,34 @@ function onConsignmentPeriodEndChange(event: any) {
   );
 }
 
-async function createConsignmentSettlementDraft(supplier: any) {
-  if (consignmentPeriodEndDate.value <= consignmentPeriodStartDate.value) {
-    uni.showToast({ title: "结束日期必须晚于开始日期", icon: "none" });
-    return;
-  }
-  const reason = await askReason(
-    `生成 ${supplier.name} 寄售结算`,
-    "填写制单依据，例如月结对账或逐单结算",
-  );
-  if (!reason) return;
-  const command = {
-    supplierId: supplier.id,
-    periodStart: new Date(
-      `${consignmentPeriodStartDate.value}T00:00:00+08:00`,
-    ).toISOString(),
-    periodEnd: new Date(
-      `${consignmentPeriodEndDate.value}T00:00:00+08:00`,
-    ).toISOString(),
-    reason,
-  };
-  const confirmed = await uni.showModal({
-    title: "确认生成寄售结算草稿",
-    content: `${supplier.name} · ${consignmentPeriodStartDate.value} 至 ${consignmentPeriodEndDate.value}（结束日不含）。系统只汇总未被其他有效账单占用的销售应付与退款冲正。`,
-    confirmText: "生成草稿",
-  });
-  if (!confirmed.confirm) return;
-  await runAction(
-    `consignment-create:${supplier.id}`,
-    `${supplier.name} 寄售结算草稿已生成`,
-    "寄售结算草稿生成失败",
-    () =>
-      withPendingCreationKey(
-        `consignment.settlement.create.${supplier.id}`,
-        command,
-        (idempotencyKey) =>
-          endpoints.createConsignmentSettlement({
-            ...command,
-            idempotencyKey,
-          }),
-      ),
-  );
+function createConsignmentSettlementDraft(supplier: any) {
+  const start = consignmentPeriodStartDate.value, end = consignmentPeriodEndDate.value
+  if (end <= start) { actionError.value = '结束日期必须晚于开始日期'; return }
+  task.start({ title: '生成寄售结算草稿', description: supplier.name + ' · ' + start + ' 至 ' + end + '（结束日不含）。只汇总未被其他有效账单占用的销售应付与退款冲正。',
+    confirmText: '确认生成草稿', fields: [reasonField('制单依据')],
+    submit: async ({ reason }) => {
+      const command = { supplierId: supplier.id, periodStart: new Date(start + 'T00:00:00+08:00').toISOString(), periodEnd: new Date(end + 'T00:00:00+08:00').toISOString(), reason }
+      await withPendingCreationKey('consignment.settlement.create.' + supplier.id, command, idempotencyKey => endpoints.createConsignmentSettlement({ ...command, idempotencyKey }))
+      await load(); return '寄售结算草稿已生成，下一步提交复核。'
+    },
+  })
 }
 
 type ConsignmentSettlementUiAction =
   "submit" | "confirm" | "dispute" | "return" | "settle" | "void";
 
-async function changeConsignmentSettlement(
-  settlement: any,
-  action: ConsignmentSettlementUiAction,
-) {
-  if (
-    ["confirm", "dispute", "return", "settle"].includes(action) &&
-    settlement.isOwnCreator === true
-  ) {
-    uni.showToast({ title: "制单人不能复核自己的寄售账单", icon: "none" });
-    return;
-  }
-  const labels = {
-    submit: ["提交寄售账单", "填写应付明细与合同规则核对依据", "提交复核"],
-    confirm: ["确认寄售账单", "填写供应商对账确认或复核依据", "复核确认"],
-    dispute: ["提出寄售争议", "填写供应商异议、差异明细或凭证", "退回草稿"],
-    return: ["退回寄售账单", "填写付款前复核发现的差异", "退回草稿"],
-    settle: ["结算供应商应付", "填写付款审批与金额核对依据", "继续录凭证"],
-    void: ["作废寄售草稿", "填写作废及重建原因", "确认作废"],
-  } as const;
-  const reason = await askReason(labels[action][0], labels[action][1]);
-  if (!reason) return;
-  let paymentReference = "";
-  if (action === "settle") {
-    const reference = await askReason(
-      "录入付款凭证",
-      "银行流水号、付款单号或抵扣凭证（必填）",
-    );
-    if (!reference) return;
-    paymentReference = reference;
-  }
-  const confirmed = await uni.showModal({
-    title: labels[action][0],
-    content: `${consignmentSupplierName(settlement)} · 应付 ${money(settlement.payableCents)} · ${consignmentSettlementPeriod(settlement)}。原因：${reason}。状态和操作人将写入不可覆盖历史。`,
-    confirmText: labels[action][2],
-  });
-  if (!confirmed.confirm) return;
-  const command = {
-    action,
-    fromStatus: settlement.status,
-    reason,
-    ...(paymentReference ? { paymentReference } : {}),
-  };
-  await runAction(
-    `consignment-${action}:${settlement.id}`,
-    `寄售结算已${action === "submit" ? "提交复核" : action === "confirm" ? "确认" : action === "dispute" ? "记录争议并退回" : action === "return" ? "退回草稿" : action === "settle" ? "完成付款" : "作废"}`,
-    "寄售结算状态更新失败",
-    () =>
-      withPendingCreationKey(
-        `consignment.settlement.${settlement.id}.${action}`,
-        command,
-        (idempotencyKey) => {
-          const payload = {
-            reason,
-            idempotencyKey,
-            ...(paymentReference ? { paymentReference } : {}),
-          };
-          if (action === "submit")
-            return endpoints.submitConsignmentSettlement(
-              settlement.id,
-              payload,
-            );
-          if (action === "confirm")
-            return endpoints.confirmConsignmentSettlement(
-              settlement.id,
-              payload,
-            );
-          if (action === "dispute")
-            return endpoints.disputeConsignmentSettlement(
-              settlement.id,
-              payload,
-            );
-          if (action === "return")
-            return endpoints.returnConsignmentSettlement(
-              settlement.id,
-              payload,
-            );
-          if (action === "settle")
-            return endpoints.settleConsignmentSettlement(
-              settlement.id,
-              payload,
-            );
-          return endpoints.voidConsignmentSettlement(settlement.id, payload);
-        },
-      ),
-  );
+function changeConsignmentSettlement(settlement: any, action: ConsignmentSettlementUiAction) {
+  if (['confirm','dispute','return','settle'].includes(action) && settlement.isOwnCreator === true) { actionError.value = '制单人不能复核自己的寄售账单'; return }
+  const labels = { submit: '提交复核', confirm: '复核确认', dispute: '提出争议', return: '退回草稿', settle: '记录付款', void: '作废草稿' }
+  task.start({ title: '寄售结算 · ' + labels[action], description: consignmentSupplierName(settlement) + ' · 应付 ' + money(settlement.payableCents) + ' · ' + consignmentSettlementPeriod(settlement) + '。操作写入不可覆盖的历史。',
+    confirmText: '确认' + labels[action], fields: [reasonField('核对依据'), ...(action === 'settle' ? [{ key: 'paymentReference', label: '银行流水号或付款凭证', min: 2, max: 200 }] : [])],
+    submit: async ({ reason, paymentReference }) => {
+      const command = { action, fromStatus: settlement.status, reason, ...(paymentReference ? { paymentReference } : {}) }
+      const handlers = { submit: endpoints.submitConsignmentSettlement, confirm: endpoints.confirmConsignmentSettlement, dispute: endpoints.disputeConsignmentSettlement, return: endpoints.returnConsignmentSettlement, settle: endpoints.settleConsignmentSettlement, void: endpoints.voidConsignmentSettlement }
+      await withPendingCreationKey('consignment.settlement.' + settlement.id + '.' + action, command, idempotencyKey => handlers[action](settlement.id, { reason, idempotencyKey, ...(paymentReference ? { paymentReference } : {}) }))
+      await load(); return '寄售结算已' + labels[action] + '，审计已记录。'
+    },
+  })
 }
 
 function consignmentSupplierName(settlement: any) {
@@ -1054,40 +801,12 @@ function payableAssignment(entry: any) {
   return `${line.settlement?.statementNo || "结算单"} · ${consignmentSettlementStatusLabel(line.settlement?.status)}`;
 }
 
-async function createSettlement(merchant: any) {
-  const input = await uni.showModal({
-    title: `生成 ${merchant.name} 结算草稿`,
-    content: "",
-    editable: true,
-    placeholderText: "输入本周期归因毛利（元，可为 0）",
-    confirmText: "核对周期",
-  });
-  if (!input.confirm) return;
-  const grossProfitYuan = input.content?.trim() || "";
-  if (!/^\d+(\.\d{1,2})?$/.test(grossProfitYuan)) {
-    uni.showToast({ title: "请输入正确金额，最多两位小数", icon: "none" });
-    return;
-  }
-  const attributedGrossProfitCents = Math.round(Number(grossProfitYuan) * 100);
-  const period = businessPeriod();
-  const confirmed = await uni.showModal({
-    title: "确认生成结算草稿",
-    content: `${merchant.name} · ${period.date}，归因毛利 ${money(attributedGrossProfitCents)}。系统将按已核销券码重算结算指标。`,
-    confirmText: "生成草稿",
-  });
-  if (!confirmed.confirm) return;
-  await runAction(
-    `settlement-create:${merchant.id}`,
-    `${merchant.name} 的 ${period.date} 结算草稿已生成`,
-    "结算草稿生成失败",
-    () =>
-      endpoints.createAllianceSettlement({
-        merchantId: merchant.id,
-        periodStart: period.periodStart,
-        periodEnd: period.periodEnd,
-        attributedGrossProfitCents,
-      }),
-  );
+function createSettlement(merchant: any) {
+  const period = businessPeriod()
+  task.start({ title: '生成联盟结算草稿', description: merchant.name + ' · ' + period.date + '。按已核销券重算指标，手工归因金额需有凭证，不直接修改实收。',
+    confirmText: '确认生成草稿', fields: [{ key: 'profit', label: '本周期归因毛利（元）', kind: 'money', initial: '0' }],
+    submit: async ({ profit }) => { await endpoints.createAllianceSettlement({ merchantId: merchant.id, periodStart: period.periodStart, periodEnd: period.periodEnd, attributedGrossProfitCents: Math.round(Number(profit) * 100) }); await load(); return '联盟结算草稿已生成，可提交商户核对。' },
+  })
 }
 
 async function submitSettlement(settlement: any) {
@@ -1120,24 +839,11 @@ async function confirmSettlement(settlement: any) {
   );
 }
 
-async function disputeSettlement(settlement: any) {
-  const reason = await askReason(
-    "提出结算争议",
-    "填写差异项、凭证或需复核原因（必填）",
-  );
-  if (!reason) return;
-  const confirmed = await uni.showModal({
-    title: "确认退回草稿",
-    content: `结算单将退回 DRAFT，原金额不覆盖，争议原因：${reason}`,
-    confirmText: "提交争议",
-  });
-  if (!confirmed.confirm) return;
-  await runAction(
-    `settlement-dispute:${settlement.id}`,
-    `${settlementMerchant(settlement)} 的结算单已退回复核`,
-    "结算争议提交失败",
-    () => endpoints.disputeAllianceSettlement(settlement.id, { reason }),
-  );
+function disputeSettlement(settlement: any) {
+  task.start({ title: '提出联盟结算争议', description: settlementMerchant(settlement) + ' · ' + money(settlement.cooperationFeeCents) + '。退回草稿，原金额不覆盖。',
+    confirmText: '确认提交争议', fields: [reasonField('差异与凭证')],
+    submit: async ({ reason }) => { await endpoints.disputeAllianceSettlement(settlement.id, { reason }); await load(); return '账单已退回待核查，争议依据保留。' },
+  })
 }
 
 async function settleSettlement(settlement: any) {
@@ -1269,11 +975,13 @@ onShow(() => {
 <template>
   <OperationsFrame
     access="finance"
+    icon="finance"
     title="财务结算"
     eyebrow="FINANCE & RECONCILIATION"
     :role="roleLabel"
     description="以营业日期为边界核对收入、退款、培训分成、联盟结算和寄售供应商应付；每个财务动作都有状态、原因和复核责任。"
   >
+    <OperationTask :task="task" />
     <view class="metric-grid">
       <MetricCard
         v-for="item in metrics"

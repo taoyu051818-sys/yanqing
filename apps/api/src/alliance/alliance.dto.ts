@@ -47,6 +47,10 @@ export class CreateMerchantDto {
 }
 
 export class CreateCouponTemplateDto {
+  @IsOptional()
+  @IsBoolean()
+  allowVenueBooking = false
+
   @IsString()
   @MinLength(2)
   @MaxLength(40)
@@ -123,6 +127,10 @@ export class SetMerchantStatusDto {
 }
 
 export class SetCouponTemplateStatusDto {
+  @IsOptional()
+  @IsBoolean()
+  allowVenueBooking?: boolean
+
   @IsBoolean()
   enabled: boolean
 

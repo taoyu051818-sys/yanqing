@@ -1,18 +1,44 @@
-# 微信开发者工具与测试 AppID 验收
+# 微信开发者工具与项目 AppID 验收
 
 本文是当前仓库的微信小程序导入、联调和实机验收手册。它针对 `apps/miniapp` 的 uni-app + Vue 3 工程；微信开发者工具导入的必须是 uni-app 编译产物，不是仓库根目录、`apps/miniapp` 或 `apps/miniapp/src`。
 
 ## 当前构建基线
 
-- 小程序测试 AppID：`wxa457599ec4c27ad1`。
+- 小程序项目 AppID：`wx25610460bc96894b`。
 - 配置位置：`apps/miniapp/src/manifest.json` 的 `mp-weixin.appid`。
 - 文件开头的顶层 `appid` 是 uni-app 的 5+ AppID，当前留空不影响微信小程序；不要把微信 AppID 填到那个字段。
 - 构建后配置：`dist/*/mp-weixin/project.config.json` 的 `compileType` 为 `miniprogram`，因此项目按“微信小程序”打开，不是“小游戏”。
 - 默认数据模式：`VITE_DATA_MODE=mock`。模拟模式不会访问 API，订单、身份和演示操作保存在当前微信开发者工具的本地缓存。
 
-当前代码门禁为 shared 13/13、API 单元/服务 558/558、小程序 106/106、健康接口 E2E 1/1；本地全新 PostgreSQL 已通过 29/29 个迁移、迁移状态和 Schema diff，种子化验收库已完成真实 HTTP/数据库回放。此前微信开发者工具预览已确认 `compileType=miniprogram` 和测试 AppID `wxa457599ec4c27ad1`；该测试号只支持编译/预览，“上传”会提示“测试号不支持上传”。每次改代码后须重新导入最新产物复验，历史预览不能替代当前真机结果；mock 构建只能计作开发演示。
+2026-09-04 已完成正式 AppID 的远端构建，产物确认 `compileType=miniprogram`、`appid=wx25610460bc96894b`，API 为 `https://api.yutechhn.cn/api/v1`，且构建产物不包含 AppSecret。每次改代码后仍须重新导入最新产物复验，历史预览不能替代当前真机结果；mock 构建只能计作开发演示。
 
-测试 AppID 只用于本地开发和预览验收，不支持上传体验版。若开发者工具提示“无权限”“AppID 不存在”或账号未加入项目，请让小程序管理员把当前微信号加入开发成员，或在 `manifest.json` 换成你有权限的 AppID 后重新构建；不要把别人的 AppID 用于正式发布。后端 `WECHAT_APP_ID` 必须与前端构建使用的 AppID 一致，`WECHAT_APP_SECRET` 只能放在 API 服务端。
+若开发者工具提示“无权限”“AppID 不存在”或账号未加入项目，请让小程序管理员把当前微信号加入开发成员。后端 `WECHAT_APP_ID` 必须与前端构建使用的 AppID 一致，`WECHAT_APP_SECRET` 只能放在 API 服务端。
+
+## 主包依赖与 200 KB 资源检查
+
+2026-09-05 已按包归属整理源码：赛事展示配置、治理配置及经营页面框架位于 `packages/ops` 分包；主包不再持有仅经营页使用的副本。设计依据见 [uni-app 分包配置说明](https://uniapp.dcloud.net.cn/collocation/manifest.html#optimization-1)。
+
+远端模式在 Vite 解析依赖时就隔离模拟模块，不只依靠运行时的 `if (isMockMode)`。模拟模式仍保留本机演示数据与重置功能，正式远端产物不包含 `services/mock`。
+
+`pnpm build:miniapp` 现在会在编译完成后自动检查：
+
+- 从主包页面、组件配置和静态 JS 依赖出发，检查是否有主包未使用的 JS。
+- 检查页面、组件、JS 引用是否缺失，以及是否存在主包／其他分包静态引用某分包的非法依赖。
+- 检查包内每个图片和音频资源，单文件上限为 **200,000 字节**（比 200 KiB 更严格）。
+- 远端构建不得残留模拟模块；模拟构建允许实际被使用的模拟依赖。
+
+检查不通过时构建命令返回失败，不会静默删掉文件来掩盖错误。只运行 `uni build` 的自定义流程需要再执行检查：
+
+```bash
+pnpm --dir apps/miniapp check:mp-weixin
+pnpm --dir apps/miniapp test:package
+# 自定义构建目录可作为参数传入；模拟目录显式允许 mock
+node apps/miniapp/scripts/check-wechat-package.mjs /path/to/mock-mp --allow-mock
+```
+
+本次产物检查：171 个媒体文件，最大的是小程序分享图 130,066 字节；比赛分享图 83,154 字节。两图已低于上限，因此未再次做有损压缩。此检查针对包内资源，不代表用户日后上传到服务器的头像或远程媒体也经过了同样检查。
+
+导入或上传应使用最新的 `apps/miniapp/dist/build/mp-weixin`，不要混用旧的 `dist/dev/mp-weixin`。如果仍看到旧路径告警，先确认开发者工具的项目目录，再清除编译缓存并重新执行代码质量检查。这是本地静态预检，微信开发者工具和真机的检查仍需执行。
 
 ## 一次性准备
 
@@ -54,7 +80,7 @@
 
    ```dotenv
    VITE_DATA_MODE=remote
-   VITE_API_BASE_URL=https://api.example.com/api/v1
+   VITE_API_BASE_URL=https://api.yutechhn.cn/api/v1
    ```
 
    确认后再执行 `pnpm build:miniapp`。如果保留 `VITE_DATA_MODE=mock`，即使目录名是 `build` 也只是本地演示包，不得上传为正式体验版。
@@ -72,7 +98,7 @@
 | 字段 | 开发联调 | 上传/体验版 |
 | --- | --- | --- |
 | 项目目录 | `apps/miniapp/dist/dev/mp-weixin` | `apps/miniapp/dist/build/mp-weixin` |
-| AppID | `wxa457599ec4c27ad1`（或管理员分配的测试 AppID） | 与发布环境一致的正式 AppID |
+| AppID | `wx25610460bc96894b` | `wx25610460bc96894b` |
 | 项目名称 | 延庆金羽羽毛球 | 延庆金羽羽毛球 |
 | 项目类型 | 小程序（Mini Program） | 小程序（Mini Program） |
 
@@ -81,7 +107,7 @@
 ```json
 {
   "compileType": "miniprogram",
-  "appid": "wxa457599ec4c27ad1"
+  "appid": "wx25610460bc96894b"
 }
 ```
 
@@ -169,7 +195,7 @@ API 详细接口、角色矩阵和幂等键要求见 [docs/api.md](api.md)；数
 - **真机调试**：连接 USB 或同一网络设备，观察真机网络、控制台和存储；逐项验证拒绝权限、弱网、前后台切换和安全区。
 - **清缓存**：遇到旧路由、旧身份或 mock 订单残留时，清除编译缓存和本地存储后重新编译。
 - **调试器**：Console 看异常和请求 ID，Network 看请求 URL/状态码/响应，Storage 检查 `yanqing_access_token` 与 mock 订单；不要截图或提交 token。
-- **上传**：只从 `dist/build/mp-weixin` 上传，填写版本号和备注，并确认当前 AppID 是支持上传、且当前微信号有开发者权限的正式小程序 AppID；仓库内测试号 `wxa457599ec4c27ad1` 会被开发者工具提示“测试号不支持上传”。上传前先跑 `pnpm verify`。
+- **上传**：只从 `dist/build/mp-weixin` 上传，填写版本号和备注，并确认当前微信号拥有 `wx25610460bc96894b` 的开发者权限。上传前先跑 `pnpm verify`。
 
 ### 上传体验版（需要管理员权限）
 
@@ -197,7 +223,7 @@ API 详细接口、角色矩阵和幂等键要求见 [docs/api.md](api.md)；数
 | 编号 | 用户旅程 | 关键通过条件 |
 | --- | --- | --- |
 | 1 | 新客/直接推荐 | 只能绑定一层直接推荐人，重复改绑和多级奖励被拒绝。 |
-| 2 | 会员订场 | 20 片场地/8 时段可查；锁场 10 分钟；支付后确认，重复支付幂等，签到后状态正确。 |
+| 2 | 会员订场 | 20 片场地/17 个一小时时段可查；按小时计价，旧两小时预约仍阻断两个小时；锁场 10 分钟；支付后确认，重复支付幂等，签到后状态正确。 |
 | 3 | 五账户与充值计划 | 五账户分别记账；充值只提交服务端当前有效 `planId`，客户端不能伪造本金或赠送额。 |
 | 4 | 培训购课到消课 | 监护人授权后购课；教练提交、管理员确认消课；有效收入按 20%计入场馆合同收入，场馆培训费和应付款为 0。 |
 | 5 | 培训逆向 | 请假/补课/退款或重复消课不重复确认收入，余额、课次、台账和审计可追溯。 |

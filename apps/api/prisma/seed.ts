@@ -215,16 +215,14 @@ async function seed() {
     });
   }
 
-  const slotSeeds = [
-    ['S01', '晨练场', 7 * 60, 9 * 60, SlotPeriod.EARLY, 6000],
-    ['S02', '上午场', 9 * 60, 12 * 60, SlotPeriod.DAYTIME, 9000],
-    ['S03', '午间场', 12 * 60, 14 * 60, SlotPeriod.DAYTIME, 7000],
-    ['S04', '下午场', 14 * 60, 17 * 60, SlotPeriod.DAYTIME, 9000],
-    ['S05', '晚高峰一', 17 * 60, 19 * 60, SlotPeriod.PRIME, 10000],
-    ['S06', '晚高峰二', 19 * 60, 21 * 60, SlotPeriod.PRIME, 12000],
-    ['S07', '夜场', 21 * 60, 23 * 60, SlotPeriod.PRIME, 8000],
-    ['S08', '深夜场', 23 * 60, 24 * 60, SlotPeriod.PRIME, 4000],
-  ] as const;
+  const slotSeeds = Array.from({ length: 17 }, (_, index) => {
+    const hour = index + 7;
+    const code = `H${String(hour).padStart(2, '0')}`;
+    const label = `${String(hour).padStart(2, '0')}:00–${String(hour + 1).padStart(2, '0')}:00`;
+    const period = hour < 9 ? SlotPeriod.EARLY : hour < 17 ? SlotPeriod.DAYTIME : SlotPeriod.PRIME;
+    const priceCents = hour < 12 ? 3000 : hour < 14 ? 3500 : hour < 17 ? 3000 : hour < 19 ? 5000 : hour < 21 ? 6000 : 4000;
+    return [code, label, hour * 60, (hour + 1) * 60, period, priceCents] as const;
+  });
   for (const [
     code,
     label,
@@ -242,7 +240,7 @@ async function seed() {
         startMinutes,
         endMinutes,
         period,
-        sortOrder: Number(code.slice(1)),
+        sortOrder: startMinutes,
       },
     });
     const priceStart = new Date('2026-01-01T00:00:00+08:00');

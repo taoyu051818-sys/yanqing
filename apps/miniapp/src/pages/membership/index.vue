@@ -5,7 +5,12 @@ import SectionEmpty from '../../components/SectionEmpty.vue'
 import { endpoints } from '../../services/api'
 import { money } from '../../utils/format'
 import { withPendingCreationKey } from '../../utils/pending-creation-key'
+import { useSessionStore } from '../../stores/session'
+import { openMemberPage, requestMemberLogin } from '../../utils/member-navigation'
 
+const session = useSessionStore()
+const busy = ref('')
+const actionError = ref('')
 const products = ref<any[]>([])
 const rechargePlans = ref<any[]>([])
 const loading = ref(false)
@@ -21,6 +26,7 @@ function benefitText(key: string, value: unknown) {
   return `${label}：以场馆公示为准`
 }
 async function load() {
+  if (!session.isAuthenticated) return requestMemberLogin('/pages/membership/index')
   loading.value = true
   error.value = ''
   try {
@@ -35,27 +41,30 @@ async function load() {
   finally { loading.value = false }
 }
 async function purchase(product: any) {
+  if (busy.value) return
+  busy.value = product.id
+  actionError.value = ''
   try {
     const command = { productId: product.id }
     const order: any = await withPendingCreationKey('membership.purchase', command, (creationIdempotencyKey) =>
       endpoints.purchaseMembership(product.id, creationIdempotencyKey),
     )
-    uni.showModal({ title: '会员订单已创建', content: `${order.orderNo} 待支付，支付后权益立即生效。`, showCancel: false })
-  } catch (cause: any) { uni.showToast({ title: cause.message, icon: 'none' }) }
+    await openMemberPage(`/pages/order/index?id=${encodeURIComponent(order.id)}`)
+  } catch (cause: any) { actionError.value = cause.message || '下单失败，请重试' }
+  finally { busy.value = '' }
 }
 async function recharge(plan: any) {
-  const result = await uni.showModal({
-    title: '确认充值计划',
-    content: `${plan.name}\n支付 ${money(plan.principalCents)}${plan.giftCents ? `，到账赠送 ${money(plan.giftCents)}` : ''}`,
-  })
-  if (!result.confirm) return
+  if (busy.value) return
+  busy.value = plan.id
+  actionError.value = ''
   try {
     const command = { planId: plan.id }
     const order: any = await withPendingCreationKey('membership.recharge', command, (creationIdempotencyKey) =>
       endpoints.recharge(plan.id, creationIdempotencyKey),
     )
-    uni.showModal({ title: '充值订单已创建', content: `${order.orderNo} 待支付。充值本金与赠送金额已按本次选择锁定，请在订单中完成支付。`, showCancel: false })
-  } catch (cause: any) { uni.showToast({ title: cause.message, icon: 'none' }) }
+    await openMemberPage(`/pages/order/index?id=${encodeURIComponent(order.id)}`)
+  } catch (cause: any) { actionError.value = cause.message || '下单失败，请重试' }
+  finally { busy.value = '' }
 }
 onShow(load)
 </script>
@@ -63,10 +72,11 @@ onShow(load)
   <view class="page safe-bottom">
     <view class="hero"><text class="eyebrow">金羽会员</text><text class="hero-title">让每次到场更有价值</text><text class="hero-note">充值金额与赠送权益均由场馆当前生效方案确定</text></view>
     <view v-if="error" class="card load-error"><text>{{ error }}</text><button class="secondary retry" @tap="load">重试</button></view>
+    <view v-if="actionError" class="card load-error" role="alert">{{ actionError }}</view>
     <view class="section-title">余额充值</view>
     <view v-for="plan in rechargePlans" :key="plan.id" class="card recharge-plan">
-      <view class="plan-copy"><text class="name">{{ plan.name }}</text><text class="muted">{{ plan.giftCents ? `额外赠送 ${money(plan.giftCents)}` : '本金全额到账' }}</text></view>
-      <button class="primary plan-button" @tap="recharge(plan)">支付 {{ money(plan.principalCents) }}</button>
+      <view class="plan-copy"><text class="name">{{ plan.name }}</text><text class="muted">本金 {{ money(plan.principalCents) }} · 赠送 {{ money(plan.giftCents) }}，分账到账</text></view>
+      <button class="primary plan-button" :loading="busy === plan.id" :disabled="Boolean(busy)" @tap="recharge(plan)">{{ money(plan.principalCents) }} · 下一步付款</button>
     </view>
     <SectionEmpty v-if="!rechargePlans.length && !loading && !error" title="暂无可用充值计划" />
     <view class="section-title">会员权益</view>
@@ -74,7 +84,7 @@ onShow(load)
       <view class="row product-head"><text class="pill">{{ levelName[product.level] || '会员方案' }}</text><text class="muted">有效期 {{ product.durationDays }} 天</text></view>
       <text class="name">{{ product.name }}</text>
       <view class="benefits"><text v-for="(value, key) in product.benefits" :key="key">✓ {{ benefitText(String(key), value) }}</text></view>
-      <view class="row purchase-row"><text class="price">{{ money(product.priceCents) }}</text><button class="primary buy" @tap="purchase(product)">立即开通</button></view>
+      <view class="row purchase-row"><text class="price">{{ money(product.priceCents) }}</text><button class="primary buy" :loading="busy === product.id" :disabled="Boolean(busy)" @tap="purchase(product)">下单，下一步付款</button></view>
     </view>
     <SectionEmpty v-if="!products.length && !loading && !error" title="暂无会员产品" />
   </view>

@@ -136,10 +136,10 @@ describe('GamesService management listing', () => {
     },
   )
 
-  it('rejects unrelated employee roles even when the service is called directly', () => {
+  it('rejects unrelated employee roles even when the service is called directly', async () => {
     const service = new GamesService({ game: { findMany: vi.fn() } } as never)
 
-    expect(() => service.managed(financeActor)).toThrow(ForbiddenException)
+    await expect(service.managed(financeActor)).rejects.toThrow(ForbiddenException)
   })
 
   it('uses an explicit management projection without actor, order or replay fields', async () => {
@@ -163,6 +163,30 @@ describe('GamesService management listing', () => {
     expect(query.select.registrations.select).not.toHaveProperty('orderId')
     expect(query.select.registrations.select.user.select).not.toHaveProperty('id')
     expect(query.select.registrations.select.order.select).toEqual({ status: true })
+  })
+
+  it('projects the effective check-in window without exposing parameter internals', async () => {
+    const startsAt = new Date(Date.now() + 2 * 60 * 60_000)
+    const findMany = vi.fn().mockResolvedValue([{ id: 'game-1', startsAt }])
+    const findFirst = vi.fn().mockResolvedValue({
+      id: 'parameter-private-id',
+      value: { version: 1, earlyMinutes: 45, lateMinutes: 20 },
+    })
+    const service = new GamesService({
+      game: { findMany },
+      systemParameter: { findFirst },
+    } as never)
+
+    const [result] = await service.managed(hostActor)
+
+    expect(result.checkInWindow).toMatchObject({
+      opensAt: new Date(startsAt.getTime() - 45 * 60_000).toISOString(),
+      closesAt: new Date(startsAt.getTime() + 20 * 60_000).toISOString(),
+      state: 'NOT_OPEN',
+      mayHistoricallyOverride: false,
+    })
+    expect(result.checkInWindow).not.toHaveProperty('parameterId')
+    expect(result.checkInWindow).not.toHaveProperty('parameterKey')
   })
 })
 

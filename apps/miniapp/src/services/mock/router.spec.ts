@@ -340,6 +340,16 @@ describe("miniapp mock acceptance journeys", () => {
       growthPointsAwarded: 1,
     });
     expect(current.growthPointsBalance).toBe(1);
+    const postedDashboard = await request<any>("GET", "/dashboard");
+    expect(postedDashboard.training.confirmedRevenueCents).toBe(
+      1_680_000 + firstConsume.effectiveRevenueCents,
+    );
+    expect(postedDashboard.training.venueContributionCents).toBe(
+      336_000 + firstConsume.venueContributionCents,
+    );
+    expect(postedDashboard.operatingShare.basisRevenueCents).toBe(
+      5_358_000 + firstConsume.effectiveRevenueCents,
+    );
 
     await login("COACH");
     const correctionCommand = {
@@ -413,6 +423,9 @@ describe("miniapp mock acceptance journeys", () => {
     expect(
       currentAttendance.revenueRecognitions.map((item: any) => item.sequence),
     ).toEqual([1, 2]);
+    const reversedDashboard = await request<any>("GET", "/dashboard");
+    expect(reversedDashboard.training.confirmedRevenueCents).toBe(1_680_000);
+    expect(reversedDashboard.training.venueContributionCents).toBe(336_000);
 
     await login("COACH");
     await request("POST", "/training/sessions/session-1/consume", {
@@ -448,6 +461,10 @@ describe("miniapp mock acceptance journeys", () => {
       consumedSessions: 1,
       growthPointsAwarded: 1,
     });
+    const repostedDashboard = await request<any>("GET", "/dashboard");
+    expect(repostedDashboard.training.confirmedRevenueCents).toBe(
+      1_680_000 + reconsume.effectiveRevenueCents,
+    );
 
     const adminMade = await request("POST", "/training/consume-corrections", {
       recognitionId: reconsume.id,
@@ -516,7 +533,7 @@ describe("miniapp mock acceptance journeys", () => {
     const order = await request("POST", "/venues/bookings", {
       date,
       courtId: "court-1",
-      slotId: "slot-1",
+      slotId: "slot-H07",
       sourceChannel: "MINI_PROGRAM",
     });
     await request("POST", `/orders/${order.id}/pay`, {
@@ -633,7 +650,7 @@ describe("miniapp mock acceptance journeys", () => {
     const base = {
       date,
       courtId: "court-1",
-      slotId: "slot-2",
+      slotId: "slot-H09",
       sourceChannel: "STORE_VISIT",
       creationIdempotencyKey: "frontdesk-venue-create-1",
     };
@@ -707,7 +724,7 @@ describe("miniapp mock acceptance journeys", () => {
         memberId: "member-1",
         date: shanghaiDate(1),
         courtId: "court-1",
-        slotId: "slot-2",
+        slotId: "slot-H09",
         sourceChannel: "STORE_VISIT",
         creationIdempotencyKey: "cash-gate-booking-1",
       }),
@@ -719,7 +736,7 @@ describe("miniapp mock acceptance journeys", () => {
       memberId: "member-1",
       date: shanghaiDate(1),
       courtId: "court-1",
-      slotId: "slot-2",
+      slotId: "slot-H09",
       sourceChannel: "STORE_VISIT",
       creationIdempotencyKey: "cash-gate-booking-1",
     });
@@ -782,7 +799,7 @@ describe("miniapp mock acceptance journeys", () => {
         data: {
           date,
           courtId: "court-1",
-          slotId: "slot-1",
+          slotId: "slot-H07",
           sourceChannel: "MINI_PROGRAM",
           creationIdempotencyKey: "mock-create-booking-1",
         },
@@ -1152,10 +1169,30 @@ describe("miniapp mock acceptance journeys", () => {
       memberId: "member-1",
       date: shanghaiDate(1),
       courtId: "court-1",
-      slotId: "slot-2",
+      slotId: "slot-H09",
       sourceChannel: "STORE_VISIT",
       creationIdempotencyKey: "shift-assisted-booking-1",
     });
+    const serviceDate = shanghaiDate();
+    saveOrders([
+      {
+        id: "member-self-service-order",
+        orderNo: "VN-MEMBER-SELF-SERVICE",
+        businessType: "VENUE",
+        status: "PAID",
+        title: "会员自主订场",
+        createdById: "user-member",
+        bookings: [
+          {
+            id: "member-self-service-booking",
+            status: "CONFIRMED",
+            startsAt: `${serviceDate}T21:00:00+08:00`,
+            endsAt: `${serviceDate}T23:00:00+08:00`,
+          },
+        ],
+      },
+      ...getOrders(),
+    ]);
     expect(await request("GET", "/operations/shifts/current")).toMatchObject({
       id: opened.id,
       status: "OPEN",
@@ -1192,7 +1229,7 @@ describe("miniapp mock acceptance journeys", () => {
       cashVarianceCents: 500,
       closedById: "user-admin",
       pendingSnapshot: {
-        pendingOrders: { count: 1 },
+        pendingOrders: { count: 2 },
       },
       auditTrail: [
         { action: "FRONT_DESK_SHIFT_OPENED" },

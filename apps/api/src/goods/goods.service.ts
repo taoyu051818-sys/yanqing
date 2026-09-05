@@ -12,6 +12,7 @@ import {
 import type { CreateGoodsOrderDto } from './goods.dto.js'
 import { executeOrderCreation } from '../orders/order-creation-idempotency.js'
 import { orderResponse } from '../orders/order-response.js'
+import { resolveOperatingShareSnapshot } from '../common/finance/operating-share.js'
 
 const orderNo = () => `GD${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`
 
@@ -67,6 +68,10 @@ export class GoodsService {
           }
         })
         const amount = items.reduce((sum, item) => sum + item.amountCents, 0)
+        const operatingShare = await resolveOperatingShareSnapshot(
+          tx,
+          BusinessType.GOODS,
+        )
         const created = await tx.order.create({
           data: {
             ...creation,
@@ -74,7 +79,11 @@ export class GoodsService {
             subjectAccount: SubjectAccount.VENUE, sourceChannel: SourceChannel.MINI_PROGRAM,
             status: OrderStatus.PENDING, title: `场馆商品 ${items.length} 种`,
             listAmountCents: amount, payableCents: amount,
-            parameterSnapshot: { pricing: 'SERVER_SNAPSHOT', itemCount: items.length },
+            parameterSnapshot: {
+              pricing: 'SERVER_SNAPSHOT',
+              itemCount: items.length,
+              operatingShare,
+            },
             items: { create: items },
           },
           include: { items: true },

@@ -32,6 +32,19 @@ describe("miniapp mock training trial funnel", () => {
     resetCatalogState();
   });
 
+  it("shows assigned coach ids only to operational training roles", async () => {
+    await login("FRONT_DESK");
+    const frontDeskProducts = await request<any[]>("GET", "/training/products");
+    expect(frontDeskProducts[0].classes[0]).toMatchObject({
+      coachId: "user-coach",
+    });
+
+    await login("MEMBER");
+    const memberProducts = await request<any[]>("GET", "/training/products");
+    expect(memberProducts[0].classes[0]).not.toHaveProperty("coachId");
+    expect(memberProducts[0].classes[0]).not.toHaveProperty("assistantId");
+  });
+
   it("runs reserve, check-in, structured assessment and paid conversion with exact replays", async () => {
     await login("FRONT_DESK");
     const sessions = await request<any[]>("GET", "/training/sessions");

@@ -5,7 +5,10 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
@@ -25,10 +28,12 @@ import {
   Prisma,
   RefundStatus,
   RegistrationStatus,
+  TrainingEnrollmentStatus,
   RewardStatus,
 } from '../generated/prisma/client.js';
 import { applyInventoryDelta } from '../inventory/inventory-balance.js';
 import type {
+  CancelPendingOrderDto,
   OrderQueryDto,
   PayOrderDto,
   RequestRefundDto,
@@ -47,6 +52,7 @@ import {
   type FrontDeskShiftAuthorization,
 } from '../operations/frontdesk-shift-gate.js';
 import { orderResponse } from './order-response.js';
+import { DIRECT_CANCEL_TYPES, PURCHASE_HOLD_MS, PURCHASE_TIMEOUT_TYPES, pendingPaymentDeadline } from './pending-order-policy.js';
 
 const serial = (prefix: string) =>
   `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`;
@@ -124,13 +130,31 @@ const refundCommandResponse = (refund: Record<string, any>): RefundCommandRespon
 });
 
 @Injectable()
-export class OrdersService {
+export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
+  private readonly logger = new Logger(OrdersService.name);
+  private expiryTimer?: ReturnType<typeof setInterval>;
+  private expirySweep?: Promise<number>;
+  private purchaseSweep?: Promise<number>;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly finalizer: OrderFinalizerService,
     private readonly wechatPay: WechatPayService,
   ) {}
+
+  onApplicationBootstrap() {
+    void this.expirePendingOrders().catch(error => this.logger.error(String(error)));
+    this.expiryTimer = setInterval(
+      () => void this.expirePendingVenueOrders(),
+      30_000,
+    );
+    this.expiryTimer.unref();
+  }
+
+  onModuleDestroy() {
+    if (this.expiryTimer) clearInterval(this.expiryTimer);
+  }
 
   async list(actor: AuthUser, query: OrderQueryDto, all = false) {
     const where: Prisma.OrderWhereInput = {
@@ -145,6 +169,10 @@ export class OrdersService {
           items: true,
           payments: { orderBy: { createdAt: 'desc' } },
           refunds: { orderBy: { requestedAt: 'desc' } },
+          bookings: { include: { court: true } },
+          gameRegistration: { include: { game: true } },
+          eventTeam: { include: { event: true } },
+          trainingEnrollment: { include: { product: true, student: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip: (query.page - 1) * query.pageSize,
@@ -177,6 +205,312 @@ export class OrdersService {
       },
     });
     return orderResponse(order);
+  }
+
+  async cancelPending(
+    orderId: string,
+    dto: CancelPendingOrderDto,
+    actor: AuthUser,
+  ) {
+    return this.cancelUnpaidOrder(
+      orderId,
+      dto.reason?.trim() || '用户取消待支付订单',
+      dto.idempotencyKey,
+      actor,
+    );
+  }
+
+  async expirePendingOrders(now = new Date()): Promise<number> {
+    if (this.purchaseSweep) return this.purchaseSweep;
+    const sweep = this.expirePendingPurchasesOnce(now).finally(() => {
+      if (this.purchaseSweep === sweep) this.purchaseSweep = undefined;
+    });
+    this.purchaseSweep = sweep;
+    return sweep;
+  }
+
+  private async expirePendingPurchasesOnce(now: Date): Promise<number> {
+    const venueCount = await this.expirePendingVenueOrders(now);
+    const candidates = await this.prisma.order.findMany({
+      where: {
+        status: OrderStatus.PENDING,
+        OR: [
+          { businessType: { in: PURCHASE_TIMEOUT_TYPES as BusinessType[] }, createdAt: { lte: new Date(now.getTime() - PURCHASE_HOLD_MS) } },
+          { businessType: BusinessType.TRAINING, trainingEnrollment: { is: { status: TrainingEnrollmentStatus.PENDING_PAYMENT, seatReservedUntil: { lte: now } } } },
+          { businessType: BusinessType.EVENT, eventTeam: { is: { status: RegistrationStatus.REGISTERED, paymentDueAt: { lte: now } } } },
+        ],
+      },
+      select: { id: true, status: true, businessType: true, createdAt: true, trainingEnrollment: { select: { seatReservedUntil: true } }, eventTeam: { select: { paymentDueAt: true } } }, orderBy: { createdAt: 'asc' }, take: 100,
+    });
+    let count = venueCount;
+    for (const item of candidates) {
+      const deadline = pendingPaymentDeadline(item);
+      if (deadline && deadline > now) continue;
+      try {
+        await this.cancelUnpaidOrder(item.id, '订单支付保留期届满', `AUTO:PURCHASE_ORDER:${item.id}`);
+        count++;
+      } catch (error) {
+        this.logger.warn(`待付款订单 ${item.id} 自动关闭未完成：${error instanceof Error ? error.message : '未知错误'}`);
+      }
+    }
+    return count;
+  }
+
+  async expirePendingVenueOrders(now = new Date()): Promise<number> {
+    if (this.expirySweep) return this.expirySweep;
+    const sweep = this.expirePendingVenueOrdersOnce(now).finally(() => {
+      if (this.expirySweep === sweep) this.expirySweep = undefined;
+    });
+    this.expirySweep = sweep;
+    return sweep;
+  }
+
+  private async expirePendingVenueOrdersOnce(now: Date): Promise<number> {
+    const candidates = await this.prisma.order.findMany({
+      where: {
+        status: OrderStatus.PENDING,
+        businessType: BusinessType.VENUE,
+        bookings: {
+          some: {
+            // Older releases freed the court without closing its pending
+            // order. A retained, expired deadline identifies those legacy
+            // holds; they must still pass the normal payment/close checks.
+            status: { in: [BookingStatus.HELD, BookingStatus.CANCELLED] },
+            holdExpiresAt: { lte: now },
+          },
+        },
+      },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+    let expired = 0;
+    for (const candidate of candidates) {
+      try {
+        await this.cancelUnpaidOrder(
+          candidate.id,
+          '场地订单支付保留期届满',
+          `AUTO:VENUE_ORDER:${candidate.id}`,
+        );
+        expired += 1;
+      } catch (error) {
+        this.logger.warn(
+          `场地待支付订单 ${candidate.id} 自动取消暂未完成：${error instanceof Error ? error.message : '未知错误'}`,
+        );
+      }
+    }
+    return expired;
+  }
+
+  private async cancelUnpaidOrder(
+    orderId: string,
+    reason: string,
+    idempotencyKey: string,
+    actor?: AuthUser,
+  ) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: true,
+        payments: { orderBy: { createdAt: 'desc' } },
+        refunds: { orderBy: { requestedAt: 'desc' } },
+        bookings: { include: { court: true } },
+        gameRegistration: { include: { game: true } },
+        eventTeam: true,
+      },
+    });
+    if (!order) throw new NotFoundException('订单不存在');
+    if (
+      actor &&
+      order.memberId !== actor.sub &&
+      !actor.roles.some((role) =>
+        [AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(
+          role as never,
+        ),
+      )
+    ) {
+      throw new ForbiddenException('仅会员本人、前台或管理员可取消待支付订单');
+    }
+    if (!DIRECT_CANCEL_TYPES.includes(order.businessType) && !(order.businessType === BusinessType.EVENT && !actor)) {
+      throw new BadRequestException('请从赛事报名详情退出，系统会同步队伍和候补名额');
+    }
+    if (order.status === OrderStatus.CANCELLED) return orderResponse(order);
+    if (order.status !== OrderStatus.PENDING) {
+      throw new ConflictException('订单已进入支付或履约流程，不能直接取消');
+    }
+    if (
+      order.payments.some((payment) => payment.status === PaymentStatus.SUCCEEDED)
+    ) {
+      throw new ConflictException('订单已经支付，请刷新后按退款流程处理');
+    }
+    const processingWechat = order.payments.find(
+      (payment) =>
+        payment.status === PaymentStatus.PROCESSING &&
+        payment.channel === PaymentChannel.WECHAT,
+    );
+    if (
+      processingWechat &&
+      this.config.get<string>('PAYMENT_PROVIDER', 'mock') === 'wechat'
+    ) {
+      await this.wechatPay.closeOrder(order.orderNo);
+    }
+
+    const cancelled = await this.prisma.$transaction(
+      async (tx) => {
+        const current = await tx.order.findUnique({
+          where: { id: orderId },
+          include: {
+            items: true,
+            payments: { orderBy: { createdAt: 'desc' } },
+            refunds: { orderBy: { requestedAt: 'desc' } },
+            bookings: { include: { court: true } },
+            gameRegistration: { include: { game: true } },
+        eventTeam: true,
+          },
+        });
+        if (!current) throw new NotFoundException('订单不存在');
+        if (current.status === OrderStatus.CANCELLED) return current;
+        if (current.status !== OrderStatus.PENDING) {
+          throw new ConflictException('订单状态已经变化，请刷新后重试');
+        }
+        if (
+          current.payments.some(
+            (payment) => payment.status === PaymentStatus.SUCCEEDED,
+          )
+        ) {
+          throw new ConflictException('订单已经支付，请刷新后按退款流程处理');
+        }
+        const cancelledAt = new Date();
+        const changed = await tx.order.updateMany({
+          where: { id: orderId, status: OrderStatus.PENDING },
+          data: { status: OrderStatus.CANCELLED, cancelledAt },
+        });
+        if (changed.count !== 1) {
+          throw new ConflictException('订单状态已经变化，请刷新后重试');
+        }
+        await tx.payment.updateMany({
+          where: {
+            orderId,
+            status: { in: [PaymentStatus.CREATED, PaymentStatus.PROCESSING] },
+          },
+          data: { status: PaymentStatus.CLOSED },
+        });
+        if (current.businessType === BusinessType.GAME) {
+          const registration = current.gameRegistration;
+          if (!registration || registration.status !== RegistrationStatus.REGISTERED) {
+            throw new ConflictException('球局报名状态已经变化，请刷新后重试');
+          }
+          const released = await tx.gameRegistration.updateMany({
+            where: { id: registration.id, orderId, status: RegistrationStatus.REGISTERED },
+            data: { status: RegistrationStatus.CANCELLED },
+          });
+          if (released.count !== 1) throw new ConflictException('球局名额状态已经变化，请重试');
+          // Release this member's seat, never the courts reserved for the whole game.
+          await promoteNextGameWaitlist(tx, registration.gameId, actor?.sub, actor?.roles[0]);
+        } else if (current.businessType === BusinessType.EVENT) {
+          const team = current.eventTeam;
+          if (!team || team.status !== RegistrationStatus.REGISTERED) throw new ConflictException('赛事队伍状态已经变化');
+          const released = await tx.eventTeam.updateMany({
+            where: { id: team.id, orderId, status: RegistrationStatus.REGISTERED },
+            data: { status: RegistrationStatus.CANCELLED, paymentDueAt: null, cancelledAt },
+          });
+          if (released.count !== 1) throw new ConflictException('赛事席位状态已经变化');
+          await promoteNextEventWaitlist(tx, team.eventId, undefined, undefined);
+        } else if (current.businessType === BusinessType.TRAINING) {
+          const released = await tx.trainingEnrollment.updateMany({
+            where: { orderId, status: TrainingEnrollmentStatus.PENDING_PAYMENT },
+            data: { status: TrainingEnrollmentStatus.CANCELLED, seatReservedUntil: null },
+          });
+          if (released.count !== 1) throw new ConflictException('课程报名状态已经变化，请刷新后重试');
+        } else if (current.businessType === BusinessType.MEMBERSHIP) {
+          await tx.memberSubscription.updateMany({
+            where: { orderId, status: MembershipStatus.FROZEN },
+            data: { status: MembershipStatus.CANCELLED },
+          });
+        } else if (current.businessType === BusinessType.VENUE) {
+          await tx.courtBooking.updateMany({
+            where: { orderId, status: BookingStatus.HELD },
+            data: { status: BookingStatus.CANCELLED, holdExpiresAt: null },
+          });
+        }
+        await tx.auditLog.create({
+          data: {
+            actorId: actor?.sub,
+            actorRole: actor?.roles[0],
+            action: `${current.businessType}_ORDER_${actor ? 'CANCELLED_BY_USER' : 'AUTO_CANCELLED'}`,
+            objectType: 'Order',
+            objectId: orderId,
+            requestId: idempotencyKey,
+            oldValue: { status: OrderStatus.PENDING } as never,
+            newValue: {
+              status: OrderStatus.CANCELLED,
+              ...(current.businessType === BusinessType.GAME
+                ? { gameId: current.gameRegistration!.gameId, registrationStatus: RegistrationStatus.CANCELLED }
+                : current.businessType === BusinessType.VENUE ? { bookingStatus: BookingStatus.CANCELLED } : {}),
+              cancelledAt: cancelledAt.toISOString(),
+            } as never,
+            reason,
+          },
+        });
+        return tx.order.findUniqueOrThrow({
+          where: { id: orderId },
+          include: {
+            items: true,
+            payments: { orderBy: { createdAt: 'desc' } },
+            refunds: { orderBy: { requestedAt: 'desc' } },
+            bookings: { include: { court: true } },
+            gameRegistration: { include: { game: true } },
+        eventTeam: true,
+          },
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+    return orderResponse(cancelled);
+  }
+
+  async paymentOptions(orderId: string, actor: AuthUser) {
+    return this.prisma.$transaction(async tx => {
+      // A cashier is not entitled to inspect another member's payment balances.
+      const order = await tx.order.findFirst({
+        where: { id: orderId, memberId: actor.sub },
+        include: { bookings: true, eventTeam: true, trainingEnrollment: true, items: true, payments: true,
+          member: { select: { openId: true, accounts: { select: { type: true, balance: true, frozenBalance: true } } } } },
+      });
+      if (!order) throw new NotFoundException('订单不存在或不属于当前账号');
+      const now = new Date();
+      const deadline = pendingPaymentDeadline(order);
+      let unavailable = order.status !== OrderStatus.PENDING ? '订单已不在待付款状态' : deadline && deadline <= now ? '支付保留期已过，请重新下单' : '';
+      if (!unavailable && order.businessType === BusinessType.GOODS) {
+        try { await this.assertGoodsStockAvailable(tx, order.items); }
+        catch (error) { unavailable = error instanceof Error ? error.message : '商品库存不足'; }
+      }
+      if (!unavailable) {
+        try { await this.assertBookingCouponScope(tx, order); }
+        catch (error) { unavailable = error instanceof Error ? error.message : '券适用范围已变化'; }
+      }
+      const channels = [PaymentChannel.WECHAT, PaymentChannel.CASH_PRINCIPAL, PaymentChannel.GIFT_BALANCE, PaymentChannel.BADMINTON_COIN];
+      const options = await Promise.all(channels.map(async channel => {
+        let reason = unavailable;
+        let debitAmount = order.payableCents;
+        let availableBalance: number | undefined;
+        if (channel !== PaymentChannel.WECHAT && order.payments.some(payment => payment.channel === PaymentChannel.WECHAT && payment.status === PaymentStatus.PROCESSING)) reason ||= '微信支付结果确认中，请先完成或取消原支付';
+        if (ACCOUNT_CHANNELS[channel]) {
+          try { debitAmount = await this.accountDebitAmount(tx, channel, order.payableCents); }
+          catch { reason ||= '抵扣规则暂不可用，请联系工作人员'; }
+          const account = order.member.accounts.find(item => item.type === ACCOUNT_CHANNELS[channel]);
+          availableBalance = Math.max(0, (account?.balance || 0) - Math.max(0, account?.frozenBalance || 0));
+          if (order.businessType === BusinessType.RECHARGE) reason ||= '充值不能使用已有余额支付';
+          if (availableBalance < debitAmount) reason ||= '可用余额不足（冻结余额不可使用）';
+        } else if (this.config.get<string>('PAYMENT_PROVIDER', 'mock') === 'wechat' && !order.member.openId) {
+          reason ||= '请先通过微信登录绑定账号';
+        }
+        return { channel, enabled: !reason, reason, debitAmount, availableBalance,
+          unit: channel === PaymentChannel.BADMINTON_COIN ? 'COIN' : 'CENT' };
+      }));
+      return { orderId, payableCents: order.payableCents, paymentExpiresAt: deadline?.toISOString(),
+        quotedAt: now.toISOString(), options };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
   async pay(orderId: string, dto: PayOrderDto, actor: AuthUser) {
@@ -238,14 +572,34 @@ export class OrdersService {
             where: { id: orderId },
             include: {
               items: true,
+              bookings: true,
               membership: { include: { product: true } },
               member: { select: { openId: true } },
+              trainingEnrollment: true,
+              eventTeam: true,
+              payments: true,
             },
           });
           if (!order) throw new NotFoundException('订单不存在');
           this.assertPaymentAuthorization(order.memberId, dto.channel, actor);
           if (order.status !== OrderStatus.PENDING)
             throw new ConflictException('订单当前状态不可支付');
+          if (dto.channel !== PaymentChannel.WECHAT && order.payments?.some(payment => payment.channel === PaymentChannel.WECHAT && payment.status === PaymentStatus.PROCESSING))
+            throw new ConflictException('微信支付结果确认中，暂不能改用其他渠道');
+          await this.assertBookingCouponScope(tx, order);
+          const deadline = pendingPaymentDeadline(order);
+          if (deadline && deadline <= new Date()) throw new ConflictException('支付保留期已过，请刷新订单后重新下单');
+          if (order.businessType === BusinessType.VENUE) {
+            const booking = order.bookings[0];
+            if (
+              !booking ||
+              booking.status !== BookingStatus.HELD ||
+              !booking.holdExpiresAt ||
+              booking.holdExpiresAt <= new Date()
+            ) {
+              throw new ConflictException('场地支付保留期已过期，请重新选择时段');
+            }
+          }
           if (order.businessType === BusinessType.GOODS) {
             await this.assertGoodsStockAvailable(tx, order.items);
           }
@@ -283,15 +637,18 @@ export class OrdersService {
               dto.channel,
               order.payableCents,
             );
+            if (dto.expectedDebitAmount !== undefined && dto.expectedDebitAmount !== debitAmount) {
+              throw new ConflictException('抵扣报价已变化，请重新选择支付方式并核对金额');
+            }
             const account = await tx.account.findUnique({
               where: {
                 userId_type: { userId: order.memberId, type: accountType },
               },
             });
-            if (!account || account.balance < debitAmount)
+            if (!account || account.balance - Math.max(0, account.frozenBalance || 0) < debitAmount)
               throw new BadRequestException('账户余额不足');
             const updated = await tx.account.updateMany({
-              where: { id: account.id, version: account.version },
+              where: { id: account.id, version: account.version, frozenBalance: { lte: account.balance - debitAmount } },
               data: {
                 balance: account.balance - debitAmount,
                 version: { increment: 1 },
@@ -1292,6 +1649,17 @@ export class OrdersService {
     ) {
       throw new ConflictException('订单状态与完成时间不一致，需先修复履约证据');
     }
+  }
+
+  private async assertBookingCouponScope(tx: Prisma.TransactionClient, order: { businessType: BusinessType; parameterSnapshot: unknown }) {
+    if (order.businessType !== BusinessType.VENUE) return;
+    const snapshot = order.parameterSnapshot as { couponId?: string } | null;
+    if (!snapshot?.couponId) return;
+    const coupon = await tx.couponCode.findUnique({ where: { id: snapshot.couponId }, select: {
+      template: { select: { code: true, allowVenueBooking: true } },
+    } });
+    if (coupon && !coupon.template.code.startsWith('NEWCOMER') && !coupon.template.allowVenueBooking)
+      throw new ConflictException('此订单使用的商户券已不支持订场，请取消后重新选择优惠下单');
   }
 
   private async accountDebitAmount(

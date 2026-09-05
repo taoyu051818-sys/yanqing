@@ -2,7 +2,8 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 
 import type { AuthUser } from '../common/auth/auth-user.js'
 import { PrismaService } from '../database/prisma.service.js'
-import { AppRole } from '../generated/prisma/enums.js'
+import { AppRole, ParameterType } from '../generated/prisma/enums.js'
+import { OPERATING_SHARE_RATE_KEY } from '../common/finance/operating-share.js'
 import type { CreateParameterDto, ParameterQueryDto } from './configuration.dto.js'
 
 @Injectable()
@@ -46,6 +47,18 @@ export class ConfigurationService {
     }
     if (dto.key === 'training.venue_fee_cents' && dto.value !== 0) {
       throw new BadRequestException('培训不得另收场地费，该参数必须为0')
+    }
+    if (
+      dto.key === OPERATING_SHARE_RATE_KEY &&
+      (dto.type !== ParameterType.INTEGER ||
+        typeof dto.value !== 'number' ||
+        !Number.isSafeInteger(dto.value) ||
+        dto.value < 0 ||
+        dto.value > 10_000)
+    ) {
+      throw new BadRequestException(
+        '经营分成比例必须使用 INTEGER 类型，并填写 0-10000 的整数基点',
+      )
     }
 
     const existing = await this.prisma.systemParameter.findFirst({

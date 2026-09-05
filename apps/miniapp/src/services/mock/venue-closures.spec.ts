@@ -66,7 +66,7 @@ describe("venue closure mock acceptance", () => {
     await expect(request("POST", "/venues/bookings", {
       date,
       courtId: "court-1",
-      slotId: "slot-4",
+      slotId: "slot-H13",
       sourceChannel: "MINI_PROGRAM",
     })).rejects.toThrow("该时段已封场");
 
@@ -96,7 +96,7 @@ describe("venue closure mock acceptance", () => {
     const order = await request("POST", "/venues/bookings", {
       date,
       courtId: "court-3",
-      slotId: "slot-1",
+      slotId: "slot-H07",
       sourceChannel: "MINI_PROGRAM",
     });
     const before = getVenueBookings().find((item) => item.orderId === order.id);

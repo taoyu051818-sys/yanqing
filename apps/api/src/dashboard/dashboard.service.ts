@@ -18,6 +18,11 @@ import {
   TrainingSessionStatus,
   UserStatus,
 } from '../generated/prisma/enums.js'
+import {
+  DEFAULT_OPERATING_SHARE_RATE_BPS,
+  operatingShareCents,
+  operatingShareSnapshotFromOrder,
+} from '../common/finance/operating-share.js'
 
 const DAY_MS = 86_400_000
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000
@@ -233,6 +238,7 @@ export class DashboardService {
       inventoryItems,
       goodsCostTransactions,
       trainingSettlements,
+      operatingShareParameter,
     ] = await Promise.all([
       this.prisma.court.count({ where: { enabled: true } }),
       this.prisma.timeSlot.findMany({
@@ -283,6 +289,7 @@ export class DashboardService {
           businessType: true,
           paidCents: true,
           completedAt: true,
+          parameterSnapshot: true,
           refunds: {
             where: { status: RefundStatus.SUCCEEDED },
             select: { amountCents: true, completedAt: true },
@@ -301,6 +308,7 @@ export class DashboardService {
             select: {
               businessType: true,
               completedAt: true,
+              parameterSnapshot: true,
               payments: {
                 where: {
                   status: {
@@ -365,6 +373,11 @@ export class DashboardService {
         select: {
           effectiveRevenueCents: true,
           venueContributionCents: true,
+          enrollment: {
+            select: {
+              order: { select: { parameterSnapshot: true } },
+            },
+          },
           attendance: {
             select: {
               session: {
@@ -497,6 +510,14 @@ export class DashboardService {
         where: { periodStart: { lt: end }, periodEnd: { gt: start } },
         orderBy: { periodEnd: 'desc' },
       }),
+      this.prisma.systemParameter.findFirst({
+        where: {
+          key: 'finance.operating_share_rate_bps',
+          effectiveFrom: { lt: end },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: end } }],
+        },
+        orderBy: { effectiveFrom: 'desc' },
+      }),
     ])
 
     const collectedOrdersByBusiness = byBusinessType(
@@ -534,19 +555,18 @@ export class DashboardService {
           ),
       })),
     )
+    const recognizedRefunds = completedRefunds.filter(
+      (refund) =>
+        refund.completedAt !== null &&
+        refund.order.completedAt !== null &&
+        refund.order.completedAt <= refund.completedAt &&
+        venueBusinessTypes.includes(refund.order.businessType),
+    )
     const recognizedRefundsByBusiness = byBusinessType(
-      completedRefunds
-        .filter(
-          (refund) =>
-            refund.completedAt !== null &&
-            refund.order.completedAt !== null &&
-            refund.order.completedAt <= refund.completedAt &&
-            venueBusinessTypes.includes(refund.order.businessType),
-        )
-        .map((refund) => ({
-          businessType: refund.order.businessType,
-          amountCents: refund.amountCents,
-        })),
+      recognizedRefunds.map((refund) => ({
+        businessType: refund.order.businessType,
+        amountCents: refund.amountCents,
+      })),
     )
     const realizedBusinessRevenue = Object.fromEntries(
       Object.values(BusinessType).map((type) => [
@@ -714,6 +734,68 @@ export class DashboardService {
       0,
     )
     const realizedRevenueCents = venueBusinessRevenueCents + trainingRevenue
+    const completedOrderShareCents = completedOrders.reduce((total, order) => {
+      const recognizedCents =
+        order.paidCents -
+        order.refunds.reduce(
+          (refundTotal, refund) =>
+            refund.completedAt &&
+            order.completedAt &&
+            refund.completedAt < order.completedAt
+              ? refundTotal + refund.amountCents
+              : refundTotal,
+          0,
+        )
+      return (
+        total +
+        operatingShareCents(
+          recognizedCents,
+          operatingShareSnapshotFromOrder(
+            order.parameterSnapshot,
+            order.businessType,
+          ),
+        )
+      )
+    }, 0)
+    const completedRefundShareCents = recognizedRefunds.reduce(
+      (total, refund) =>
+        total +
+        operatingShareCents(
+          refund.amountCents,
+          operatingShareSnapshotFromOrder(
+            refund.order.parameterSnapshot,
+            refund.order.businessType,
+          ),
+        ),
+      0,
+    )
+    const trainingOperatingShareCents = trainingRecognitions.reduce(
+      (total, recognition) =>
+        total +
+        operatingShareCents(
+          recognition.effectiveRevenueCents,
+          operatingShareSnapshotFromOrder(
+            recognition.enrollment?.order?.parameterSnapshot,
+            BusinessType.TRAINING,
+          ),
+        ),
+      0,
+    )
+    const accruedOperatingShareCents =
+      completedOrderShareCents -
+      completedRefundShareCents +
+      trainingOperatingShareCents
+    const periodEndOperatingShare = operatingShareSnapshotFromOrder(
+      operatingShareParameter
+        ? {
+            operatingShare: {
+              included: true,
+              rateBps: operatingShareParameter.value,
+            },
+          }
+        : null,
+      BusinessType.VENUE,
+    )
     const venueContractRevenueCents =
       venueBusinessRevenueCents + trainingVenueContribution
     const completedRefundCents = completedRefunds.reduce(
@@ -776,6 +858,17 @@ export class DashboardService {
         venueContractRevenueCents,
         recognitionBasis:
           '场馆、活动、商品及会员业务按订单 completedAt 确认，退款按 completedAt 反冲；培训按复核消课确认',
+      },
+      operatingShare: {
+        basis: 'REALIZED_NET_REVENUE',
+        basisRevenueCents: realizedRevenueCents,
+        accruedCents: accruedOperatingShareCents,
+        defaultRateBps: DEFAULT_OPERATING_SHARE_RATE_BPS,
+        rateAtPeriodEndBps: periodEndOperatingShare.rateBps,
+        rateParameterId: operatingShareParameter?.id ?? null,
+        rechargeIncluded: false,
+        recognitionBasis:
+          '逐笔使用订单创建时保存的分成规则；履约确认计提，退款按原订单比例反冲，充值不参与',
       },
       venue: {
         courtCount,

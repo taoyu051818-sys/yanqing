@@ -123,6 +123,11 @@ describe('MembershipsService order creator evidence', () => {
           rechargePlanVersion: plan.version,
           principalCents: plan.principalCents,
           giftCents: plan.giftCents,
+          operatingShare: expect.objectContaining({
+            rateBps: 0,
+            businessType: 'RECHARGE',
+            included: false,
+          }),
         }),
       }),
     }))

@@ -7,55 +7,55 @@ import {
   onShow,
 } from "@dcloudio/uni-app";
 
+import AppIcon from "../../components/AppIcon.vue";
 import SectionEmpty from "../../components/SectionEmpty.vue";
+import ReasonForm from "../../components/ReasonForm.vue";
 import StatusBadge from "../../components/StatusBadge.vue";
 import { endpoints } from "../../services/api";
 import { useSessionStore } from "../../stores/session";
 import { money, shortDate } from "../../utils/format";
 import { withPendingCreationKey } from "../../utils/pending-creation-key";
+import { gameDetailPath, gameLevelLabel as displayGameLevel } from "../../utils/game-detail";
+import { SHARE_CARD_IMAGES } from "../../config/share";
+import { consumeCommunityIntent, openMemberPage, requestMemberLogin } from "../../utils/member-navigation";
 
 const session = useSessionStore();
 const tab = ref<"games" | "events">("games");
+const view = ref<'browse' | 'mine'>('browse');
+const showPast = ref(false);
+const showHostApplication = ref(false);
+const expanded = ref<Record<string, boolean>>({});
 const games = ref<any[]>([]);
 const events = ref<any[]>([]);
 const eventRegistrations = ref<Record<string, any>>({});
 const loading = ref(false);
 const actionKey = ref("");
 const errorMessage = ref("");
+const cancellingEventId = ref("");
+const cancelError = ref("");
+function eventCancelDescription(event: any) {
+  const status = eventRegistration(event.id)?.registration?.status;
+  return status === 'PAID'
+    ? '确认后进入退款审批；审批成功前仍占用席位且不能签到，驳回后恢复报名。'
+    : status === 'WAITLISTED'
+      ? '确认后退出候补队列，不会产生订单或费用。'
+      : '确认后取消待付款订单，释放席位并按顺序晋级候补。';
+}
 const hostApplication = ref<any | null>(null);
 const targetGameId = ref("");
 const targetEventId = ref("");
-const eventPartnerInvites = ref<
-  Record<
-    string,
-    {
-      partnerInviteCode: string;
-      partnerDisplayName: string;
-      expiresAt: string;
-    }
-  >
->({});
-const activeShare = ref<{ type: "game" | "event"; id: string } | null>(null);
+const activeShare = ref<{ type: "event"; id: string } | null>(null);
 
 const isMember = computed(() => session.roles.includes("MEMBER"));
 const isHost = computed(() => session.roles.includes("HOST"));
-const visibleGames = computed(() => {
-  if (!targetGameId.value) return games.value;
-  return [...games.value].sort((left, right) => {
-    if (left.id === targetGameId.value) return -1;
-    if (right.id === targetGameId.value) return 1;
-    return 0;
-  });
-});
+const visibleGames = computed(() => games.value.filter((game) => view.value === 'mine'
+  ? Boolean(game.myRegistration)
+  : showPast.value || ['OPEN', 'FULL', 'IN_PROGRESS'].includes(game.status)));
 
-const gameLevelLabel: Record<string, string> = {
-  BEGINNER: "新手友好",
-  BASIC: "基础",
-  INTERMEDIATE: "进阶",
-  ADVANCED: "高水平",
-  RECREATIONAL: "休闲",
-  ALL_LEVELS: "不限水平",
-};
+const visibleEvents = computed(() => events.value.filter((event) => view.value === 'mine'
+  ? Boolean(eventRegistrations.value[event.id]?.registration) || event.id === targetEventId.value
+  : showPast.value || ['OPEN', 'FULL', 'IN_PROGRESS'].includes(event.status) || event.id === targetEventId.value));
+
 const applicationStatusLabel: Record<string, string> = {
   APPLIED: "待审核",
   APPROVED: "已通过",
@@ -82,10 +82,6 @@ const refundStatusLabel: Record<string, string> = {
   CANCELLED: "已取消",
 };
 
-function displayGameLevel(level?: string) {
-  return gameLevelLabel[level || ""] || "不限水平";
-}
-
 function displayApplicationStatus(status?: string) {
   return applicationStatusLabel[status || ""] || "状态更新中";
 }
@@ -99,8 +95,10 @@ function displayRefundStatus(status?: string) {
 }
 
 async function load() {
+  if (!session.isAuthenticated) return requestMemberLogin('/pages/community/index?tab=' + tab.value + '&view=' + view.value
+    + (targetEventId.value ? '&eventId=' + encodeURIComponent(targetEventId.value) : ''));
   const ready = await session.hydrate();
-  if (!ready) return;
+  if (!ready) { errorMessage.value = '活动暂未同步，请重试。'; return; }
   loading.value = true;
   errorMessage.value = "";
   try {
@@ -109,7 +107,7 @@ async function load() {
       endpoints.events(),
     ]);
     games.value = (gameList as any[]).filter((game) =>
-      ["OPEN", "FULL"].includes(game.status),
+      ["OPEN", "FULL", "IN_PROGRESS", "COMPLETED", "CANCELLED"].includes(game.status),
     );
     const visibleEvents = (eventList as any[]).filter((event) =>
       ["OPEN", "FULL", "IN_PROGRESS", "COMPLETED", "CANCELLED"].includes(
@@ -186,194 +184,9 @@ function openHostWorkbench() {
   uni.navigateTo({ url: "/packages/ops/pages/host/index" });
 }
 
-async function joinGame(game: any) {
+function joinEvent(event: any) {
   if (!isMember.value || actionKey.value) return;
-  if (!["OPEN", "FULL"].includes(game.status)) {
-    errorMessage.value = "该球局当前不在报名期。";
-    return;
-  }
-  const confirmed = await uni.showModal({
-    title: game.status === "FULL" ? "加入候补队列" : "确认报名球局",
-    content: `${game.title}\n${shortDate(game.startsAt)} · ${money(game.feeCents)}\n${game.status === "FULL" ? "当前满员，提交后按先后顺序候补。" : "提交后生成待支付订单。"}`,
-    confirmText: game.status === "FULL" ? "确认候补" : "确认报名",
-  });
-  if (!confirmed.confirm) return;
-  actionKey.value = `game:${game.id}`;
-  errorMessage.value = "";
-  try {
-    const command = { gameId: game.id, sourceChannel: "MINI_PROGRAM" };
-    const result: any = await withPendingCreationKey(
-      "game.register",
-      command,
-      (creationIdempotencyKey) =>
-        endpoints.registerGame(game.id, creationIdempotencyKey),
-    );
-    if (
-      result?.status === "WAITLISTED" ||
-      result?.registration?.status === "WAITLISTED"
-    ) {
-      uni.showModal({
-        title: "已进入候补",
-        content: `当前候补第 ${result.waitlistPosition || "—"} 位。有名额释放并被人工晋级后，再完成订单支付。`,
-        showCancel: false,
-      });
-    } else {
-      uni.showModal({
-        title: "报名成功",
-        content: `已生成订单 ${result.orderNo}，请前往订单支付。`,
-        showCancel: false,
-      });
-    }
-    await load();
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || "球局报名失败。";
-  } finally {
-    actionKey.value = "";
-  }
-}
-
-async function joinEvent(event: any) {
-  if (!isMember.value || actionKey.value) return;
-  if (!["OPEN", "FULL"].includes(event.status)) {
-    errorMessage.value = "该赛事当前不在报名期。";
-    return;
-  }
-  const teamInput = await uni.showModal({
-    title: "填写队伍名称",
-    editable: true,
-    placeholderText: "例如：金羽搭档",
-  });
-  if (!teamInput.confirm) return;
-  const teamName = String(teamInput.content || "").trim();
-  if (!teamName) {
-    errorMessage.value = "请填写队伍名称。";
-    return;
-  }
-  const partnerInput = await uni.showModal({
-    title: "填写搭档授权码",
-    content: "请粘贴搭档本人刚刚为本赛事生成的一次性授权码。",
-    editable: true,
-    placeholderText: "以 EP_ 开头的授权码",
-  });
-  if (!partnerInput.confirm) return;
-  const partnerInviteCode = String(partnerInput.content || "").trim();
-  if (!partnerInviteCode) {
-    errorMessage.value = "请填写搭档授权码。";
-    return;
-  }
-  let partnerPreview: {
-    partnerDisplayName: string;
-    expiresAt: string;
-  };
-  try {
-    partnerPreview = await endpoints.previewEventPartnerInvite(
-      event.id,
-      partnerInviteCode,
-    );
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || "搭档授权码无效或已过期。";
-    return;
-  }
-  let categoryResult: UniApp.ShowActionSheetRes;
-  try {
-    categoryResult = await uni.showActionSheet({
-      itemList: ["男双", "女双", "混双"],
-    });
-  } catch {
-    return;
-  }
-  const category = ["MEN_DOUBLES", "WOMEN_DOUBLES", "MIXED_DOUBLES"][
-    categoryResult.tapIndex
-  ];
-  const confirmed = await uni.showModal({
-    title: event.status === "FULL" ? "确认加入候补" : "确认赛事报名",
-    content: `${event.name}\n${teamName} · ${session.user?.displayName || "当前会员"} / ${partnerPreview.partnerDisplayName}\n搭档已通过本人账号授权。${event.status === "FULL" ? "满员后按提交顺序进入持久候补，不会提前收费。" : "提交后生成限时待支付订单。"}`,
-    confirmText: event.status === "FULL" ? "加入候补" : "确认提交",
-  });
-  if (!confirmed.confirm) return;
-  actionKey.value = `event:${event.id}`;
-  errorMessage.value = "";
-  try {
-    const command = {
-      eventId: event.id,
-      name: teamName,
-      partnerInviteCode,
-      category,
-      sourceChannel: "MINI_PROGRAM",
-    };
-    const result: any = await withPendingCreationKey(
-      "event.register",
-      command,
-      (creationIdempotencyKey) =>
-        endpoints.registerEvent(event.id, {
-          name: teamName,
-          partnerInviteCode,
-          category,
-          creationIdempotencyKey,
-        }),
-    );
-    if (
-      result?.status === "WAITLISTED" ||
-      result?.registration?.status === "WAITLISTED"
-    ) {
-      uni.showModal({
-        title: "已进入赛事候补",
-        content: `当前第 ${result.waitlistPosition || "—"} 位。释放名额后系统按先后顺序晋级，晋级前不会生成订单或收费。`,
-        showCancel: false,
-      });
-    } else {
-      const dueAt = result?.eventTeam?.paymentDueAt;
-      uni.showModal({
-        title: "赛事报名已提交",
-        content: `订单 ${result.orderNo} 待支付${dueAt ? `，请于 ${new Date(dueAt).toLocaleString()} 前完成` : ""}。`,
-        showCancel: false,
-      });
-    }
-    await load();
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || "赛事报名失败。";
-  } finally {
-    actionKey.value = "";
-  }
-}
-
-async function createEventPartnerInvite(event: any) {
-  if (!isMember.value || actionKey.value) return;
-  actionKey.value = `event-partner-invite:${event.id}`;
-  errorMessage.value = "";
-  try {
-    const invite = await endpoints.createEventPartnerInvite(event.id);
-    eventPartnerInvites.value = {
-      ...eventPartnerInvites.value,
-      [event.id]: invite,
-    };
-    let copied = true;
-    try {
-      await uni.setClipboardData({ data: invite.partnerInviteCode });
-    } catch {
-      // The code remains visible in the modal when a browser denies clipboard.
-      copied = false;
-    }
-    uni.showModal({
-      title: copied ? "搭档授权码已复制" : "搭档授权码",
-      content: `${invite.partnerInviteCode}\n\n把此码私下发给队长。授权码仅用于“${event.name}”，15分钟内一次有效；队长报名成功后即失效。`,
-      showCancel: false,
-    });
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || "搭档授权码生成失败。";
-  } finally {
-    actionKey.value = "";
-  }
-}
-
-async function copyEventPartnerInvite(eventId: string) {
-  const invite = eventPartnerInvites.value[eventId];
-  if (!invite) return;
-  try {
-    await uni.setClipboardData({ data: invite.partnerInviteCode });
-  } catch {
-    uni.showToast({ title: "复制失败，请长按授权码复制", icon: "none" });
-  }
+  openMemberPage('/pages/event-signup/index?id=' + encodeURIComponent(event.id));
 }
 
 function eventRegistration(eventId: string) {
@@ -397,7 +210,7 @@ function hasActiveEventRegistration(eventId: string) {
 function canCancelEventRegistration(event: any) {
   const registration = eventRegistration(event.id)?.registration;
   return Boolean(
-    isMember.value &&
+    isMember.value && registration?.isCaptain !== false &&
     ["OPEN", "FULL"].includes(event.status) &&
     ["WAITLISTED", "REGISTERED", "PAID"].includes(registration?.status) &&
     !registration?.cancellationPending &&
@@ -405,32 +218,11 @@ function canCancelEventRegistration(event: any) {
   );
 }
 
-async function cancelEventRegistration(event: any) {
+async function cancelEventRegistration(event: any, reason: string) {
   if (!canCancelEventRegistration(event) || actionKey.value) return;
   const registration = eventRegistration(event.id)?.registration;
-  const input = await uni.showModal({
-    title: registration.status === "PAID" ? "申请退出并退款" : "退出赛事报名",
-    editable: true,
-    placeholderText: "请填写退出原因（至少2个字）",
-    confirmText: "下一步",
-  });
-  if (!input.confirm) return;
-  const reason = String(input.content || "").trim();
-  if (reason.length < 2) {
-    errorMessage.value = "退出原因至少需要2个字。";
-    return;
-  }
-  const confirmed = await uni.showModal({
-    title: "确认退出",
-    content:
-      registration.status === "PAID"
-        ? "提交后进入财务退款审批；审批成功前仍占用席位，但不能签到。驳回后报名会恢复。"
-        : registration.status === "WAITLISTED"
-          ? "提交后立即退出候补队列，不会产生订单或费用。"
-          : "提交后取消待支付订单并立即释放席位，系统会按进入队列先后顺序晋级候补。",
-    confirmText: "确认提交",
-  });
-  if (!confirmed.confirm) return;
+  if (reason.trim().length < 2) return;
+  cancelError.value = '';
   actionKey.value = `event-cancel-registration:${event.id}`;
   errorMessage.value = "";
   try {
@@ -444,27 +236,19 @@ async function cancelEventRegistration(event: any) {
           idempotencyKey,
         }),
     );
-    uni.showModal({
-      title:
-        result?.outcome === "REFUND_REQUESTED"
-          ? "退款申请已提交"
-          : "已退出报名",
-      content:
-        result?.outcome === "REFUND_REQUESTED"
-          ? "财务审批成功后才会释放席位并原路退款；审批期间不可签到。"
-          : "报名/候补已取消，席位流转已完成。",
-      showCancel: false,
-    });
+    cancellingEventId.value = '';
+    uni.showToast({ title: result?.outcome === 'REFUND_REQUESTED' ? '退款申请已提交' : '已退出报名', icon: 'success' });
     await load();
   } catch (cause: any) {
-    errorMessage.value = cause?.message || "退出赛事报名失败。";
+    cancelError.value = cause?.message || "退出赛事报名失败，请重试。";
   } finally {
     actionKey.value = "";
   }
 }
 
-function openOrders() {
-  uni.navigateTo({ url: "/pages/order/index" });
+function openEventOrder(event: any) {
+  const id = eventRegistration(event.id)?.registration?.order?.id;
+  openMemberPage(id ? "/pages/order/index?id=" + encodeURIComponent(id) : "/pages/order/index?status=PENDING");
 }
 
 function rankedTeams(event: any) {
@@ -488,71 +272,50 @@ function eventShareTitle(event: any) {
     : `${event.name}｜固定双打五轮瑞士积分赛`;
 }
 
-function gameShareTitle(game: any) {
-  const joined = Number(game._count?.registrations || 0);
-  const remaining = Math.max(0, Number(game.capacity || 0) - joined);
-  return game.status === "FULL"
-    ? `${game.title}已满员，可加入候补`
-    : `${game.title}还差${remaining || "几"}位球友，一起来打球`;
-}
-
-// TODO(api): gameId is a temporary routing fallback. Production sharing
-// should use a server-signed opaque token carrying game, inviter and expiry.
-function gameSharePath(game: any) {
-  return `/pages/community/index?tab=games&gameId=${encodeURIComponent(game.id)}`;
-}
-
-function rememberShare(type: "game" | "event", id: string) {
+function rememberShare(type: "event", id: string) {
   activeShare.value = { type, id };
 }
 
 onShareAppMessage((options: any) => {
   const shareType = String(options?.target?.dataset?.shareType || "");
-  const gameId = String(options?.target?.dataset?.gameId || "");
   const eventId = String(options?.target?.dataset?.eventId || "");
-  if (shareType === "game") {
-    const game = games.value.find((item) => item.id === gameId);
-    if (game) return { title: gameShareTitle(game), path: gameSharePath(game) };
-  }
   if (shareType === "event-result") {
     const event = events.value.find((item) => item.id === eventId);
     if (event) {
       return {
         title: eventShareTitle(event),
         path: `/pages/community/index?tab=events&eventId=${encodeURIComponent(event.id)}`,
+        imageUrl: SHARE_CARD_IMAGES.competition,
       };
     }
   }
   return {
     title: "延庆金羽｜找球搭子与积分赛",
     path: "/pages/community/index",
+    imageUrl: SHARE_CARD_IMAGES.competition,
   };
 });
 
 onShareTimeline(() => {
-  if (activeShare.value?.type === "game") {
-    const game = games.value.find((item) => item.id === activeShare.value?.id);
-    if (game) {
-      return {
-        title: gameShareTitle(game),
-        query: `tab=games&gameId=${encodeURIComponent(game.id)}`,
-      };
-    }
-  }
   if (activeShare.value?.type === "event") {
     const event = events.value.find((item) => item.id === activeShare.value?.id);
     if (event) {
       return {
         title: eventShareTitle(event),
         query: `tab=events&eventId=${encodeURIComponent(event.id)}`,
+        imageUrl: SHARE_CARD_IMAGES.competition,
       };
     }
   }
-  return { title: "延庆金羽｜找球搭子与积分赛" };
+  return {
+    title: "延庆金羽｜找球搭子与积分赛",
+    imageUrl: SHARE_CARD_IMAGES.competition,
+  };
 });
 
-onLoad((options: any) => {
-  if (options?.tab === "events") tab.value = "events";
+function applyNavigation(options: any) {
+  if (options?.tab === 'games' || options?.tab === 'events') tab.value = options.tab;
+  if (options?.view === 'mine' || options?.view === 'browse') view.value = options.view;
   if (options?.gameId) {
     tab.value = "games";
     targetGameId.value = String(options.gameId);
@@ -560,34 +323,39 @@ onLoad((options: any) => {
   if (options?.eventId) {
     tab.value = "events";
     targetEventId.value = String(options.eventId);
+    expanded.value[String(options.eventId)] = true;
   }
+}
+function changeView(next: 'browse' | 'mine') { view.value = next; targetGameId.value = ''; targetEventId.value = ''; }
+onLoad(applyNavigation);
+onShow(() => {
+  const intent = consumeCommunityIntent();
+  if (intent) { targetGameId.value = ''; targetEventId.value = ''; applyNavigation(intent); }
+  if (targetGameId.value) {
+    const destination = gameDetailPath(targetGameId.value, true);
+    targetGameId.value = '';
+    // Consume old game invitations once; returning to this tab must not reopen it.
+    uni.navigateTo({ url: destination });
+    return;
+  }
+  void load();
 });
-
-onShow(load);
 </script>
 
 <template>
   <view class="page safe-bottom">
-    <view class="tabs">
-      <view :class="{ active: tab === 'games' }" @tap="tab = 'games'"
-        >日常球局</view
-      >
-      <view :class="{ active: tab === 'events' }" @tap="tab = 'events'"
-        >金羽积分赛</view
-      >
-    </view>
-
-    <view class="card invite-guide">
-      <text class="invite-guide-title">邀请与报名不要混用</text>
-      <text v-if="tab === 'games'" class="invite-guide-copy"
-        >“邀请球友”只分享当前拼场球局；邀请好友首次使用小程序，请到“我的”页面。</text
-      >
-      <text v-else class="invite-guide-copy"
-        >积分赛采用真实搭档确认：搭档本人生成赛事授权码，队长确认姓名后再报名。该授权码不是拉新邀请码。</text
-      >
+    <view class="journey-tabs"><button :class="{ active: view === 'browse' }" @tap="changeView('browse')">找活动</button><button :class="{ active: view === 'mine' }" @tap="changeView('mine')">我的报名</button></view>
+    <view class="tabs" role="tablist" aria-label="活动类型">
+      <view class="tab-option" :class="{ active: tab === 'games' }" role="tab" tabindex="0" :aria-selected="tab === 'games'" @tap="tab = 'games'" @keyup.enter="tab = 'games'">
+        <AppIcon name="sport" :size="30" :tone="tab === 'games' ? 'primary' : 'muted'" /><text>日常球局</text>
+      </view>
+      <view class="tab-option" :class="{ active: tab === 'events' }" role="tab" tabindex="0" :aria-selected="tab === 'events'" @tap="tab = 'events'" @keyup.enter="tab = 'events'">
+        <AppIcon name="event" :size="30" :tone="tab === 'events' ? 'primary' : 'muted'" /><text>金羽积分赛</text>
+      </view>
     </view>
 
     <view v-if="errorMessage" class="card error-card">
+      <view class="error-icon"><AppIcon name="warning" :size="34" tone="danger" /></view>
       <view
         ><text class="error-title">操作未完成</text
         ><text class="error-copy">{{ errorMessage }}</text></view
@@ -597,103 +365,40 @@ onShow(load);
         :disabled="loading || Boolean(actionKey)"
         @tap="load"
       >
-        重试
+        <AppIcon name="refresh" :size="26" />重试
       </button>
     </view>
 
-    <view v-if="tab === 'games'" class="card host-entry">
-      <view>
-        <text class="host-title">发起自己的球局</text>
-        <text class="muted"
-          >会员先申请主理人；审核通过后可创建草稿、发布、管理候补和签到。</text
-        >
-        <text v-if="hostApplication" class="application-state"
-          >申请状态：{{ displayApplicationStatus(hostApplication.status) }}</text
-        >
-      </view>
-      <button
-        v-if="isHost"
-        class="primary host-button"
-        @tap="openHostWorkbench"
-      >
-        进入主理人工作台
-      </button>
-      <button
-        v-else-if="isMember && hostApplication?.status !== 'APPLIED'"
-        class="secondary host-button"
-        :loading="actionKey === 'host-apply'"
-        :disabled="loading || Boolean(actionKey)"
-        @tap="applyHost"
-      >
-        申请成为主理人
-      </button>
-      <button v-else-if="isMember" class="secondary host-button" disabled>
-        申请审核中
-      </button>
-    </view>
-
-    <view v-if="loading" class="card state-card">活动列表同步中…</view>
+    <view v-if="loading" class="loading-stack"><view class="card activity-skeleton skeleton" /><view class="card activity-skeleton skeleton" /></view>
 
     <template v-else-if="tab === 'games'">
       <view
         v-for="game in visibleGames"
         :key="game.id"
         class="card activity"
-        :class="{ 'invited-game': targetGameId === game.id }"
       >
         <view class="row"
           ><StatusBadge :value="game.status" /><text class="muted">{{
             shortDate(game.startsAt)
           }}</text></view
         >
-        <text class="title">{{ game.title }}</text>
-        <text v-if="targetGameId === game.id" class="invite-context"
-          >好友邀请你加入这场球局</text
-        >
+        <view class="activity-title-row"><view class="activity-icon"><AppIcon name="sport" :size="32" /></view><text class="title">{{ game.title }}</text></view>
         <text class="muted"
           >主理人 {{ game.host?.displayName || "待显示" }} · {{ displayGameLevel(game.level) }} ·
           {{ game._count?.registrations || 0 }}/{{ game.capacity }} 人</text
         >
-        <view class="row footer">
-          <text class="money">{{ money(game.feeCents) }}</text>
-          <view class="game-actions">
-            <button
-              v-if="['OPEN', 'FULL'].includes(game.status)"
-              class="secondary join invite-game"
-              open-type="share"
-              data-share-type="game"
-              :data-game-id="game.id"
-              @tap="rememberShare('game', game.id)"
-            >
-              邀请球友
-            </button>
-            <button
-              v-if="isMember && ['OPEN', 'FULL'].includes(game.status)"
-              class="primary join"
-              :loading="actionKey === `game:${game.id}`"
-              :disabled="Boolean(actionKey)"
-              @tap="joinGame(game)"
-            >
-              {{ game.status === "FULL" ? "加入候补" : "立即报名" }}
-            </button>
-            <text v-else class="muted">{{
-              isMember ? "当前不可报名" : "会员账号可报名"
-            }}</text>
-          </view>
+        <text v-if="game.myRegistration" class="game-list-status">我的报名：{{ displayRegistrationStatus(game.myRegistration.status) }}</text>
+        <view class="activity-summary">
+          <text class="money">{{ money(game.feeCents) }} / 人</text>
+          <button class="secondary" @tap="openMemberPage(gameDetailPath(game.id))">查看球局详情<AppIcon name="chevron" :size="28" /></button>
         </view>
       </view>
-      <SectionEmpty v-if="!games.length" title="暂无开放球局" />
+      <SectionEmpty v-if="!visibleGames.length && !errorMessage" icon="sport" :title="view === 'mine' ? '还没有球局报名' : '暂无开放球局'" description="可以切换活动类型，或改天再来看看。" />
     </template>
 
     <template v-else-if="!loading">
-      <view class="rules card">
-        <text class="rules-title">固定双打 · 五轮瑞士制</text>
-        <text class="muted"
-          >单局21分，20平不加分；男双对女双让5分，男双对混双让2分，混双对女双让2分。</text
-        >
-      </view>
       <view
-        v-for="event in events"
+        v-for="event in visibleEvents"
         :key="event.id"
         class="card activity"
         :class="{ 'invited-event': targetEventId === event.id }"
@@ -703,7 +408,7 @@ onShow(load);
             shortDate(event.startsAt)
           }}</text></view
         >
-        <text class="title">{{ event.name }}</text>
+        <view class="activity-title-row"><view class="activity-icon"><AppIcon name="event" :size="32" /></view><text class="title">{{ event.name }}</text></view>
         <text v-if="targetEventId === event.id" class="invite-context"
           >好友分享了这场赛事的战绩</text
         >
@@ -711,6 +416,15 @@ onShow(load);
           >{{ event.minimumPeople }}人成赛 · {{ event.capacityPeople }}人封顶 ·
           {{ event.totalRounds }}轮</text
         >
+        <view class="activity-summary"><text class="money">{{ money(event.feeCents) }}</text><button class="secondary" :aria-expanded="Boolean(expanded[event.id])" @tap="expanded[event.id] = !expanded[event.id]">{{ expanded[event.id] ? '收起详情' : eventRegistration(event.id)?.registration ? '查看我的报名' : '查看详情' }}</button></view>
+        <template v-if="expanded[event.id]">
+      <view class="rules card">
+        <view class="rules-heading"><AppIcon name="event" :size="34" tone="accent" /><text class="rules-title">固定双打 · 五轮瑞士制</text></view>
+        <text class="muted"
+          >单局21分，20平不加分；男双对女双让5分，男双对混双让2分，混双对女双让2分。</text
+        >
+      </view>
+
         <text v-if="event.sponsor" class="sponsor"
           >合作伙伴：{{ event.sponsor }}</text
         >
@@ -722,28 +436,10 @@ onShow(load);
           "
           class="event-signup-guide"
         >
-          <text class="event-signup-title">固定双打 · 两人确认</text>
+          <text class="event-signup-title">固定双打 · 一次报名两人</text>
           <text class="event-signup-copy"
-            >1. 搭档本人生成授权码并私下发给队长；2. 队长点击报名，核对双方姓名后提交。</text
+            >可直接填写两位选手的姓名和联系电话，搭档无需注册；也可分享微信卡片，邀请搭档确认。</text
           >
-          <view
-            v-if="eventPartnerInvites[event.id]"
-            class="partner-invite-result"
-          >
-            <text class="partner-invite-label">我的赛事搭档授权码</text>
-            <text class="partner-invite-code">{{
-              eventPartnerInvites[event.id].partnerInviteCode
-            }}</text>
-            <text class="partner-invite-expiry"
-              >15 分钟内一次有效，报名成功后立即失效</text
-            >
-            <button
-              class="secondary partner-copy-button"
-              @tap="copyEventPartnerInvite(event.id)"
-            >
-              再次复制
-            </button>
-          </view>
         </view>
         <view
           v-if="eventRegistration(event.id)?.registration"
@@ -854,35 +550,22 @@ onShow(load);
           <view class="event-actions">
             <button
               v-if="
-                isMember &&
-                ['OPEN', 'FULL'].includes(event.status) &&
-                !hasActiveEventRegistration(event.id)
-              "
-              class="secondary join partner-invite"
-              :loading="actionKey === `event-partner-invite:${event.id}`"
-              :disabled="Boolean(actionKey)"
-              @tap="createEventPartnerInvite(event)"
-            >
-              搭档生成码
-            </button>
-            <button
-              v-if="
                 eventRegistration(event.id)?.registration?.status ===
                 'REGISTERED'
               "
               class="secondary join"
-              @tap="openOrders"
+              @tap="openEventOrder(event)"
             >
-              去支付
+              <AppIcon name="finance" :size="27" />去支付
             </button>
             <button
               v-if="canCancelEventRegistration(event)"
               class="secondary join danger"
               :loading="actionKey === `event-cancel-registration:${event.id}`"
               :disabled="Boolean(actionKey)"
-              @tap="cancelEventRegistration(event)"
+              @tap="cancellingEventId = event.id; cancelError = ''"
             >
-              退出报名
+              <AppIcon name="refund" :size="27" tone="danger" />退出报名
             </button>
             <button
               v-else-if="
@@ -914,20 +597,63 @@ onShow(load);
               :data-event-id="event.id"
               @tap="rememberShare('event', event.id)"
             >
-              分享战绩
+              <AppIcon name="share" :size="27" />分享战绩
             </button>
             <text v-else class="muted">{{
               isMember ? "当前不可报名" : "会员账号可报名"
             }}</text>
           </view>
         </view>
+        <ReasonForm v-if="cancellingEventId === event.id && canCancelEventRegistration(event)" :key="event.id" title="确认退出本次赛事" :description="eventCancelDescription(event)" :busy="Boolean(actionKey)" :error="cancelError" confirm-text="确认退出报名" @cancel="cancellingEventId = ''" @submit="cancelEventRegistration(event, $event)" />
+        </template>
       </view>
-      <SectionEmpty v-if="!events.length" title="赛事筹备中" />
+      <SectionEmpty v-if="!visibleEvents.length && !errorMessage" icon="event" :title="view === 'mine' ? '还没有赛事报名' : '暂无开放赛事'" />
     </template>
+    <button v-if="view === 'browse'" class="quiet-entry" @tap="showPast = !showPast">{{ showPast ? '收起往期活动' : '查看往期活动' }}</button>
+    <button v-else class="quiet-entry" @tap="openMemberPage('/pages/order/index')">查看全部订单（含已取消）</button>
+    <button v-if="tab === 'games'" class="quiet-entry" @tap="showHostApplication = !showHostApplication">{{ showHostApplication ? '收起组织球局入口' : '我想组织球局' }}</button>
+    <view v-if="tab === 'games' && showHostApplication" class="card host-entry">
+      <view class="host-copy">
+        <view class="host-heading"><view class="host-icon"><AppIcon name="add" :size="30" /></view><text class="host-title">发起自己的球局</text></view>
+        <text class="muted"
+          >申请通过后，可以组织球局并管理报名与签到。</text
+        >
+        <text v-if="hostApplication" class="application-state"
+          >申请状态：{{ displayApplicationStatus(hostApplication.status) }}</text
+        >
+      </view>
+      <button
+        v-if="isHost"
+        class="primary host-button"
+        @tap="openHostWorkbench"
+      >
+        <AppIcon name="work" :size="28" tone="inverse" />进入主理人工作台
+      </button>
+      <button
+        v-else-if="isMember && hostApplication?.status !== 'APPLIED'"
+        class="secondary host-button"
+        :loading="actionKey === 'host-apply'"
+        :disabled="loading || Boolean(actionKey)"
+        @tap="applyHost"
+      >
+        <AppIcon name="add" :size="28" />申请成为主理人
+      </button>
+      <button v-else-if="isMember" class="secondary host-button" disabled>
+        申请审核中
+      </button>
+    </view>
+
+
   </view>
 </template>
 
 <style scoped>
+.journey-tabs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12rpx; margin-bottom:22rpx; }
+.journey-tabs button { width:100%; margin:0; padding:16rpx; color:var(--color-muted); background:transparent; font-size:30rpx; }
+.journey-tabs .active { color:var(--color-primary); background:var(--color-surface); font-weight:800; }
+.activity-summary { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16rpx; margin-top:22rpx; }
+.activity-summary button { margin:0; font-size:26rpx; }
+.quiet-entry { width:100%; margin:12rpx 0; color:var(--color-muted); background:transparent; font-size:25rpx; }
 .tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -937,10 +663,16 @@ onShow(load);
   border-radius: 22rpx;
   text-align: center;
 }
-.tabs view {
+.tab-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  min-height: 44px;
   padding: 20rpx;
   color: #788079;
   border-radius: 17rpx;
+  box-sizing: border-box;
 }
 .tabs .active {
   color: #174b30;
@@ -959,6 +691,15 @@ onShow(load);
 .error-card > view {
   flex: 1 1 auto;
   min-width: 0;
+}
+.error-card > .error-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 54rpx;
+  height: 54rpx;
+  background: #fff0ef;
+  border-radius: 16rpx;
 }
 .error-title,
 .error-copy {
@@ -984,9 +725,11 @@ onShow(load);
   gap: 20rpx;
   background: #f8fbf8;
 }
+.host-copy { min-width: 0; }
+.host-heading { display:flex; align-items:center; gap:12rpx; margin-bottom:10rpx; }
+.host-icon { display:grid; flex:0 0 auto; place-items:center; width:52rpx; height:52rpx; background:#e7f4eb; border-radius:16rpx; }
 .host-title {
   display: block;
-  margin-bottom: 10rpx;
   font-size: 29rpx;
   font-weight: 800;
 }
@@ -1004,13 +747,14 @@ onShow(load);
   width: 100%;
   margin: 0;
 }
-.state-card {
-  color: #758079;
-  text-align: center;
-}
+.loading-stack { display:grid; gap:14rpx; }
+.activity-skeleton { min-height:310rpx; }
+.activity-title-row { display:flex; align-items:center; min-width:0; gap:12rpx; margin:26rpx 0 12rpx; }
+.activity-icon { display:grid; flex:0 0 auto; place-items:center; width:54rpx; height:54rpx; background:#e7f4eb; border-radius:16rpx; }
 .activity .title {
   display: block;
-  margin: 26rpx 0 12rpx;
+  min-width: 0;
+  margin: 0;
   font-size: 34rpx;
   font-weight: 800;
   overflow-wrap: anywhere;
@@ -1022,55 +766,17 @@ onShow(load);
 }
 .join {
   min-width: 170rpx;
-  min-height: 72rpx;
-  padding: 14rpx 20rpx;
+  min-height: 88rpx;
+  padding: 18rpx 20rpx;
   margin: 0;
   line-height: 1.35;
   font-size: 24rpx;
   white-space: normal;
 }
-.game-actions {
-  display: flex;
-  flex: 1 1 360rpx;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 12rpx;
-}
-.game-actions .join {
-  flex: 0 1 auto;
-}
-.invite-game {
-  color: #17653d;
-  background: #fff;
-  border: 1rpx solid #bdd7c6;
-}
-.invited-game {
-  border-color: rgba(23, 101, 61, 0.45);
-  box-shadow: 0 12rpx 36rpx rgba(23, 101, 61, 0.14);
-}
+.game-list-status { display: block; margin-top: 16rpx; color: var(--color-primary); font-size: 25rpx; }
 .invited-event {
   border-color: rgba(23, 101, 61, 0.45);
   box-shadow: 0 12rpx 36rpx rgba(23, 101, 61, 0.14);
-}
-.invite-guide {
-  padding: 22rpx 24rpx;
-  background: #f8fbf8;
-}
-.invite-guide-title,
-.invite-guide-copy {
-  display: block;
-}
-.invite-guide-title {
-  color: #174b30;
-  font-size: 25rpx;
-  font-weight: 800;
-}
-.invite-guide-copy {
-  margin-top: 8rpx;
-  color: #647169;
-  font-size: 22rpx;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
 }
 .invite-context {
   display: inline-flex;
@@ -1087,9 +793,10 @@ onShow(load);
 .rules {
   background: linear-gradient(135deg, #153f2a, #23714a);
 }
+.rules-heading { display:flex; align-items:center; gap:12rpx; margin-bottom:12rpx; }
 .rules-title {
   display: block;
-  margin-bottom: 12rpx;
+  min-width: 0;
   color: #fff;
   font-size: 31rpx;
   font-weight: 700;
@@ -1111,58 +818,15 @@ onShow(load);
   background: #edf5ef;
   border-radius: 16rpx;
 }
-.event-signup-title,
-.event-signup-copy,
-.partner-invite-label,
-.partner-invite-code,
-.partner-invite-expiry {
-  display: block;
-}
-.event-signup-title,
-.partner-invite-label {
-  font-size: 23rpx;
-  font-weight: 800;
-}
+.event-signup-title, .event-signup-copy { display: block; }
+.event-signup-title { font-size: 23rpx; font-weight: 800; }
 .event-signup-copy {
   margin-top: 8rpx;
   font-size: 21rpx;
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
-.partner-invite-result {
-  margin-top: 16rpx;
-  padding: 16rpx;
-  background: #fff;
-  border: 1rpx solid #d6e7dc;
-  border-radius: 14rpx;
-}
-.partner-invite-code {
-  margin-top: 10rpx;
-  padding: 12rpx 14rpx;
-  color: #174b30;
-  background: #f4f7f4;
-  border-radius: 12rpx;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 21rpx;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-  word-break: break-all;
-  white-space: normal;
-  user-select: text;
-}
-.partner-invite-expiry {
-  margin-top: 8rpx;
-  color: #758079;
-  font-size: 20rpx;
-  line-height: 1.5;
-}
-.partner-copy-button {
-  width: 100%;
-  min-height: 72rpx;
-  margin: 14rpx 0 0;
-  line-height: 1.35;
-  font-size: 22rpx;
-}
+
 .ranking-card {
   margin-top: 18rpx;
   padding: 18rpx;
@@ -1232,17 +896,13 @@ onShow(load);
   color: #9a493d;
   border-color: #d8aaa2;
 }
-.event-actions .partner-invite {
-  color: #17653d;
-  border-color: #bdd7c6;
-  background: #fff;
-}
+
 @media (max-width: 420px) {
   .error-card { align-items: stretch; flex-wrap: wrap; }
   .retry { width: 100%; }
   .footer { align-items: stretch; }
   .footer > .money { width: 100%; }
-  .game-actions,.event-actions { flex-basis: 100%; justify-content: stretch; }
-  .game-actions .join,.event-actions .join { flex: 1 1 220rpx; min-width: 0; }
+  .event-actions { flex-basis: 100%; justify-content: stretch; }
+  .event-actions .join { flex: 1 1 220rpx; min-width: 0; }
 }
 </style>

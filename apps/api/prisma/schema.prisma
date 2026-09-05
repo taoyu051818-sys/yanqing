@@ -500,6 +500,7 @@ model User {
   gameRegistrations                   GameRegistration[]
   eventCaptains                       EventTeam[]                       @relation("EventCaptains")
   eventPartnerInvites                 EventPartnerInvite[]              @relation("EventPartnerInviteIssuer")
+  eventTeamInvites                    EventPartnerInvite[]              @relation("EventTeamInviteCaptain")
   cancelledEventTeams                 EventTeam[]                       @relation("EventTeamCanceller")
   cancelledEvents                     Event[]                           @relation("EventCanceller")
   trainingPurchases                   TrainingEnrollment[]              @relation("TrainingPurchases")
@@ -1309,6 +1310,10 @@ model EventTeam {
   playerBName            String
   playerAUserId          String?
   playerBUserId          String?
+  playerAPhone           String?
+  playerBPhone           String?
+  captainPlays           Boolean            @default(true)
+  registrationMode       String             @default("INVITE")
   category               TeamCategory
   sourceChannel          SourceChannel?
   listAmountCents        Int?
@@ -1349,6 +1354,8 @@ model EventTeam {
   @@unique([eventId, seed])
   @@index([eventId, status])
   @@index([eventId, status, createdAt])
+  @@index([eventId, playerAPhone])
+  @@index([eventId, playerBPhone])
   @@index([status, paymentDueAt])
   @@index([cancelledById, cancelRequestedAt])
 }
@@ -1356,19 +1363,29 @@ model EventTeam {
 model EventPartnerInvite {
   id             String     @id @default(cuid())
   eventId        String
-  partnerId      String
+  partnerId      String?
+  captainId      String?
+  teamName       String?
+  category       TeamCategory?
+  playerAName    String?
+  playerAPhone   String?
+  playerBName    String?
+  playerBPhone   String?
+  acceptedAt     DateTime?
   tokenHash      String     @unique
   expiresAt      DateTime
   revokedAt      DateTime?
   consumedAt     DateTime?
   consumedTeamId String?    @unique
   event          Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  partner        User       @relation("EventPartnerInviteIssuer", fields: [partnerId], references: [id], onDelete: Cascade)
+  partner        User?      @relation("EventPartnerInviteIssuer", fields: [partnerId], references: [id], onDelete: Cascade)
+  captain        User?      @relation("EventTeamInviteCaptain", fields: [captainId], references: [id], onDelete: Cascade)
   consumedTeam   EventTeam? @relation(fields: [consumedTeamId], references: [id], onDelete: SetNull)
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
   @@index([eventId, partnerId, expiresAt])
+  @@index([eventId, captainId, expiresAt])
   @@index([expiresAt, revokedAt, consumedAt])
 }
 
@@ -1777,6 +1794,7 @@ model CouponTemplate {
   activityName       String
   benefitDescription String
   faceValueCents     Int          @default(0)
+  allowVenueBooking  Boolean      @default(false)
   validFrom          DateTime
   validTo            DateTime
   claimLimitPerUser  Int          @default(1)

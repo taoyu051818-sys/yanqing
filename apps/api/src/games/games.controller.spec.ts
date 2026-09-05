@@ -8,6 +8,20 @@ import { AppRole } from '../generated/prisma/enums.js'
 import { GamesController } from './games.controller.js'
 
 describe('GamesController management list', () => {
+  it('passes the authenticated member to the public list projection', async () => {
+    const list = vi.fn().mockResolvedValue([])
+    const controller = new GamesController({ list } as never)
+    const actor: AuthUser = {
+      sub: 'member-1',
+      displayName: '会员',
+      roles: [AppRole.MEMBER],
+    }
+
+    await controller.list(actor)
+
+    expect(list).toHaveBeenCalledWith(actor)
+  })
+
   it('only exposes the management route to hosts and administrators', () => {
     expect(
       Reflect.getMetadata(ROLES_KEY, GamesController.prototype.managed),

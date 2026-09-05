@@ -61,9 +61,11 @@ import { orderResponse } from '../orders/order-response.js';
 import { completeOrderFulfillment } from '../orders/order-fulfillment.js';
 import {
   assertOperationTimeWindow,
+  resolveOperationWindowConfiguration,
   TRAINING_ATTENDANCE_WINDOW_PARAMETER,
   TRAINING_COMPLETION_WINDOW_PARAMETER,
 } from '../common/time-window/operation-time-window.js';
+import { resolveOperatingShareSnapshot } from '../common/finance/operating-share.js';
 import { YouthTrainingRulesService } from './youth-training-rules.service.js';
 import {
   trainingAttendanceCommandResponse,
@@ -130,8 +132,15 @@ export class TrainingService {
   ) {}
 
   async listProducts(actor: AuthUser) {
-    const administrator = actor.roles.some(
+    const mayConfigureProducts = actor.roles.some(
       (role) => role === AppRole.ADMIN || role === AppRole.SUPER_ADMIN,
+    );
+    const mayViewClassAssignments = actor.roles.some(
+      (role) =>
+        role === AppRole.FRONT_DESK ||
+        role === AppRole.COACH ||
+        role === AppRole.ADMIN ||
+        role === AppRole.SUPER_ADMIN,
     );
     const coachOnly =
       actor.roles.includes(AppRole.COACH) &&
@@ -139,11 +148,11 @@ export class TrainingService {
         (role) => role === AppRole.ADMIN || role === AppRole.SUPER_ADMIN,
       );
     const products = await this.prisma.trainingProduct.findMany({
-      where: { enabled: true },
+      where: mayConfigureProducts ? {} : { enabled: true },
       include: {
         classes: {
           where: {
-            active: true,
+            ...(mayConfigureProducts ? {} : { active: true }),
             ...(coachOnly
               ? { OR: [{ coachId: actor.sub }, { assistantId: actor.sub }] }
               : {}),
@@ -165,7 +174,7 @@ export class TrainingService {
         name: trainingClass.name,
         capacity: trainingClass.capacity,
         active: trainingClass.active,
-        ...(administrator
+        ...(mayViewClassAssignments
           ? {
               coachId: trainingClass.coachId,
               assistantId: trainingClass.assistantId,
@@ -337,30 +346,76 @@ export class TrainingService {
           AppRole.FRONT_DESK,
         ].includes(role as never),
       );
-    const sessions = await this.prisma.trainingSession.findMany({
-      where: coachScope
-        ? {
-            class: {
-              OR: [{ coachId: actor?.sub }, { assistantId: actor?.sub }],
-            },
-          }
-        : undefined,
-      include: {
-        class: { include: { product: true } },
-        attendances: {
+    const observedAt = new Date();
+    const [sessions, attendanceConfiguration, completionConfiguration] =
+      await Promise.all([
+        this.prisma.trainingSession.findMany({
+          where: coachScope
+            ? {
+                class: {
+                  OR: [{ coachId: actor?.sub }, { assistantId: actor?.sub }],
+                },
+              }
+            : undefined,
           include: {
-            enrollment: {
+            class: { include: { product: true } },
+            attendances: {
               include: {
-                buyer: { select: { displayName: true } },
-                student: true,
+                enrollment: {
+                  include: {
+                    buyer: { select: { displayName: true } },
+                    student: true,
+                  },
+                },
               },
             },
           },
-        },
-      },
-      orderBy: { startsAt: 'desc' },
-      take: 100,
-    });
+          orderBy: { startsAt: 'desc' },
+          take: 100,
+        }),
+        resolveOperationWindowConfiguration(
+          this.prisma,
+          TRAINING_ATTENDANCE_WINDOW_PARAMETER,
+          { earlyMinutes: 30, lateMinutes: 120 },
+          observedAt,
+        ),
+        resolveOperationWindowConfiguration(
+          this.prisma,
+          TRAINING_COMPLETION_WINDOW_PARAMETER,
+          { earlyMinutes: 0, lateMinutes: 240 },
+          observedAt,
+        ),
+      ]);
+    const mayHistoricallyOverride = Boolean(
+      actor?.roles.some((role) =>
+        [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never),
+      ),
+    );
+    const windowProjection = (
+      startsAt: Date,
+      endsAt: Date,
+      configuration: { earlyMinutes: number; lateMinutes: number },
+    ) => {
+      const opensAt = new Date(
+        startsAt.getTime() - configuration.earlyMinutes * 60_000,
+      );
+      const closesAt = new Date(
+        endsAt.getTime() + configuration.lateMinutes * 60_000,
+      );
+      const state =
+        observedAt < opensAt
+          ? 'NOT_OPEN'
+          : observedAt <= closesAt
+            ? 'OPEN'
+            : 'CLOSED';
+      return {
+        opensAt: opensAt.toISOString(),
+        closesAt: closesAt.toISOString(),
+        state,
+        mayHistoricallyOverride:
+          state === 'CLOSED' && mayHistoricallyOverride,
+      };
+    };
     return sessions.map((session) => ({
       id: session.id,
       classId: session.classId,
@@ -370,6 +425,16 @@ export class TrainingService {
       courtCount: session.courtCount,
       occupiedCourtHours: session.occupiedCourtHours,
       note: session.note,
+      attendanceWindow: windowProjection(
+        session.startsAt,
+        session.endsAt,
+        attendanceConfiguration,
+      ),
+      completionWindow: windowProjection(
+        session.endsAt,
+        session.endsAt,
+        completionConfiguration,
+      ),
       class: {
         id: session.class.id,
         name: session.class.name,
@@ -981,6 +1046,11 @@ export class TrainingService {
           if (occupiedSeats >= trainingClass.capacity)
             throw new ConflictException('班级名额已满');
         }
+        const operatingShare = await resolveOperatingShareSnapshot(
+          tx,
+          BusinessType.TRAINING,
+          now,
+        );
         const created = await tx.order.create({
           data: {
             ...creation,
@@ -1001,6 +1071,7 @@ export class TrainingService {
               classId: dto.classId,
               seatReservedUntil: seatReservedUntil?.toISOString(),
               youthRegulatoryValidation: regulatoryValidation,
+              operatingShare,
             },
             items: {
               create: {

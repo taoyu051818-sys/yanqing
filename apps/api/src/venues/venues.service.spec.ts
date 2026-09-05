@@ -476,6 +476,12 @@ describe('VenuesService booking ownership', () => {
             targetMemberId: 'member-2',
             createdById: frontDesk.sub,
             operatorAssisted: true,
+            operatingShare: expect.objectContaining({
+              rateBps: 1_500,
+              businessType: BusinessType.VENUE,
+              included: true,
+              basis: 'REALIZED_NET_REVENUE',
+            }),
           }),
         }),
       }),

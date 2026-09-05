@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
-import OperationsFrame from '../../../../components/OperationsFrame.vue'
+import { computed, nextTick, reactive, ref } from 'vue'
+import { onLoad, onShow, onShareAppMessage } from '@dcloudio/uni-app'
+import OperationsFrame from '../../components/OperationsFrame.vue'
+import OperationTask from '../../components/OperationTask.vue'
+import { useOperationTask, reasonField } from '../../components/operation-task'
+import { couponClaimPath, couponCodeFromInput } from '../../../../utils/coupon-invitation'
+import { SHARE_CARD_IMAGES } from '../../../../config/share'
 import MetricCard from '../../../../components/MetricCard.vue'
 import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
@@ -9,6 +13,7 @@ import { useSessionStore } from '../../../../stores/session'
 import { idempotencyKey, money } from '../../../../utils/format'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
 
+const task = useOperationTask()
 const session = useSessionStore()
 const merchants = ref<any[]>([])
 const templates = ref<any[]>([])
@@ -19,10 +24,14 @@ const actionKey = ref('')
 const loadError = ref('')
 const actionError = ref('')
 const lastRedeemedCode = ref('')
+const batchVisible = ref(20)
+const batchShareError = ref('')
 const generatedBatch = ref<{ templateName: string; codes: string[] } | null>(null)
 const showMerchantForm = ref(false)
 const showTemplateForm = ref(false)
 const dataScopeKey = ref('')
+const managementView = ref('')
+const managementViewHandled = ref(false)
 
 const isAdmin = computed(() => session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
 const isMerchant = computed(() => session.roles.includes('MERCHANT'))
@@ -70,7 +79,7 @@ const merchantForm = reactive({
   contactName: '', contactPhone: '', settlementMode: 'PER_REDEMPTION', settlementAmount: '10',
 })
 const templateForm = reactive({
-  code: '', name: '', activityName: '', benefitDescription: '', faceValue: '20',
+  code: '', name: '', activityName: '', benefitDescription: '', faceValue: '20', allowVenueBooking: false,
   validFrom: shanghaiDate(), validTo: shanghaiDate(30), claimLimitPerUser: '1', issueLimit: '100',
 })
 const merchantLevels = [
@@ -156,6 +165,12 @@ async function load() {
     selectedMerchantId.value = merchants.value[0]?.id || ''
   }
   loading.value = false
+  if (managementView.value === 'coupons' && !managementViewHandled.value) {
+    managementViewHandled.value = true
+    showTemplateForm.value = canCreateCampaign.value && merchantIsActive.value
+    await nextTick()
+    uni.pageScrollTo({ selector: '#coupon-management', duration: 280 })
+  }
 }
 
 async function runAction(key: string, action: () => Promise<unknown>, message: string) {
@@ -173,44 +188,31 @@ async function runAction(key: string, action: () => Promise<unknown>, message: s
   }
 }
 
-async function redeem(code?: string) {
-  if (!canRedeem.value || !merchant.value) return
-  if (!merchantIsActive.value) { actionError.value = '商户已停用，不能核销券码'; return }
-  let couponCode = code?.trim() || ''
-  if (!couponCode) {
-    const codeInput = await uni.showModal({ title: '输入唯一券码', editable: true, placeholderText: '扫描结果或券码' })
-    if (!codeInput.confirm) return
-    couponCode = codeInput.content?.trim() || ''
-  }
-  if (!couponCode) return
-  const amountInput = await uni.showModal({
-    title: '登记消费归因', editable: true, placeholderText: '实际成交金额（元），无金额填0',
+function redeem(code?: string) {
+  if (!canRedeem.value || !merchant.value || !merchantIsActive.value) return
+  const merchantId = merchant.value.id
+  task.start({ title: '核销消费券', description: merchant.value.name + ' · 核对券与实际消费金额后确认。券核销后不可重复使用。',
+    confirmText: '确认核销一次', fields: [
+      { key: 'code', label: '消费券', initial: code?.trim(), hint: '优先使用扫码带入；无法扫码时可填写顾客出示的券码。', max: 128 },
+      { key: 'amount', kind: 'money', label: '实际成交金额（元）', initial: '0', hint: '仅作消费归因，不会自动扣款。无成交金额填0。' },
+    ],
+    submit: async values => {
+      const attributedAmountCents = cents(values.amount, '成交金额')
+      const command = { code: values.code, merchantId, attributedAmountCents }
+      await withPendingCreationKey('merchant.redeem.' + values.code, command, idempotencyKey => endpoints.redeemCoupon({ ...command, idempotencyKey }))
+      lastRedeemedCode.value = values.code
+      await load()
+      return '核销成功，已计入商户核销记录，券不可再次使用。'
+    },
   })
-  if (!amountInput.confirm) return
-  let attributedAmountCents = 0
-  try { attributedAmountCents = cents(amountInput.content?.trim() || '0', '成交金额') }
-  catch (cause: any) { actionError.value = cause.message; return }
-  const confirmed = await uni.showModal({
-    title: '二次确认核销',
-    content: `${merchant.value.name} · ${couponCode}\n归因金额 ${money(attributedAmountCents)}。核销后券码不可再次使用。`,
-    confirmText: '确认核销',
-  })
-  if (!confirmed.confirm) return
-  await runAction(`redeem:${couponCode}`, async () => {
-    await endpoints.redeemCoupon({
-      code: couponCode,
-      merchantId: merchant.value.id,
-      attributedAmountCents,
-      idempotencyKey: idempotencyKey(`merchant-${couponCode}`),
-    })
-    lastRedeemedCode.value = couponCode
-  }, '核销成功')
 }
 
 async function scan() {
   try {
     const result = await uni.scanCode({ scanType: ['qrCode', 'barCode'] })
-    await redeem(result.result.split('/').pop() || result.result)
+    const code = couponCodeFromInput(result.result)
+    if (!code) throw new Error('未识别到有效领取卡，请扫描本平台卡券或选择手动输入')
+    await redeem(code)
   } catch (cause: any) {
     if (cause?.errMsg?.includes('cancel')) return
     actionError.value = cause?.message || '扫码失败，可改用手动输入'
@@ -227,20 +229,11 @@ async function confirmSettlement(item: any) {
   await runAction(`settlement-confirm:${item.id}`, () => endpoints.confirmAllianceSettlement(item.id), '账单已确认')
 }
 
-async function disputeSettlement(item: any) {
-  const input = await uni.showModal({
-    title: '填写结算争议', editable: true, placeholderText: '至少2个字，说明核销、归因或合同口径差异',
+function disputeSettlement(item: any) {
+  task.start({ title: '提出结算争议', description: (item.merchant?.name || merchant.value?.name) + ' · ' + displayPeriod(item) + ' · 应结 ' + money(item.cooperationFeeCents) + '。提交后账单退回草稿，原金额与历史不覆盖。',
+    confirmText: '确认退回核查', fields: [reasonField('差异依据')],
+    submit: async ({ reason }) => { await endpoints.disputeAllianceSettlement(item.id, { reason }); await load(); return '争议已记录，账单退回待核查状态。' },
   })
-  const reason = input.content?.trim() || ''
-  if (!input.confirm) return
-  if (reason.length < 2) { actionError.value = '争议原因至少需要2个字'; return }
-  const confirmed = await uni.showModal({
-    title: '二次确认提出争议',
-    content: `账单将退回草稿，原金额不会被覆盖。\n原因：${reason}`,
-    confirmText: '确认退回', confirmColor: '#a52626',
-  })
-  if (!confirmed.confirm) return
-  await runAction(`settlement-dispute:${item.id}`, () => endpoints.disputeAllianceSettlement(item.id, { reason }), '争议已提交')
 }
 
 async function createMerchant() {
@@ -300,7 +293,7 @@ async function createTemplate() {
     await endpoints.createCouponTemplate({
       merchantId: merchant.value.id, code: templateForm.code.trim(), name: templateForm.name.trim(),
       activityName: templateForm.activityName.trim(), benefitDescription: templateForm.benefitDescription.trim(),
-      faceValueCents, validFrom: `${templateForm.validFrom}T00:00:00+08:00`,
+      faceValueCents, allowVenueBooking: templateForm.allowVenueBooking, validFrom: `${templateForm.validFrom}T00:00:00+08:00`,
       validTo: `${templateForm.validTo}T23:59:59+08:00`, claimLimitPerUser, issueLimit,
     })
     Object.assign(templateForm, { code: '', name: '', activityName: '', benefitDescription: '' })
@@ -308,107 +301,82 @@ async function createTemplate() {
   }, '券活动已创建')
 }
 
-async function issueCodes(item: any) {
+function issueCodes(item: any) {
   const remaining = Math.max(0, Number(item.issueLimit || 0) - Number(item.issuedCount || 0))
   if (!canIssueCodes.value || remaining <= 0) return
-  const input = await uni.showModal({
-    title: '批量发行唯一券', editable: true, placeholderText: `本批数量，剩余可发行 ${remaining} 张`,
+  const max = Math.min(2000, remaining)
+  task.start({ title: '批量发行消费券', description: item.name + ' · 剩余可发行 ' + remaining + ' 张。只生成本批唯一券，不自动代替会员领取。',
+    confirmText: '确认发行所填数量', fields: [{ key: 'count', label: '发行数量（张）', kind: 'number', min: 1, max, hint: '本批最多 ' + max + ' 张。', initial: '1' }],
+    submit: async values => {
+      const count = positiveInteger(values.count, '发行数量', max)
+      const result: any = await withPendingCreationKey('alliance.coupon-batch.' + item.id, { templateId: item.id, count },
+        idempotencyKey => endpoints.generateCouponCodes(item.id, { count, idempotencyKey }))
+      generatedBatch.value = { templateName: item.name, codes: result.codes || [] }
+      batchVisible.value = 20
+      await load()
+      return '已发行 ' + count + ' 张。请在本批券列表选择要发出的领取链接。'
+    },
   })
-  if (!input.confirm) return
-  let count: number
-  try { count = positiveInteger(input.content?.trim() || '', '发行数量', Math.min(2000, remaining)) }
-  catch (cause: any) { actionError.value = cause.message; return }
-  const confirmed = await uni.showModal({
-    title: '二次确认发行',
-    content: `${item.name} 将生成 ${count} 个不可重复的唯一券码。生成后请通过受控渠道发放。`,
-    confirmText: '确认发行',
-  })
-  if (!confirmed.confirm) return
-  await runAction(`issue:${item.id}`, async () => {
-    const command = { templateId: item.id, count }
-    const result: any = await withPendingCreationKey(
-      `alliance.coupon-batch.${item.id}`,
-      command,
-      (idempotencyKey) => endpoints.generateCouponCodes(item.id, { count, idempotencyKey }),
-    )
-    generatedBatch.value = { templateName: item.name, codes: result.codes || [] }
-  }, `已发行${count}张`)
 }
 
-async function lifecycleReason(title: string, placeholder: string) {
-  const input = await uni.showModal({ title, editable: true, placeholderText: placeholder })
-  if (!input.confirm) return ''
-  const reason = input.content?.trim() || ''
-  if (reason.length < 2 || reason.length > 300) {
-    actionError.value = '状态变更原因需要2-300个字符'
-    return ''
-  }
-  return reason
-}
 
-async function toggleMerchantStatus() {
+
+function toggleMerchantStatus() {
   if (!isAdmin.value || !merchant.value) return
-  const activating = merchant.value.status !== 'ACTIVE'
+  const selected = merchant.value
+  const activating = selected.status !== 'ACTIVE'
   const status = activating ? 'ACTIVE' : 'DISABLED'
-  const reason = await lifecycleReason(
-    activating ? '填写启用商户原因' : '填写停用商户原因',
-    activating ? '如：合作协议已续签并复核' : '如：合作到期或风险暂停',
-  )
-  if (!reason) return
-  const confirmed = await uni.showModal({
-    title: activating ? '二次确认启用商户' : '二次确认停用商户',
-    content: activating
-      ? `${merchant.value.name} 将恢复券活动创建、唯一券发行和核销；已停用的券模板仍需逐一启用。\n原因：${reason}`
-      : `${merchant.value.name} 停用后不能新建券活动、发行或核销券码；历史数据与结算单不会删除。\n原因：${reason}`,
-    confirmText: activating ? '确认启用' : '确认停用',
-    confirmColor: activating ? '#17653d' : '#a52626',
+  task.start({ title: activating ? '启用商户' : '停用商户', description: selected.name + (activating ? ' · 恢复发行和核销；停用券模板仍需另行启用。' : ' · 停止创建活动、发行及核销，历史和结算单保留。'),
+    confirmText: activating ? '确认启用' : '确认停用', fields: [reasonField('变更依据')],
+    submit: async ({ reason }) => {
+      await withPendingCreationKey('alliance.merchant-status.' + selected.id, { merchantId: selected.id, status, reason }, idempotencyKey => endpoints.setMerchantStatus(selected.id, { status, reason, idempotencyKey }))
+      await load(); return activating ? '商户已启用。' : '商户已停用，历史数据保留。'
+    },
   })
-  if (!confirmed.confirm) return
-  const merchantId = merchant.value.id
-  const command = { merchantId, status, reason }
-  await runAction(`merchant-status:${merchantId}`, () => withPendingCreationKey(
-    `alliance.merchant-status.${merchantId}`,
-    command,
-    (commandKey) => endpoints.setMerchantStatus(merchantId, {
-      status,
-      reason,
-      idempotencyKey: commandKey,
-    }),
-  ), activating ? '商户已启用' : '商户已停用')
 }
 
-async function toggleTemplateStatus(item: any) {
+function toggleTemplateStatus(item: any) {
   if (!isAdmin.value) return
   const enabled = !item.enabled
-  if (enabled && !merchantIsActive.value) {
-    actionError.value = '请先启用商户，再启用券模板'
-    return
-  }
-  const reason = await lifecycleReason(
-    enabled ? '填写启用券模板原因' : '填写停用券模板原因',
-    enabled ? '如：活动物料和履约能力已确认' : '如：活动结束或权益调整',
-  )
-  if (!reason) return
-  const confirmed = await uni.showModal({
-    title: enabled ? '二次确认启用券模板' : '二次确认停用券模板',
-    content: enabled
-      ? `${item.name} 启用后可继续发行唯一券；有效期和发行上限仍会校验。\n原因：${reason}`
-      : `${item.name} 停用后不能继续发行，既有数据不会删除。\n原因：${reason}`,
-    confirmText: enabled ? '确认启用' : '确认停用',
-    confirmColor: enabled ? '#17653d' : '#a52626',
+  if (enabled && !merchantIsActive.value) { actionError.value = '请先启用商户'; return }
+  task.start({ title: enabled ? '启用券活动' : '停用券活动', description: item.name + (enabled ? ' · 仍按有效期和发行上限校验。' : ' · 停止继续发行和使用；已发券与核销记录保留。'),
+    confirmText: enabled ? '确认启用' : '确认停用', fields: [reasonField('变更依据')],
+    submit: async ({ reason }) => {
+      await withPendingCreationKey('alliance.template-status.' + item.id, { templateId: item.id, enabled, reason }, idempotencyKey => endpoints.setCouponTemplateStatus(item.id, { enabled, reason, idempotencyKey }))
+      await load(); return enabled ? '券活动已启用。' : '券活动已停用，历史记录保留。'
+    },
   })
-  if (!confirmed.confirm) return
-  const command = { templateId: item.id, enabled, reason }
-  await runAction(`template-status:${item.id}`, () => withPendingCreationKey(
-    `alliance.template-status.${item.id}`,
-    command,
-    (commandKey) => endpoints.setCouponTemplateStatus(item.id, {
-      enabled,
-      reason,
-      idempotencyKey: commandKey,
-    }),
-  ), enabled ? '券模板已启用' : '券模板已停用')
 }
+
+function configureScope(item: any) {
+  task.start({ title: '设置券适用范围', description: item.name + ' · 影响该活动已发出的未使用券。已支付订单不追溯改价，未付旧订单需重新核验。', confirmText: '确认变更适用范围',
+    fields: [{ key: 'scope', label: '可用业务', kind: 'choices', initial: item.allowVenueBooking ? 'VENUE' : 'MERCHANT',
+      options: [{ value: 'MERCHANT', label: '仅所属商户消费' }, { value: 'VENUE', label: '商户消费及订场抵扣' }] }, reasonField('变更依据')],
+    submit: async ({ scope, reason }) => {
+      const command = { enabled: item.enabled, allowVenueBooking: scope === 'VENUE', reason }
+      await withPendingCreationKey('alliance.template-scope.' + item.id, command, idempotencyKey => endpoints.setCouponTemplateStatus(item.id, { ...command, idempotencyKey }))
+      await load(); return '适用范围已更新，后续建单及付款均由服务器重新核验。'
+    },
+  })
+}
+
+onShareAppMessage((options: any) => {
+  const code = String(options?.target?.dataset?.couponCode || '')
+  return code && generatedBatch.value?.codes.includes(code)
+    ? { title: generatedBatch.value.templateName + ' · 邀请你领取', path: couponClaimPath(code), imageUrl: SHARE_CARD_IMAGES.miniapp }
+    : { title: '延庆金羽羽毛球', path: '/pages/home/index', imageUrl: SHARE_CARD_IMAGES.miniapp }
+})
+// #ifdef H5
+async function shareCoupon(code: string) {
+  batchShareError.value = ''
+  const url = window.location.origin + window.location.pathname + '#' + couponClaimPath(code)
+  try {
+    if (navigator.share) { await navigator.share({ title: generatedBatch.value?.templateName || '领取消费券', url }); return }
+    await uni.setClipboardData({ data: url })
+    uni.showToast({ title: '领取链接已复制，好友打开确认即可', icon: 'none' })
+  } catch (cause: any) { if (cause?.name !== 'AbortError') batchShareError.value = '分享未完成，可重试或使用微信端发送卡片。' }
+}
+// #endif
 
 function copyGeneratedCodes() {
   if (!generatedBatch.value?.codes.length) return
@@ -430,11 +398,15 @@ function canIssueTemplate(item: any) {
     Number(item.issuedCount || 0) < Number(item.issueLimit || 0)
 }
 
+onLoad((options) => {
+  managementView.value = typeof options?.view === 'string' ? options.view : ''
+})
 onShow(load)
 </script>
 
 <template>
-  <OperationsFrame access="alliance" title="联盟商户" eyebrow="ALLIANCE MERCHANT" :role="roleLabel" :venue="merchant?.name || '商户账户'" :description="pageDescription">
+  <OperationsFrame access="alliance" icon="shop" title="联盟商户" eyebrow="ALLIANCE MERCHANT" :role="roleLabel" :venue="merchant?.name || '商户账户'" :description="pageDescription">
+    <OperationTask :task="task" />
     <view v-if="loading" class="loading card">正在同步联盟商户、券活动与结算单…</view>
     <view v-if="loadError" class="error card"><text>{{ loadError }}</text><button class="ghost compact" :disabled="loading" @tap="load">重试</button></view>
     <view v-if="actionError" class="error card"><text>{{ actionError }}</text></view>
@@ -465,26 +437,41 @@ onShow(load)
     </template>
 
     <template v-if="canViewTemplates && merchant">
-      <view class="section-title">券活动与唯一券 <text class="section-note">{{ merchantTemplates.length }} 个</text></view>
+      <view id="coupon-management" class="section-title">券活动与唯一券 <text class="section-note">{{ merchantTemplates.length }} 个</text></view>
       <button v-if="canCreateCampaign" class="secondary full" :disabled="!merchantIsActive" @tap="showTemplateForm = !showTemplateForm">{{ merchantIsActive ? (showTemplateForm ? '收起券活动表单' : '新建券活动') : '商户停用期间不能新建券活动' }}</button>
       <view v-if="showTemplateForm && canCreateCampaign && merchantIsActive" class="card form-card">
-        <input v-model="templateForm.code" class="input" maxlength="40" placeholder="券模板编码，如 COFFEE-2026" />
-        <input v-model="templateForm.name" class="input" maxlength="120" placeholder="券名称" />
-        <input v-model="templateForm.activityName" class="input" maxlength="120" placeholder="活动名称" />
-        <textarea v-model="templateForm.benefitDescription" class="textarea" maxlength="300" placeholder="会员权益说明" />
-        <view class="grid-2"><input v-model="templateForm.faceValue" class="input" type="digit" placeholder="券面值（元）" /><input v-model="templateForm.issueLimit" class="input" type="number" placeholder="发行上限" /></view>
-        <view class="grid-2"><picker mode="date" :value="templateForm.validFrom" @change="templateForm.validFrom = ($event.detail as any).value"><view class="picker-field">开始 {{ templateForm.validFrom }}</view></picker><picker mode="date" :value="templateForm.validTo" @change="templateForm.validTo = ($event.detail as any).value"><view class="picker-field">结束 {{ templateForm.validTo }}</view></picker></view>
-        <input v-model="templateForm.claimLimitPerUser" class="input" type="number" placeholder="每人领取上限" />
+        <view><text class="field-label">券模板编码</text><input v-model="templateForm.code" class="input" maxlength="40" placeholder="例如 COFFEE-2026" /></view>
+        <view><text class="field-label">券名称</text><input v-model="templateForm.name" class="input" maxlength="120" placeholder="会员可见的券名称" /></view>
+        <view><text class="field-label">活动名称</text><input v-model="templateForm.activityName" class="input" maxlength="120" placeholder="本次发行活动名称" /></view>
+        <view><text class="field-label">会员权益说明</text><textarea v-model="templateForm.benefitDescription" class="textarea" maxlength="300" placeholder="说明适用商品、门槛和不可用场景" /></view>
+        <view class="grid-2"><view><text class="field-label">券面值（元）</text><input v-model="templateForm.faceValue" class="input" type="digit" /></view><view><text class="field-label">发行上限（张）</text><input v-model="templateForm.issueLimit" class="input" type="number" /></view></view>
+        <view class="grid-2"><picker mode="date" :value="templateForm.validFrom" @change="templateForm.validFrom = ($event.detail as any).value"><view><text class="field-label">生效日期</text><view class="picker-field">{{ templateForm.validFrom }}　›</view></view></picker><picker mode="date" :value="templateForm.validTo" @change="templateForm.validTo = ($event.detail as any).value"><view><text class="field-label">失效日期</text><view class="picker-field">{{ templateForm.validTo }}　›</view></view></picker></view>
+        <view><text class="field-label">适用范围：默认仅限所属商户消费</text><switch :checked="templateForm.allowVenueBooking" @change="templateForm.allowVenueBooking = Boolean(($event as any).detail.value)" /><text>另外允许订场抵扣（影响场馆收入）</text></view>
+        <view><text class="field-label">每位会员领取上限（张）</text><input v-model="templateForm.claimLimitPerUser" class="input" type="number" /></view>
+        <text class="template-guardrail">模板发行后不覆盖历史规则；需要改面值、有效期或上限时，请停用旧模板并创建新模板，已发券仍按原快照核销。</text>
         <button class="primary full" :disabled="Boolean(actionKey)" @tap="createTemplate">确认创建券活动</button>
       </view>
       <view v-for="item in merchantTemplates" :key="item.id" class="card template-card">
         <view class="row"><view><text class="merchant-title">{{ item.name }}</text><text class="muted">{{ item.code }} · {{ item.activityName }}</text></view><text class="status" :class="templateState(item).className">{{ templateState(item).label }}</text></view>
-        <text class="benefit">{{ item.benefitDescription }}</text>
+        <text class="benefit">{{ item.benefitDescription }}</text><text class="state-note">{{ item.code?.startsWith("NEWCOMER") ? "新客体验专用规则" : item.allowVenueBooking ? "商户消费 / 订场抵扣" : "仅限所属商户消费" }}</text>
+        <button v-if="isAdmin && !item.code?.startsWith('NEWCOMER')" class="secondary full" @tap="configureScope(item)">设置适用范围</button>
         <view class="progress-line"><text>已发行 {{ item.issuedCount || 0 }} / {{ item.issueLimit }}</text><text>已核销 {{ item.redeemedCount || 0 }}</text></view>
         <view class="lifecycle-actions"><button v-if="canIssueCodes" class="secondary" :disabled="Boolean(actionKey) || !canIssueTemplate(item)" @tap="issueCodes(item)">{{ canIssueTemplate(item) ? '批量发行唯一券' : templateState(item).label }}</button><button v-if="isAdmin" :class="item.enabled ? 'danger' : 'secondary'" :disabled="Boolean(actionKey) || (!item.enabled && !merchantIsActive)" @tap="toggleTemplateStatus(item)">{{ item.enabled ? '停用模板' : '启用模板' }}</button></view>
       </view>
       <view v-if="!loading && !merchantTemplates.length" class="empty card">当前商户还没有券活动，管理员可先建立模板再发行唯一券。</view>
-      <view v-if="generatedBatch" class="success card"><view class="row"><view><text class="notice-title">{{ generatedBatch.templateName }} · 本批 {{ generatedBatch.codes.length }} 张</text><text class="muted">页面仅预览前 20 个，复制可取得本批全部券码。</text></view><button class="ghost compact" @tap="copyGeneratedCodes">复制全部</button></view><text v-for="code in generatedBatch.codes.slice(0, 20)" :key="code" class="code">{{ code }}</text></view>
+      <view v-if="generatedBatch" class="success card"><text class="notice-title">{{ generatedBatch.templateName }} · 本批 {{ generatedBatch.codes.length }} 张</text><text class="muted">每张券发给一位会员。对方打开卡片后确认领取，无需复制券码；请勿群发同一张券。</text>
+        <view v-for="(code,index) in generatedBatch.codes.slice(0,batchVisible)" :key="code" class="batch-row"><text>第 {{ index + 1 }} 张领取卡</text>
+          <!-- #ifdef MP-WEIXIN -->
+          <button class="secondary full" open-type="share" :data-coupon-code="code">发送领券卡片</button>
+          <!-- #endif -->
+          <!-- #ifdef H5 -->
+          <button class="secondary full" @tap="shareCoupon(code)">分享领取链接</button>
+          <!-- #endif -->
+        </view>
+        <text v-if="batchShareError" role="alert">{{ batchShareError }}</text>
+        <button v-if="batchVisible < generatedBatch.codes.length" class="secondary full" @tap="batchVisible += 20">显示后续领取卡</button>
+        <button class="ghost full" @tap="copyGeneratedCodes">批量印制用途：复制全部券码</button>
+      </view>
     </template>
 
     <template v-if="canCreateCampaign">
@@ -522,6 +509,7 @@ onShow(load)
 .state-draft,.state-disabled { color:#6f746f; background:#eef0ef; }.state-pending_confirmation { color:#8a6019; background:#fff2d6; }.state-settled { color:#fff; background:#17653d; }
 .amount-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12rpx; margin-top:20rpx; padding-top:18rpx; border-top:1rpx solid #edf0ed; }
 .field-label { display:block; color:#758079; font-size:21rpx; }.amount { display:block; margin-top:7rpx; font-size:24rpx; font-weight:800; }.highlight { color:#17653d; }
+.template-guardrail { display:block; color:#7b6940; font-size:21rpx; line-height:1.6; }
 .state-note,.benefit { display:block; margin-top:18rpx; color:#65736a; font-size:22rpx; line-height:1.6; }
 .danger { color:#8a3636; background:#fbeaea; border:1rpx solid #efcaca; }
 .compact { min-width:130rpx; min-height:58rpx; margin:0; padding:0 16rpx; line-height:58rpx; font-size:22rpx; }

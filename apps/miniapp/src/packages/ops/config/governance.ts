@@ -1,4 +1,4 @@
-import type { AppRole } from "../types/domain";
+import type { AppRole } from "../../../types/domain";
 
 export type GovernanceTab =
   "users" | "parameters" | "risks" | "privacy" | "audit" | "exports";
@@ -94,6 +94,15 @@ export type BusinessParameterDefinition = {
 };
 
 export const businessParameterCatalog: BusinessParameterDefinition[] = [
+  {
+    key: "finance.operating_share_rate_bps",
+    label: "经营收入分成比例",
+    description:
+      "按已履约净收入计提；充值不计收入，退款按原订单规则反冲",
+    type: "INTEGER",
+    kind: "RATE_BPS",
+    placeholder: "输入百分比，例如 15",
+  },
   {
     key: "training.contract_rate_bps",
     label: "培训合同收入计提比例",

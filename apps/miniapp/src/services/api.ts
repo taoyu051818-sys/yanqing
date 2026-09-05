@@ -1,4 +1,6 @@
-import { api, download } from "./http";
+import { api, download, request, upload } from "./http";
+import type { GameDetail, GameParticipants } from '../types/game';
+import type { TeamInviteView } from '../types/event-signup';
 import type {
   CourtAvailability,
   Member360View,
@@ -74,17 +76,19 @@ export interface VenueClosure {
 }
 
 export const endpoints = {
-  wechatLogin: (code: string, displayName?: string, avatarUrl?: string) =>
+  wechatLogin: (code: string) =>
     api.post<{ accessToken: string; user: SessionUser }>("/auth/wechat-login", {
       code,
-      displayName,
-      avatarUrl,
     }),
   devLogin: (role: string) =>
     api.post<{ accessToken: string; user: SessionUser }>("/auth/dev-login", {
       role,
     }),
   me: () => api.get<SessionUser>("/auth/me"),
+  updateMyProfile: (displayName: string) =>
+    api.patch<SessionUser>("/auth/profile", { displayName }),
+  uploadMyAvatar: (filePath: string) =>
+    upload<SessionUser>("/auth/profile/avatar", filePath, "avatar"),
   dashboard: () => api.get<Record<string, any>>("/dashboard"),
   reconciliationPeriod: (date: string) =>
     api.get<ReconciliationPeriod>(`/reconciliation/periods/${date}`),
@@ -111,9 +115,12 @@ export const endpoints = {
     api.post<VenueClosure>(`/venues/closures/${id}/cancel`, { reason }),
   createBooking: (data: CreateVenueBookingCommand) =>
     api.post<Record<string, any>>("/venues/bookings", data),
-  orders: () => api.get<{ items: any[]; total: number }>("/orders"),
+  orders: (params: { status?: string; businessType?: string; page?: number; pageSize?: number } = {}) => api.get<{ items: any[]; total: number }>("/orders", params),
   order: (id: string) => api.get<Record<string, any>>(`/orders/${id}`),
+  paymentOptions: (id: string) => api.get<any>(`/orders/${id}/payment-options`),
   payOrder: (id: string, data: object) => api.post(`/orders/${id}/pay`, data),
+  cancelPendingOrder: (id: string, data: object) =>
+    api.post(`/orders/${id}/cancel`, data),
   refundOrder: (id: string, data: object) =>
     api.post(`/orders/${id}/refunds`, data),
   approveRefund: (refundId: string, data: object) =>
@@ -121,6 +128,10 @@ export const endpoints = {
   rejectRefund: (refundId: string, data: object = {}) =>
     api.post(`/orders/refunds/${refundId}/reject`, data),
   games: () => api.get<any[]>("/games"),
+  game: (id: string) => api.get<GameDetail>(`/games/${encodeURIComponent(id)}`),
+  gameParticipants: (id: string) => request<GameParticipants>({
+    url: `/games/${encodeURIComponent(id)}/participants`, method: 'GET', redirectOnUnauthorized: false,
+  }),
   createGame: (data: object) => api.post("/games", data),
   applyHost: () => api.post("/games/hosts/apply"),
   hostApplications: () => api.get<any[]>("/games/host-applications"),
@@ -133,10 +144,10 @@ export const endpoints = {
   cancelGame: (id: string, data: object) =>
     api.post(`/games/${id}/cancel`, data),
   registerGame: (id: string, creationIdempotencyKey?: string) =>
-    api.post(`/games/${id}/register`, {
+    request({ url: `/games/${encodeURIComponent(id)}/register`, method: 'POST', redirectOnUnauthorized: false, data: {
       sourceChannel: "MINI_PROGRAM",
       creationIdempotencyKey,
-    }),
+    } }),
   promoteGameWaitlist: (id: string) =>
     api.post(`/games/${id}/promote-waitlist`),
   grantMaturedGameRewards: () => api.post("/games/rewards/grant-matured"),
@@ -155,17 +166,12 @@ export const endpoints = {
       ...data,
       sourceChannel: "MINI_PROGRAM",
     }),
-  createEventPartnerInvite: (id: string) =>
-    api.post<{
-      partnerInviteCode: string;
-      partnerDisplayName: string;
-      expiresAt: string;
-    }>(`/events/${id}/partner-invites`),
-  previewEventPartnerInvite: (id: string, partnerInviteCode: string) =>
-    api.post<{ partnerDisplayName: string; expiresAt: string }>(
-      `/events/${id}/partner-invites/preview`,
-      { partnerInviteCode },
-    ),
+  createTeamInvite: (id: string, data: object) =>
+    api.post<{ partnerInviteCode: string; expiresAt: string }>(`/events/${encodeURIComponent(id)}/team-invites`, data),
+  teamInvite: (id: string, partnerInviteCode: string, authenticated = false) =>
+    request<TeamInviteView>({ url: `/events/${encodeURIComponent(id)}/team-invites/${authenticated ? 'context' : 'preview'}`, method: 'POST', data: { partnerInviteCode }, redirectOnUnauthorized: false }),
+  acceptTeamInvite: (id: string, data: object) =>
+    api.post<TeamInviteView>(`/events/${encodeURIComponent(id)}/team-invites/accept`, data),
   promoteEventWaitlist: (id: string) =>
     api.post(`/events/${id}/promote-waitlist`),
   cancelEventRegistration: (id: string, data: object) =>
@@ -237,7 +243,7 @@ export const endpoints = {
     api.post(`/alliance/coupon-templates/${templateId}/status`, data),
   generateCouponCodes: (templateId: string, data: object) =>
     api.post(`/alliance/coupon-templates/${templateId}/codes`, data),
-  claimCoupon: (code: string) => api.post(`/alliance/coupons/${code}/claim`),
+  claimCoupon: (code: string) => api.post(`/alliance/coupons/${encodeURIComponent(code)}/claim`),
   myCoupons: () => api.get<any[]>("/alliance/coupons/me"),
   couponQr: (code: string) =>
     api.get<Record<string, any>>(`/alliance/coupons/${code}/qr`),
@@ -355,8 +361,9 @@ export const endpoints = {
   checkInGame: (gameId: string, userId: string, data: object = {}) =>
     api.post(`/games/${gameId}/check-in/${userId}`, data),
   completeGame: (gameId: string) => api.post(`/games/${gameId}/complete`),
-  members: () => api.get<MemberDirectory>("/members"),
+  members: (params: Record<string, any> = {}) => api.get<MemberDirectory>("/members", params),
   member360: (id: string) => api.get<Member360View>(`/members/${id}/360`),
+  leadOwners: (params: Record<string, any> = {}) => api.get<any>("/members/leads/owners", params),
   customerLeads: (params: Record<string, any> = {}) =>
     api.get<any>("/members/leads", params),
   createCustomerLead: (data: object) => api.post("/members/leads", data),

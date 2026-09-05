@@ -4,7 +4,13 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { CurrentUser, Roles } from '../common/auth/auth.decorators.js'
 import type { AuthUser } from '../common/auth/auth-user.js'
 import { AppRole } from '../generated/prisma/enums.js'
-import { OrderQueryDto, PayOrderDto, RequestRefundDto, ReviewRefundDto } from './orders.dto.js'
+import {
+  CancelPendingOrderDto,
+  OrderQueryDto,
+  PayOrderDto,
+  RequestRefundDto,
+  ReviewRefundDto,
+} from './orders.dto.js'
 import { OrdersService } from './orders.service.js'
 
 @ApiTags('订单支付退款')
@@ -29,9 +35,23 @@ export class OrdersController {
     return this.orders.detail(id, actor)
   }
 
+  @Get(':id/payment-options')
+  paymentOptions(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
+    return this.orders.paymentOptions(id, actor)
+  }
+
   @Post(':id/pay')
   pay(@Param('id') id: string, @Body() dto: PayOrderDto, @CurrentUser() actor: AuthUser) {
     return this.orders.pay(id, dto, actor)
+  }
+
+  @Post(':id/cancel')
+  cancelPending(
+    @Param('id') id: string,
+    @Body() dto: CancelPendingOrderDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.orders.cancelPending(id, dto, actor)
   }
 
   @Post(':id/refunds')

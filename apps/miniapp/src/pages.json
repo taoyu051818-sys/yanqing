@@ -3,12 +3,16 @@
     { "path": "pages/home/index", "style": { "navigationBarTitleText": "延庆金羽" } },
     { "path": "pages/booking/index", "style": { "navigationBarTitleText": "在线订场" } },
     { "path": "pages/community/index", "style": { "navigationBarTitleText": "球局与赛事" } },
+    { "path": "pages/event-signup/index", "style": { "navigationBarTitleText": "双打报名" } },
+    { "path": "pages/game-detail/index", "style": { "navigationBarTitleText": "球局详情", "enablePullDownRefresh": true } },
     { "path": "pages/profile/index", "style": { "navigationBarTitleText": "个人中心" } },
     { "path": "pages/login/index", "style": { "navigationBarTitleText": "登录", "navigationStyle": "custom" } },
     { "path": "pages/order/index", "style": { "navigationBarTitleText": "订单" } },
-    { "path": "pages/wallet/index", "style": { "navigationBarTitleText": "五账户" } },
-    { "path": "pages/training/index", "style": { "navigationBarTitleText": "培训中心" } },
-    { "path": "pages/coupon/index", "style": { "navigationBarTitleText": "联盟优惠券" } },
+    { "path": "pages/wallet/index", "style": { "navigationBarTitleText": "钱包与权益" } },
+    { "path": "pages/settings/index", "style": { "navigationBarTitleText": "资料与设置" } },
+    { "path": "pages/invite/index", "style": { "navigationBarTitleText": "邀请好友" } },
+    { "path": "pages/training/index", "style": { "navigationBarTitleText": "课程" } },
+    { "path": "pages/coupon/index", "style": { "navigationBarTitleText": "我的卡券" } },
     { "path": "pages/membership/index", "style": { "navigationBarTitleText": "会员权益" } },
     { "path": "pages/shop/index", "style": { "navigationBarTitleText": "金羽小店" } },
     { "path": "pages/workspace/index", "style": { "navigationBarTitleText": "经营工作台" } }
@@ -45,10 +49,10 @@
     "backgroundColor": "#ffffff",
     "borderStyle": "white",
     "list": [
-      { "pagePath": "pages/home/index", "text": "首页" },
-      { "pagePath": "pages/booking/index", "text": "订场" },
-      { "pagePath": "pages/community/index", "text": "活动" },
-      { "pagePath": "pages/profile/index", "text": "我的" }
+      { "pagePath": "pages/home/index", "text": "首页", "iconPath": "static/tabbar/home.png", "selectedIconPath": "static/tabbar/home-active.png" },
+      { "pagePath": "pages/booking/index", "text": "订场", "iconPath": "static/tabbar/booking.png", "selectedIconPath": "static/tabbar/booking-active.png" },
+      { "pagePath": "pages/community/index", "text": "活动", "iconPath": "static/tabbar/activity.png", "selectedIconPath": "static/tabbar/activity-active.png" },
+      { "pagePath": "pages/profile/index", "text": "我的", "iconPath": "static/tabbar/profile.png", "selectedIconPath": "static/tabbar/profile-active.png" }
     ]
   },
   "globalStyle": {

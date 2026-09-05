@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import OperationsFrame from '../../../../components/OperationsFrame.vue'
+import OperationsFrame from '../../components/OperationsFrame.vue'
+import OperationTask from '../../components/OperationTask.vue'
+import { useOperationTask, reasonField } from '../../components/operation-task'
 import MetricCard from '../../../../components/MetricCard.vue'
 import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
@@ -16,6 +18,7 @@ import {
   type OpsDeepLinkQuery,
 } from '../../../../utils/work-item-deep-link'
 
+const task = useOperationTask()
 const session = useSessionStore()
 const members = ref<MemberDirectoryItem[]>([])
 const leads = ref<any[]>([])
@@ -219,81 +222,79 @@ async function claim(lead: any) {
   catch (cause: any) { uni.showToast({ title: cause.message || '认领失败', icon: 'none' }) }
 }
 
-async function assign(lead: any) {
-  const result = await uni.showModal({ title: '分配负责人', content: '输入员工用户ID', editable: true, placeholderText: '例如 user-coach' })
-  if (!result.confirm || !result.content?.trim()) return
-  try { await endpoints.assignCustomerLead(lead.id, result.content.trim()); await refreshLeads('已分配') }
-  catch (cause: any) { uni.showToast({ title: cause.message || '分配失败', icon: 'none' }) }
-}
-
-async function followUp(lead: any) {
-  const result = await uni.showModal({ title: '追加跟进', content: '', editable: true, placeholderText: '填写本次沟通结果' })
-  if (!result.confirm || !result.content?.trim()) return
-  const nextStatus: Record<string, string> = { NEW: 'CONTACTING', CONTACTING: 'TRIAL_RESERVED', TRIAL_RESERVED: 'ATTENDED', ATTENDED: 'ATTENDED' }
-  try {
-    await endpoints.followUpCustomerLead(lead.id, { kind: 'WECHAT', content: result.content.trim(), nextStatus: nextStatus[lead.status] || lead.status })
-    await refreshLeads('跟进已追加')
-  } catch (cause: any) { uni.showToast({ title: cause.message || '跟进失败', icon: 'none' }) }
-}
-
-async function convert(lead: any) {
-  if (!selectedId.value) return uni.showToast({ title: '请先在会员页选择转换目标', icon: 'none' })
-  try { await endpoints.convertCustomerLead(lead.id, selectedId.value); await refreshLeads('已转为会员') }
-  catch (cause: any) { uni.showToast({ title: cause.message || '转换失败', icon: 'none' }) }
-}
-
-async function lose(lead: any) {
-  const result = await uni.showModal({ title: '标记流失', content: '', editable: true, placeholderText: '必须填写流失原因' })
-  if (!result.confirm || !result.content?.trim()) return
-  try { await endpoints.loseCustomerLead(lead.id, result.content.trim()); await refreshLeads('已标记流失') }
-  catch (cause: any) { uni.showToast({ title: cause.message || '操作失败', icon: 'none' }) }
-}
-
-async function reviewHost(application: any, approved: boolean) {
-  const result = await uni.showModal({
-    title: approved ? '批准主理人' : '驳回主理人', content: '', editable: true,
-    placeholderText: approved ? '填写审批意见（可选）' : '填写驳回原因（必填）',
+function assign(lead: any) {
+  if (!canWriteLeads.value) return
+  task.start({ title: '分配负责人', description: lead.displayName + ' · 仅显示当前可接收线索的在岗员工。', confirmText: '确认分配',
+    fields: [{ key: 'ownerId', label: '负责人', kind: 'search', search: async (keyword, page) => {
+      const result = await endpoints.leadOwners({ keyword, page, pageSize: 20 })
+      const labels: Record<string,string> = { FRONT_DESK: '前台', COACH: '教练', ADMIN: '管理员', SUPER_ADMIN: '总管理员' }
+      return { total: result.total, items: result.items.map((item: any) => ({ value: item.id, label: item.displayName, description: item.roles.map((role: string) => labels[role]).join(' / ') })) }
+    } }],
+    submit: async values => { await endpoints.assignCustomerLead(lead.id, values.ownerId); await refreshLeads('已分配'); return '负责人已更新，可在该线索继续跟进。' },
   })
-  if (!result.confirm || (!approved && (result.content || '').trim().length < 2)) return
-  try {
-    if (approved) await endpoints.approveHost(application.userId, { reason: result.content?.trim() || undefined })
-    else await endpoints.rejectHost(application.userId, result.content!.trim())
-    hostApplications.value = await endpoints.hostApplications()
-    uni.showToast({ title: approved ? '申请已批准' : '申请已驳回', icon: 'success' })
-  } catch (cause: any) { uni.showToast({ title: cause.message || '审批失败', icon: 'none' }) }
 }
 
-async function requestAccountAdjustment() {
+function followUp(lead: any) {
+  task.start({ title: '记录客户跟进', description: lead.displayName + ' · 按实际沟通结果选择阶段，不会自动推进。', confirmText: '保存跟进',
+    fields: [
+      { key: 'content', label: '沟通结果', min: 2, max: 1000 },
+      { key: 'nextStatus', label: '当前阶段', kind: 'choices', initial: lead.status, options: ['NEW','CONTACTING','TRIAL_RESERVED','ATTENDED'].filter((status, index, all) => index >= all.indexOf(lead.status)).map(value => ({ value, label: leadLabels[value] })) },
+    ],
+    submit: async values => { await endpoints.followUpCustomerLead(lead.id, { kind: 'WECHAT', ...values }); await refreshLeads('跟进已保存'); return '沟通记录与阶段已同步。' },
+  })
+}
+
+function convert(lead: any) {
+  task.start({ title: '线索转为会员', description: lead.displayName + ' · 搜索并核对实际注册会员，转换后保留来源与跟进历史。', confirmText: '确认关联会员',
+    fields: [{ key: 'memberId', label: '会员', kind: 'search', search: async (keyword, page) => {
+      const result = await endpoints.members({ keyword, page, pageSize: 20 })
+      return { total: result.total, items: result.items.map((item: any) => ({ value: item.id, label: item.displayName, description: item.phone || '未提供联系电话' })) }
+    } }],
+    submit: async values => { await endpoints.convertCustomerLead(lead.id, values.memberId); await refreshLeads('已转为会员'); return '线索已关联会员，可从会员360继续服务。' },
+  })
+}
+
+function lose(lead: any) {
+  task.start({ title: '标记线索流失', description: lead.displayName + ' · 关闭当前跟进，不删除历史。', confirmText: '确认标记流失',
+    fields: [reasonField('流失原因', ['暂时无运动计划','时间无法安排','选择其他场馆'])],
+    submit: async ({ reason }) => { await endpoints.loseCustomerLead(lead.id, reason); await refreshLeads('已标记流失'); return '线索已关闭，原因保留在跟进记录。' },
+  })
+}
+
+function reviewHost(application: any, approved: boolean) {
+  task.start({ title: approved ? '批准主理人申请' : '驳回主理人申请',
+    description: (application.displayName || application.user?.displayName || '当前申请人') + (approved ? ' · 确认后授予主理人能力，操作记入审计。' : ' · 驳回不授予权限。'),
+    confirmText: approved ? '确认授予主理人' : '确认驳回', fields: [reasonField('审批意见')],
+    submit: async ({ reason }) => {
+      if (approved) await endpoints.approveHost(application.userId, { reason })
+      else await endpoints.rejectHost(application.userId, reason)
+      hostApplications.value = await endpoints.hostApplications()
+      return approved ? '申请已批准，权限由服务器重新核验后生效。' : '申请已驳回，审批意见已记录。'
+    },
+  })
+}
+
+function requestAccountAdjustment() {
   const accounts = customer.value?.accounts || []
-  if (!selectedId.value || !accounts.length) return uni.showToast({ title: '客户账户未载入', icon: 'none' })
-  let selected: any
-  try {
-    const result = await uni.showActionSheet({ itemList: accounts.map((account: any) => `${accountLabel(account.type)} · 当前 ${accountBalance(account)}`) })
-    selected = accounts[result.tapIndex]
-  } catch { return }
-  const amountInput = await uni.showModal({
-    title: `调整${accountLabel(selected.type)}`,
-    content: '', editable: true,
-    placeholderText: ['CASH_PRINCIPAL', 'GIFT_BALANCE'].includes(selected.type) ? '输入增减金额（元，如 -20）' : '输入增减数量（如 -20）',
+  const memberId = selectedId.value
+  if (!memberId || !accounts.length) return
+  task.start({ title: '申请账户调整', description: (customer.value?.member?.displayName || '当前会员') + ' · 提交不会立即改变余额，必须由另一名财务或管理员复核。', confirmText: '提交独立复核',
+    fields: [
+      { key: 'accountType', label: '调整账户', kind: 'choices', options: accounts.map((account: any) => ({ value: account.type, label: accountLabel(account.type), description: '当前 ' + accountBalance(account) })) },
+      { key: 'amount', label: '增减数额', hint: '金额账户填元，其余账户填整数；扣减带负号，例如 -20。' },
+      reasonField('调整依据'),
+    ],
+    submit: async ({ accountType, amount: raw, reason }) => {
+      const isMoney = ['CASH_PRINCIPAL','GIFT_BALANCE'].includes(accountType)
+      if (isMoney ? !/^-?\d+(\.\d{1,2})?$/.test(raw) : !/^-?\d+$/.test(raw)) throw new Error('调整数额格式不正确')
+      const amount = isMoney ? Math.round(Number(raw) * 100) : Number(raw)
+      if (!Number.isSafeInteger(amount) || amount === 0) throw new Error('调整数额不能为0')
+      const command = { memberId, accountType, amount, reason }
+      await withPendingCreationKey('account.adjustment.' + memberId + '.' + accountType, command, idempotencyKey =>
+        endpoints.createAccountAdjustment(memberId, { accountType, amount, reason, idempotencyKey }))
+      return '调整申请已提交，余额尚未改变，请等待独立复核。'
+    },
   })
-  if (!amountInput.confirm) return
-  const raw = amountInput.content?.trim() || ''
-  const moneyAccount = ['CASH_PRINCIPAL', 'GIFT_BALANCE'].includes(selected.type)
-  if (moneyAccount ? !/^-?\d+(\.\d{1,2})?$/.test(raw) : !/^-?\d+$/.test(raw)) {
-    return uni.showToast({ title: '调整数额格式不正确', icon: 'none' })
-  }
-  const amount = moneyAccount ? Math.round(Number(raw) * 100) : Number(raw)
-  if (!Number.isSafeInteger(amount) || amount === 0) return uni.showToast({ title: '调整数额不能为0', icon: 'none' })
-  const reasonResult = await uni.showModal({ title: '填写调整原因', content: '', editable: true, placeholderText: '至少2个字，复核人可见' })
-  const reason = reasonResult.content?.trim() || ''
-  if (!reasonResult.confirm || reason.length < 2) return
-  const command = { memberId: selectedId.value, accountType: selected.type, amount, reason }
-  try {
-    await withPendingCreationKey(`account.adjustment.${selectedId.value}.${selected.type}`, command, (idempotencyKey) =>
-      endpoints.createAccountAdjustment(selectedId.value, { accountType: selected.type, amount, reason, idempotencyKey }),
-    )
-    uni.showModal({ title: '申请已提交', content: '余额尚未变化，需由另一名财务或管理员复核后才会入账。', showCancel: false })
-  } catch (cause: any) { uni.showToast({ title: cause.message || '调整申请失败', icon: 'none' }) }
 }
 
 const yuanToCents = (value: string) => {
@@ -345,19 +346,15 @@ async function createRechargePlan() {
   } catch (cause: any) { uni.showToast({ title: cause.message || '创建失败', icon: 'none' }) }
 }
 
-async function setRechargePlanStatus(plan: any) {
+function setRechargePlanStatus(plan: any) {
   const enabled = !plan.enabled
-  const action = enabled ? '启用' : '停用'
-  const result = await uni.showModal({ title: `${action}充值计划`, editable: true, placeholderText: `填写${action}原因（至少2个字）` })
-  const reason = result.content?.trim() || ''
-  if (!result.confirm || reason.length < 2) return
-  const command = { planId: plan.id, enabled, reason }
-  try {
-    await withPendingCreationKey(`membership.recharge-plan.status.${plan.id}`, command, (idempotencyKey) =>
-      endpoints.setRechargePlanStatus(plan.id, { enabled, reason, idempotencyKey }),
-    )
-    await refreshRechargePlans(`计划已${action}`)
-  } catch (cause: any) { uni.showToast({ title: cause.message || `${action}失败`, icon: 'none' }) }
+  task.start({ title: enabled ? '启用充值计划' : '停用充值计划', description: plan.name + ' · 只影响后续销售，历史本金和赠送权益不改变。',
+    confirmText: enabled ? '确认启用' : '确认停用', fields: [reasonField('变更依据')],
+    submit: async ({ reason }) => {
+      await withPendingCreationKey('membership.recharge-plan.status.' + plan.id, { planId: plan.id, enabled, reason }, idempotencyKey => endpoints.setRechargePlanStatus(plan.id, { enabled, reason, idempotencyKey }))
+      await refreshRechargePlans('状态已更新'); return '充值计划状态已更新，历史订单保持不变。'
+    },
+  })
 }
 
 function resetMembershipProductForm() {
@@ -474,35 +471,16 @@ async function createMembershipProductVersion() {
   }
 }
 
-async function setMembershipProductStatus(product: any) {
+function setMembershipProductStatus(product: any) {
   if (!canManageMembershipProducts.value || membershipProductSubmitting.value) return
   const enabled = !product.enabled
-  const action = enabled ? '启用' : '停用'
-  const input = await uni.showModal({
-    title: `${action}会员产品`, editable: true,
-    placeholderText: `填写${action}原因（至少2个字）`,
+  task.start({ title: enabled ? '启用会员产品' : '停用会员产品', description: product.name + ' · 只影响后续销售，历史订单与订阅不改变。',
+    confirmText: enabled ? '确认启用' : '确认停用', fields: [reasonField('变更依据')],
+    submit: async ({ reason }) => {
+      await withPendingCreationKey('membership.product.status.' + product.id, { productId: product.id, enabled, reason }, idempotencyKey => endpoints.setMembershipProductStatus(product.id, { enabled, reason, idempotencyKey }))
+      await refreshMembershipProducts('状态已更新'); return '会员产品状态已更新，历史订阅保留。'
+    },
   })
-  const reason = input.content?.trim() || ''
-  if (!input.confirm || reason.length < 2 || reason.length > 300) return
-  const confirmed = await uni.showModal({
-    title: `二次确认${action}`,
-    content: `${product.name} · ${product.code} v${product.version}\n${enabled ? '启用后进入有效期才会对会员可售。' : '停用只影响后续销售，历史订单与订阅不会改变。'}`,
-    confirmText: `确认${action}`,
-    confirmColor: enabled ? '#17653d' : '#a52626',
-  })
-  if (!confirmed.confirm) return
-  const command = { productId: product.id, enabled, reason }
-  membershipProductSubmitting.value = true
-  try {
-    await withPendingCreationKey(`membership.product.status.${product.id}`, command, (idempotencyKey) =>
-      endpoints.setMembershipProductStatus(product.id, { enabled, reason, idempotencyKey }),
-    )
-    await refreshMembershipProducts(`会员产品已${action}`)
-  } catch (cause: any) {
-    uni.showToast({ title: cause?.message || `${action}失败`, icon: 'none' })
-  } finally {
-    membershipProductSubmitting.value = false
-  }
 }
 
 function changeSource(event: any) {
@@ -516,7 +494,8 @@ onShow(load)
 </script>
 
 <template>
-  <OperationsFrame access="members" title="客户经营" eyebrow="CRM & MEMBER 360" role="前台 / 教练 / 财务" description="线索先进入责任队列，跟进记录只追加；转化后关联现有会员并进入客户360。">
+  <OperationsFrame access="members" icon="members" title="客户经营" eyebrow="CRM & MEMBER 360" role="前台 / 教练 / 财务" description="线索先进入责任队列，跟进记录只追加；转化后关联现有会员并进入客户360。">
+    <OperationTask :task="task" />
     <view class="metric-grid"><MetricCard v-for="item in metrics" :key="item[0]" :label="item[0]" :value="item[1]" :note="item[2]" /></view>
     <view v-if="loadError" class="card load-error"><view><text class="member-name">客户数据未完整同步</text><text class="muted block">{{ loadError }}</text></view><button class="secondary retry-button" :disabled="loading" @tap="load">重新加载</button></view>
     <view class="tabs card"><button class="tab" :class="{ active: tab === 'members' }" @tap="tab = 'members'">会员360</button><button v-if="canViewLeads" class="tab" :class="{ active: tab === 'leads' }" @tap="tab = 'leads'">客户线索</button><button v-if="canViewMembershipProducts" class="tab" :class="{ active: tab === 'membershipProducts' }" @tap="tab = 'membershipProducts'">会员产品</button><button v-if="canManageRechargePlans" class="tab" :class="{ active: tab === 'rechargePlans' }" @tap="tab = 'rechargePlans'">充值计划</button></view>

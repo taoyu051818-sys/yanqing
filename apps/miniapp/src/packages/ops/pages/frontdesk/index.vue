@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import OperationsFrame from '../../../../components/OperationsFrame.vue'
+import OperationsFrame from '../../components/OperationsFrame.vue'
+import OperationTask from '../../components/OperationTask.vue'
+import { useOperationTask, reasonField } from '../../components/operation-task'
+import ReasonForm from '../../../../components/ReasonForm.vue'
 import MetricCard from '../../../../components/MetricCard.vue'
 import StatusBadge from '../../../../components/StatusBadge.vue'
 import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
 import type { MemberDirectoryItem } from '../../../../types/domain'
-import { idempotencyKey, money, today } from '../../../../utils/format'
+import { idempotencyKey, money, shortDate, today } from '../../../../utils/format'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
 import {
   findOpsDeepLinkRecord,
@@ -17,6 +20,7 @@ import {
   type OpsDeepLinkQuery,
 } from '../../../../utils/work-item-deep-link'
 
+const task = useOperationTask()
 const session = useSessionStore()
 const orders = ref<any[]>([])
 const members = ref<MemberDirectoryItem[]>([])
@@ -24,6 +28,14 @@ const merchants = ref<any[]>([])
 const availability = ref<any>(null)
 const selectedMemberId = ref('')
 const loading = ref(false)
+const fulfillment = ref<{ orderId: string; outcome: 'COMPLETED' | 'NO_SHOW'; observedAt: string } | null>(null)
+const fulfilling = ref(false)
+const fulfillmentError = ref('')
+function prepareFulfillment(order: any, outcome: 'COMPLETED' | 'NO_SHOW') {
+  if (fulfilling.value) return
+  fulfillment.value = { orderId: order.id, outcome, observedAt: new Date().toISOString() }
+  fulfillmentError.value = ''
+}
 const loadError = ref('')
 const shiftLoaded = ref(false)
 const ordersLoaded = ref(false)
@@ -137,24 +149,16 @@ function selectMember(event: any) {
   selectedMemberId.value = members.value[index]?.id || ''
 }
 
-async function openShift() {
-  if (shift.value?.status === 'CLOSED') {
-    uni.showToast({ title: '今日班次已关班，不能再次开班', icon: 'none' }); return
-  }
-  const modal = await uni.showModal({
-    title: '开启主馆前台班次', content: '', editable: true,
-    placeholderText: '输入备用金（元，如 500）', confirmText: '核对开班',
+function openShift() {
+  if (shift.value?.status === 'CLOSED') return
+  task.start({ title: '开启前台班次', description: '请实点备用金后登记；后续现金收款和退款将归入本班次。', confirmText: '确认开班',
+    fields: [{ key: 'amount', kind: 'money', label: '实点备用金（元）', initial: '0' }],
+    submit: async ({ amount }) => {
+      if (!/^\d+(\.\d{1,2})?$/.test(amount)) throw new Error('备用金金额格式不正确')
+      shift.value = await endpoints.openFrontDeskShift(Math.round(Number(amount) * 100))
+      return '班次已开启，备用金与操作人已留痕。'
+    },
   })
-  if (!modal.confirm) return
-  const input = modal.content?.trim() || ''
-  if (!/^\d+(\.\d{1,2})?$/.test(input)) {
-    uni.showToast({ title: '备用金格式不正确', icon: 'none' }); return
-  }
-  const openingCashCents = Math.round(Number(input) * 100)
-  try {
-    shift.value = await endpoints.openFrontDeskShift(openingCashCents)
-    uni.showToast({ title: '班次已开启并留痕', icon: 'success' })
-  } catch (cause: any) { uni.showToast({ title: cause.message || '开班失败', icon: 'none' }) }
 }
 
 function ensureShiftOpen() {
@@ -163,94 +167,54 @@ function ensureShiftOpen() {
   return false
 }
 
-async function closeShift() {
+function closeShift() {
   if (!ensureShiftOpen() || !shift.value) return
-  const cash = await uni.showModal({
-    title: '关班现金实点', content: '', editable: true,
-    placeholderText: '输入抽屉现金实点（元）', confirmText: '下一步',
+  const current = shift.value
+  task.start({ title: '关班与交接', description: '本班账面现金 ' + money(current.expectedCashCents) + '。请填写实际盘点数；关班后现场操作锁定，现金差异交独立复核。',
+    confirmText: '确认关班并交接', fields: [{ key: 'amount', kind: 'money', label: '抽屉现金实点（元）' }, { key: 'handoverNote', label: '交接备注', min: 2, hint: '说明现金、退款、未核销订单及现场异常。' }],
+    submit: async ({ amount, handoverNote }) => {
+      if (!/^\d+(\.\d{1,2})?$/.test(amount)) throw new Error('实点金额格式不正确')
+      shift.value = await endpoints.closeFrontDeskShift(current.id, { closingCashCents: Math.round(Number(amount) * 100), handoverNote })
+      return '关班完成。账面 ' + money(shift.value.expectedCashCents) + '，现金差异 ' + money(shift.value.cashVarianceCents) + '；未完成业务保留在交接待办。'
+    },
   })
-  if (!cash.confirm) return
-  const cashInput = cash.content?.trim() || ''
-  if (!/^\d+(\.\d{1,2})?$/.test(cashInput)) {
-    uni.showToast({ title: '现金实点格式不正确', icon: 'none' }); return
-  }
-  const note = await uni.showModal({
-    title: '填写交接备注', content: '', editable: true,
-    placeholderText: '现金、退款、未签到订单及现场异常', confirmText: '确认关班',
-  })
-  const handoverNote = note.content?.trim() || ''
-  if (!note.confirm || handoverNote.length < 2) return
-  try {
-    shift.value = await endpoints.closeFrontDeskShift(shift.value.id, {
-      closingCashCents: Math.round(Number(cashInput) * 100), handoverNote,
-    })
-    const pending = shift.value.pendingSnapshot || {}
-    await uni.showModal({
-      title: '关班完成', showCancel: false,
-      content: `账面现金 ${money(shift.value.expectedCashCents)}，差异 ${money(shift.value.cashVarianceCents)}；待处理订单 ${pending.pendingOrders?.count || 0} 笔，待处理退款 ${pending.pendingRefunds?.count || 0} 笔。`,
-    })
-  } catch (cause: any) { uni.showToast({ title: cause.message || '关班失败', icon: 'none' }) }
 }
 
-async function manualOrder() {
+function manualOrder() {
   if (!ensureShiftOpen()) return
   const customer = selectedMember.value
-  if (!customer) {
-    uni.showToast({ title: '请先选择代订会员', icon: 'none' }); return
-  }
-  if (!availability.value?.courts?.length || !availability.value?.slots?.length) {
-    uni.showToast({ title: '暂无可预订资源', icon: 'none' }); return
-  }
-  let courtResult: UniApp.ShowActionSheetRes
-  let slotResult: UniApp.ShowActionSheetRes
-  try {
-    courtResult = await uni.showActionSheet({ itemList: availability.value.courts.filter((court: any) => court.enabled).slice(0, 8).map((court: any) => court.name) })
-    slotResult = await uni.showActionSheet({ itemList: availability.value.slots.slice(0, 8).map((slot: any) => slot.label) })
-  } catch { return }
-  const court = availability.value.courts.filter((item: any) => item.enabled).slice(0, 8)[courtResult.tapIndex]
-  const slot = availability.value.slots.slice(0, 8)[slotResult.tapIndex]
-  try {
-    const command = {
-      memberId: customer.id,
-      date: today(),
-      courtId: court.id,
-      slotId: slot.id,
-      sourceChannel: 'STORE_VISIT',
-    }
-    await withPendingCreationKey('venue.booking.frontdesk', command, (creationIdempotencyKey) =>
-      endpoints.createBooking({ ...command, creationIdempotencyKey }),
-    )
-    uni.showToast({ title: `已为${customer.displayName}建单`, icon: 'success' })
-    await load()
-  } catch (cause: any) { uni.showToast({ title: cause.message || '创建失败', icon: 'none' }) }
+  if (!customer || !availability.value) { uni.showToast({ title: '请先选择代订会员并加载可售场地', icon: 'none' }); return }
+  const day = today(), available = availability.value
+  task.start({ title: '为会员代订场地', description: customer.displayName + ' · ' + day + '。只创建待付款订单，不代扣会员余额。', confirmText: '确认创建待付款订单',
+    fields: [
+      { key: 'courtId', label: '场地', kind: 'choices', options: available.courts.filter((court: any) => court.enabled && court.usage === 'PUBLIC').map((court: any) => ({ value: court.id, label: court.name })) },
+      { key: 'slotId', label: '可售一小时时段', kind: 'choices', hint: '先选场地，再选时间；服务器提交时再次校验冲突。',
+        optionsFor: values => available.slots.filter((slot: any) => {
+          if (!values.courtId || !slot.enabled || !slot.price) return false
+          const midnight = new Date(day + 'T00:00:00+08:00').getTime()
+          const start = midnight + slot.startMinutes * 60000, end = midnight + slot.endMinutes * 60000
+          return start > Date.now() && ![...(available.bookings || []), ...(available.closures || [])].some((booking: any) => booking.courtId === values.courtId && booking.status !== 'CANCELLED' && new Date(booking.startsAt).getTime() < end && new Date(booking.endsAt).getTime() > start)
+        }).map((slot: any) => ({ value: slot.id, label: slot.label, description: money(slot.price.priceCents) })) },
+    ],
+    submit: async ({ courtId, slotId }) => {
+      if (!ensureShiftOpen()) throw new Error('请先开启班次')
+      const command = { memberId: customer.id, date: day, courtId, slotId, sourceChannel: 'STORE_VISIT' }
+      const result: any = await withPendingCreationKey('venue.booking.frontdesk', command, creationIdempotencyKey => endpoints.createBooking({ ...command, creationIdempotencyKey }))
+      await load(); return '已为 ' + customer.displayName + ' 建单，应付 ' + money(result.payableCents) + '。请在待收款订单继续处理；10分钟未付自动释放。'
+    },
+  })
 }
 
-async function checkIn(order: any) {
+function checkIn(order: any) {
   if (!ensureShiftOpen()) return
-  const booking = venueBooking(order)
-  const startsAt = new Date(booking?.startsAt || 0).getTime()
-  const earliest = startsAt - 30 * 60_000
-  const latest = startsAt + 30 * 60_000
-  if (Number.isFinite(startsAt) && Date.now() < earliest) {
-    uni.showToast({ title: '未到签到窗口，不能提前签到', icon: 'none' }); return
-  }
-  let overrideReason: string | undefined
-  if (Number.isFinite(startsAt) && Date.now() > latest) {
-    if (!session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role))) {
-      uni.showToast({ title: '已过签到窗口，请由管理员历史补录', icon: 'none' }); return
-    }
-    const modal = await uni.showModal({
-      title: '历史补录签到', content: '', editable: true,
-      placeholderText: '填写迟到补录原因（2-300字）', confirmText: '确认补录',
-    })
-    overrideReason = modal.content?.trim()
-    if (!modal.confirm || !overrideReason || overrideReason.length < 2) return
-  }
-  try {
-    await endpoints.checkInVenueOrder(order.id, overrideReason ? { overrideReason } : {})
-    uni.showToast({ title: '已完成签到', icon: 'success' })
-    await load()
-  } catch (cause: any) { uni.showToast({ title: cause.message || '签到失败', icon: 'none' }) }
+  const booking = venueBooking(order), start = new Date(booking?.startsAt || 0).getTime()
+  if (!Number.isFinite(start) || Date.now() < start - 30 * 60000) { uni.showToast({ title: '未到签到窗口', icon: 'none' }); return }
+  const historical = Date.now() > start + 30 * 60000
+  if (historical && !session.roles.some(role => ['ADMIN','SUPER_ADMIN'].includes(role))) { uni.showToast({ title: '请由管理员历史补录', icon: 'none' }); return }
+  task.start({ title: historical ? '历史补录签到' : '确认到店核销', description: order.title + ' · ' + (order.member?.displayName || '当前会员') + '。核实本人到场，核销后不可重复使用。',
+    confirmText: '确认核销一次', fields: historical ? [reasonField('补录依据')] : [],
+    submit: async ({ reason }) => { if (!ensureShiftOpen()) throw new Error('当前班次已关闭'); await endpoints.checkInVenueOrder(order.id, historical ? { overrideReason: reason } : {}); await load(); return '到店核销已完成，可在使用结束后确认履约。' },
+  })
 }
 
 function venueBooking(order: any) {
@@ -262,38 +226,65 @@ function bookingEnded(order: any) {
   return Number.isFinite(endsAt) && endsAt <= Date.now()
 }
 
-async function fulfill(order: any, outcome: 'COMPLETED' | 'NO_SHOW') {
+function bookingTimeLabel(order: any) {
+  const booking = venueBooking(order)
+  if (!booking?.startsAt) return '履约时间未同步'
+  const endTime = booking.endsAt
+    ? new Date(booking.endsAt).toLocaleTimeString('zh-CN', {
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      })
+    : ''
+  return `履约 ${shortDate(booking.startsAt)}${endTime ? `-${endTime}` : ''}`
+}
+
+function checkInWindowState(order: any) {
+  const startsAt = new Date(venueBooking(order)?.startsAt || 0).getTime()
+  if (!Number.isFinite(startsAt)) return 'UNAVAILABLE'
+  if (Date.now() < startsAt - 30 * 60_000) return 'EARLY'
+  if (Date.now() > startsAt + 30 * 60_000) return 'LATE'
+  return 'OPEN'
+}
+
+function canOpenCheckIn(order: any) {
+  const state = checkInWindowState(order)
+  return state === 'OPEN' ||
+    (state === 'LATE' && session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
+}
+
+function checkInActionLabel(order: any) {
+  const state = checkInWindowState(order)
+  if (state === 'EARLY') return '未到签到窗口'
+  if (state === 'LATE') return session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)) ? '补录签到' : '签到已过期'
+  return state === 'OPEN' ? '签到' : '时间未同步'
+}
+
+async function fulfill(order: any, reason: string) {
+  if (fulfilling.value || !fulfillment.value || fulfillment.value.orderId !== order.id || reason.trim().length < 2) return
+  const outcome = fulfillment.value.outcome
   if (!ensureShiftOpen()) return
   if (!bookingEnded(order)) {
     uni.showToast({ title: '预约结束后才能确认履约', icon: 'none' }); return
   }
   const isNoShow = outcome === 'NO_SHOW'
-  const modal = await uni.showModal({
-    title: isNoShow ? '确认会员未到场' : '确认场地使用完成',
-    content: '', editable: true,
-    placeholderText: isNoShow ? '填写点名与现场核对说明' : '填写巡场与完成说明',
-    confirmText: isNoShow ? '标记未到' : '确认完成',
-  })
-  const reason = modal.content?.trim() || ''
-  if (!modal.confirm || reason.length < 2 || reason.length > 300) {
-    if (modal.confirm) uni.showToast({ title: '原因需填写2-300个字', icon: 'none' })
-    return
-  }
+  fulfilling.value = true
+  fulfillmentError.value = ''
   const command = {
     outcome,
     reason,
     evidence: {
       source: isNoShow ? 'FRONT_DESK_ROLL_CALL' : 'COURT_INSPECTION',
-      observedAt: new Date().toISOString(),
+      observedAt: fulfillment.value.observedAt,
     },
   }
   try {
     await withPendingCreationKey(`venue.fulfillment.${order.id}.${outcome}`, command, (idempotencyKey) =>
       endpoints.fulfillVenueOrder(order.id, { ...command, idempotencyKey }),
     )
+    fulfillment.value = null
     uni.showToast({ title: isNoShow ? '已标记未到并关单' : '履约完成并关单', icon: 'success' })
     await load()
-  } catch (cause: any) { uni.showToast({ title: cause.message || '履约确认失败', icon: 'none' }) }
+  } catch (cause: any) { fulfillmentError.value = cause.message || '履约确认失败，请重试' }
+  finally { fulfilling.value = false }
 }
 
 async function collectCash(order: any) {
@@ -362,7 +353,8 @@ onShow(load)
 </script>
 
 <template>
-  <OperationsFrame access="today" title="今日营业" eyebrow="TODAY OPERATIONS" role="前台 / 值班" :shift="shiftLabel" description="先开班，再按现场队列处理签到、订单、退款申请和联盟券核销。">
+  <OperationsFrame access="today" icon="work" title="今日营业" eyebrow="TODAY OPERATIONS" role="前台 / 值班" :shift="shiftLabel" description="先开班，再按现场队列处理签到、订单、退款申请和联盟券核销。">
+    <OperationTask :task="task" />
     <view v-if="loadError" class="load-error card"><view><text class="load-error-title">前台数据未完整同步</text><text class="muted">{{ loadError }}</text></view><button class="secondary retry" :disabled="loading" @tap="load">重新加载</button></view>
     <view class="shift card">
       <view>
@@ -394,8 +386,9 @@ onShow(load)
 
     <view class="section-title">订单队列 <text class="section-note">{{ loading ? '同步中' : ordersLoaded ? `共 ${pendingOrders.length} 笔` : '未同步' }}</text></view>
     <view v-for="order in venueOrders" :id="opsDeepLinkDomId('frontdesk-order', order.id)" :key="order.id" class="card order-card" :class="{ 'deep-link-target': focusedRecord === `frontdesk-order:${order.id}` }">
-      <view class="row"><view><text class="order-title">{{ order.title }}</text><text class="muted">{{ order.orderNo }} · {{ order.member?.displayName || '现场会员' }}</text></view><StatusBadge :value="order.status" /></view>
-      <view class="order-footer"><text class="money">{{ money(order.payableCents) }}</text><view class="order-actions"><button v-if="order.status === 'PENDING'" class="primary inline" :disabled="!onsiteAllowed" @tap="collectCash(order)">现金收款</button><button v-if="order.status === 'PAID' && !bookingEnded(order)" class="secondary inline" :disabled="!onsiteAllowed" @tap="checkIn(order)">签到</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CHECKED_IN' && bookingEnded(order)" class="primary inline" :disabled="!onsiteAllowed" @tap="fulfill(order, 'COMPLETED')">确认完成</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CONFIRMED' && bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="fulfill(order, 'NO_SHOW')">标记未到</button><button v-if="order.status === 'PAID' && !bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="requestRefund(order)">退款申请</button></view></view>
+      <view class="row"><view><text class="order-title">{{ order.title }}</text><text class="muted">{{ order.orderNo }} · {{ order.member?.displayName || '现场会员' }}</text><text class="muted">{{ bookingTimeLabel(order) }}</text></view><StatusBadge :value="order.status" /></view>
+      <view class="order-footer"><text class="money">{{ money(order.payableCents) }}</text><view class="order-actions"><button v-if="order.status === 'PENDING'" class="primary inline" :disabled="!onsiteAllowed" @tap="collectCash(order)">现金收款</button><button v-if="order.status === 'PAID' && !bookingEnded(order)" class="secondary inline" :disabled="!onsiteAllowed || !canOpenCheckIn(order)" @tap="checkIn(order)">{{ checkInActionLabel(order) }}</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CHECKED_IN' && bookingEnded(order)" class="primary inline" :disabled="!onsiteAllowed" @tap="prepareFulfillment(order, 'COMPLETED')">确认完成</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CONFIRMED' && bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="prepareFulfillment(order, 'NO_SHOW')">标记未到</button><button v-if="order.status === 'PAID' && !bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="requestRefund(order)">退款申请</button></view></view>
+      <ReasonForm v-if="fulfillment?.orderId === order.id" :key="order.id + fulfillment?.outcome" :title="fulfillment?.outcome === 'NO_SHOW' ? '确认会员未到场' : '确认场地使用完成'" :description="'订单：' + order.title + '。请根据现场核实结果选择；确认后将关单并记录操作日志。'" :reasons="fulfillment?.outcome === 'NO_SHOW' ? ['现场点名确认未到场', '联系会员确认未到场', '其他原因'] : ['巡场确认使用已结束', '会员已离场且已检查场地', '其他原因']" :busy="fulfilling" :error="fulfillmentError" confirm-text="确认并记录" @cancel="fulfillment = null" @submit="fulfill(order, $event)" />
     </view>
     <view v-if="!loading && ordersLoaded && !venueOrders.length" class="empty card">当前没有待处理场地订单</view>
 
@@ -422,7 +415,7 @@ onShow(load)
 </template>
 
 <style scoped>
-.shift,.customer-card,.order-card,.resource-card,.handover { margin-top: 22rpx; }.shift { display:flex; align-items:center; justify-content:space-between; gap:20rpx; }.shift > view { min-width:0; flex:1; }.shift-title,.order-title { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; overflow-wrap:anywhere; }.shift-button { min-width: 132rpx; min-height: 64rpx; margin:0; line-height:64rpx; font-size:24rpx; }.pill.closed { color:#6f5142; background:#f3e8df; }.metric-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; margin-top:20rpx; }.customer-card { display:flex; align-items:center; justify-content:space-between; gap:20rpx; }.customer-card > view:first-child { min-width:0; flex:1; }.customer-card .muted { display:block; overflow-wrap:anywhere; }.customer-picker { min-width:132rpx; max-width:180rpx; padding:16rpx 20rpx; border:1rpx solid #bfd0c4; border-radius:14rpx; color:#17653d; text-align:center; font-size:24rpx; font-weight:700; overflow-wrap:anywhere; }.action-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; }.action-grid button { min-width:0!important; min-height:78rpx; margin:0; padding:10rpx 12rpx; font-size:24rpx; line-height:1.35; white-space:normal; }.action-grid button:last-child { grid-column:span 2; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.order-card { padding:24rpx; }.order-card .row > view { flex:1; min-width:0; }.order-card .muted { display:block; overflow-wrap:anywhere; }.order-footer { display:flex; align-items:flex-start; justify-content:space-between; gap:12rpx; margin-top:18rpx; }.order-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10rpx; }.inline { min-width:112rpx; min-height:56rpx; margin:0; padding:8rpx 14rpx; line-height:1.35; font-size:21rpx; white-space:normal; }.empty { color:#758079; text-align:center; }.resource-card .muted,.handover .muted { display:block; margin-top:12rpx; line-height:1.6; overflow-wrap:anywhere; }.handover button { width:100%; margin-top:20rpx; }.load-error { display:flex; align-items:flex-start; justify-content:space-between; gap:14rpx; margin-top:22rpx; color:#8a3636; background:#fff4f2; }.load-error > view { flex:1; min-width:0; }.load-error-title { display:block; margin-bottom:8rpx; font-size:26rpx; font-weight:800; }.load-error .muted { display:block; line-height:1.55; overflow-wrap:anywhere; }.retry { flex:0 0 auto; width:auto; margin:0; padding:0 18rpx; font-size:22rpx; }
+.shift,.customer-card,.order-card,.resource-card,.handover { margin-top: 22rpx; }.shift { display:flex; align-items:center; justify-content:space-between; gap:20rpx; }.shift > view { min-width:0; flex:1; }.shift-title,.order-title { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; overflow-wrap:anywhere; }.shift-button { min-width: 132rpx; min-height: 88rpx; margin:0; line-height:88rpx; font-size:24rpx; }.pill.closed { color:#6f5142; background:#f3e8df; }.metric-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; margin-top:20rpx; }.customer-card { display:flex; align-items:center; justify-content:space-between; gap:20rpx; }.customer-card > view:first-child { min-width:0; flex:1; }.customer-card .muted { display:block; overflow-wrap:anywhere; }.customer-picker { min-width:132rpx; max-width:180rpx; padding:16rpx 20rpx; border:1rpx solid #bfd0c4; border-radius:14rpx; color:#17653d; text-align:center; font-size:24rpx; font-weight:700; overflow-wrap:anywhere; }.action-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; }.action-grid button { min-width:0!important; min-height:88rpx; margin:0; padding:10rpx 12rpx; font-size:24rpx; line-height:1.35; white-space:normal; }.action-grid button:last-child { grid-column:span 2; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.order-card { padding:24rpx; }.order-card .row > view { flex:1; min-width:0; }.order-card .muted { display:block; overflow-wrap:anywhere; }.order-footer { display:flex; align-items:flex-start; justify-content:space-between; gap:12rpx; margin-top:18rpx; }.order-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10rpx; }.inline { min-width:112rpx; min-height:88rpx; margin:0; padding:8rpx 14rpx; line-height:1.35; font-size:21rpx; white-space:normal; }.empty { color:#758079; text-align:center; }.resource-card .muted,.handover .muted { display:block; margin-top:12rpx; line-height:1.6; overflow-wrap:anywhere; }.handover button { width:100%; margin-top:20rpx; }.load-error { display:flex; align-items:flex-start; justify-content:space-between; gap:14rpx; margin-top:22rpx; color:#8a3636; background:#fff4f2; }.load-error > view { flex:1; min-width:0; }.load-error-title { display:block; margin-bottom:8rpx; font-size:26rpx; font-weight:800; }.load-error .muted { display:block; line-height:1.55; overflow-wrap:anywhere; }.retry { flex:0 0 auto; width:auto; margin:0; padding:0 18rpx; font-size:22rpx; }
 .deep-link-target { border-color:#d69a24!important; box-shadow:0 0 0 4rpx rgba(214,154,36,.18); }
 @media (max-width:375px) { .load-error,.order-footer { flex-direction:column; }.retry { width:100%; }.order-actions { width:100%; justify-content:flex-start; } }
 </style>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
-import OperationsFrame from "../../../../components/OperationsFrame.vue";
+import OperationsFrame from "../../components/OperationsFrame.vue";
 import SectionEmpty from "../../../../components/SectionEmpty.vue";
 import StatusBadge from "../../../../components/StatusBadge.vue";
 import {
@@ -13,7 +13,7 @@ import {
   visibleGovernanceExportScopes,
   visibleGovernanceTabs,
   type GovernanceTab,
-} from "../../../../config/governance";
+} from "../../config/governance";
 import { hasOperationsAccess } from "../../../../config/operations";
 import { endpoints } from "../../../../services/api";
 import { isMockMode } from "../../../../services/http";
@@ -39,6 +39,7 @@ const selectedUserId = ref("");
 const selectedRoles = ref<AppRole[]>([]);
 const primaryRole = ref<AppRole>("MEMBER");
 const merchantId = ref("");
+const merchantChoices = ref<any[]>([]);
 const roleReason = ref("");
 const auditObjectType = ref("");
 const riskReasons = reactive<Record<string, string>>({});
@@ -162,6 +163,7 @@ async function loadCurrentTab() {
   error.value = "";
   try {
     if (activeTab.value === "users") {
+      merchantChoices.value = canSuperviseUsers.value ? (await endpoints.merchants()).filter((item: any) => item.status === "ACTIVE") : [];
       users.value = unwrapItems(
         await endpoints.governanceUsers({
           page: 1,
@@ -482,6 +484,7 @@ onShow(async () => {
 <template>
   <OperationsFrame
     access="governance"
+    icon="governance"
     title="治理与审计"
     eyebrow="GOVERNANCE & CONTROL"
     role="管理员 / 财务"
@@ -572,12 +575,9 @@ onShow(async () => {
               >主角色：{{ roleLabel(primaryRole) }} ›</view
             ></picker
           >
-          <input
-            v-if="selectedRoles.includes('MERCHANT')"
-            v-model="merchantId"
-            class="field"
-            placeholder="关联商户 ID（必填）"
-          />
+          <picker v-if="selectedRoles.includes('MERCHANT')" :range="merchantChoices" range-key="name" @change="merchantId = merchantChoices[Number(($event as any).detail.value)]?.id || ''">
+            <view class="field">关联商户（必选）：{{ merchantChoices.find(item => item.id === merchantId)?.name || '请选择在营商户' }}</view>
+          </picker>
           <textarea
             v-model="roleReason"
             class="textarea"

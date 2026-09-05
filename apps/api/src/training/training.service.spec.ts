@@ -41,6 +41,130 @@ const guardian: AuthUser = {
   roles: [AppRole.MEMBER],
 };
 
+describe('TrainingService operational product projection', () => {
+  const product = {
+    id: 'product-1',
+    name: '成人进阶课包',
+    audience: TrainingAudience.ADULT,
+    totalSessions: 12,
+    validityDays: 120,
+    priceCents: 128_000,
+    enabled: true,
+    classes: [
+      {
+        id: 'class-1',
+        name: '周三晚进阶班',
+        capacity: 12,
+        active: true,
+        coachId: 'coach-1',
+        assistantId: null,
+      },
+    ],
+  };
+
+  it('shows class assignments to front desk but not members', async () => {
+    const prisma = {
+      trainingProduct: { findMany: vi.fn().mockResolvedValue([product]) },
+    };
+    const service = new TrainingService(prisma as never);
+    const frontDeskResult = await service.listProducts({
+      sub: 'front-1',
+      displayName: '前台',
+      roles: [AppRole.FRONT_DESK],
+    });
+    const memberResult = await service.listProducts(guardian);
+
+    expect(frontDeskResult[0].classes[0]).toMatchObject({
+      coachId: 'coach-1',
+      assistantId: null,
+    });
+    expect(memberResult[0].classes[0]).not.toHaveProperty('coachId');
+    expect(memberResult[0].classes[0]).not.toHaveProperty('assistantId');
+  });
+
+  it('includes disabled products and classes only for administrators', async () => {
+    const prisma = {
+      trainingProduct: { findMany: vi.fn().mockResolvedValue([product]) },
+    };
+    const service = new TrainingService(prisma as never);
+
+    await service.listProducts(administrator);
+    expect(prisma.trainingProduct.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: {},
+      include: { classes: { where: {} } },
+    }));
+
+    await service.listProducts(guardian);
+    expect(prisma.trainingProduct.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { enabled: true },
+      include: { classes: { where: { active: true } } },
+    }));
+  });
+});
+
+describe('TrainingService operational session windows', () => {
+  it('projects configured action windows without exposing parameter records', async () => {
+    const startsAt = new Date(Date.now() + 2 * 60 * 60_000);
+    const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
+    const prisma = {
+      trainingSession: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'session-window-1',
+            classId: 'class-1',
+            startsAt,
+            endsAt,
+            status: TrainingSessionStatus.SCHEDULED,
+            courtCount: 1,
+            occupiedCourtHours: 1,
+            note: null,
+            class: {
+              id: 'class-1',
+              name: '成人进阶班',
+              capacity: 12,
+              active: true,
+              product: {
+                id: 'product-1',
+                name: '成人进阶课包',
+                audience: TrainingAudience.ADULT,
+              },
+            },
+            attendances: [],
+          },
+        ]),
+      },
+      systemParameter: {
+        findFirst: vi.fn().mockImplementation(({ where }: any) =>
+          Promise.resolve({
+            id: `private-${where.key}`,
+            value:
+              where.key === 'training.attendance_window.v1'
+                ? { version: 1, earlyMinutes: 45, lateMinutes: 90 }
+                : { version: 1, earlyMinutes: 0, lateMinutes: 180 },
+          }),
+        ),
+      },
+    };
+
+    const [result] = await new TrainingService(prisma as never).listSessions(
+      administrator,
+    );
+
+    expect(result.attendanceWindow).toMatchObject({
+      opensAt: new Date(startsAt.getTime() - 45 * 60_000).toISOString(),
+      closesAt: new Date(endsAt.getTime() + 90 * 60_000).toISOString(),
+      state: 'NOT_OPEN',
+    });
+    expect(result.completionWindow).toMatchObject({
+      opensAt: endsAt.toISOString(),
+      closesAt: new Date(endsAt.getTime() + 180 * 60_000).toISOString(),
+      state: 'NOT_OPEN',
+    });
+    expect(JSON.stringify(result)).not.toContain('private-');
+    expect(JSON.stringify(result)).not.toContain('training.attendance_window');
+  });
+});
+
 const attendanceFixture = (overrides: Record<string, unknown> = {}) => ({
   id: 'attendance-1',
   sessionId: 'session-1',

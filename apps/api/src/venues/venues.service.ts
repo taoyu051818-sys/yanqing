@@ -18,6 +18,7 @@ import {
   CourtUsage,
   AppRole,
   OrderStatus,
+  PaymentStatus,
   Prisma,
   SlotPeriod,
   SubjectAccount,
@@ -51,14 +52,13 @@ import {
   assertOperationTimeWindow,
   VENUE_CHECK_IN_WINDOW_PARAMETER,
 } from '../common/time-window/operation-time-window.js';
+import { resolveOperatingShareSnapshot } from '../common/finance/operating-share.js';
 
 const orderNo = () =>
   `VN${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`;
 
 const atMinutes = (date: string, minutes: number): Date => {
-  const hours = String(Math.floor(minutes / 60)).padStart(2, '0');
-  const mins = String(minutes % 60).padStart(2, '0');
-  return new Date(`${date}T${hours}:${mins}:00+08:00`);
+  return new Date(new Date(`${date}T00:00:00+08:00`).getTime() + minutes * 60_000);
 };
 
 const ASSISTED_BOOKING_ROLES = new Set<AppRole>([
@@ -161,7 +161,8 @@ export class VenuesService {
       }),
       this.prisma.courtBooking.findMany({
         where: {
-          startsAt: { gte: dayStart, lt: dayEnd },
+          startsAt: { lt: dayEnd },
+          endsAt: { gt: dayStart },
           status: { not: BookingStatus.CANCELLED },
         },
         select: {
@@ -562,6 +563,7 @@ export class VenuesService {
         }
         payableCents = price.newcomerPriceCents;
       } else {
+        if (!coupon.template.allowVenueBooking) throw new BadRequestException('此券仅限所属商户消费，不可抵扣订场');
         payableCents = Math.max(
           0,
           price.priceCents - coupon.template.faceValueCents,
@@ -603,6 +605,10 @@ export class VenuesService {
             },
           });
           if (conflict) throw new ConflictException('该场地时段刚刚被预订');
+          const operatingShare = await resolveOperatingShareSnapshot(
+            tx,
+            BusinessType.VENUE,
+          );
 
           const created = await tx.order.create({
             data: {
@@ -643,6 +649,7 @@ export class VenuesService {
                 targetMemberId: target.memberId,
                 createdById: actor.sub,
                 operatorAssisted: target.assisted,
+                operatingShare,
               },
               items: {
                 create: {
@@ -1626,12 +1633,78 @@ export class VenuesService {
   }
 
   private async releaseExpiredHolds(): Promise<void> {
-    await this.prisma.courtBooking.updateMany({
-      where: {
-        status: BookingStatus.HELD,
-        holdExpiresAt: { lt: new Date() },
-      },
-      data: { status: BookingStatus.CANCELLED },
+    const now = new Date();
+    if (typeof (this.prisma as any).$transaction !== 'function') {
+      await this.prisma.courtBooking.updateMany({
+        where: {
+          status: BookingStatus.HELD,
+          holdExpiresAt: { lte: now },
+        },
+        data: { status: BookingStatus.CANCELLED, holdExpiresAt: null },
+      });
+      return;
+    }
+    await this.prisma.$transaction(async (tx) => {
+      const expired = await tx.courtBooking.findMany({
+        where: {
+          status: BookingStatus.HELD,
+          holdExpiresAt: { lte: now },
+        },
+        include: {
+          order: {
+            include: {
+              payments: {
+                select: { status: true },
+              },
+            },
+          },
+        },
+        take: 100,
+      });
+      for (const booking of expired) {
+        const order = booking.order;
+        const paymentInFlight = order?.payments.some(
+          (payment) =>
+            payment.status === PaymentStatus.PROCESSING ||
+            payment.status === PaymentStatus.SUCCEEDED,
+        );
+        if (paymentInFlight) continue;
+        if (order?.status === OrderStatus.PENDING) {
+          const changed = await tx.order.updateMany({
+            where: { id: order.id, status: OrderStatus.PENDING },
+            data: { status: OrderStatus.CANCELLED, cancelledAt: now },
+          });
+          if (changed.count !== 1) continue;
+          await tx.payment.updateMany({
+            where: {
+              orderId: order.id,
+              status: PaymentStatus.CREATED,
+            },
+            data: { status: PaymentStatus.CLOSED },
+          });
+          await tx.auditLog.create({
+            data: {
+              action: 'VENUE_ORDER_AUTO_CANCELLED',
+              objectType: 'Order',
+              objectId: order.id,
+              requestId: `AUTO:VENUE_ORDER:${order.id}`,
+              oldValue: { status: OrderStatus.PENDING } as never,
+              newValue: {
+                status: OrderStatus.CANCELLED,
+                bookingStatus: BookingStatus.CANCELLED,
+                cancelledAt: now.toISOString(),
+              } as never,
+              reason: '场地订单支付保留期届满',
+            },
+          });
+        }
+        if (!order || order.status === OrderStatus.PENDING || order.status === OrderStatus.CANCELLED) {
+          await tx.courtBooking.updateMany({
+            where: { id: booking.id, status: BookingStatus.HELD },
+            data: { status: BookingStatus.CANCELLED, holdExpiresAt: null },
+          });
+        }
+      }
     });
   }
 

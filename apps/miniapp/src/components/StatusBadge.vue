@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = defineProps<{ value?: string }>()
+const props = defineProps<{ value?: string; label?: string }>()
 const labels: Record<string, string> = {
   PENDING_PAYMENT: '待支付', PAID: '已支付', CONFIRMED: '已确认', CHECKED_IN: '已签到',
   COMPLETED: '已完成', CANCELLED: '已取消', REFUNDING: '退款中', REFUNDED: '已退款',
@@ -14,7 +14,7 @@ const labels: Record<string, string> = {
 }
 </script>
 
-<template><text class="badge" :class="(props.value || '').toLowerCase()">{{ labels[props.value || ''] || props.value || '—' }}</text></template>
+<template><text class="badge" :class="(props.value || '').toLowerCase()">{{ props.label || labels[props.value || ''] || props.value || '—' }}</text></template>
 
 <style scoped>
 .badge { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; max-width: 100%; min-height:40rpx; padding: 6rpx 14rpx; overflow:hidden; color: #456052; background: #eef2ef; border:1rpx solid rgba(69,96,82,.08); border-radius: 999rpx; font-size: 22rpx; line-height: 1.35; text-align: center; text-overflow:ellipsis; white-space: nowrap; }

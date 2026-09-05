@@ -35,6 +35,7 @@ import type {
   CreateLeadDto,
   LeadFunnelQueryDto,
   LeadQueryDto,
+  LeadOwnerQueryDto,
   LoseLeadDto,
   MemberQueryDto,
   ReviewAccountAdjustmentDto,
@@ -1481,12 +1482,33 @@ export class MembersService {
     return actor.roles.find((role) => LEAD_WRITE_ROLES.includes(role)) ?? actor.roles[0]
   }
 
+  async leadOwners(query: LeadOwnerQueryDto, actor: AuthUser) {
+    this.assertAnyRole(actor, LEAD_WRITE_ROLES, '无权分配客户线索')
+    const where: Prisma.UserWhereInput = {
+      status: UserStatus.ACTIVE, deletedAt: null,
+      OR: [{ primaryRole: { in: LEAD_VIEW_ROLES } }, { roles: { some: { role: { in: LEAD_VIEW_ROLES } } } }],
+      ...(query.keyword?.trim() ? { displayName: { contains: query.keyword.trim(), mode: 'insensitive' } } : {}),
+    }
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.user.findMany({
+        where, select: { id: true, displayName: true, primaryRole: true, roles: { select: { role: true } } },
+        orderBy: [{ displayName: 'asc' }, { id: 'asc' }],
+        skip: (query.page - 1) * query.pageSize, take: query.pageSize,
+      }),
+      this.prisma.user.count({ where }),
+    ])
+    return { items: items.map(user => ({
+      id: user.id, displayName: user.displayName,
+      roles: [...new Set([user.primaryRole, ...user.roles.map(item => item.role)])].filter(role => LEAD_VIEW_ROLES.includes(role)),
+    })), total, page: query.page, pageSize: query.pageSize }
+  }
+
   private async assertAssignableOwner(ownerId: string) {
     const owner = await this.prisma.user.findUnique({
       where: { id: ownerId },
       select: { status: true, deletedAt: true, primaryRole: true, roles: { select: { role: true } } },
     })
-    const assignable: AppRole[] = [AppRole.FRONT_DESK, AppRole.COACH, AppRole.ADMIN, AppRole.SUPER_ADMIN]
+    const assignable = LEAD_VIEW_ROLES
     if (!owner || owner.status !== UserStatus.ACTIVE || owner.deletedAt ||
       ![owner.primaryRole, ...owner.roles.map(({ role }) => role)].some((role) => assignable.includes(role))) {
       throw new BadRequestException('负责人不存在、已停用或角色不可分配')

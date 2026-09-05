@@ -41,6 +41,12 @@ describe("governance presentation policy", () => {
 
   it("formats internal parameter values as business-readable Chinese text", () => {
     expect(
+      formatBusinessParameterValue(
+        "finance.operating_share_rate_bps",
+        1_500,
+      ),
+    ).toBe("15%");
+    expect(
       formatBusinessParameterValue("training.contract_rate_bps", 2_000),
     ).toBe("20%");
     expect(

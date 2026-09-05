@@ -70,7 +70,7 @@ pnpm dev:api
 
 ## 微信验收
 
-当前本地开发/预览构建使用测试 AppID `wxa457599ec4c27ad1`，构建产物应满足 `project.config.json.compileType = "miniprogram"`。在微信开发者工具导入 `apps/miniapp/dist/dev/mp-weixin`（开发）或 `apps/miniapp/dist/build/mp-weixin`（压缩构建/预览），不要导入源码目录。该测试号只用于编译和预览，不支持上传；本文不声称最终代码已经上传或已经通过真机。体验版需更换为支持上传且已授权的 AppID 后重新构建。先在 `VITE_DATA_MODE=mock` 下完成页面和角色旅程，再在 `VITE_DATA_MODE=remote` 下验证 API 持久化、权限和幂等。
+当前项目构建使用 AppID `wx25610460bc96894b`，构建产物应满足 `project.config.json.compileType = "miniprogram"`。在微信开发者工具导入 `apps/miniapp/dist/dev/mp-weixin`（开发）或 `apps/miniapp/dist/build/mp-weixin`（压缩构建/预览），不要导入源码目录。本文不声称仅凭配置 AppID 就已经完成上传或真机验收；当前微信号仍需由小程序管理员授予开发者权限。先在 `VITE_DATA_MODE=mock` 下完成页面和角色旅程，再在 `VITE_DATA_MODE=remote` 下验证 API 持久化、权限和幂等。
 
 在开发者工具和至少一台已加入体验成员的真机上逐项验证：微信登录、request 合法域名、扫码、支付/退款回调联调、弱网重试、分享返回、前后台切换、拒绝权限、安全区适配和不同屏幕尺寸。`urlCheck=false`、模拟支付、开发登录和本地 mock 只能作为开发演示，不能计为生产通过；真机不能访问电脑的 `127.0.0.1`，需使用 HTTPS 测试域名或受控局域网代理。生产 AppID、商户号、Secret、证书和 HTTPS 域名属于部署方资产，需在上线环境完成最终验收。
 

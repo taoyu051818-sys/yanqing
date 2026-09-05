@@ -1,10 +1,14 @@
-import { BadGatewayException, Injectable, UnauthorizedException } from '@nestjs/common'
+import { randomUUID } from 'node:crypto'
+import { mkdir, unlink, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
+
+import { BadGatewayException, BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 
 import { PrismaService } from '../database/prisma.service.js'
 import { AccountType, AppRole, UserStatus } from '../generated/prisma/enums.js'
-import type { DevLoginDto, WechatLoginDto } from './auth.dto.js'
+import type { DevLoginDto, UpdateMyProfileDto, WechatLoginDto } from './auth.dto.js'
 
 interface WechatSessionResponse {
   openid?: string
@@ -44,14 +48,11 @@ export class AuthService {
         where: { openId: session.openid },
         update: {
           unionId: session.unionid,
-          displayName: dto.displayName || undefined,
-          avatarUrl: dto.avatarUrl,
         },
         create: {
           openId: session.openid,
           unionId: session.unionid,
-          displayName: dto.displayName || '微信用户',
-          avatarUrl: dto.avatarUrl,
+          displayName: '微信用户',
           primaryRole: AppRole.MEMBER,
           roles: { create: { role: AppRole.MEMBER } },
           memberProfile: { create: { tags: [] } },
@@ -144,6 +145,50 @@ export class AuthService {
       accounts: user.accounts,
       hasReferrer: Boolean(user.referrerId),
     }
+  }
+
+  async updateProfile(userId: string, dto: UpdateMyProfileDto) {
+    const displayName = dto.displayName.trim()
+    if (!displayName) throw new BadRequestException('微信昵称不能为空')
+    await this.prisma.user.update({ where: { id: userId }, data: { displayName } })
+    return this.me(userId)
+  }
+
+  async updateAvatar(userId: string, file?: Express.Multer.File) {
+    if (!file?.buffer?.length) throw new BadRequestException('请选择微信头像')
+    const image = this.detectAvatarImage(file.buffer)
+    if (!image) throw new BadRequestException('头像仅支持 JPG、PNG 或 WebP 图片')
+    const uploadRoot = this.config.get<string>('UPLOAD_DIR')
+      || this.config.get<string>('STORAGE_LOCAL_PATH')
+      || join(process.cwd(), 'uploads')
+    const avatarDirectory = join(uploadRoot, 'avatars')
+    await mkdir(avatarDirectory, { recursive: true })
+    const filename = `${randomUUID()}.${image}`
+    await writeFile(join(avatarDirectory, filename), file.buffer, { flag: 'wx' })
+    const current = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId }, select: { avatarUrl: true },
+    })
+    const avatarUrl = `/uploads/avatars/${filename}`
+    try {
+      await this.prisma.user.update({ where: { id: userId }, data: { avatarUrl } })
+    } catch (cause) {
+      await unlink(join(avatarDirectory, filename)).catch(() => undefined)
+      throw cause
+    }
+    const oldName = current.avatarUrl?.startsWith('/uploads/avatars/')
+      ? basename(current.avatarUrl)
+      : ''
+    if (oldName && oldName !== filename) {
+      await unlink(join(avatarDirectory, oldName)).catch(() => undefined)
+    }
+    return this.me(userId)
+  }
+
+  private detectAvatarImage(buffer: Buffer): 'jpg' | 'png' | 'webp' | null {
+    if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpg'
+    if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'png'
+    if (buffer.length >= 12 && buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP') return 'webp'
+    return null
   }
 
   private async issueToken(user: {

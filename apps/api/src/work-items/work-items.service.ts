@@ -10,6 +10,7 @@ import {
   DataErasureRequestStatus,
   EventPrizeStatus,
   EventStatus,
+  GameStatus,
   HostStatus,
   LeadStatus,
   MatchStatus,
@@ -20,6 +21,7 @@ import {
   SettlementStatus,
   AttendanceStatus,
   TrainingConsumeCorrectionStatus,
+  TrainingSessionStatus,
   TrainingTrialStatus,
   YouthTrainingRuleStatus,
 } from '../generated/prisma/client.js';
@@ -35,6 +37,7 @@ export type WorkItemKind =
   | 'TRAINING_TRIAL_ASSESSMENT'
   | 'TRAINING_TRIAL_DECISION'
   | 'YOUTH_TRAINING_RULE_REVIEW'
+  | 'TRAINING_SESSION_OPERATION'
   | 'TRAINING_ATTENDANCE'
   | 'EVENT_SCORE'
   | 'EVENT_PRIZE_RECEIPT'
@@ -42,11 +45,48 @@ export type WorkItemKind =
   | 'TRAINING_SETTLEMENT'
   | 'CONSIGNMENT_SETTLEMENT'
   | 'LOW_STOCK'
+  | 'GAME_OPERATION'
   | 'ORDER_FULFILLMENT';
+
+export type WorkItemGroup =
+  | 'CUSTOMER'
+  | 'REFUND'
+  | 'TRAINING'
+  | 'EVENT'
+  | 'ALLIANCE'
+  | 'INVENTORY'
+  | 'FULFILLMENT'
+  | 'RECONCILIATION'
+  | 'GOVERNANCE';
+
+const WORK_ITEM_GROUP_BY_KIND: Record<WorkItemKind, WorkItemGroup> = {
+  ACCOUNT_ADJUSTMENT_REVIEW: 'REFUND',
+  CUSTOMER_LEAD_SLA: 'CUSTOMER',
+  HOST_APPLICATION_REVIEW: 'CUSTOMER',
+  DATA_ERASURE_REVIEW: 'GOVERNANCE',
+  REFUND_REVIEW: 'REFUND',
+  TRAINING_CONSUME_CORRECTION_REVIEW: 'TRAINING',
+  TRAINING_TRIAL_CHECK_IN: 'TRAINING',
+  TRAINING_TRIAL_ASSESSMENT: 'TRAINING',
+  TRAINING_TRIAL_DECISION: 'TRAINING',
+  YOUTH_TRAINING_RULE_REVIEW: 'GOVERNANCE',
+  TRAINING_SESSION_OPERATION: 'TRAINING',
+  TRAINING_ATTENDANCE: 'TRAINING',
+  EVENT_SCORE: 'EVENT',
+  EVENT_PRIZE_RECEIPT: 'EVENT',
+  ALLIANCE_SETTLEMENT: 'RECONCILIATION',
+  TRAINING_SETTLEMENT: 'RECONCILIATION',
+  CONSIGNMENT_SETTLEMENT: 'RECONCILIATION',
+  LOW_STOCK: 'INVENTORY',
+  GAME_OPERATION: 'FULFILLMENT',
+  ORDER_FULFILLMENT: 'FULFILLMENT',
+};
 
 export interface WorkItem {
   id: string;
   kind: WorkItemKind;
+  /** Server-owned queue classification. Clients must not infer responsibility from title text. */
+  group?: WorkItemGroup;
   objectType: string;
   objectId: string;
   status: string;
@@ -109,6 +149,12 @@ export class WorkItemsService {
       AppRole.ADMIN,
       AppRole.SUPER_ADMIN,
     ]);
+    const canOperateTrainingSessions = hasAny(roles, [
+      AppRole.COACH,
+      AppRole.FRONT_DESK,
+      AppRole.ADMIN,
+      AppRole.SUPER_ADMIN,
+    ]);
     const canOperateEvents = hasAny(roles, [
       AppRole.EVENT_MANAGER,
       AppRole.FRONT_DESK,
@@ -122,8 +168,13 @@ export class WorkItemsService {
     ]);
     const canOperateOrders = hasAny(roles, [
       AppRole.FRONT_DESK,
-      AppRole.HOST,
       AppRole.EVENT_MANAGER,
+      AppRole.ADMIN,
+      AppRole.SUPER_ADMIN,
+    ]);
+    const canOperateGames = hasAny(roles, [
+      AppRole.HOST,
+      AppRole.FRONT_DESK,
       AppRole.ADMIN,
       AppRole.SUPER_ADMIN,
     ]);
@@ -165,24 +216,8 @@ export class WorkItemsService {
         businessType: BusinessType.VENUE,
         bookings: {
           some: {
-            endsAt: { lte: nowDate },
+            startsAt: { lte: nowDate },
             status: { in: [BookingStatus.CONFIRMED, BookingStatus.CHECKED_IN] },
-          },
-        },
-      });
-    }
-    if (isOperationsAdmin || roles.includes(AppRole.HOST)) {
-      orderFulfillmentScopes.push({
-        businessType: BusinessType.GAME,
-        gameRegistration: {
-          is: {
-            status: {
-              in: [RegistrationStatus.PAID, RegistrationStatus.CHECKED_IN],
-            },
-            game: {
-              endsAt: { lte: nowDate },
-              ...(isOperationsAdmin ? {} : { hostId: actor.sub }),
-            },
           },
         },
       });
@@ -218,6 +253,8 @@ export class WorkItemsService {
       trainingConsumeCorrections,
       trainingTrials,
       youthTrainingRules,
+      games,
+      trainingSessions,
     ] = await Promise.all([
       canReviewMoney
         ? this.prisma.refund.findMany({
@@ -371,14 +408,26 @@ export class WorkItemsService {
                     in: [BookingStatus.CONFIRMED, BookingStatus.CHECKED_IN],
                   },
                 },
-                select: { id: true, status: true, endsAt: true },
+                select: {
+                  id: true,
+                  status: true,
+                  startsAt: true,
+                  endsAt: true,
+                },
                 take: 1,
               },
               gameRegistration: {
                 select: {
                   id: true,
                   status: true,
-                  game: { select: { id: true, title: true, endsAt: true } },
+                  game: {
+                    select: {
+                      id: true,
+                      title: true,
+                      startsAt: true,
+                      endsAt: true,
+                    },
+                  },
                 },
               },
               eventTeam: {
@@ -515,10 +564,139 @@ export class WorkItemsService {
             take: limit,
           })
         : Promise.resolve([]),
+      canOperateGames && this.prisma.game?.findMany
+        ? this.prisma.game.findMany({
+            where: {
+              status: {
+                in: [GameStatus.OPEN, GameStatus.FULL, GameStatus.IN_PROGRESS],
+              },
+              startsAt: { lte: nowDate },
+              ...(roles.includes(AppRole.HOST) && !isOperationsAdmin
+                ? { hostId: actor.sub }
+                : {}),
+            },
+            select: {
+              id: true,
+              title: true,
+              hostId: true,
+              status: true,
+              startsAt: true,
+              endsAt: true,
+              _count: {
+                select: {
+                  registrations: {
+                    where: {
+                      status: {
+                        in: [
+                          RegistrationStatus.PAID,
+                          RegistrationStatus.CHECKED_IN,
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: [{ startsAt: 'asc' }, { createdAt: 'asc' }],
+            take: limit,
+          })
+        : Promise.resolve([]),
+      canOperateTrainingSessions && this.prisma.trainingSession?.findMany
+        ? this.prisma.trainingSession.findMany({
+            where: {
+              status: {
+                in: [
+                  TrainingSessionStatus.SCHEDULED,
+                  TrainingSessionStatus.IN_PROGRESS,
+                ],
+              },
+              startsAt: { lte: nowDate },
+              ...(roles.includes(AppRole.COACH) && !isOperationsAdmin
+                ? { class: { coachId: actor.sub } }
+                : {}),
+            },
+            select: {
+              id: true,
+              status: true,
+              startsAt: true,
+              endsAt: true,
+              class: { select: { id: true, name: true, coachId: true } },
+              _count: {
+                select: {
+                  attendances: {
+                    where: { status: AttendanceStatus.PENDING },
+                  },
+                },
+              },
+            },
+            orderBy: [{ startsAt: 'asc' }, { createdAt: 'asc' }],
+            take: limit,
+          })
+        : Promise.resolve([]),
     ]);
 
     const now = nowDate.getTime();
     const items: WorkItem[] = [
+      ...trainingSessions.map((session) => {
+        const ended = session.endsAt.getTime() <= now;
+        const pending = session._count.attendances;
+        return {
+          id: `training-session-operation:${session.id}`,
+          kind: 'TRAINING_SESSION_OPERATION' as const,
+          objectType: 'TrainingSession',
+          objectId: session.id,
+          status: session.status,
+          priority: ended ? 91 : 83,
+          title: `${ended ? '课次待结课' : '课次待点名'} · ${session.class.name}`,
+          description: `${pending} 名待登记 · 完成点名后提交消课建议`,
+          ownerRoles: [
+            AppRole.COACH,
+            AppRole.FRONT_DESK,
+            AppRole.ADMIN,
+            AppRole.SUPER_ADMIN,
+          ],
+          createdAt: session.startsAt.toISOString(),
+          dueAt: (ended ? session.endsAt : session.startsAt).toISOString(),
+          action: `/packages/ops/pages/coach/index?focus=session&sessionId=${session.id}`,
+          metadata: {
+            sessionId: session.id,
+            classId: session.class.id,
+            coachId: session.class.coachId,
+            pendingAttendanceCount: pending,
+            startsAt: session.startsAt.toISOString(),
+            endsAt: session.endsAt.toISOString(),
+          },
+        };
+      }),
+      ...games.map((game) => {
+        const ended = game.endsAt.getTime() <= now;
+        return {
+          id: `game-operation:${game.id}`,
+          kind: 'GAME_OPERATION' as const,
+          objectType: 'Game',
+          objectId: game.id,
+          status: game.status,
+          priority: ended ? 90 : 84,
+          title: `${ended ? '球局待完赛' : '球局现场待处理'} · ${game.title}`,
+          description: `${game._count.registrations} 名已支付/签到 · 主理人现场队列`,
+          ownerRoles: [
+            AppRole.HOST,
+            AppRole.FRONT_DESK,
+            AppRole.ADMIN,
+            AppRole.SUPER_ADMIN,
+          ],
+          createdAt: game.startsAt.toISOString(),
+          dueAt: (ended ? game.endsAt : game.startsAt).toISOString(),
+          action: `/packages/ops/pages/host/index?focus=game&gameId=${game.id}`,
+          metadata: {
+            gameId: game.id,
+            hostId: game.hostId,
+            activeRegistrationCount: game._count.registrations,
+            startsAt: game.startsAt.toISOString(),
+            endsAt: game.endsAt.toISOString(),
+          },
+        };
+      }),
       ...trainingTrials.map((trial) => {
         const subjectName =
           trial.student?.displayName ||
@@ -865,13 +1043,15 @@ export class WorkItemsService {
         const booking = order.bookings[0];
         const registration = order.gameRegistration;
         const team = order.eventTeam;
-        const dueAt =
-          booking?.endsAt || registration?.game.endsAt || team?.event.startsAt;
         const fulfillmentStatus =
           booking?.status ||
           registration?.status ||
           team?.status ||
           order.status;
+        const dueAt =
+          fulfillmentStatus === BookingStatus.CHECKED_IN
+            ? booking?.endsAt || registration?.game.endsAt || team?.event.startsAt
+            : booking?.startsAt || registration?.game.startsAt || team?.event.startsAt;
         const fulfillmentObjectId =
           booking?.id || registration?.id || team?.id || order.id;
         const ownerRoles =
@@ -893,7 +1073,7 @@ export class WorkItemsService {
           objectId: order.id,
           status: order.status,
           priority: order.status === OrderStatus.CHECKED_IN ? 78 : 72,
-          title: `${fulfillmentStatus === 'CHECKED_IN' ? '已签到待完成' : '已到期待确认'} · ${order.orderNo}`,
+          title: `${fulfillmentStatus === 'CHECKED_IN' ? '已签到待完成' : '已开场待签到'} · ${order.orderNo}`,
           description: `${order.title} · ${order.businessType}`,
           ownerRoles,
           createdAt: order.createdAt.toISOString(),
@@ -914,6 +1094,10 @@ export class WorkItemsService {
         (a, b) =>
           b.priority - a.priority || a.createdAt.localeCompare(b.createdAt),
       )
-      .slice(0, limit);
+      .slice(0, limit)
+      .map((item) => ({
+        ...item,
+        group: WORK_ITEM_GROUP_BY_KIND[item.kind],
+      }));
   }
 }

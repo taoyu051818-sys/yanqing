@@ -30,6 +30,7 @@ import type {
 } from './memberships.dto.js'
 import { executeOrderCreation } from '../orders/order-creation-idempotency.js'
 import { orderResponse } from '../orders/order-response.js'
+import { resolveOperatingShareSnapshot } from '../common/finance/operating-share.js'
 
 const orderNo = (prefix: string) =>
   `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`
@@ -595,6 +596,11 @@ export class MembershipsService {
         if (!member) throw new NotFoundException('会员档案不存在')
         const startsAt = now
         const endsAt = new Date(startsAt.getTime() + product.durationDays * 86_400_000)
+        const operatingShare = await resolveOperatingShareSnapshot(
+          tx,
+          BusinessType.MEMBERSHIP,
+          now,
+        )
         const created = await tx.order.create({
           data: {
             ...creation,
@@ -613,6 +619,7 @@ export class MembershipsService {
               benefits: product.benefits,
               effectiveFrom: product.effectiveFrom.toISOString(),
               effectiveTo: product.effectiveTo?.toISOString() ?? null,
+              operatingShare,
             },
             items: { create: {
               itemType: 'MEMBERSHIP', itemId: product.id, name: product.name,
@@ -668,6 +675,11 @@ export class MembershipsService {
         })
         if (!plan)
           throw new NotFoundException('充值计划不存在、未生效或已停用')
+        const operatingShare = await resolveOperatingShareSnapshot(
+          tx,
+          BusinessType.RECHARGE,
+          now,
+        )
         const created = await tx.order.create({
           data: {
             ...creation,
@@ -684,6 +696,7 @@ export class MembershipsService {
               giftCents: plan.giftCents,
               effectiveFrom: plan.effectiveFrom.toISOString(),
               effectiveTo: plan.effectiveTo?.toISOString() ?? null,
+              operatingShare,
             },
             items: { create: {
               itemType: 'RECHARGE', itemId: plan.id, name: plan.name,

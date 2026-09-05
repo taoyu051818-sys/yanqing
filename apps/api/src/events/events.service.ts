@@ -27,6 +27,7 @@ import {
   InventoryTxnType,
   MatchStatus,
   OrderStatus,
+  PaymentChannel,
   PaymentStatus,
   Prisma,
   RefundStatus,
@@ -50,16 +51,20 @@ import type {
   PublishEventDto,
   ReceiveEventPrizeDto,
   RegisterEventTeamDto,
+  CreateEventTeamInviteDto,
+  AcceptEventTeamInviteDto,
   SubmitScoreDto,
 } from './events.dto.js';
 import {
   assertOperationTimeWindow,
   EVENT_CHECK_IN_WINDOW_PARAMETER,
 } from '../common/time-window/operation-time-window.js';
+import { resolveOperatingShareSnapshot } from '../common/finance/operating-share.js';
 import {
   EVENT_MAX_CAPACITY_PEOPLE,
   EVENT_MINIMUM_PEOPLE,
   EVENT_TOTAL_ROUNDS,
+  normalizeParticipantPhone,
 } from './events.dto.js';
 
 const serial = (prefix: string) =>
@@ -121,7 +126,11 @@ const prizeAwardResponse = (value: any) => ({
   issuedAt: value.issuedAt,
   receivedAt: value.receivedAt,
   team: value.team
-    ? { id: value.team.id, name: value.team.name, finalRank: value.team.finalRank }
+    ? {
+        id: value.team.id,
+        name: value.team.name,
+        finalRank: value.team.finalRank,
+      }
     : undefined,
   inventoryItem: value.inventoryItem
     ? {
@@ -270,6 +279,21 @@ const EVENT_COMPLETED_ORDER_STATUSES: ReadonlySet<OrderStatus> = new Set(
 const normaliseText = (value: unknown): string =>
   typeof value === 'string' ? value.trim() : '';
 
+export const eventPointRecipientIds = (team: {
+  captainId: string;
+  captainPlays?: boolean;
+  playerAUserId?: string | null;
+  playerBUserId?: string | null;
+}): string[] => [
+  ...new Set(
+    [
+      team.playerAUserId,
+      team.playerBUserId,
+      ...(team.captainPlays === false ? [] : [team.captainId]),
+    ].filter((id): id is string => Boolean(id)),
+  ),
+];
+
 const normaliseOptionalText = (value: unknown): string | undefined => {
   const text = normaliseText(value);
   return text || undefined;
@@ -304,8 +328,8 @@ const eventPaymentDueAt = (
 async function expireEventReservations(
   tx: Prisma.TransactionClient,
   eventId: string,
-  actorId: string,
-  actorRole: AppRole,
+  actorId: string | undefined,
+  actorRole: AppRole | undefined,
   now: Date,
 ) {
   const expired = await tx.eventTeam.findMany({
@@ -313,7 +337,9 @@ async function expireEventReservations(
       eventId,
       status: RegistrationStatus.REGISTERED,
       paymentDueAt: { lte: now },
-      order: { status: OrderStatus.PENDING },
+      // An in-flight WeChat payment must be remotely closed by OrdersService
+      // before releasing its seat. A domain-only transaction cannot close it.
+      order: { status: OrderStatus.PENDING, payments: { none: { channel: PaymentChannel.WECHAT, status: PaymentStatus.PROCESSING } } },
     },
     select: { id: true, orderId: true, paymentDueAt: true },
     orderBy: [{ paymentDueAt: 'asc' }, { id: 'asc' }],
@@ -382,8 +408,8 @@ async function expireEventReservations(
 export async function promoteNextEventWaitlist(
   tx: Prisma.TransactionClient,
   eventId: string,
-  actorId: string,
-  actorRole: AppRole,
+  actorId: string | undefined,
+  actorRole: AppRole | undefined,
   now = new Date(),
 ) {
   const event = await tx.event.findUnique({
@@ -441,6 +467,11 @@ export async function promoteNextEventWaitlist(
     const payableCents = next.payableCents ?? 0;
     const listAmountCents = next.listAmountCents ?? payableCents;
     const promotionOrderKey = `SYSTEM:EVENT_WAITLIST:${next.id}`;
+    const operatingShare = await resolveOperatingShareSnapshot(
+      tx,
+      BusinessType.EVENT,
+      now,
+    );
     const order = await tx.order.upsert({
       where: { creationIdempotencyKey: promotionOrderKey },
       update: {},
@@ -469,6 +500,7 @@ export async function promoteNextEventWaitlist(
           promotedFromWaitlist: true,
           paymentDueAt: paymentDueAt.toISOString(),
           memberFeeApplied: next.memberFeeApplied,
+          operatingShare,
         },
         items: {
           create: {
@@ -606,6 +638,8 @@ export class EventsService {
       playerBName: string | null | undefined;
       playerAUserId?: string | null;
       playerBUserId?: string | null;
+      playerAPhone?: string | null;
+      playerBPhone?: string | null;
     },
     mode: 'create' | 'stored' = 'stored',
   ): void {
@@ -616,7 +650,14 @@ export class EventsService {
     const playerAName = normaliseText(team.playerAName);
     const playerBName = normaliseText(team.playerBName);
     if (!playerAName || !playerBName) fail('固定双打必须填写两名队员');
-    if (playerAName.toLocaleLowerCase() === playerBName.toLocaleLowerCase()) {
+    if (
+      playerAName.toLocaleLowerCase() === playerBName.toLocaleLowerCase() &&
+      !(
+        team.playerAPhone &&
+        team.playerBPhone &&
+        team.playerAPhone !== team.playerBPhone
+      )
+    ) {
       fail('固定双打的两名队员不能相同');
     }
     const playerAUserId = normaliseOptionalText(team.playerAUserId);
@@ -657,10 +698,7 @@ export class EventsService {
   }
 
   private async resolvePartnerInvite(
-    client: Pick<
-      Prisma.TransactionClient,
-      'eventPartnerInvite' | 'eventTeam'
-    >,
+    client: Pick<Prisma.TransactionClient, 'eventPartnerInvite' | 'eventTeam'>,
     eventId: string,
     partnerInviteCode: string,
     actor: AuthUser,
@@ -690,12 +728,15 @@ export class EventsService {
       throw new ConflictException('搭档授权码无效、已使用或已过期');
     }
     if (
+      !invite.partner ||
       invite.partner.status !== UserStatus.ACTIVE ||
       invite.partner.deletedAt ||
       !invite.partner.memberProfile
     ) {
-      throw new ConflictException('授权搭档账号不存在或已停用');
+      throw new ConflictException('搭档尚未确认邀请，或账号已停用');
     }
+    if (invite.captainId && invite.captainId !== actor.sub)
+      throw new ForbiddenException('这份邀请只能由发起的队长提交报名');
     if (invite.partnerId === actor.sub) {
       throw new ConflictException('不能使用自己生成的搭档授权码');
     }
@@ -703,13 +744,10 @@ export class EventsService {
       where: {
         eventId,
         status: {
-          notIn: [
-            RegistrationStatus.CANCELLED,
-            RegistrationStatus.REFUNDED,
-          ],
+          notIn: [RegistrationStatus.CANCELLED, RegistrationStatus.REFUNDED],
         },
         OR: [
-          { captainId: invite.partnerId },
+          { captainId: invite.partnerId! },
           { playerAUserId: invite.partnerId },
           { playerBUserId: invite.partnerId },
         ],
@@ -720,6 +758,349 @@ export class EventsService {
       throw new ConflictException('授权搭档已参加本赛事或正在候补');
     }
     return invite;
+  }
+
+  private assertSignupContact(name: string, phone: string) {
+    if (!normaliseText(name) || !/^1[3-9]\d{9}$/.test(phone))
+      throw new BadRequestException('两位选手均须填写姓名和11位联系电话');
+  }
+
+  private async assertPhoneAvailable(
+    tx: Prisma.TransactionClient,
+    eventId: string,
+    phones: string[],
+    userIds: string[] = [],
+  ) {
+    const contacts = phones.filter(Boolean);
+    if (!contacts.length) return;
+    if (new Set(contacts).size !== contacts.length)
+      throw new ConflictException('两位选手不能使用相同的联系电话');
+    // Compare with both guest contact snapshots and existing account-linked
+    // registrations. A supplied phone never grants access to that account.
+    const users = await tx.user.findMany({
+      where: { phone: { in: contacts } },
+      select: { id: true },
+    });
+    const ids = [...new Set([...userIds, ...users.map((user) => user.id)])];
+    const existing = await tx.eventTeam.findFirst({
+      where: {
+        eventId,
+        status: {
+          notIn: [RegistrationStatus.CANCELLED, RegistrationStatus.REFUNDED],
+        },
+        OR: [
+          { playerAPhone: { in: contacts } },
+          { playerBPhone: { in: contacts } },
+          ...ids.flatMap((id) => [
+            { playerAUserId: id },
+            { playerBUserId: id },
+          ]),
+        ],
+      },
+      select: { id: true },
+    });
+    if (existing)
+      throw new ConflictException(
+        '其中一位选手已报名本赛事或正在候补，请勿重复提交',
+      );
+  }
+
+  private async teamInviteRecord(
+    client: Pick<Prisma.TransactionClient, 'eventPartnerInvite'>,
+    eventId: string,
+    code: string,
+  ) {
+    const invite = await client.eventPartnerInvite.findUnique({
+      where: { tokenHash: eventPartnerInviteHash(code) },
+      include: {
+        event: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            startsAt: true,
+            registrationEndsAt: true,
+            feeCents: true,
+          },
+        },
+        captain: {
+          select: {
+            id: true,
+            displayName: true,
+            avatarUrl: true,
+            status: true,
+            deletedAt: true,
+          },
+        },
+        partner: {
+          select: {
+            id: true,
+            displayName: true,
+            avatarUrl: true,
+            status: true,
+            deletedAt: true,
+          },
+        },
+      },
+    });
+    if (
+      !invite?.captain ||
+      invite.eventId !== eventId ||
+      invite.revokedAt ||
+      invite.captain.status !== UserStatus.ACTIVE ||
+      invite.captain.deletedAt
+    ) {
+      throw new NotFoundException('搭档邀请无效或已撤回，请好友重新分享');
+    }
+    return invite;
+  }
+
+  async createTeamInvite(
+    eventId: string,
+    dto: CreateEventTeamInviteDto,
+    actor: AuthUser,
+  ) {
+    if (!actor.roles.includes(AppRole.MEMBER))
+      throw new ForbiddenException('请使用会员身份邀请搭档');
+    if (dto.consent !== true)
+      throw new BadRequestException('请确认已征得参赛者同意');
+    const name = normaliseText(dto.name),
+      playerAName = normaliseText(dto.playerAName),
+      playerAPhone = normalizeParticipantPhone(dto.playerAPhone);
+    if (!name) throw new BadRequestException('请填写队伍名称');
+    this.assertSignupContact(playerAName, playerAPhone);
+    const code = `EP_${randomBytes(24).toString('base64url')}`;
+    const expiresAt = await this.prisma
+      .$transaction(
+        async (tx) => {
+          const event = await tx.event.findUnique({ where: { id: eventId } });
+          const now = new Date();
+          if (
+            !event ||
+            ![EventStatus.OPEN, EventStatus.FULL].includes(event.status as any)
+          )
+            throw new ConflictException('赛事不在报名期');
+          if (event.registrationEndsAt <= now || event.startsAt <= now)
+            throw new ConflictException('赛事报名已截止');
+          await this.assertPhoneAvailable(
+            tx,
+            eventId,
+            [playerAPhone],
+            [actor.sub],
+          );
+          const duplicate = await tx.eventTeam.findFirst({
+            where: {
+              eventId,
+              captainId: actor.sub,
+              status: {
+                notIn: [
+                  RegistrationStatus.CANCELLED,
+                  RegistrationStatus.REFUNDED,
+                ],
+              },
+            },
+            select: { id: true },
+          });
+          if (duplicate)
+            throw new ConflictException('你已提交本赛事报名或候补');
+          const expiry = new Date(
+            Math.min(
+              now.getTime() + 24 * 3_600_000,
+              event.registrationEndsAt.getTime(),
+              event.startsAt.getTime(),
+            ),
+          );
+          await tx.eventPartnerInvite.updateMany({
+            where: {
+              eventId,
+              captainId: actor.sub,
+              consumedAt: null,
+              revokedAt: null,
+            },
+            data: { revokedAt: now },
+          });
+          const invite = await tx.eventPartnerInvite.create({
+            data: {
+              eventId,
+              captainId: actor.sub,
+              teamName: name,
+              playerAName,
+              playerAPhone,
+              category: dto.category,
+              tokenHash: eventPartnerInviteHash(code),
+              expiresAt: expiry,
+            },
+          });
+          await tx.auditLog.create({
+            data: {
+              actorId: actor.sub,
+              actorRole: actor.roles[0],
+              action: 'EVENT_TEAM_INVITE_CREATED',
+              objectType: 'EventPartnerInvite',
+              objectId: invite.id,
+              newValue: {
+                eventId,
+                expiresAt: expiry.toISOString(),
+                consent: true,
+              },
+            },
+          });
+          return expiry;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+      .catch((error) => {
+        if (isPrismaErrorCode(error, 'P2034'))
+          throw new ConflictException('邀请状态发生并发变化，请重试');
+        throw error;
+      });
+    return { partnerInviteCode: code, expiresAt };
+  }
+
+  async previewTeamInvite(eventId: string, code: string, actor?: AuthUser) {
+    const invite = await this.teamInviteRecord(this.prisma, eventId, code);
+    const now = new Date();
+    const role =
+      actor?.sub === invite.captainId
+        ? 'CAPTAIN'
+        : actor?.sub === invite.partnerId
+          ? 'PARTNER'
+          : 'VISITOR';
+    const expired =
+      invite.expiresAt <= now ||
+      invite.event.registrationEndsAt <= now ||
+      invite.event.startsAt <= now ||
+      ![EventStatus.OPEN, EventStatus.FULL].includes(
+        invite.event.status as any,
+      );
+    return {
+      status: invite.consumedAt
+        ? 'SUBMITTED'
+        : expired
+          ? 'EXPIRED'
+          : invite.acceptedAt
+            ? 'ACCEPTED'
+            : 'PENDING',
+      role,
+      event: {
+        id: invite.event.id,
+        name: invite.event.name,
+        startsAt: invite.event.startsAt,
+        feeCents: invite.event.feeCents,
+      },
+      captain: {
+        displayName: invite.captain!.displayName,
+        avatarUrl: invite.captain!.avatarUrl,
+      },
+      teamName: invite.teamName,
+      category: invite.category,
+      expiresAt: invite.expiresAt,
+      ...(role === 'CAPTAIN' || role === 'PARTNER'
+        ? {
+            playerAName: invite.playerAName,
+            playerBName: invite.playerBName,
+            partner: invite.partner
+              ? {
+                  displayName: invite.partner.displayName,
+                  avatarUrl: invite.partner.avatarUrl,
+                }
+              : null,
+          }
+        : {}),
+    };
+  }
+
+  async acceptTeamInvite(
+    eventId: string,
+    dto: AcceptEventTeamInviteDto,
+    actor: AuthUser,
+  ) {
+    if (!actor.roles.includes(AppRole.MEMBER))
+      throw new ForbiddenException('请使用会员身份确认搭档邀请');
+    if (dto.consent !== true)
+      throw new BadRequestException('请确认同意与该队长组队参赛');
+    const name = normaliseText(dto.playerBName),
+      phone = normalizeParticipantPhone(dto.playerBPhone);
+    this.assertSignupContact(name, phone);
+    await this.prisma
+      .$transaction(
+        async (tx) => {
+          const invite = await this.teamInviteRecord(
+            tx,
+            eventId,
+            dto.partnerInviteCode,
+          );
+          if (invite.captainId === actor.sub)
+            throw new ConflictException('不能接受自己发出的搭档邀请');
+          if (invite.partnerId === actor.sub && invite.acceptedAt) {
+            if (invite.playerBName !== name || invite.playerBPhone !== phone)
+              throw new ConflictException(
+                '已确认的信息不能覆盖，请队长重新发起邀请',
+              );
+            return;
+          }
+          const now = new Date();
+          if (invite.partnerId || invite.consumedAt)
+            throw new ConflictException('这份邀请已由其他搭档确认');
+          if (
+            invite.expiresAt <= now ||
+            invite.event.registrationEndsAt <= now ||
+            invite.event.startsAt <= now ||
+            ![EventStatus.OPEN, EventStatus.FULL].includes(
+              invite.event.status as any,
+            )
+          )
+            throw new ConflictException(
+              '邀请已过期或赛事已截止，请队长重新发起',
+            );
+          const profile = await tx.memberProfile.findUnique({
+            where: { userId: actor.sub },
+            select: { id: true },
+          });
+          if (!profile)
+            throw new ConflictException('会员资料尚未建立，请重新登录');
+          await this.assertPhoneAvailable(
+            tx,
+            eventId,
+            [invite.playerAPhone!, phone],
+            [invite.captainId!, actor.sub],
+          );
+          const changed = await tx.eventPartnerInvite.updateMany({
+            where: {
+              id: invite.id,
+              partnerId: null,
+              consumedAt: null,
+              revokedAt: null,
+              expiresAt: { gt: now },
+            },
+            data: {
+              partnerId: actor.sub,
+              playerBName: name,
+              playerBPhone: phone,
+              acceptedAt: now,
+            },
+          });
+          if (changed.count !== 1)
+            throw new ConflictException('邀请状态已变化，请刷新后重试');
+          await tx.auditLog.create({
+            data: {
+              actorId: actor.sub,
+              actorRole: actor.roles[0],
+              action: 'EVENT_TEAM_INVITE_ACCEPTED',
+              objectType: 'EventPartnerInvite',
+              objectId: invite.id,
+              newValue: { eventId, consent: true },
+            },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+      .catch((error) => {
+        if (isPrismaErrorCode(error, 'P2034'))
+          throw new ConflictException('邀请正在被确认，请刷新后重试');
+        throw error;
+      });
+    return this.previewTeamInvite(eventId, dto.partnerInviteCode, actor);
   }
 
   async createPartnerInvite(eventId: string, actor: AuthUser) {
@@ -751,10 +1132,7 @@ export class EventsService {
         where: {
           eventId,
           status: {
-            notIn: [
-              RegistrationStatus.CANCELLED,
-              RegistrationStatus.REFUNDED,
-            ],
+            notIn: [RegistrationStatus.CANCELLED, RegistrationStatus.REFUNDED],
           },
           OR: [
             { captainId: actor.sub },
@@ -868,7 +1246,7 @@ export class EventsService {
       now,
     );
     return {
-      partnerDisplayName: invite.partner.displayName,
+      partnerDisplayName: invite.partner!.displayName,
       expiresAt: invite.expiresAt,
     };
   }
@@ -1151,6 +1529,10 @@ export class EventsService {
             name: true,
             playerAName: true,
             playerBName: true,
+            playerAPhone: true,
+            playerBPhone: true,
+            captainPlays: true,
+            registrationMode: true,
             category: true,
             seed: true,
             status: true,
@@ -1213,12 +1595,12 @@ export class EventsService {
             status: true,
             payableCents: true,
             paidCents: true,
-              refunds: {
-                orderBy: { requestedAt: 'desc' },
-                select: {
-                  id: true,
-                  amountCents: true,
-                  reason: true,
+            refunds: {
+              orderBy: { requestedAt: 'desc' },
+              select: {
+                id: true,
+                amountCents: true,
+                reason: true,
                 status: true,
                 requestedAt: true,
                 completedAt: true,
@@ -1232,6 +1614,7 @@ export class EventsService {
     if (!registration) return null;
     const registrationView = {
       id: registration.id,
+      isCaptain: registration.captainId === actor.sub,
       name: registration.name,
       playerAName: registration.playerAName,
       playerBName: registration.playerBName,
@@ -1771,8 +2154,15 @@ export class EventsService {
   }
 
   async register(eventId: string, dto: RegisterEventTeamDto, actor: AuthUser) {
-    const memberSelfService = this.isMemberSelfService(actor);
+    const memberSelfService =
+      this.isMemberSelfService(actor) || Boolean(dto.registrationMode);
+    if (memberSelfService && !actor.roles.includes(AppRole.MEMBER))
+      throw new ForbiddenException('请使用会员身份提交报名');
+    const manual = dto.registrationMode === 'MANUAL';
+    const captainPlays = manual ? dto.captainPlays !== false : true;
     const partnerInviteCode = normaliseOptionalText(dto.partnerInviteCode);
+    let playerAPhone = normalizeParticipantPhone(dto.playerAPhone);
+    let playerBPhone = normalizeParticipantPhone(dto.playerBPhone);
     let playerAName = normaliseText(dto.playerAName);
     let playerBName = normaliseText(dto.playerBName);
     const teamName = normaliseText(dto.name);
@@ -1780,18 +2170,31 @@ export class EventsService {
     let playerAUserId = normaliseOptionalText(dto.playerAUserId);
     let playerBUserId = normaliseOptionalText(dto.playerBUserId);
     if (memberSelfService) {
-      if (!partnerInviteCode) {
+      if (!manual && !partnerInviteCode) {
         throw new BadRequestException('会员报名必须填写搭档本人生成的授权码');
       }
+      if (manual && partnerInviteCode)
+        throw new BadRequestException('代填报名与搭档邀请不能同时提交');
       if (playerAUserId && playerAUserId !== actor.sub) {
         throw new ForbiddenException('会员报名不能替其他账号占用队长席位');
       }
       if (playerBUserId) {
         throw new ForbiddenException('会员报名不能直接指定搭档账号');
       }
-      playerAName = normaliseText(actor.displayName);
-      playerBName = '';
-      playerAUserId = actor.sub;
+      if (manual) {
+        if (dto.consent !== true)
+          throw new BadRequestException('请确认已征得两位参赛者同意');
+        this.assertSignupContact(playerAName, playerAPhone);
+        this.assertSignupContact(playerBName, playerBPhone);
+        if (playerAPhone === playerBPhone)
+          throw new BadRequestException('两位选手不能使用相同的联系电话');
+      } else {
+        playerAName = normaliseText(actor.displayName);
+        playerBName = '';
+        playerAPhone = '';
+        playerBPhone = '';
+      }
+      playerAUserId = captainPlays ? actor.sub : undefined;
       playerBUserId = undefined;
     } else {
       this.assertFixedDoubles(
@@ -1815,17 +2218,24 @@ export class EventsService {
       kind: 'EVENT_REGISTRATION',
       eventId,
       name: teamName,
-      playerAName: memberSelfService ? null : playerAName,
-      playerBName: memberSelfService ? null : playerBName,
+      playerAName: memberSelfService && !manual ? null : playerAName,
+      playerBName: memberSelfService && !manual ? null : playerBName,
       playerAUserId: playerAUserId ?? null,
       playerBUserId: playerBUserId ?? null,
       category: dto.category,
       sourceChannel,
-      ...(memberSelfService
+      ...(manual
         ? {
-            partnerInviteTokenHash: eventPartnerInviteHash(
-              partnerInviteCode!,
-            ),
+            registrationMode: 'MANUAL',
+            captainPlays,
+            playerAPhone,
+            playerBPhone,
+            consent: true,
+          }
+        : {}),
+      ...(memberSelfService && !manual
+        ? {
+            partnerInviteTokenHash: eventPartnerInviteHash(partnerInviteCode!),
           }
         : {}),
     });
@@ -1939,7 +2349,7 @@ export class EventsService {
           let resolvedPlayerAUserId = playerAUserId;
           let resolvedPlayerBUserId = playerBUserId;
           let partnerInviteId: string | undefined;
-          if (memberSelfService) {
+          if (memberSelfService && !manual) {
             const partnerInvite = await this.resolvePartnerInvite(
               tx,
               eventId,
@@ -1947,12 +2357,23 @@ export class EventsService {
               actor,
               now,
             );
-            resolvedPlayerAName = normaliseText(actor.displayName);
+            if (
+              partnerInvite.captainId &&
+              (partnerInvite.teamName !== teamName ||
+                partnerInvite.category !== dto.category)
+            )
+              throw new ConflictException(
+                '邀请中的队名或组别与提交不一致，请重新发起邀请',
+              );
+            resolvedPlayerAName =
+              partnerInvite.playerAName || normaliseText(actor.displayName);
             resolvedPlayerBName = normaliseText(
-              partnerInvite.partner.displayName,
+              partnerInvite.playerBName || partnerInvite.partner!.displayName,
             );
             resolvedPlayerAUserId = actor.sub;
-            resolvedPlayerBUserId = partnerInvite.partnerId;
+            resolvedPlayerBUserId = partnerInvite.partnerId!;
+            playerAPhone = partnerInvite.playerAPhone || '';
+            playerBPhone = partnerInvite.playerBPhone || '';
             partnerInviteId = partnerInvite.id;
           }
           this.assertFixedDoubles(
@@ -1961,11 +2382,27 @@ export class EventsService {
               playerBName: resolvedPlayerBName,
               playerAUserId: resolvedPlayerAUserId,
               playerBUserId: resolvedPlayerBUserId,
+              playerAPhone,
+              playerBPhone,
             },
             'create',
           );
           const consumePartnerInvite = async (teamId: string) => {
-            if (!partnerInviteId) return;
+            if (!partnerInviteId) {
+              // Switching to manual signup supersedes outstanding share cards.
+              // Revoke in the same transaction as the seat/order creation.
+              if (manual)
+                await tx.eventPartnerInvite.updateMany({
+                  where: {
+                    eventId,
+                    captainId: actor.sub,
+                    consumedAt: null,
+                    revokedAt: null,
+                  },
+                  data: { revokedAt: now },
+                });
+              return;
+            }
             const claimed = await tx.eventPartnerInvite.updateMany({
               where: {
                 id: partnerInviteId,
@@ -2027,6 +2464,12 @@ export class EventsService {
             resolvedPlayerAUserId,
             resolvedPlayerBUserId,
           ].filter((value): value is string => Boolean(value));
+          await this.assertPhoneAvailable(
+            tx,
+            eventId,
+            [playerAPhone, playerBPhone],
+            knownPlayerIds,
+          );
           if (knownPlayerIds.length) {
             const duplicateParticipant = await tx.eventTeam.findFirst({
               where: {
@@ -2066,8 +2509,17 @@ export class EventsService {
             name: teamName,
             playerAName: resolvedPlayerAName,
             playerBName: resolvedPlayerBName,
-            playerAUserId: resolvedPlayerAUserId ?? actor.sub,
+            playerAUserId:
+              resolvedPlayerAUserId ?? (captainPlays ? actor.sub : null),
             playerBUserId: resolvedPlayerBUserId ?? null,
+            ...(manual || playerAPhone || playerBPhone
+              ? {
+                  playerAPhone: playerAPhone || null,
+                  playerBPhone: playerBPhone || null,
+                  captainPlays,
+                  registrationMode: manual ? 'MANUAL' : 'INVITE',
+                }
+              : {}),
             category: dto.category,
             sourceChannel,
             listAmountCents: event.feeCents,
@@ -2109,6 +2561,13 @@ export class EventsService {
                   status: RegistrationStatus.WAITLISTED,
                   position: waitlistedTeams + 1,
                   teamName,
+                  ...(manual
+                    ? {
+                        registrationMode: 'MANUAL',
+                        captainPlays,
+                        participantConsent: true,
+                      }
+                    : {}),
                   category: dto.category,
                 } as never,
               },
@@ -2123,6 +2582,11 @@ export class EventsService {
           const paymentDueAt = eventPaymentDueAt(
             event.registrationEndsAt,
             event.startsAt,
+            now,
+          );
+          const operatingShare = await resolveOperatingShareSnapshot(
+            tx,
+            BusinessType.EVENT,
             now,
           );
           const created = await tx.order.create({
@@ -2145,6 +2609,7 @@ export class EventsService {
                 memberFeeApplied: feeCents !== event.feeCents,
                 rules: event.rules,
                 paymentDueAt: paymentDueAt.toISOString(),
+                operatingShare,
               },
               items: {
                 create: {
@@ -2183,6 +2648,13 @@ export class EventsService {
                 creationIdempotencyKeyPresent: Boolean(creationIdempotencyKey),
                 eventId,
                 eventTeamId: created.eventTeam?.id,
+                ...(manual
+                  ? {
+                      registrationMode: 'MANUAL',
+                      captainPlays,
+                      participantConsent: true,
+                    }
+                  : {}),
                 category: dto.category,
                 seed,
                 memberFeeApplied: feeCents !== event.feeCents,
@@ -2664,8 +3136,10 @@ export class EventsService {
             const activeRefunds = order.refunds.filter((refund) =>
               ACTIVE_REFUND_STATUSES.includes(refund.status),
             );
-            const pending = activeRefunds
-              .reduce((sum, refund) => sum + refund.amountCents, 0);
+            const pending = activeRefunds.reduce(
+              (sum, refund) => sum + refund.amountCents,
+              0,
+            );
             const amountCents = Math.max(
               0,
               order.paidCents - order.refundedCents - pending,
@@ -2685,9 +3159,7 @@ export class EventsService {
                 OrderStatus.PARTIALLY_REFUNDED,
               ].includes(originalOrderStatus as never)
             ) {
-              throw new ConflictException(
-                '赛事退款缺少可恢复的原订单状态证据',
-              );
+              throw new ConflictException('赛事退款缺少可恢复的原订单状态证据');
             }
             return amountCents > 0
               ? [{ team, order, amountCents, originalOrderStatus }]
@@ -3425,77 +3897,77 @@ export class EventsService {
     try {
       return await this.prisma.$transaction(
         async (tx) => {
-        const match = await tx.eventMatch.findUnique({
-          where: { id: matchId },
-        });
-        if (!match?.teamBId) throw new NotFoundException('对阵不存在');
-        const event = await tx.event.findUnique({
-          where: { id: match.eventId },
-          select: { status: true },
-        });
-        if (!event) throw new NotFoundException('赛事不存在');
-        if (event.status !== EventStatus.IN_PROGRESS) {
-          throw new ConflictException(
-            event.status === EventStatus.COMPLETED
-              ? '赛事已完赛封账，不能再纠正比分'
-              : '当前赛事不在进行中，不能纠正比分',
-          );
-        }
-        if (match.round < 1 || match.round > EVENT_TOTAL_ROUNDS) {
-          throw new ConflictException('赛事轮次数据无效，不能纠正比分');
-        }
-        if (!isTerminalMatch(match.status)) {
-          throw new ConflictException('只有已确认比分才能发起纠错');
-        }
-        try {
-          validateEventScore(
-            dto.scoreA,
-            dto.scoreB,
-            match.startingScoreA,
-            match.startingScoreB,
-          );
-        } catch (error) {
-          throw new BadRequestException(
-            error instanceof Error ? error.message : '比分无效',
-          );
-        }
-        await tx.eventMatch.update({
-          where: { id: matchId },
-          data: {
-            scoreA: dto.scoreA,
-            scoreB: dto.scoreB,
-            status: MatchStatus.CORRECTED,
-            correctionReason: dto.reason,
-            confirmedById: actor.sub,
-            confirmedAt: new Date(),
-          },
-        });
-        await this.recomputeStandings(tx, match.eventId);
-        await tx.auditLog.create({
-          data: {
-            actorId: actor.sub,
-            actorRole: actor.roles[0],
-            action: 'EVENT_SCORE_CORRECTED',
-            objectType: 'EventMatch',
-            objectId: matchId,
-            oldValue: {
-              status: match.status,
-              scoreA: match.scoreA,
-              scoreB: match.scoreB,
-              startingScoreA: match.startingScoreA,
-              startingScoreB: match.startingScoreB,
-            } as never,
-            newValue: {
-              status: MatchStatus.CORRECTED,
+          const match = await tx.eventMatch.findUnique({
+            where: { id: matchId },
+          });
+          if (!match?.teamBId) throw new NotFoundException('对阵不存在');
+          const event = await tx.event.findUnique({
+            where: { id: match.eventId },
+            select: { status: true },
+          });
+          if (!event) throw new NotFoundException('赛事不存在');
+          if (event.status !== EventStatus.IN_PROGRESS) {
+            throw new ConflictException(
+              event.status === EventStatus.COMPLETED
+                ? '赛事已完赛封账，不能再纠正比分'
+                : '当前赛事不在进行中，不能纠正比分',
+            );
+          }
+          if (match.round < 1 || match.round > EVENT_TOTAL_ROUNDS) {
+            throw new ConflictException('赛事轮次数据无效，不能纠正比分');
+          }
+          if (!isTerminalMatch(match.status)) {
+            throw new ConflictException('只有已确认比分才能发起纠错');
+          }
+          try {
+            validateEventScore(
+              dto.scoreA,
+              dto.scoreB,
+              match.startingScoreA,
+              match.startingScoreB,
+            );
+          } catch (error) {
+            throw new BadRequestException(
+              error instanceof Error ? error.message : '比分无效',
+            );
+          }
+          await tx.eventMatch.update({
+            where: { id: matchId },
+            data: {
               scoreA: dto.scoreA,
               scoreB: dto.scoreB,
-              startingScoreA: match.startingScoreA,
-              startingScoreB: match.startingScoreB,
-            } as never,
-            reason: dto.reason,
-          },
-        });
-        return tx.eventMatch.findUniqueOrThrow({ where: { id: matchId } });
+              status: MatchStatus.CORRECTED,
+              correctionReason: dto.reason,
+              confirmedById: actor.sub,
+              confirmedAt: new Date(),
+            },
+          });
+          await this.recomputeStandings(tx, match.eventId);
+          await tx.auditLog.create({
+            data: {
+              actorId: actor.sub,
+              actorRole: actor.roles[0],
+              action: 'EVENT_SCORE_CORRECTED',
+              objectType: 'EventMatch',
+              objectId: matchId,
+              oldValue: {
+                status: match.status,
+                scoreA: match.scoreA,
+                scoreB: match.scoreB,
+                startingScoreA: match.startingScoreA,
+                startingScoreB: match.startingScoreB,
+              } as never,
+              newValue: {
+                status: MatchStatus.CORRECTED,
+                scoreA: dto.scoreA,
+                scoreB: dto.scoreB,
+                startingScoreA: match.startingScoreA,
+                startingScoreB: match.startingScoreB,
+              } as never,
+              reason: dto.reason,
+            },
+          });
+          return tx.eventMatch.findUniqueOrThrow({ where: { id: matchId } });
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -3548,7 +4020,12 @@ export class EventsService {
         // completed, all award writes from the same transaction have committed
         // and a retry must only return the persisted ranking.
         if (event.status === EventStatus.COMPLETED) {
-          await this.completeTerminalEventOrders(tx, event.id, event.teams, actor);
+          await this.completeTerminalEventOrders(
+            tx,
+            event.id,
+            event.teams,
+            actor,
+          );
           const ranked = rankSwissPairs(teams);
           return ranked.map((team, index) => ({
             ...team,
@@ -3620,13 +4097,7 @@ export class EventsService {
               },
             });
           }
-          const playerIds = [
-            ...new Set(
-              [team.playerAUserId, team.playerBUserId, team.captainId].filter(
-                Boolean,
-              ),
-            ),
-          ] as string[];
+          const playerIds = eventPointRecipientIds(team);
           for (const userId of playerIds) {
             const idempotencyKey = `EVENT:${event.id}:${userId}`;
             // AccountTransaction.idempotencyKey is unique.  Check it before
@@ -3749,21 +4220,22 @@ export class EventsService {
       ) {
         continue;
       }
-      const allowed = team.status === RegistrationStatus.NO_SHOW
-        ? EVENT_NO_SHOW_ORDER_STATUSES
-        : EVENT_COMPLETED_ORDER_STATUSES;
+      const allowed =
+        team.status === RegistrationStatus.NO_SHOW
+          ? EVENT_NO_SHOW_ORDER_STATUSES
+          : EVENT_COMPLETED_ORDER_STATUSES;
       if (!allowed.has(team.order.status)) continue;
       await completeOrderFulfillment(tx, {
         orderId: team.order.id,
         actor,
         objectType: 'EventTeam',
         objectId: team.id,
-        outcome: team.status === RegistrationStatus.NO_SHOW
-          ? 'NO_SHOW'
-          : 'COMPLETED',
-        reason: team.status === RegistrationStatus.NO_SHOW
-          ? '赛事结束且队伍无签到记录'
-          : '补全历史完赛订单履约时间',
+        outcome:
+          team.status === RegistrationStatus.NO_SHOW ? 'NO_SHOW' : 'COMPLETED',
+        reason:
+          team.status === RegistrationStatus.NO_SHOW
+            ? '赛事结束且队伍无签到记录'
+            : '补全历史完赛订单履约时间',
         metadata: { eventId, finalRank: team.finalRank },
       });
     }
@@ -3805,9 +4277,10 @@ export class EventsService {
 
       const changed = await tx.eventTeam.updateMany({
         where: { id: team.id, eventId, status: team.status },
-        data: outcome === RegistrationStatus.NO_SHOW
-          ? { status: outcome, paymentDueAt: null }
-          : { status: outcome, paymentDueAt: null, cancelledAt: completedAt },
+        data:
+          outcome === RegistrationStatus.NO_SHOW
+            ? { status: outcome, paymentDueAt: null }
+            : { status: outcome, paymentDueAt: null, cancelledAt: completedAt },
       });
       if (changed.count !== 1) continue;
 
@@ -3832,10 +4305,7 @@ export class EventsService {
           },
           data: { status: PaymentStatus.CLOSED },
         });
-      } else if (
-        outcome === RegistrationStatus.NO_SHOW &&
-        team.order
-      ) {
+      } else if (outcome === RegistrationStatus.NO_SHOW && team.order) {
         await completeOrderFulfillment(tx, {
           orderId: team.order.id,
           actor,
@@ -3854,9 +4324,10 @@ export class EventsService {
         data: {
           actorId: actor.sub,
           actorRole: actor.roles[0],
-          action: outcome === RegistrationStatus.NO_SHOW
-            ? 'EVENT_TEAM_NO_SHOW'
-            : 'EVENT_REGISTRATION_EXPIRED',
+          action:
+            outcome === RegistrationStatus.NO_SHOW
+              ? 'EVENT_TEAM_NO_SHOW'
+              : 'EVENT_REGISTRATION_EXPIRED',
           objectType: 'EventTeam',
           objectId: team.id,
           oldValue: {

@@ -3,7 +3,9 @@ import { computed, nextTick, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 
 import MetricCard from "../../../../components/MetricCard.vue";
-import OperationsFrame from "../../../../components/OperationsFrame.vue";
+import OperationsFrame from '../../components/OperationsFrame.vue'
+import OperationTask from '../../components/OperationTask.vue'
+import { useOperationTask, reasonField } from '../../components/operation-task'
 import StatusBadge from "../../../../components/StatusBadge.vue";
 import { hasOperationsAccess } from "../../../../config/operations";
 import { endpoints } from "../../../../services/api";
@@ -18,7 +20,8 @@ import {
   type OpsDeepLinkQuery,
 } from "../../../../utils/work-item-deep-link";
 
-const session = useSessionStore();
+const task = useOperationTask()
+const session = useSessionStore()
 const games = ref<any[]>([]);
 const availability = ref<CourtAvailability | null>(null);
 const loading = ref(false);
@@ -104,6 +107,33 @@ const canCancelSelectedGame = computed(() => Boolean(
   ["DRAFT", "OPEN", "FULL"].includes(selectedGame.value.status) &&
   new Date(selectedGame.value.startsAt).getTime() > Date.now(),
 ));
+
+function checkInWindowState(game: any) {
+  if (game?.checkInWindow?.state) return game.checkInWindow.state;
+  const startsAt = new Date(game?.startsAt || "").getTime();
+  if (!Number.isFinite(startsAt)) return "CLOSED";
+  if (Date.now() < startsAt - 30 * 60_000) return "NOT_OPEN";
+  if (Date.now() <= startsAt + 30 * 60_000) return "OPEN";
+  return "CLOSED";
+}
+
+function checkInActionLabel(game: any) {
+  const state = checkInWindowState(game);
+  if (state === "NOT_OPEN") return "未到签到窗口";
+  if (state === "CLOSED")
+    return game?.checkInWindow?.mayHistoricallyOverride
+      ? "补录签到"
+      : "签到已过期";
+  return "签到";
+}
+
+function canCheckIn(game: any) {
+  const state = checkInWindowState(game);
+  return (
+    state === "OPEN" ||
+    (state === "CLOSED" && game?.checkInWindow?.mayHistoricallyOverride)
+  );
+}
 
 function shanghaiDate(offsetDays = 0) {
   const value = new Date(Date.now() + offsetDays * 86_400_000);
@@ -240,30 +270,13 @@ async function createGame() {
   }
 }
 
-async function publishGame() {
-  const game = selectedGame.value;
-  if (!game || game.status !== "DRAFT" || actionKey.value) return;
-  const modal = await uni.showModal({
-    title: "确认发布球局",
-    content: `“${game.title}”发布后会员可立即报名，时间、场地、人数与价格将作为履约依据。`,
-    editable: true,
-    placeholderText: "可填写发布说明（选填）",
-    confirmText: "确认发布",
-  });
-  if (!modal.confirm) return;
-  actionKey.value = `publish:${game.id}`;
-  errorMessage.value = "";
-  try {
-    await endpoints.publishGame(game.id, {
-      reason: String(modal.content || "").trim() || undefined,
-    });
-    uni.showToast({ title: "球局已发布", icon: "success" });
-    await load();
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || "球局发布失败。";
-  } finally {
-    actionKey.value = "";
-  }
+function publishGame() {
+  const game = selectedGame.value
+  if (!game || game.status !== 'DRAFT' || actionKey.value) return
+  task.start({ title: '发布球局', description: game.title + ' · 确认后会员可报名，时间、场地、人数与价格作为履约依据。',
+    confirmText: '确认发布', fields: [{ key: 'reason', label: '发布说明', required: false, max: 300 }],
+    submit: async ({ reason }) => { await endpoints.publishGame(game.id, { reason: reason || undefined }); await load(); return '球局已发布，会员可查看详情并报名。' },
+  })
 }
 
 async function promoteWaitlist() {
@@ -293,87 +306,28 @@ async function promoteWaitlist() {
   }
 }
 
-async function checkIn(player: any) {
-  const game = selectedGame.value;
-  if (!game || player.status !== "PAID" || actionKey.value) return;
-  const confirmed = await uni.showModal({
-    title: "确认到场签到",
-    content: `${player.user?.displayName || player.displayName || "报名球友"} · ${game.title}`,
-  });
-  if (!confirmed.confirm) return;
-  const startsAt = new Date(game.startsAt).getTime();
-  if (Number.isFinite(startsAt) && Date.now() < startsAt - 30 * 60_000) {
-    errorMessage.value = "未到签到窗口，不能提前签到。";
-    return;
-  }
-  let overrideReason: string | undefined;
-  if (Number.isFinite(startsAt) && Date.now() > startsAt + 30 * 60_000) {
-    if (!session.roles.some((role) => ["ADMIN", "SUPER_ADMIN"].includes(role))) {
-      errorMessage.value = "已过签到窗口，请由管理员历史补录。";
-      return;
-    }
-    const override = await uni.showModal({
-      title: "历史补录签到",
-      content: "",
-      editable: true,
-      placeholderText: "填写迟到补录原因（2-300字）",
-      confirmText: "确认补录",
-    });
-    overrideReason = String(override.content || "").trim();
-    if (!override.confirm || overrideReason.length < 2) return;
-  }
-  actionKey.value = `checkin:${player.id}`;
-  errorMessage.value = "";
-  try {
-    await endpoints.checkInGame(
-      game.id,
-      player.id,
-      overrideReason ? { overrideReason } : {},
-    );
-    uni.showToast({ title: "已签到", icon: "success" });
-    await load();
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || "签到失败。";
-  } finally {
-    actionKey.value = "";
-  }
+function checkIn(player: any) {
+  const game = selectedGame.value
+  if (!game || player.status !== 'PAID' || actionKey.value) return
+  const windowState = checkInWindowState(game)
+  if (windowState === 'NOT_OPEN' || (windowState === 'CLOSED' && !game.checkInWindow?.mayHistoricallyOverride)) { errorMessage.value = '当前不在签到窗口，请核对时间或联系管理员。'; return }
+  task.start({ title: windowState === 'CLOSED' ? '历史补录签到' : '确认到场签到',
+    description: (player.user?.displayName || player.displayName || '当前球友') + ' · ' + game.title + '。请核对本人到场。',
+    confirmText: '确认签到', fields: windowState === 'CLOSED' ? [reasonField('补录依据')] : [],
+    submit: async ({ reason }) => { await endpoints.checkInGame(game.id, player.id, reason ? { overrideReason: reason } : {}); await load(); return '到场签到已记录，不能重复核销。' },
+  })
 }
 
-async function cancelGame() {
-  const game = selectedGame.value;
-  if (!game || !canCancelSelectedGame.value || actionKey.value) return;
-  const modal = await uni.showModal({
-    title: "取消球局",
-    content: "已支付报名只生成待财务审批的退款申请，不会直接退款。",
-    editable: true,
-    placeholderText: "填写取消原因（2-300字）",
-    confirmText: "确认取消",
-  });
-  const reason = String(modal.content || "").trim();
-  if (!modal.confirm || reason.length < 2 || reason.length > 300) {
-    if (modal.confirm) errorMessage.value = "取消原因需要 2-300 个字。";
-    return;
-  }
-  actionKey.value = `cancel:${game.id}`;
-  errorMessage.value = "";
-  const command = { reason };
-  try {
-    const result: any = await withPendingCreationKey(
-      `game.cancel.${game.id}`,
-      command,
-      (idempotencyKey) => endpoints.cancelGame(game.id, { reason, idempotencyKey }),
-    );
-    const refundCount = Number(result?.refundRequestCount || 0);
-    uni.showToast({
-      title: refundCount ? `已取消，${refundCount}笔退款待审` : "球局已取消",
-      icon: "success",
-    });
-    await load();
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || "球局取消失败。";
-  } finally {
-    actionKey.value = "";
-  }
+function cancelGame() {
+  const game = selectedGame.value
+  if (!game || !canCancelSelectedGame.value || actionKey.value) return
+  task.start({ title: '取消整场球局', description: game.title + ' · 释放场地与报名；已付报名生成退款申请，待财务审批，不等于退款已到账。',
+    confirmText: '确认取消整场球局', fields: [reasonField('取消原因', ['场馆临时维护','人数不足无法成局','组织安排有变'])],
+    submit: async ({ reason }) => {
+      const result: any = await withPendingCreationKey('game.cancel.' + game.id, { reason }, idempotencyKey => endpoints.cancelGame(game.id, { reason, idempotencyKey }))
+      await load(); return '球局已取消，已生成 ' + Number(result?.refundRequestCount || 0) + ' 笔退款申请，后续进度在退款待办查看。'
+    },
+  })
 }
 
 async function completeGame() {
@@ -406,7 +360,8 @@ onShow(load);
 </script>
 
 <template>
-  <OperationsFrame access="games" title="球局运营" eyebrow="GAME OPERATIONS" :role="roleLabel" :description="canManageAllGames ? '管理员可查看并处理全部主理人球局；主理人仍只操作本人球局。' : '从草稿创建、发布报名、候补晋级、现场签到到结束结算，主理人仅操作本人球局。'">
+  <OperationsFrame access="games" icon="sport" title="球局运营" eyebrow="GAME OPERATIONS" :role="roleLabel" :description="canManageAllGames ? '管理员可查看并处理全部主理人球局；主理人仍只操作本人球局。' : '从草稿创建、发布报名、候补晋级、现场签到到结束结算，主理人仅操作本人球局。'">
+    <OperationTask :task="task" />
     <view v-if="errorMessage" class="card error-panel">
       <view><text class="panel-title">操作未完成</text><text class="muted">{{ errorMessage }}</text></view>
       <button class="secondary inline" :disabled="loading || Boolean(actionKey)" @tap="load">重试</button>
@@ -461,7 +416,7 @@ onShow(load);
       <view class="section-title">报名与现场签到 <text class="section-note">已到 {{ checkedIn }} / {{ seated.length }}</text></view>
       <view v-for="player in seated" :key="player.id" class="card player-row">
         <view><text class="player-name">{{ player.user?.displayName || player.displayName || "报名球友" }}</text><text class="muted">状态：{{ player.status }}</text></view>
-        <button v-if="player.status === 'PAID' && player.order?.status !== 'REFUND_PENDING' && selectedGame.status !== 'COMPLETED'" class="secondary inline" :loading="actionKey === `checkin:${player.id}`" :disabled="Boolean(actionKey)" @tap="checkIn(player)">签到</button><StatusBadge v-else :value="player.order?.status === 'REFUND_PENDING' ? 'REFUND_PENDING' : player.status" />
+        <button v-if="player.status === 'PAID' && player.order?.status !== 'REFUND_PENDING' && selectedGame.status !== 'COMPLETED'" class="secondary inline check-in-action" :loading="actionKey === `checkin:${player.id}`" :disabled="Boolean(actionKey) || !canCheckIn(selectedGame)" @tap="checkIn(player)">{{ checkInActionLabel(selectedGame) }}</button><StatusBadge v-else :value="player.order?.status === 'REFUND_PENDING' ? 'REFUND_PENDING' : player.status" />
       </view>
       <view v-if="!seated.length" class="empty card">当前球局暂无有效报名。</view>
     </template>
@@ -474,6 +429,6 @@ onShow(load);
 .metric-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14rpx; margin-top:22rpx; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.panel-title { display:block; margin-bottom:8rpx; font-size:28rpx; font-weight:800; }.error-panel { display:flex; align-items:center; justify-content:space-between; gap:16rpx; margin-top:22rpx; color:#8a3636; background:#fff4f2; }.error-panel .muted { display:block; line-height:1.5; }
 .create-form { display:grid; gap:16rpx; }.text-input,.description-input,.field-row { box-sizing:border-box; width:100%; padding:20rpx; background:#f3f6f3; border-radius:16rpx; font-size:24rpx; }.description-input { min-height:120rpx; }.field-row { display:flex; align-items:center; justify-content:space-between; min-height:72rpx; }.time-grid { display:grid; grid-template-columns:1fr 1fr; gap:12rpx; }.fee-input { width:180rpx; text-align:right; }.guardrail { color:#7b6940; font-size:22rpx; line-height:1.6; }.create-form button { width:100%; margin:0; }
 .game-tabs { margin-bottom:18rpx; }.tab-row { display:flex; gap:12rpx; }.game-tab { display:flex; flex:0 0 520rpx; align-items:center; justify-content:center; min-height:84rpx; margin:0; padding:12rpx 22rpx; color:#667169; background:#e8efea; border-radius:18rpx; line-height:1.35; overflow-wrap:anywhere; white-space:normal; }.game-tab.active { color:#fff; background:#17653d; }.game-summary { padding:24rpx; }.game-title,.player-name { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; }.summary-copy { display:block; margin:18rpx 0; line-height:1.6; }.game-summary button { margin:0; width:100%; }.settled { padding:18rpx; color:#17653d; background:#e8f4eb; border-radius:16rpx; text-align:center; }
-.waitlist-card { display:grid; gap:14rpx; }.wait-row { display:flex; align-items:center; justify-content:space-between; padding-bottom:12rpx; border-bottom:1rpx solid #edf0ed; font-size:24rpx; }.waitlist-card button { width:100%; margin:0; }.player-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; margin-top:14rpx; padding:20rpx 24rpx; }.inline { min-width:108rpx; min-height:56rpx; margin:0; padding:0 14rpx; line-height:56rpx; font-size:22rpx; }.empty { color:#758079; text-align:center; }.boundary { margin-top:22rpx; line-height:1.7; }.boundary .muted { display:block; }
+.waitlist-card { display:grid; gap:14rpx; }.wait-row { display:flex; align-items:center; justify-content:space-between; padding-bottom:12rpx; border-bottom:1rpx solid #edf0ed; font-size:24rpx; }.waitlist-card button { width:100%; margin:0; }.player-row { display:flex; align-items:center; justify-content:space-between; gap:12rpx; margin-top:14rpx; padding:20rpx 24rpx; }.inline { min-width:108rpx; min-height:88rpx; margin:0; padding:0 14rpx; line-height:1.35; font-size:22rpx; }.check-in-action { max-width:190rpx; white-space:normal; }.empty { color:#758079; text-align:center; }.boundary { margin-top:22rpx; line-height:1.7; }.boundary .muted { display:block; }
 .deep-link-target { border-color:#d69a24!important; box-shadow:0 0 0 4rpx rgba(214,154,36,.18); }
 </style>

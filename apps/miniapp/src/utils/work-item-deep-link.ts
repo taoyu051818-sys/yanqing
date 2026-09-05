@@ -52,6 +52,7 @@ const kindPlan: Record<string, { page: OpsPage; focus: string }> = {
     page: "coach",
     focus: "consume-correction",
   },
+  TRAINING_SESSION_OPERATION: { page: "coach", focus: "session" },
   TRAINING_ATTENDANCE: { page: "coach", focus: "attendance" },
   TRAINING_CONSUME: { page: "coach", focus: "attendance" },
   TRAINING_TRIAL: { page: "coach", focus: "trial" },

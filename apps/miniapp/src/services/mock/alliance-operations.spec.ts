@@ -158,7 +158,7 @@ describe("miniapp mock alliance operations", () => {
     await expect(request("POST", "/venues/bookings", {
       date: bookingDate,
       courtId: "court-1",
-      slotId: "slot-7",
+      slotId: "slot-H19",
       sourceChannel: "NEWCOMER_COUPON",
       couponCode: claimed.code,
       creationIdempotencyKey: "newcomer-prime-denied-1",
@@ -166,12 +166,12 @@ describe("miniapp mock alliance operations", () => {
     const experienceOrder = await request("POST", "/venues/bookings", {
       date: bookingDate,
       courtId: "court-1",
-      slotId: "slot-1",
+      slotId: "slot-H07",
       sourceChannel: "NEWCOMER_COUPON",
       couponCode: claimed.code,
       creationIdempotencyKey: "newcomer-daytime-order-1",
     });
-    expect(experienceOrder).toMatchObject({ payableCents: 4_800, discountCents: 2_000 });
+    expect(experienceOrder).toMatchObject({ payableCents: 2_100, discountCents: 900 });
     expect(experienceOrder).not.toHaveProperty("parameterSnapshot");
     const persistedExperienceOrder = getOrders().find(
       (order) => order.id === experienceOrder.id,

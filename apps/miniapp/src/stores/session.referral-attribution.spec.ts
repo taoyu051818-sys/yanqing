@@ -54,6 +54,21 @@ describe('session referral attribution', () => {
     expect(pendingReferralInvite()).toBeNull()
   })
 
+  it('updates authentication immediately after first login and logout without a reload', async () => {
+    endpointMocks.me.mockReset().mockResolvedValue(member())
+    const session = useSessionStore()
+
+    expect(session.isAuthenticated).toBe(false)
+    await session.loginForDevelopment('MEMBER')
+    expect(session.isAuthenticated).toBe(true)
+    expect(storage.get('yanqing_access_token')).toBe('token')
+
+    session.logout()
+    expect(session.isAuthenticated).toBe(false)
+    expect(storage.has('yanqing_access_token')).toBe(false)
+    expect(storage.has('yanqing_actor_id')).toBe(false)
+  })
+
   it('keeps an existing immutable relation and discards a later invite', async () => {
     endpointMocks.me.mockReset().mockResolvedValue(member(true))
     captureReferralAttribution({ query: { invite: inviteCode } })

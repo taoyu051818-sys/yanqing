@@ -1,3 +1,5 @@
+import { pendingPaymentDeadline } from './pending-order-policy.js'
+
 type JsonRecord = Record<string, any>
 
 const record = (value: unknown): JsonRecord =>
@@ -152,6 +154,8 @@ export const orderResponse = (value: unknown) => {
     paidAt: order.paidAt,
     completedAt: order.completedAt,
     cancelledAt: order.cancelledAt,
+    paymentExpiresAt:
+      pendingPaymentDeadline(order)?.toISOString(),
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
     member: member.id

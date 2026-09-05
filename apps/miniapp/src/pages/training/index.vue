@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
+import { useSessionStore } from '../../stores/session'
+import { requestMemberLogin, openMemberPage } from '../../utils/member-navigation'
 import SectionEmpty from '../../components/SectionEmpty.vue'
+import ReasonForm from '../../components/ReasonForm.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 import { endpoints } from '../../services/api'
-import { idempotencyKey, money, shortDate } from '../../utils/format'
+import { money, shortDate } from '../../utils/format'
 import { withPendingCreationKey } from '../../utils/pending-creation-key'
 import {
   parseYuanToCents,
@@ -12,6 +15,9 @@ import {
   trainingRefundLimitCents,
 } from '../../utils/training-refund'
 
+const session = useSessionStore()
+const audience = ref('ALL')
+const expandedEnrollments = ref<Record<string, boolean>>({})
 const products = ref<any[]>([])
 const enrollments = ref<any[]>([])
 const students = ref<any[]>([])
@@ -22,10 +28,34 @@ const error = ref('')
 const savingStudent = ref(false)
 const purchasingId = ref('')
 const refundingId = ref('')
+const selectedProductId = ref('')
+const selectedClassId = ref('')
+const selectedStudentId = ref('')
+const purchaseError = ref('')
+const eligibleStudents = computed(() => students.value.filter(item => item.guardianConsentStatus))
+const refundItemId = ref('')
+const refundMaximum = ref(0)
+const refundOrder = ref<any>(null)
+const refundError = ref('')
+const customRefund = ref(false)
+const refundAmount = ref('')
+function preparePurchase(product: any) {
+  if (purchasingId.value) return
+  selectedProductId.value = product.id
+  selectedClassId.value = product.classes?.length === 1 ? product.classes[0].id : ''
+  selectedStudentId.value = eligibleStudents.value.length === 1 ? eligibleStudents.value[0].id : ''
+  purchaseError.value = ''
+  if (product.audience === 'YOUTH' && !eligibleStudents.value.length) {
+    audience.value = 'YOUTH'
+    showStudentForm.value = true
+    uni.pageScrollTo({ scrollTop: 0, duration: 200 })
+  }
+}
 const showStudentForm = ref(false)
 const defaultBirthMonth = `${new Date().getFullYear() - 10}-01`
 const studentForm = ref({ displayName: '', birthMonth: defaultBirthMonth, guardianConsentStatus: false })
 const maxBirthMonth = computed(() => new Date().toISOString().slice(0, 7))
+function openStudentForm() { showStudentForm.value = true; uni.pageScrollTo({ scrollTop: 0, duration: 200 }) }
 
 onLoad((query) => {
   const requested = query?.tab
@@ -33,7 +63,7 @@ onLoad((query) => {
     tab.value = requested
   }
 })
-const hasYouthProducts = computed(() => products.value.some((item) => item.audience === 'YOUTH'))
+const visibleProducts = computed(() => products.value.filter((item) => audience.value === 'ALL' || item.audience === audience.value))
 const consumed = (item: any) => Number(item.consumedSessions ?? item.usedSessions ?? 0)
 const refundedCents = (item: any) => Number(item.refundedCents || 0)
 const unusedPrepaidCents = (item: any) => Number(item.prepaidBalanceCents || 0)
@@ -71,9 +101,11 @@ const paymentComposition = (order: any) => {
 const setBirthMonth = (event: any) => { studentForm.value.birthMonth = String(event.detail.value) }
 const setConsent = (event: any) => { studentForm.value.guardianConsentStatus = Boolean(event.detail.value) }
 async function load() {
+  if (!session.isAuthenticated) return requestMemberLogin('/pages/training/index?tab=' + tab.value)
   loading.value = true
   error.value = ''
   try {
+    if (!(await session.hydrate())) { throw new Error('报名人信息暂未同步，请重试') }
     [products.value, students.value, enrollments.value, trials.value] = await Promise.all([
       endpoints.trainingProducts(),
       endpoints.trainingStudents(),
@@ -85,18 +117,8 @@ async function load() {
   finally { loading.value = false }
 }
 
-function choose<T>(items: T[], label: (item: T) => string): Promise<T | undefined> {
-  if (items.length <= 1) return Promise.resolve(items[0])
-  return new Promise((resolve) => {
-    uni.showActionSheet({
-      itemList: items.map(label),
-      success: ({ tapIndex }) => resolve(items[tapIndex]),
-      fail: () => resolve(undefined),
-    })
-  })
-}
-
 async function createStudent() {
+  if (savingStudent.value) return
   const displayName = studentForm.value.displayName.trim()
   if (!displayName) return uni.showToast({ title: '请填写学员姓名', icon: 'none' })
   if (!studentForm.value.guardianConsentStatus) {
@@ -104,7 +126,7 @@ async function createStudent() {
   }
   savingStudent.value = true
   try {
-    await endpoints.createTrainingStudent({
+    const created: any = await endpoints.createTrainingStudent({
       displayName,
       birthMonth: `${studentForm.value.birthMonth}-01T00:00:00.000Z`,
       guardianConsentStatus: true,
@@ -112,6 +134,7 @@ async function createStudent() {
     studentForm.value = { displayName: '', birthMonth: defaultBirthMonth, guardianConsentStatus: false }
     showStudentForm.value = false
     await load()
+    selectedStudentId.value = created?.id || eligibleStudents.value[eligibleStudents.value.length - 1]?.id || ''
     uni.showToast({ title: '学员档案已建立', icon: 'success' })
   } catch (cause: any) {
     uni.showToast({ title: cause.message, icon: 'none' })
@@ -121,160 +144,151 @@ async function createStudent() {
 }
 
 async function purchase(product: any) {
-  let student: any
-  if (product.audience === 'YOUTH') {
-    const eligibleStudents = students.value.filter((item) => item.guardianConsentStatus)
-    if (!eligibleStudents.length) {
-      showStudentForm.value = true
-      return uni.showModal({
-        title: '先建立学员档案',
-        content: '青少年报名必须绑定监护人主账号并完成授权。请在本页填写学员信息。',
-        showCancel: false,
-      })
-    }
-    student = await choose(eligibleStudents, (item) => `${item.displayName}（已授权）`)
-    if (!student) return
+  if (purchasingId.value) return
+  purchaseError.value = ''
+  if (product.classes?.length && !product.classes.some((item: any) => item.id === selectedClassId.value)) {
+    purchaseError.value = '请先选择上课班级'; return
   }
-  const selectedClass = await choose(product.classes || [], (item: any) => item.name)
-  if (product.classes?.length && !selectedClass) return
+  if (product.audience === 'YOUTH' && !eligibleStudents.value.some(item => item.id === selectedStudentId.value)) {
+    purchaseError.value = '请选择已由监护人授权的学员；没有档案时可在上方新建'; return
+  }
   purchasingId.value = product.id
   try {
     const command = {
       productId: product.id,
-      classId: selectedClass?.id,
-      studentId: student?.id,
+      classId: selectedClassId.value || undefined,
+      studentId: product.audience === 'YOUTH' ? selectedStudentId.value : undefined,
       sourceChannel: 'MINI_PROGRAM',
     }
-    const order: any = await withPendingCreationKey('training.purchase', command, (creationIdempotencyKey) =>
+    const order: any = await withPendingCreationKey('training.purchase', command, creationIdempotencyKey =>
       endpoints.purchaseTraining({ ...command, creationIdempotencyKey }),
     )
-    uni.showModal({
-      title: '课包订单已创建',
-      content: `${order.orderNo} 待支付。付款记培训预收，实际消课后才确认收入。`,
-      confirmText: '去订单支付',
-      success: ({ confirm }) => confirm && uni.navigateTo({ url: '/pages/order/index' }),
-    })
-  } catch (cause: any) { uni.showToast({ title: cause.message, icon: 'none' }) }
+    await openMemberPage('/pages/order/index?id=' + encodeURIComponent(order.id))
+  } catch (cause: any) { purchaseError.value = cause.message || '报名失败，请重试' }
   finally { purchasingId.value = '' }
 }
 
-async function requestTrainingRefund(item: any) {
-  if (!item.orderId || refundingId.value) return
+async function prepareRefund(item: any) {
+  if (refundingId.value) return
+  refundItemId.value = item.id
   refundingId.value = item.id
+  refundError.value = ''
+  refundOrder.value = null
+  customRefund.value = false
+  refundMaximum.value = 0
   try {
     const order: any = await endpoints.order(item.orderId)
-    const pendingCents = pendingTrainingRefundCents(order)
-    if (pendingCents > 0 || order.status === 'REFUND_PENDING') {
-      return uni.showModal({
-        title: '退费申请处理中',
-        content: `已有 ${money(pendingCents)} 待审批，完成或驳回后才能再次申请。`,
-        showCancel: false,
-      })
+    if (pendingTrainingRefundCents(order) > 0 || order.status === 'REFUND_PENDING') {
+      refundError.value = '已有退费申请处理中，请在订单查看进度，处理结束后再申请。'; return
     }
-    const maximumCents = trainingRefundLimitCents(item, order)
-    if (maximumCents <= 0) {
-      return uni.showModal({
-        title: '当前无可退余额',
-        content: '已消课收入不能直接退款；如消课记录有误，须先由教练发起、管理员复核冲正。',
-        showCancel: false,
-      })
+    refundMaximum.value = trainingRefundLimitCents(item, order)
+    if (refundMaximum.value <= 0) {
+      refundError.value = '当前没有可退的未使用课时余额；如消课记录有误，请联系教练或前台。'; return
     }
-    const scope = await uni.showModal({
-      title: '核对可退范围',
-      content: `最大可退 ${money(maximumCents)}，仅来自未消课预收。原支付构成：${paymentComposition(order)}。退款审批后按原规则退回，不会冲掉已确认消课收入。`,
-      confirmText: '填写金额',
-    })
-    if (!scope.confirm) return
-    const amountResult = await uni.showModal({
-      title: `退费金额（最多 ${money(maximumCents)}）`,
-      content: (maximumCents / 100).toFixed(2),
-      editable: true,
-      placeholderText: '请输入金额，单位元，最多两位小数',
-      confirmText: '下一步',
-    })
-    if (!amountResult.confirm) return
-    const amountCents = parseYuanToCents(amountResult.content)
-    if (amountCents === null || amountCents > maximumCents) {
-      return uni.showToast({
-        title: `请输入 0.01 至 ${(maximumCents / 100).toFixed(2)} 元`,
-        icon: 'none',
-      })
-    }
-    const reasonResult = await uni.showModal({
-      title: `确认申请 ${money(amountCents)}`,
-      content: '退还未消课预收余额',
-      editable: true,
-      placeholderText: '请填写退费原因（至少2个字）',
-      confirmText: '提交申请',
-    })
-    if (!reasonResult.confirm) return
-    const reason = String(reasonResult.content || '').trim()
-    if (reason.length < 2) {
-      return uni.showToast({ title: '退费原因至少需要2个字', icon: 'none' })
-    }
-    await endpoints.refundOrder(order.id, {
-      amountCents,
-      reason,
-      idempotencyKey: idempotencyKey(`training-refund-${order.id}`),
-    })
+    refundAmount.value = (refundMaximum.value / 100).toFixed(2)
+    refundOrder.value = order
+  } catch (cause: any) { refundError.value = cause.message || '可退金额未同步，请重试' }
+  finally { refundingId.value = '' }
+}
+async function requestTrainingRefund(item: any, reason: string) {
+  if (!refundOrder.value || refundingId.value || refundItemId.value !== item.id) return
+  const amountCents = customRefund.value ? parseYuanToCents(refundAmount.value) : refundMaximum.value
+  if (amountCents === null || amountCents <= 0 || amountCents > refundMaximum.value) {
+    refundError.value = '请输入 0.01 至 ' + (refundMaximum.value / 100).toFixed(2) + ' 元'; return
+  }
+  refundingId.value = item.id
+  refundError.value = ''
+  try {
+    const command = { orderId: item.orderId, amountCents, reason }
+    await withPendingCreationKey('training.refund', command, idempotencyKey =>
+      endpoints.refundOrder(item.orderId, { amountCents, reason, idempotencyKey }),
+    )
+    refundItemId.value = ''
     uni.showToast({ title: '退费申请已提交', icon: 'success' })
     await load()
-  } catch (cause: any) {
-    uni.showToast({ title: cause.message || '退费申请失败', icon: 'none' })
-  } finally {
-    refundingId.value = ''
-  }
+    await openMemberPage('/pages/order/index?id=' + encodeURIComponent(item.orderId))
+  } catch (cause: any) { refundError.value = cause.message || '退费申请失败，请重试' }
+  finally { refundingId.value = '' }
 }
 onShow(load)
 </script>
 <template>
   <view class="page safe-bottom">
-    <view class="ledger-banner"><text class="banner-title">培训独立经营账</text><text>购买课包不立即确认收入；每次签到消课确认有效收入，其中20%计入场馆合同收入，不另收场地费。</text></view>
+    <view class="course-intro"><text class="banner-title">{{ tab === 'products' ? '找到适合你的课程' : tab === 'mine' ? '我的课程' : '我的试听记录' }}</text><text>{{ tab === 'products' ? '先选课程，再选择班级与报名学员。' : '查看上课记录、剩余课时与老师反馈。' }}</text></view>
     <view v-if="error" class="card load-error"><text>{{ error }}</text><button class="secondary retry" @tap="load">重试</button></view>
-    <view class="tabs"><view :class="{ active: tab === 'products' }" @tap="tab='products'">课程课包</view><view :class="{ active: tab === 'mine' }" @tap="tab='mine'">我的课表</view><view :class="{ active: tab === 'trials' }" @tap="tab='trials'">试听结果</view></view>
+    <view class="tabs"><button :class="{ active: tab === 'products' }" @tap="tab='products'">找课程</button><button :class="{ active: tab === 'mine' }" @tap="tab='mine'">我的课程</button><button v-if="trials.length || tab === 'trials'" :class="{ active: tab === 'trials' }" @tap="tab='trials'">试听记录</button></view>
     <template v-if="tab === 'products'">
-      <view v-if="hasYouthProducts" class="card student-card">
+      <view class="audience-tabs"><button v-for="option in [{ value: 'ALL', label: '全部' }, { value: 'ADULT', label: '成人课程' }, { value: 'YOUTH', label: '青少年课程' }]" :key="option.value" :class="{ selected: audience === option.value }" @tap="audience = option.value">{{ option.label }}</button></view>
+      <view v-if="audience === 'YOUTH' || showStudentForm" class="card student-card">
         <view class="row"><view><text class="student-title">我的青少年学员</text><text class="student-tip">监护人主账号负责授权与报名</text></view><button class="mini" @tap="showStudentForm = !showStudentForm">{{ showStudentForm ? '收起' : '添加学员' }}</button></view>
         <view v-if="students.length" class="student-list">
           <view v-for="student in students" :key="student.id" class="student-row"><text>{{ student.displayName }}</text><text :class="student.guardianConsentStatus ? 'consent-ok' : 'consent-warn'">{{ student.guardianConsentStatus ? '已授权' : '待授权' }}</text></view>
         </view>
         <view v-else-if="!showStudentForm" class="student-tip empty-student">尚未建立学员档案，青少年课包暂不能报名。</view>
         <view v-if="showStudentForm" class="student-form">
-          <input v-model="studentForm.displayName" maxlength="40" placeholder="学员姓名或常用称呼" />
+          <text class="student-tip">学员姓名或常用称呼</text><input v-model="studentForm.displayName" aria-label="学员姓名" maxlength="40" placeholder="请填写学员姓名或常用称呼" />
           <picker mode="date" fields="month" :value="studentForm.birthMonth" :end="maxBirthMonth" @change="setBirthMonth"><view class="picker-row"><text>出生月份</text><text>{{ studentForm.birthMonth }}</text></view></picker>
           <view class="consent-row"><text>我确认是该学员监护人，并授权用于课程报名、出勤与紧急联系</text><switch color="#17653d" :checked="studentForm.guardianConsentStatus" @change="setConsent" /></view>
           <button class="primary save-student" :loading="savingStudent" :disabled="savingStudent" @tap="createStudent">保存并完成授权</button>
         </view>
       </view>
-      <view v-for="product in products" :key="product.id" class="card product">
+      <view v-for="product in visibleProducts" :key="product.id" class="card product">
         <view class="row"><text class="pill">{{ product.audience === 'YOUTH' ? '青少年' : '成人' }}</text><text class="muted">有效期 {{ product.validityDays }} 天</text></view>
         <text class="title">{{ product.name }}</text>
         <view class="details"><text>{{ product.totalSessions }}次课</text><text>{{ product.classes?.length || 0 }}个可选班级</text></view>
-        <view class="row footer"><text class="money">{{ money(product.priceCents) }}</text><button class="secondary buy" :loading="purchasingId === product.id" :disabled="Boolean(purchasingId)" @tap="purchase(product)">立即报名</button></view>
+        <view class="row footer"><text class="money">{{ money(product.priceCents) }}</text><button class="secondary buy" :loading="purchasingId === product.id" :disabled="Boolean(purchasingId)" @tap="preparePurchase(product)">选择报名</button></view>
+        <view v-if="selectedProductId === product.id" class="enroll-form">
+          <text class="student-title">确认报名信息</text>
+          <text class="muted">所选课程：{{ product.name }} · {{ money(product.priceCents) }}</text>
+          <view v-if="product.classes?.length">
+            <text class="student-tip">上课班级</text>
+            <picker :range="product.classes" range-key="name" :value="Math.max(0, product.classes.findIndex((item: any) => item.id === selectedClassId))" :disabled="Boolean(purchasingId)" @change="selectedClassId = product.classes[Number($event.detail.value)]?.id || ''"><view class="picker-row">{{ product.classes.find((item: any) => item.id === selectedClassId)?.name || '请选择班级' }} · 点击选择</view></picker>
+          </view>
+          <view v-if="product.audience === 'YOUTH'">
+            <text class="student-tip">报名学员</text>
+            <picker v-if="eligibleStudents.length" :range="eligibleStudents" range-key="displayName" :disabled="Boolean(purchasingId)" @change="selectedStudentId = eligibleStudents[Number($event.detail.value)]?.id || ''"><view class="picker-row">{{ eligibleStudents.find(item => item.id === selectedStudentId)?.displayName || '请选择已授权学员' }} · 点击选择</view></picker>
+            <button class="secondary" @tap="openStudentForm">新建学员档案</button>
+          </view>
+          <text v-else class="muted">报名人：{{ session.user?.displayName }}（本人）</text>
+          <text v-if="purchaseError" class="form-error" role="alert">{{ purchaseError }}</text>
+          <button class="primary" :loading="purchasingId === product.id" :disabled="Boolean(purchasingId)" @tap="purchase(product)">确认报名，下一步付款</button>
+          <button class="secondary" :disabled="Boolean(purchasingId)" @tap="selectedProductId = ''">暂不报名</button>
+        </view>
       </view>
-      <SectionEmpty v-if="!products.length && !loading && !error" title="暂无在售课包" />
+      <SectionEmpty v-if="!visibleProducts.length && !loading && !error" title="暂无在售课程" />
     </template>
     <template v-else-if="tab === 'mine'">
       <view v-for="item in enrollments" :key="item.id" class="card enrollment">
         <view class="row"><text class="title compact">{{ item.product?.name }}</text><StatusBadge :value="item.status" /></view>
         <text v-if="item.student" class="student-tip">学员：{{ item.student.displayName }}</text>
+        <text class="remaining">剩余 {{ Math.max(0, Number(item.remainingSessions ?? (item.totalSessions - consumed(item)))) }} 次课</text>
         <view class="progress"><view :style="{ width: `${Math.min(100, item.totalSessions ? consumed(item) / item.totalSessions * 100 : 0)}%` }"></view></view>
         <view class="row"><text class="muted">已消 {{ consumed(item) }}/{{ item.totalSessions }} 次</text><text class="muted">有效至 {{ shortDate(item.expiresAt) }}</text></view>
-        <view class="training-ledger">
-          <view><text class="ledger-label">培训预收款</text><text class="ledger-value">{{ money(receivedPrepaidCents(item)) }}</text></view>
-          <view><text class="ledger-label">已消课收入</text><text class="ledger-value confirmed">{{ money(confirmedRevenueCents(item)) }}</text></view>
-          <view><text class="ledger-label">未消课余额</text><text class="ledger-value">{{ money(unusedPrepaidCents(item)) }}</text></view>
+        <button class="details-toggle" @tap="expandedEnrollments[item.id] = !expandedEnrollments[item.id]">{{ expandedEnrollments[item.id] ? '收起费用明细' : '查看费用明细' }}</button>
+        <view v-if="expandedEnrollments[item.id]" class="training-ledger">
+          <view><text class="ledger-label">实付学费</text><text class="ledger-value">{{ money(receivedPrepaidCents(item)) }}</text></view>
+          <view><text class="ledger-label">已使用课时费用</text><text class="ledger-value confirmed">{{ money(confirmedRevenueCents(item)) }}</text></view>
+          <view><text class="ledger-label">未使用课时金额</text><text class="ledger-value">{{ money(unusedPrepaidCents(item)) }}</text></view>
           <view><text class="ledger-label">累计退费</text><text class="ledger-value refunded">{{ money(refundedCents(item)) }}</text></view>
         </view>
-        <text class="ledger-note">四栏独立：购课先记预收；仅经确认的消课转为收入；退费只冲未消课余额，已消课须先走冲正。</text>
+        <text v-if="expandedEnrollments[item.id]" class="ledger-note">费用按上课与退费记录更新；如发现上课记录有误，请联系教练核实。</text>
         <view v-if="item.regulatoryWarnings?.length" class="regulatory-warning"><text v-for="warning in item.regulatoryWarnings" :key="warning">{{ warning }}</text></view>
         <view v-if="canRequestRefund(item)" class="refund-actions">
-          <text class="refund-limit">当前最多可申请 {{ money(unusedPrepaidCents(item)) }}，最终以订单待审批占用校验为准</text>
-          <button class="secondary refund-button" :loading="refundingId === item.id" :disabled="Boolean(refundingId)" @tap="requestTrainingRefund(item)">申请未消课退费</button>
+          <text class="refund-limit">未使用课时金额 {{ money(unusedPrepaidCents(item)) }}，可退金额以申请时核对为准</text>
+          <button class="secondary refund-button" :loading="refundingId === item.id" :disabled="Boolean(refundingId)" @tap="prepareRefund(item)">申请退费</button>
         </view>
+        <view v-if="refundItemId === item.id && !refundOrder" class="enroll-form"><text v-if="refundingId" class="muted">正在核对可退金额…</text><text v-if="refundError" class="form-error" role="alert">{{ refundError }}</text><button class="secondary" @tap="openMemberPage('/pages/order/index?id=' + encodeURIComponent(item.orderId))">查看相关订单</button></view>
+        <ReasonForm v-if="refundItemId === item.id && refundOrder" :key="item.id" title="申请未使用课时退费" :description="'最多可退 ' + money(refundMaximum) + '；原支付方式：' + paymentComposition(refundOrder) + '。提交后等待审核，按原支付规则退回，已使用课时不在退费范围。'" :busy="Boolean(refundingId)" :error="refundError" confirm-text="确认申请退费" @cancel="refundItemId = ''" @submit="requestTrainingRefund(item, $event)">
+          <view class="refund-amount">
+            <button class="secondary" :aria-pressed="!customRefund" :disabled="Boolean(refundingId)" @tap="customRefund = false; refundError = ''">全部可退余额 {{ money(refundMaximum) }}</button>
+            <button class="secondary" :aria-pressed="customRefund" :disabled="Boolean(refundingId)" @tap="customRefund = true; refundError = ''">指定退费金额</button>
+            <view v-if="customRefund"><text class="student-tip">申请金额（元）</text><input v-model="refundAmount" class="input" aria-label="申请退费金额" type="digit" :disabled="Boolean(refundingId)" /></view>
+          </view>
+        </ReasonForm>
         <view v-if="item.attendances?.[0]" class="feedback">最近：{{ item.attendances[0].feedback || '已完成签到消课' }}</view>
       </view>
-      <SectionEmpty v-if="!enrollments.length && !loading && !error" title="还没有课程" />
+      <SectionEmpty v-if="!enrollments.length && !loading && !error" title="还没有课程" description="找到合适的课程并报名后，可以在这里查看课时。" />
+      <button v-if="!enrollments.length && !loading" class="secondary" @tap="tab = 'products'">去找课程</button>
     </template>
     <template v-else>
       <view v-for="trial in trials" :key="trial.id" class="card trial-result">
@@ -292,9 +306,16 @@ onShow(load)
   </view>
 </template>
 <style scoped>
-.ledger-banner { padding: 28rpx; margin-bottom: 22rpx; color: rgba(255,255,255,.78); background: linear-gradient(135deg,#173e2a,#236d47); border-radius: 28rpx; font-size: 23rpx; line-height: 1.7; }
+.enroll-form { display:grid; gap:20rpx; margin-top:22rpx; padding:24rpx; border:1rpx solid var(--color-border); border-radius:20rpx; background:var(--color-surface-subtle); }.enroll-form button,.refund-amount button { width:100%; margin:0; padding:18rpx 12rpx; font-size:26rpx; }.form-error { color:var(--color-danger); line-height:1.6; }.refund-amount { display:grid; gap:16rpx; }.refund-amount button[aria-pressed="true"] { outline:2rpx solid var(--color-primary); }
+
+.audience-tabs { display:flex; gap:12rpx; margin-bottom:22rpx; }
+.audience-tabs button { flex:1; margin:0; font-size:24rpx; color:var(--color-muted); background:transparent; }
+.audience-tabs .selected { background:var(--color-primary-soft); color:var(--color-primary); }
+.remaining { display:block; margin-top:22rpx; color:var(--color-primary); font-size:36rpx; font-weight:800; }
+.details-toggle { width:100%; margin:16rpx 0 0; color:var(--color-muted); background:transparent; font-size:24rpx; }
+.course-intro { padding: 28rpx; margin-bottom: 22rpx; color: rgba(255,255,255,.78); background: linear-gradient(135deg,#173e2a,#236d47); border-radius: 28rpx; font-size: 23rpx; line-height: 1.7; }
 .banner-title { display: block; margin-bottom: 10rpx; color: #fff; font-size: 31rpx; font-weight: 800; }
-.tabs { display: flex; gap: 12rpx; padding: 8rpx; margin-bottom: 22rpx; background: #e7ece8; border-radius: 22rpx; }.tabs view { flex: 1; padding: 20rpx; text-align: center; }.tabs .active { background: #fff; border-radius: 17rpx; font-weight: 700; }
+.tabs { display: flex; gap: 12rpx; padding: 8rpx; margin-bottom: 22rpx; background: #e7ece8; border-radius: 22rpx; }.tabs button { flex: 1; width:100%; padding:16rpx 6rpx; margin:0; background:transparent; color:var(--color-muted); font-size:26rpx; text-align:center; }.tabs .active { background: #fff; border-radius: 17rpx; font-weight: 700; }
 .title { display: block; margin: 24rpx 0 16rpx; font-size: 33rpx; font-weight: 800; }.title.compact { margin: 0; }
 .details { display: flex; gap: 28rpx; color: #6e776f; font-size: 24rpx; }.footer { margin-top: 26rpx; }.buy { min-width: 180rpx; margin: 0; }
 .progress { height: 12rpx; margin: 28rpx 0 12rpx; overflow: hidden; background: #edf0ed; border-radius: 99rpx; }.progress view { height: 100%; background: #1b7045; border-radius: inherit; }

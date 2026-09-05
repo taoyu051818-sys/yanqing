@@ -238,6 +238,14 @@ const makePrisma = () => ({
       .fn()
       .mockResolvedValue([{ id: 'settlement-1', status: 'SETTLED' }]),
   },
+  systemParameter: {
+    findFirst: vi.fn().mockResolvedValue({
+      id: 'operating-share-v1',
+      value: 1_500,
+      effectiveFrom: date('2026-01-01T00:00:00.000Z'),
+      effectiveTo: null,
+    }),
+  },
 })
 
 describe('DashboardService', () => {
@@ -272,6 +280,15 @@ describe('DashboardService', () => {
       [BusinessType.EVENT]: 3_000,
       [BusinessType.TRAINING]: 8_000,
       [BusinessType.RECHARGE]: 0,
+    })
+    expect(result.operatingShare).toMatchObject({
+      basis: 'REALIZED_NET_REVENUE',
+      basisRevenueCents: 25_000,
+      accruedCents: 3_750,
+      defaultRateBps: 1_500,
+      rateAtPeriodEndBps: 1_500,
+      rateParameterId: 'operating-share-v1',
+      rechargeIncluded: false,
     })
     expect(result.training).toMatchObject({
       prepaidCollectedCents: 10_000,

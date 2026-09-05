@@ -34,6 +34,8 @@ const emptyPrisma = () => ({
   trainingConsumeCorrection: { findMany: vi.fn().mockResolvedValue([]) },
   trainingTrial: { findMany: vi.fn().mockResolvedValue([]) },
   youthTrainingRule: { findMany: vi.fn().mockResolvedValue([]) },
+  game: { findMany: vi.fn().mockResolvedValue([]) },
+  trainingSession: { findMany: vi.fn().mockResolvedValue([]) },
   userRole: { findMany: vi.fn().mockResolvedValue([]) },
 });
 
@@ -102,7 +104,7 @@ describe('WorkItemsService fulfillment and training handoffs', () => {
     }
   });
 
-  it('queries and maps only due venue/game/event fulfillment orders', async () => {
+  it('queries and maps due venue/event fulfillment orders without creating one task per game player', async () => {
     const prisma = emptyPrisma();
     const createdAt = new Date('2026-08-29T00:00:00.000Z');
     prisma.order.findMany.mockResolvedValue([
@@ -117,25 +119,11 @@ describe('WorkItemsService fulfillment and training handoffs', () => {
           {
             id: 'booking-1',
             status: BookingStatus.CHECKED_IN,
+            startsAt: createdAt,
             endsAt: createdAt,
           },
         ],
         gameRegistration: null,
-        eventTeam: null,
-      },
-      {
-        id: 'game-order',
-        orderNo: 'GM001',
-        title: '周末球局',
-        status: OrderStatus.PAID,
-        businessType: BusinessType.GAME,
-        createdAt,
-        bookings: [],
-        gameRegistration: {
-          id: 'registration-1',
-          status: RegistrationStatus.PAID,
-          game: { id: 'game-1', title: '周末球局', endsAt: createdAt },
-        },
         eventTeam: null,
       },
       {
@@ -160,7 +148,6 @@ describe('WorkItemsService fulfillment and training handoffs', () => {
     expect(result.map((item) => item.kind)).toEqual([
       'ORDER_FULFILLMENT',
       'ORDER_FULFILLMENT',
-      'ORDER_FULFILLMENT',
     ]);
     expect(result).toEqual(
       expect.arrayContaining([
@@ -173,16 +160,7 @@ describe('WorkItemsService fulfillment and training handoffs', () => {
             businessType: BusinessType.VENUE,
             fulfillmentObjectId: 'booking-1',
           }),
-        }),
-        expect.objectContaining({
-          objectId: 'game-order',
-          action:
-            '/packages/ops/pages/host/index?focus=fulfillment&orderId=game-order',
-          ownerRoles: [AppRole.HOST, AppRole.ADMIN, AppRole.SUPER_ADMIN],
-          metadata: expect.objectContaining({
-            businessType: BusinessType.GAME,
-            fulfillmentObjectId: 'registration-1',
-          }),
+          group: 'FULFILLMENT',
         }),
         expect.objectContaining({
           objectId: 'event-order',
@@ -205,16 +183,96 @@ describe('WorkItemsService fulfillment and training handoffs', () => {
         where: expect.objectContaining({
           completedAt: null,
           OR: expect.arrayContaining([
-            expect.objectContaining({ businessType: BusinessType.VENUE }),
-            expect.objectContaining({ businessType: BusinessType.GAME }),
+            expect.objectContaining({
+              businessType: BusinessType.VENUE,
+              bookings: { some: expect.objectContaining({ startsAt: { lte: expect.any(Date) } }) },
+            }),
             expect.objectContaining({ businessType: BusinessType.EVENT }),
           ]),
         }),
       }),
     );
-    expect(
-      JSON.stringify(prisma.order.findMany.mock.calls[0][0].where),
-    ).not.toContain(BusinessType.TRAINING);
+    const fulfillmentQuery = JSON.stringify(
+      prisma.order.findMany.mock.calls[0][0].where,
+    );
+    expect(fulfillmentQuery).not.toContain(BusinessType.TRAINING);
+    expect(fulfillmentQuery).not.toContain(BusinessType.GAME);
+  });
+
+  it('projects one actionable game task instead of one task per registration', async () => {
+    const prisma = emptyPrisma();
+    const startsAt = new Date(Date.now() - 2 * 60 * 60_000);
+    const endsAt = new Date(Date.now() - 60 * 60_000);
+    (prisma as any).game = {
+      findMany: vi.fn().mockResolvedValue([
+        {
+          id: 'game-1',
+          title: '周末进阶局',
+          hostId: 'host-1',
+          status: 'FULL',
+          startsAt,
+          endsAt,
+          _count: { registrations: 8 },
+        },
+      ]),
+    };
+
+    const result = await new WorkItemsService(prisma as never).list(admin, 20);
+
+    expect(result).toContainEqual(
+      expect.objectContaining({
+        kind: 'GAME_OPERATION',
+        group: 'FULFILLMENT',
+        objectId: 'game-1',
+        priority: 90,
+        title: '球局待完赛 · 周末进阶局',
+        action: '/packages/ops/pages/host/index?focus=game&gameId=game-1',
+        metadata: expect.objectContaining({ activeRegistrationCount: 8 }),
+      }),
+    );
+  });
+
+  it('projects one coach-scoped task per due training session', async () => {
+    const prisma = emptyPrisma();
+    const startsAt = new Date(Date.now() - 2 * 60 * 60_000);
+    const endsAt = new Date(Date.now() - 60 * 60_000);
+    prisma.trainingSession.findMany.mockResolvedValue([
+      {
+        id: 'session-1',
+        status: 'IN_PROGRESS',
+        startsAt,
+        endsAt,
+        class: { id: 'class-1', name: '周三晚进阶班', coachId: 'coach-1' },
+        _count: { attendances: 3 },
+      },
+    ] as never);
+
+    const result = await new WorkItemsService(prisma as never).list(
+      {
+        sub: 'coach-1',
+        displayName: '王教练',
+        roles: [AppRole.COACH],
+      },
+      20,
+    );
+
+    expect(result).toContainEqual(
+      expect.objectContaining({
+        kind: 'TRAINING_SESSION_OPERATION',
+        group: 'TRAINING',
+        objectId: 'session-1',
+        priority: 91,
+        title: '课次待结课 · 周三晚进阶班',
+        action:
+          '/packages/ops/pages/coach/index?focus=session&sessionId=session-1',
+        metadata: expect.objectContaining({ pendingAttendanceCount: 3 }),
+      }),
+    );
+    expect(prisma.trainingSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ class: { coachId: 'coach-1' } }),
+      }),
+    );
   });
 
   it('puts trial arrival/assessment/decision and draft youth rules in the unified queue', async () => {

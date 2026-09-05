@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 
-import { CurrentUser, Roles } from '../common/auth/auth.decorators.js'
+import { CurrentUser, Public, Roles } from '../common/auth/auth.decorators.js'
 import type { AuthUser } from '../common/auth/auth-user.js'
 import { AppRole } from '../generated/prisma/enums.js'
 import {
@@ -22,8 +22,8 @@ export class GamesController {
   constructor(private readonly games: GamesService) {}
 
   @Get()
-  list() {
-    return this.games.list()
+  list(@CurrentUser() actor: AuthUser) {
+    return this.games.list(actor)
   }
 
   @Get('managed')
@@ -42,6 +42,19 @@ export class GamesController {
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   hostApplications() {
     return this.games.hostApplications()
+  }
+
+  // A shared link is readable before login; the roster is a separate,
+  // authenticated projection and never inherits this route's public metadata.
+  @Public()
+  @Get(':id')
+  detail(@Param('id') id: string) {
+    return this.games.detail(id)
+  }
+
+  @Get(':id/participants')
+  participants(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
+    return this.games.participants(id, actor)
   }
 
   @Post('hosts/:userId/approve')

@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 
 import { ValidationPipe } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
+import type { NestExpressApplication } from '@nestjs/platform-express'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import helmet from 'helmet'
 import type { NextFunction, Request, Response } from 'express'
@@ -14,7 +16,7 @@ import { HttpMutationAuditInterceptor } from './common/http/http-mutation-audit.
 import { PrismaService } from './database/prisma.service.js'
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: false, rawBody: true })
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: false, rawBody: true })
   const config = app.get(ConfigService)
   const prefix = config.get<string>('API_PREFIX', 'api/v1')
   const origins = config
@@ -23,7 +25,11 @@ async function bootstrap() {
     .map((origin) => origin.trim())
     .filter(Boolean)
 
-  app.use(helmet())
+  const uploadRoot = config.get<string>('UPLOAD_DIR')
+    || config.get<string>('STORAGE_LOCAL_PATH')
+    || join(process.cwd(), 'uploads')
+  app.useStaticAssets(uploadRoot, { prefix: '/uploads/' })
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
   app.use((request: Request & { requestId?: string }, response: Response, next: NextFunction) => {
     request.requestId = String(request.headers['x-request-id'] ?? randomUUID())
     response.setHeader('x-request-id', request.requestId)
@@ -59,7 +65,10 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, document, { jsonDocumentUrl: 'docs/openapi.json' })
 
   app.enableShutdownHooks()
-  await app.listen(config.get<number>('PORT', 3200), '0.0.0.0')
+  await app.listen(
+    config.get<number>('PORT', 3200),
+    config.get<string>('HOST', '0.0.0.0'),
+  )
 }
 
 await bootstrap()

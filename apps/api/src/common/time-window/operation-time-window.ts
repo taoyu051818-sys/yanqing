@@ -48,6 +48,13 @@ interface OperationTimeWindowInput {
   observedAt?: Date
 }
 
+export interface EffectiveOperationWindowConfiguration {
+  parameterId: string | null
+  parameterSource: 'SYSTEM_PARAMETER' | 'DEFAULT' | 'DEFAULT_INVALID_PARAMETER'
+  earlyMinutes: number
+  lateMinutes: number
+}
+
 const configuredMinutes = (
   value: unknown,
   field: 'earlyMinutes' | 'lateMinutes',
@@ -57,6 +64,59 @@ const configuredMinutes = (
   return Number.isInteger(candidate) && Number(candidate) >= 0 && Number(candidate) <= 240
     ? Number(candidate)
     : null
+}
+
+export async function resolveOperationWindowConfiguration(
+  store: unknown,
+  parameterKey: string,
+  defaults: OperationWindowDefaults,
+  observedAt = new Date(),
+): Promise<EffectiveOperationWindowConfiguration> {
+  const parameterDelegate = (
+    store as {
+      systemParameter?: {
+        findFirst?: (query: Record<string, unknown>) => PromiseLike<{
+          id: string
+          value: unknown
+        } | null>
+      }
+    }
+  ).systemParameter
+  const parameter = parameterDelegate?.findFirst
+    ? await parameterDelegate.findFirst({
+        where: {
+          key: parameterKey,
+          effectiveFrom: { lte: observedAt },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gt: observedAt } }],
+        },
+        orderBy: { effectiveFrom: 'desc' },
+        select: { id: true, value: true },
+      })
+    : null
+  const configuredEarly = configuredMinutes(parameter?.value, 'earlyMinutes')
+  const configuredLate = configuredMinutes(parameter?.value, 'lateMinutes')
+  const configuredVersion =
+    parameter?.value &&
+    typeof parameter.value === 'object' &&
+    !Array.isArray(parameter.value)
+      ? (parameter.value as Record<string, unknown>).version
+      : null
+  const configurationValid =
+    configuredVersion === 1 &&
+    configuredEarly !== null &&
+    configuredLate !== null
+  return {
+    parameterId: parameter?.id ?? null,
+    parameterSource: parameter
+      ? configurationValid
+        ? 'SYSTEM_PARAMETER'
+        : 'DEFAULT_INVALID_PARAMETER'
+      : 'DEFAULT',
+    earlyMinutes: configurationValid
+      ? configuredEarly
+      : defaults.earlyMinutes,
+    lateMinutes: configurationValid ? configuredLate : defaults.lateMinutes,
+  }
 }
 
 /**
@@ -81,40 +141,13 @@ export async function assertOperationTimeWindow(
     throw new ConflictException('业务时段配置无效，暂不能执行操作')
   }
 
-  const parameterDelegate = (
-    tx as Prisma.TransactionClient & {
-      systemParameter?: Prisma.TransactionClient['systemParameter']
-    }
-  ).systemParameter
-  const parameter = parameterDelegate?.findFirst
-    ? await parameterDelegate.findFirst({
-        where: {
-          key: input.parameterKey,
-          effectiveFrom: { lte: observedAt },
-          OR: [{ effectiveTo: null }, { effectiveTo: { gt: observedAt } }],
-        },
-        orderBy: { effectiveFrom: 'desc' },
-        select: { id: true, value: true },
-      })
-    : null
-  const configuredEarly = configuredMinutes(parameter?.value, 'earlyMinutes')
-  const configuredLate = configuredMinutes(parameter?.value, 'lateMinutes')
-  const configuredVersion =
-    parameter?.value &&
-    typeof parameter.value === 'object' &&
-    !Array.isArray(parameter.value)
-      ? (parameter.value as Record<string, unknown>).version
-      : null
-  const configurationValid =
-    configuredVersion === 1 &&
-    configuredEarly !== null &&
-    configuredLate !== null
-  const earlyMinutes = configurationValid
-    ? configuredEarly
-    : input.defaults.earlyMinutes
-  const lateMinutes = configurationValid
-    ? configuredLate
-    : input.defaults.lateMinutes
+  const configuration = await resolveOperationWindowConfiguration(
+    tx,
+    input.parameterKey,
+    input.defaults,
+    observedAt,
+  )
+  const { earlyMinutes, lateMinutes } = configuration
   const windowStartsAt = new Date(
     input.scheduledStartsAt.getTime() - earlyMinutes * 60_000,
   )
@@ -124,12 +157,8 @@ export async function assertOperationTimeWindow(
   const baseSnapshot = {
     parameterKey: input.parameterKey,
     parameterVersion: 1 as const,
-    parameterId: parameter?.id ?? null,
-    parameterSource: parameter
-      ? configurationValid
-        ? 'SYSTEM_PARAMETER' as const
-        : 'DEFAULT_INVALID_PARAMETER' as const
-      : 'DEFAULT' as const,
+    parameterId: configuration.parameterId,
+    parameterSource: configuration.parameterSource,
     earlyMinutes,
     lateMinutes,
     windowStartsAt: windowStartsAt.toISOString(),

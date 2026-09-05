@@ -49,7 +49,9 @@ import { completeOrderFulfillment } from '../orders/order-fulfillment.js'
 import {
   assertOperationTimeWindow,
   GAME_CHECK_IN_WINDOW_PARAMETER,
+  resolveOperationWindowConfiguration,
 } from '../common/time-window/operation-time-window.js'
+import { resolveOperatingShareSnapshot } from '../common/finance/operating-share.js'
 
 const serial = (prefix: string) =>
   `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`
@@ -200,6 +202,8 @@ const GAME_SEAT_STATUSES: readonly RegistrationStatus[] = [
   RegistrationStatus.COMPLETED,
 ]
 
+const GAME_DETAIL_STATUSES = [GameStatus.OPEN, GameStatus.FULL, GameStatus.IN_PROGRESS, GameStatus.COMPLETED, GameStatus.CANCELLED]
+
 const FINANCIAL_ROLES: readonly AppRole[] = [
   AppRole.FINANCE,
   AppRole.ADMIN,
@@ -241,8 +245,8 @@ type RewardEligibility = {
 export async function promoteNextGameWaitlist(
   tx: Prisma.TransactionClient,
   gameId: string,
-  actorId: string,
-  actorRole: AppRole,
+  actorId: string | undefined,
+  actorRole: AppRole | undefined,
 ) {
   const game = await tx.game.findUnique({
     where: { id: gameId },
@@ -275,6 +279,10 @@ export async function promoteNextGameWaitlist(
     data: { status: RegistrationStatus.REGISTERED },
   })
   if (claimed.count !== 1) return null
+  const operatingShare = await resolveOperatingShareSnapshot(
+    tx,
+    BusinessType.GAME,
+  )
 
   const order = await tx.order.create({
     data: {
@@ -291,7 +299,12 @@ export async function promoteNextGameWaitlist(
       title: game.title,
       listAmountCents: game.feeCents,
       payableCents: game.feeCents,
-      parameterSnapshot: { gameId, hostId: game.hostId, promotedFromWaitlist: true },
+      parameterSnapshot: {
+        gameId,
+        hostId: game.hostId,
+        promotedFromWaitlist: true,
+        operatingShare,
+      },
       items: {
         create: {
           itemType: 'GAME_REGISTRATION',
@@ -328,8 +341,76 @@ export async function promoteNextGameWaitlist(
 export class GamesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  list() {
-    return this.prisma.game.findMany({
+  async detail(id: string) {
+    const game = await this.prisma.game.findFirst({
+      where: { id, status: { in: GAME_DETAIL_STATUSES } },
+      select: {
+        id: true, title: true, level: true, status: true,
+        startsAt: true, endsAt: true, capacity: true, feeCents: true,
+        newcomerOnly: true, description: true,
+        host: { select: { displayName: true, avatarUrl: true } },
+        courtBookings: { select: { court: { select: { name: true } } } },
+        registrations: {
+          where: { status: { in: [...GAME_SEAT_STATUSES, RegistrationStatus.WAITLISTED] } },
+          select: { status: true },
+        },
+      },
+    })
+    if (!game) throw new NotFoundException('球局不存在或尚未发布')
+    const { registrations, courtBookings, ...publicFields } = game
+    const pendingCount = registrations.filter((item) => item.status === RegistrationStatus.REGISTERED).length
+    const waitlistCount = registrations.filter((item) => item.status === RegistrationStatus.WAITLISTED).length
+    const occupiedCount = registrations.length - waitlistCount
+    return {
+      ...publicFields,
+      courtNames: [...new Set(courtBookings.map((item) => item.court.name))],
+      occupiedCount, confirmedCount: occupiedCount - pendingCount, pendingCount, waitlistCount,
+    }
+  }
+
+  async participants(id: string, actor: AuthUser) {
+    const confirmedStatuses = [RegistrationStatus.PAID, RegistrationStatus.CHECKED_IN, RegistrationStatus.COMPLETED]
+    const game = await this.prisma.game.findFirst({
+      where: { id, status: { in: GAME_DETAIL_STATUSES } },
+      select: {
+        registrations: {
+          where: { OR: [{ status: { in: confirmedStatuses } }, { userId: actor.sub }] },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: {
+            userId: true, status: true,
+            user: { select: { displayName: true, avatarUrl: true } },
+          },
+        },
+      },
+    })
+    if (!game) throw new NotFoundException('球局不存在或尚未发布')
+    // Retrieve order metadata only for the authenticated account, not the roster.
+    const mine = await this.prisma.gameRegistration.findUnique({
+      where: { gameId_userId: { gameId: id, userId: actor.sub } },
+      select: { id: true, status: true, createdAt: true, order: { select: { id: true, status: true } } },
+    })
+    const waitlistPosition = mine?.status === RegistrationStatus.WAITLISTED
+      ? await this.prisma.gameRegistration.count({
+          where: { gameId: id, status: RegistrationStatus.WAITLISTED, OR: [
+            { createdAt: { lt: mine.createdAt } },
+            { createdAt: mine.createdAt, id: { lte: mine.id } },
+          ] },
+        })
+      : null
+    return {
+      participants: game.registrations
+        .filter((item) => confirmedStatuses.includes(item.status as never))
+        .map((item) => ({
+          displayName: item.user.displayName,
+          avatarUrl: item.user.avatarUrl,
+          isMe: item.userId === actor.sub,
+        })),
+      myRegistration: mine ? { id: mine.id, status: mine.status, order: mine.order, waitlistPosition } : null,
+    }
+  }
+
+  async list(actor: AuthUser) {
+    const games = await this.prisma.game.findMany({
       where: {
         status: { in: [GameStatus.OPEN, GameStatus.FULL, GameStatus.IN_PROGRESS, GameStatus.COMPLETED] },
       },
@@ -350,48 +431,103 @@ export class GamesService {
             registrations: { where: { status: { in: [...GAME_SEAT_STATUSES] } } },
           },
         },
+        registrations: {
+          where: { userId: actor.sub },
+          select: {
+            id: true,
+            status: true,
+            order: { select: { status: true } },
+          },
+          take: 1,
+        },
       },
       orderBy: { startsAt: 'desc' },
     })
+    return games.map(({ registrations, ...game }) => ({
+      ...game,
+      myRegistration: registrations[0]
+        ? {
+            id: registrations[0].id,
+            status: registrations[0].status,
+            orderStatus: registrations[0].order?.status ?? null,
+          }
+        : null,
+    }))
   }
 
-  managed(actor: AuthUser) {
+  async managed(actor: AuthUser) {
     const canManageAll = actor.roles.some((role) =>
       [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never),
     )
     if (!canManageAll && !actor.roles.includes(AppRole.HOST)) {
       throw new ForbiddenException('当前角色无权访问球局经营列表')
     }
-    return this.prisma.game.findMany({
-      where: canManageAll ? undefined : { hostId: actor.sub },
-      select: {
-        id: true,
-        code: true,
-        title: true,
-        level: true,
-        status: true,
-        startsAt: true,
-        endsAt: true,
-        capacity: true,
-        feeCents: true,
-        newcomerOnly: true,
-        description: true,
-        cancelReason: true,
-        cancelledAt: true,
-        host: { select: { displayName: true, avatarUrl: true } },
-        registrations: {
-          select: {
-            id: true,
-            status: true,
-            checkedInAt: true,
-            createdAt: true,
-            user: { select: { displayName: true, avatarUrl: true } },
-            order: { select: { status: true } },
+    const observedAt = new Date()
+    const [games, checkInConfiguration] = await Promise.all([
+      this.prisma.game.findMany({
+        where: canManageAll ? undefined : { hostId: actor.sub },
+        select: {
+          id: true,
+          code: true,
+          title: true,
+          level: true,
+          status: true,
+          startsAt: true,
+          endsAt: true,
+          capacity: true,
+          feeCents: true,
+          newcomerOnly: true,
+          description: true,
+          cancelReason: true,
+          cancelledAt: true,
+          host: { select: { displayName: true, avatarUrl: true } },
+          registrations: {
+            select: {
+              id: true,
+              status: true,
+              checkedInAt: true,
+              createdAt: true,
+              user: { select: { displayName: true, avatarUrl: true } },
+              order: { select: { status: true } },
+            },
+            orderBy: { createdAt: 'asc' },
           },
-          orderBy: { createdAt: 'asc' },
         },
-      },
-      orderBy: { startsAt: 'desc' },
+        orderBy: { startsAt: 'desc' },
+      }),
+      resolveOperationWindowConfiguration(
+        this.prisma,
+        GAME_CHECK_IN_WINDOW_PARAMETER,
+        { earlyMinutes: 30, lateMinutes: 30 },
+        observedAt,
+      ),
+    ])
+    const mayHistoricallyOverride = actor.roles.some((role) =>
+      [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never),
+    )
+    return games.map((game) => {
+      const scheduled = new Date(game.startsAt).getTime()
+      const opensAt = new Date(
+        scheduled - checkInConfiguration.earlyMinutes * 60_000,
+      )
+      const closesAt = new Date(
+        scheduled + checkInConfiguration.lateMinutes * 60_000,
+      )
+      const state =
+        observedAt < opensAt
+          ? 'NOT_OPEN'
+          : observedAt <= closesAt
+            ? 'OPEN'
+            : 'CLOSED'
+      return {
+        ...game,
+        checkInWindow: {
+          opensAt: opensAt.toISOString(),
+          closesAt: closesAt.toISOString(),
+          state,
+          mayHistoricallyOverride: state === 'CLOSED' && mayHistoricallyOverride,
+        },
+      }
     })
   }
 
@@ -1066,6 +1202,10 @@ export class GamesService {
           }
         }
 
+        const operatingShare = await resolveOperatingShareSnapshot(
+          tx,
+          BusinessType.GAME,
+        )
         const order = await tx.order.create({
           data: {
             ...creation,
@@ -1079,7 +1219,11 @@ export class GamesService {
             title: game.title,
             listAmountCents: game.feeCents,
             payableCents: game.feeCents,
-            parameterSnapshot: { gameId, hostId: game.hostId },
+            parameterSnapshot: {
+              gameId,
+              hostId: game.hostId,
+              operatingShare,
+            },
             items: {
               create: {
                 itemType: 'GAME_REGISTRATION',
