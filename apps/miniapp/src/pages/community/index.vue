@@ -16,6 +16,7 @@ import { useSessionStore } from "../../stores/session";
 import { money, shortDate } from "../../utils/format";
 import { withPendingCreationKey } from "../../utils/pending-creation-key";
 import { gameDetailPath, gameLevelLabel as displayGameLevel } from "../../utils/game-detail";
+import { eventDetailPath, eventShareTitle } from "../../utils/event-detail";
 import { SHARE_CARD_IMAGES } from "../../config/share";
 import { consumeCommunityIntent, openMemberPage, requestMemberLogin } from "../../utils/member-navigation";
 
@@ -265,13 +266,6 @@ function myEventTeam(event: any) {
   return Number(registration?.finalRank || 0) > 0 ? registration : null;
 }
 
-function eventShareTitle(event: any) {
-  const champion = rankedTeams(event)[0];
-  return champion
-    ? `${event.name}冠军榜｜${champion.name}夺冠`
-    : `${event.name}｜固定双打五轮瑞士积分赛`;
-}
-
 function rememberShare(type: "event", id: string) {
   activeShare.value = { type, id };
 }
@@ -284,7 +278,7 @@ onShareAppMessage((options: any) => {
     if (event) {
       return {
         title: eventShareTitle(event),
-        path: `/pages/community/index?tab=events&eventId=${encodeURIComponent(event.id)}`,
+        path: eventDetailPath(event.id, true),
         imageUrl: SHARE_CARD_IMAGES.competition,
       };
     }
@@ -335,6 +329,12 @@ onShow(() => {
     const destination = gameDetailPath(targetGameId.value, true);
     targetGameId.value = '';
     // Consume old game invitations once; returning to this tab must not reopen it.
+    uni.navigateTo({ url: destination });
+    return;
+  }
+  if (targetEventId.value && view.value !== 'mine') {
+    const destination = eventDetailPath(targetEventId.value, true);
+    targetEventId.value = '';
     uni.navigateTo({ url: destination });
     return;
   }
@@ -410,13 +410,13 @@ onShow(() => {
         >
         <view class="activity-title-row"><view class="activity-icon"><AppIcon name="event" :size="32" /></view><text class="title">{{ event.name }}</text></view>
         <text v-if="targetEventId === event.id" class="invite-context"
-          >好友分享了这场赛事的战绩</text
+          >好友分享了这场赛事</text
         >
         <text class="muted"
           >{{ event.minimumPeople }}人成赛 · {{ event.capacityPeople }}人封顶 ·
           {{ event.totalRounds }}轮</text
         >
-        <view class="activity-summary"><text class="money">{{ money(event.feeCents) }}</text><button class="secondary" :aria-expanded="Boolean(expanded[event.id])" @tap="expanded[event.id] = !expanded[event.id]">{{ expanded[event.id] ? '收起详情' : eventRegistration(event.id)?.registration ? '查看我的报名' : '查看详情' }}</button></view>
+        <view class="activity-summary"><text class="money">{{ money(event.feeCents) }}</text><button class="secondary" :aria-expanded="view === 'mine' ? Boolean(expanded[event.id]) : undefined" @tap="view === 'mine' ? expanded[event.id] = !expanded[event.id] : openMemberPage(eventDetailPath(event.id))">{{ view === 'browse' ? '查看赛事详情' : expanded[event.id] ? '收起详情' : '查看我的报名' }}</button></view>
         <template v-if="expanded[event.id]">
       <view class="rules card">
         <view class="rules-heading"><AppIcon name="event" :size="34" tone="accent" /><text class="rules-title">固定双打 · 五轮瑞士制</text></view>

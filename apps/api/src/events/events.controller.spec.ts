@@ -3,7 +3,7 @@ import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AuthUser } from '../common/auth/auth-user.js';
-import { ROLES_KEY } from '../common/auth/auth.decorators.js';
+import { IS_PUBLIC_KEY, ROLES_KEY } from '../common/auth/auth.decorators.js';
 import { AppRole } from '../generated/prisma/enums.js';
 import type {
   CreateEventDto,
@@ -20,6 +20,13 @@ const actor: AuthUser = {
 };
 
 describe('EventsController publish command', () => {
+  it('allows shared event details without opening registration or management routes', () => {
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, EventsController.prototype.detail)).toBe(true);
+    for (const method of ['list', 'myRegistration', 'register', 'managedList', 'managedDetail', 'cancelRegistration'] as const) {
+      expect(Reflect.getMetadata(IS_PUBLIC_KEY, EventsController.prototype[method])).not.toBe(true);
+    }
+  });
+
   it('protects full management reads from ordinary members', () => {
     const roles = [
       AppRole.EVENT_MANAGER,

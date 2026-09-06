@@ -3,6 +3,7 @@
     { "path": "pages/home/index", "style": { "navigationBarTitleText": "延庆金羽" } },
     { "path": "pages/booking/index", "style": { "navigationBarTitleText": "在线订场" } },
     { "path": "pages/community/index", "style": { "navigationBarTitleText": "球局与赛事" } },
+    { "path": "pages/event-detail/index", "style": { "navigationBarTitleText": "积分赛详情", "enablePullDownRefresh": true } },
     { "path": "pages/event-signup/index", "style": { "navigationBarTitleText": "双打报名" } },
     { "path": "pages/game-detail/index", "style": { "navigationBarTitleText": "球局详情", "enablePullDownRefresh": true } },
     { "path": "pages/profile/index", "style": { "navigationBarTitleText": "个人中心" } },

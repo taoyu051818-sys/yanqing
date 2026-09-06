@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { NotFoundException } from '@nestjs/common'
 
 import { EventStatus, RegistrationStatus } from '../generated/prisma/enums.js'
 import { EventsService } from './events.service.js'
@@ -72,6 +73,14 @@ describe('EventsService public projection', () => {
     expect(result.standings).toEqual([
       expect.objectContaining({ name: '冠军队', finalRank: 1 }),
     ])
+  })
+
+  it('returns a not-found response for unavailable shared events', async () => {
+    const findFirstOrThrow = vi.fn().mockRejectedValue({ code: 'P2025' })
+    const service = new EventsService({ event: { findFirstOrThrow } } as never)
+    await expect(service.detail('missing')).rejects.toBeInstanceOf(NotFoundException)
+    findFirstOrThrow.mockRejectedValueOnce(new Error('database unavailable'))
+    await expect(service.detail('event-1')).rejects.toThrow('database unavailable')
   })
 
   it('keeps operations fields on explicit safe management projections', async () => {

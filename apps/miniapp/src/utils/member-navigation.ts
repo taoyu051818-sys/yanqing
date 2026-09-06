@@ -4,8 +4,8 @@ const RETURN_KEY = 'yanqing_member_login_return'
 const TAB_KEY = 'yanqing_member_tab_intent'
 const MAX_AGE = 15 * 60_000
 const tabRoutes = ['/pages/home/index', '/pages/booking/index', '/pages/community/index', '/pages/profile/index']
-const memberRoutes = [...tabRoutes, ...['order', 'wallet', 'training', 'coupon', 'membership', 'shop', 'settings', 'invite', 'game-detail', 'event-signup'].map((name) => `/pages/${name}/index`)]
-const publicRoutes = [...tabRoutes.filter((route) => route !== '/pages/community/index'), '/pages/game-detail/index', '/pages/event-signup/index']
+const memberRoutes = [...tabRoutes, ...['order', 'wallet', 'training', 'coupon', 'membership', 'shop', 'settings', 'invite', 'game-detail', 'event-detail', 'event-signup'].map((name) => `/pages/${name}/index`)]
+const publicRoutes = [...tabRoutes.filter((route) => route !== '/pages/community/index'), '/pages/game-detail/index', '/pages/event-detail/index', '/pages/event-signup/index']
 
 export function safeMemberRoute(url: unknown): string | null {
   if (typeof url !== 'string' || url.length > 1000 || /[\r\n#]/.test(url)) return null

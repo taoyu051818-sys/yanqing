@@ -60,6 +60,8 @@ export class EventsController {
     return this.events.myRegistration(id, actor);
   }
 
+  // Shared cards expose the existing public field projection, never registration details.
+  @Public()
   @Get(':id')
   detail(@Param('id') id: string) {
     return this.events.detail(id);

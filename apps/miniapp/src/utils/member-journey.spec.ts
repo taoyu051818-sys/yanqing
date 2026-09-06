@@ -25,8 +25,8 @@ describe('member journey navigation', () => {
     expect(switchTab).toHaveBeenCalledWith({ url: '/pages/booking/index' })
     expect(navigateTo).not.toHaveBeenCalled()
   })
-  it('lets a visitor open a specific shared game and returns there after explicit login', () => {
-    const route = '/pages/game-detail/index?id=game-weekend&from=share'
+  it.each(['game-detail', 'event-detail'])('lets a visitor open shared %s and returns there after explicit login', page => {
+    const route = `/pages/${page}/index?id=activity-weekend&from=share`
     openMemberPage(route)
     expect(navigateTo).toHaveBeenCalledWith({ url: route })
     rememberLoginReturn(route)

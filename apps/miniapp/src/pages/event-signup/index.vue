@@ -9,6 +9,7 @@ import { openMemberPage, requestMemberLogin } from '../../utils/member-navigatio
 import { withPendingCreationKey } from '../../utils/pending-creation-key'
 import { eventSignupPath, participantError, participantPhone, rememberTeamInvite, pendingTeamInvite, forgetTeamInvite } from '../../utils/event-signup'
 import { money, shortDate } from '../../utils/format'
+import { eventDetailPath } from '../../utils/event-detail'
 import { SHARE_CARD_IMAGES } from '../../config/share'
 import type { DoublesCategory, TeamInviteView } from '../../types/event-signup'
 
@@ -175,7 +176,7 @@ onShareAppMessage(() => ({
   title: invite.value?.role === 'CAPTAIN' && invite.value.status === 'PENDING'
     ? invite.value.captain.displayName + ' 邀你组队｜' + invite.value.event.name
     : '一起参加' + (event.value?.name || invite.value?.event.name || '金羽双打赛'),
-  path: eventSignupPath(id.value, invite.value?.role === 'CAPTAIN' && invite.value.status === 'PENDING' ? code.value : ''),
+  path: invite.value?.role === 'CAPTAIN' && invite.value.status === 'PENDING' ? eventSignupPath(id.value, code.value) : eventDetailPath(id.value, true),
   imageUrl: SHARE_CARD_IMAGES.competition,
 }))
 </script>

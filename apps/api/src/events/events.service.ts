@@ -1470,6 +1470,9 @@ export class EventsService {
           orderBy: { finalRank: 'asc' },
         },
       },
+     }).catch((error: unknown) => {
+      if (isPrismaErrorCode(error, 'P2025')) throw new NotFoundException('赛事不存在或已下架');
+      throw error;
     });
     const { teams, ...summary } = event;
     return {

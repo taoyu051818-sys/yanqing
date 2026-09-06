@@ -152,7 +152,7 @@ export const endpoints = {
     api.post(`/games/${id}/promote-waitlist`),
   grantMaturedGameRewards: () => api.post("/games/rewards/grant-matured"),
   events: () => api.get<any[]>("/events"),
-  event: (id: string) => api.get<Record<string, any>>(`/events/${id}`),
+  event: (id: string) => request<Record<string, any>>({ url: `/events/${encodeURIComponent(id)}`, method: 'GET', redirectOnUnauthorized: false }),
   managedEvents: () => api.get<any[]>("/events/managed"),
   managedEvent: (id: string) =>
     api.get<Record<string, any>>(`/events/managed/${id}`),
