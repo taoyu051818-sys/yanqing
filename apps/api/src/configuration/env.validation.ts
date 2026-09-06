@@ -3,6 +3,21 @@ export const validateEnvironment = (
 ): Record<string, unknown> => {
   const environment = { ...input };
   environment.NODE_ENV = String(input.NODE_ENV ?? 'development');
+  const devLoginEnabled = String(input.DEV_LOGIN_ENABLED ?? 'false');
+  if (!['true', 'false'].includes(devLoginEnabled))
+    throw new Error('DEV_LOGIN_ENABLED must be true or false');
+  if (devLoginEnabled === 'true' && !['development', 'test', 'staging'].includes(String(environment.NODE_ENV)))
+    throw new Error('DEV_LOGIN_ENABLED is forbidden outside development/test/staging');
+  environment.DEV_LOGIN_ENABLED = devLoginEnabled;
+  const adminOrigin = String(input.ADMIN_CONSOLE_ORIGIN ?? '');
+  if (adminOrigin) {
+    let parsed: URL;
+    try { parsed = new URL(adminOrigin); } catch { throw new Error('ADMIN_CONSOLE_ORIGIN must be an origin URL'); }
+    const local = ['localhost', '127.0.0.1'].includes(parsed.hostname);
+    if (parsed.origin !== adminOrigin || (parsed.protocol !== 'https:' && !(local && parsed.protocol === 'http:' && ['development', 'test'].includes(String(environment.NODE_ENV)))))
+      throw new Error('ADMIN_CONSOLE_ORIGIN requires HTTPS, or local HTTP in development/test');
+  }
+  environment.ADMIN_CONSOLE_ORIGIN = adminOrigin;
   environment.PORT = Number(input.PORT ?? 3200);
   environment.HOST = String(input.HOST ?? '0.0.0.0');
   environment.API_PREFIX = String(input.API_PREFIX ?? 'api/v1');

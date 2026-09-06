@@ -1,8 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { dateTimeRange, shortDate, today, venueDateLabel, venueTimeRange } from './format'
+import { dateTimeRange, shortDate, today, venueClock, venueDateKey, venueDateLabel, venueTimeRange } from './format'
 
-afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 describe('portable Beijing venue time presentation', () => {
+  it('initializes date filters without Intl across Beijing midnight and leap-day offsets', () => {
+    vi.stubGlobal('Intl', undefined)
+    vi.useFakeTimers().setSystemTime(new Date('2028-02-28T16:01:00Z'))
+    expect(today()).toBe('2028-02-29')
+    expect(today(-1)).toBe('2028-02-28')
+    expect(today(1)).toBe('2028-03-01')
+    expect(venueDateKey('2026-12-31T16:01:00Z')).toBe('2027-01-01')
+    expect(venueDateKey('2026-12-31')).toBe('2026-12-31')
+    expect(venueClock('2026-12-31T16:01:00Z')).toBe('00:01')
+    expect(venueDateKey('invalid')).toBe('')
+    expect(venueClock('invalid')).toBe('待定')
+  })
   it('never relies on native locale methods, including WeChat runtimes returning CST', () => {
     for (const method of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString'] as const) {
       vi.spyOn(Date.prototype, method).mockImplementation(() => 'Mon Sep 07 2026 19:00:00 GMT+0800 (CST)')

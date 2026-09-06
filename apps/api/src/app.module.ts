@@ -1,3 +1,4 @@
+import { AdminAuthModule } from './admin-auth/admin-auth.module.js'
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { APP_GUARD } from '@nestjs/core'
@@ -39,6 +40,7 @@ import { PrivacyModule } from './privacy/privacy.module.js'
     }),
     DatabaseModule,
     AuthModule,
+    AdminAuthModule,
     AuditModule,
     ConfigurationModule,
     MembersModule,

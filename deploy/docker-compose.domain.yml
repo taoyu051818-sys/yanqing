@@ -23,6 +23,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: staging
+      DEV_LOGIN_ENABLED: "false"
       PORT: 3200
       API_PREFIX: api/v1
       DATABASE_URL: postgresql://${POSTGRES_USER:-yanqing_domain_acceptance}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-yanqing_domain_acceptance}?schema=public
@@ -53,7 +54,7 @@ services:
       args:
         VITE_API_BASE_URL: https://${API_DOMAIN:?API_DOMAIN is required}/api/v1
         VITE_DATA_MODE: remote
-        VITE_ENABLE_REMOTE_DEV_LOGIN: "true"
+        VITE_ENABLE_REMOTE_DEV_LOGIN: "false"
         VITE_PUBLIC_BASE_PATH: ${PUBLIC_BASE_PATH:-/badminton/}
     restart: unless-stopped
     ports:

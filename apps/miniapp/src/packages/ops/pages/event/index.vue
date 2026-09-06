@@ -10,7 +10,7 @@ import { presentPrizePool } from "../../config/event-presentation";
 import { endpoints } from "../../../../services/api";
 import { useSessionStore } from "../../../../stores/session";
 import type { AppRole } from "../../../../types/domain";
-import { shortDate } from "../../../../utils/format";
+import { shortDate, today as shanghaiDate } from "../../../../utils/format";
 import { withPendingCreationKey } from "../../../../utils/pending-creation-key";
 import {
   findOpsDeepLinkRecord,
@@ -401,20 +401,6 @@ const workflowHint = computed(() => {
 
 function causeMessage(cause: unknown, fallback: string) {
   return cause instanceof Error && cause.message ? cause.message : fallback;
-}
-
-function shanghaiDate(offsetDays = 0) {
-  const value = new Date(Date.now() + offsetDays * 86_400_000);
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(value);
-  const values = Object.fromEntries(
-    parts.map((part) => [part.type, part.value]),
-  );
-  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function statusLabel(status?: string) {
@@ -810,8 +796,6 @@ function canCorrectScore(match: EventMatch) {
     TERMINAL_MATCH_STATUSES.includes(match.status),
   );
 }
-
-
 
 function score(match: EventMatch) { if (canSubmitScore(match)) openScoreTask(match, false) }
 

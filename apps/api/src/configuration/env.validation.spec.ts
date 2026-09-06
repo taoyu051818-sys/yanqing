@@ -3,6 +3,26 @@ import { describe, expect, it } from 'vitest';
 import { validateEnvironment } from './env.validation.js';
 
 describe('environment validation', () => {
+  it.each([
+    ['production', 'https://api.example.com'],
+    ['development', 'http://127.0.0.1:5190'],
+    ['test', 'http://localhost:5190'],
+  ])('accepts the exact admin origin in %s', (NODE_ENV, ADMIN_CONSOLE_ORIGIN) => {
+    expect(validateEnvironment({ NODE_ENV, ADMIN_CONSOLE_ORIGIN, DATABASE_URL: 'postgresql://local/test', JWT_SECRET: 'x'.repeat(32) }).ADMIN_CONSOLE_ORIGIN).toBe(ADMIN_CONSOLE_ORIGIN);
+  });
+
+  it.each([
+    ['production', 'http://127.0.0.1:5190'],
+    ['staging', 'http://localhost:5190'],
+    ['development', 'http://api.example.com'],
+    ['production', 'https://api.example.com/admin/'],
+    ['production', 'https://api.example.com/'],
+    ['production', 'https://user:password@api.example.com'],
+    ['production', '*'],
+  ])('rejects an unsafe admin origin: %s %s', (NODE_ENV, ADMIN_CONSOLE_ORIGIN) => {
+    expect(() => validateEnvironment({ NODE_ENV, ADMIN_CONSOLE_ORIGIN, DATABASE_URL: 'postgresql://local/test', JWT_SECRET: 'x'.repeat(32) })).toThrow('ADMIN_CONSOLE_ORIGIN');
+  });
+
   it('applies safe development defaults', () => {
     const result = validateEnvironment({
       DATABASE_URL: 'postgresql://local/test',
@@ -10,6 +30,19 @@ describe('environment validation', () => {
     });
     expect(result.PORT).toBe(3200);
     expect(result.API_PREFIX).toBe('api/v1');
+    expect(result.DEV_LOGIN_ENABLED).toBe('false');
+  });
+
+  it.each(['development', 'test', 'staging', 'production'])('closes development login by default in %s', (NODE_ENV) => {
+    expect(validateEnvironment({ NODE_ENV, DATABASE_URL: 'postgresql://local/test', JWT_SECRET: 'x'.repeat(32) }).DEV_LOGIN_ENABLED).toBe('false');
+  });
+
+  it.each([
+    { NODE_ENV: 'production', DEV_LOGIN_ENABLED: 'true' },
+    { NODE_ENV: 'unknown', DEV_LOGIN_ENABLED: 'true' },
+    { NODE_ENV: 'staging', DEV_LOGIN_ENABLED: 'yes' },
+  ])('rejects an unsafe or malformed development switch: %j', (values) => {
+    expect(() => validateEnvironment({ ...values, DATABASE_URL: 'postgresql://local/test', JWT_SECRET: 'x'.repeat(32) })).toThrow('DEV_LOGIN_ENABLED');
   });
 
   it('rejects missing database and weak JWT secrets', () => {

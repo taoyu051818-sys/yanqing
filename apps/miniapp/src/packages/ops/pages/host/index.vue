@@ -11,7 +11,7 @@ import { hasOperationsAccess } from "../../../../config/operations";
 import { endpoints } from "../../../../services/api";
 import { useSessionStore } from "../../../../stores/session";
 import type { CourtAvailability } from "../../../../types/domain";
-import { money, shortDate } from "../../../../utils/format";
+import { money, shortDate, today as shanghaiDate } from "../../../../utils/format";
 import { withPendingCreationKey } from "../../../../utils/pending-creation-key";
 import {
   findOpsDeepLinkRecord,
@@ -133,18 +133,6 @@ function canCheckIn(game: any) {
     state === "OPEN" ||
     (state === "CLOSED" && game?.checkInWindow?.mayHistoricallyOverride)
   );
-}
-
-function shanghaiDate(offsetDays = 0) {
-  const value = new Date(Date.now() + offsetDays * 86_400_000);
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(value);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function localIso(time: string) {

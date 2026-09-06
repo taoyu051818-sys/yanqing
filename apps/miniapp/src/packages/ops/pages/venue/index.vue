@@ -12,7 +12,7 @@ import {
 } from "../../../../services/api";
 import { useSessionStore } from "../../../../stores/session";
 import type { CourtAvailability } from "../../../../types/domain";
-import { idempotencyKey, money } from "../../../../utils/format";
+import { idempotencyKey, money, today as shanghaiDate, shortDate, venueDateKey } from "../../../../utils/format";
 import { withPendingCreationKey } from "../../../../utils/pending-creation-key";
 
 const task = useOperationTask()
@@ -77,18 +77,6 @@ const selectedPriceSlot = computed(() =>
   priceSlotOptions.value[priceSlotIndex.value] || priceSlotOptions.value[0],
 );
 
-function shanghaiDate(offsetDays = 0) {
-  const value = new Date(Date.now() + offsetDays * 86_400_000);
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(value);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
 function dayRange(date: string) {
   const fromDate = new Date(`${date}T00:00:00+08:00`);
   return {
@@ -101,18 +89,7 @@ function localIso(date: string, time: string) {
   return `${date}T${time}:00+08:00`;
 }
 
-function displayTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
-}
+const displayTime = shortDate;
 
 async function load() {
   await session.hydrate();
@@ -514,7 +491,7 @@ onShow(load);
       <view v-for="rule in priceRules" :key="rule.id" class="card price-card">
         <view class="row"><view><text class="closure-court">{{ rule.name }}</text><text class="closure-time">{{ rule.code }} · v{{ rule.version }} · {{ rule.timeSlot?.label || "全时段兜底" }}</text></view><text class="status-pill" :class="rule.enabled && rule.timeSlot?.enabled !== false ? 'active' : 'cancelled'">{{ rule.timeSlot?.enabled === false ? "历史时段已停售" : rule.enabled ? "已启用" : "已停用" }}</text></view>
         <text class="price-value">普通价 {{ money(rule.priceCents) }} · 新客价 {{ rule.newcomerPriceCents == null ? "未配置" : money(rule.newcomerPriceCents) }}</text>
-        <text class="audit-line">{{ weekdayLabel(rule.weekdayMask) }} · {{ new Date(rule.effectiveFrom).toLocaleDateString() }} 至 {{ rule.effectiveTo ? new Date(rule.effectiveTo).toLocaleDateString() : "长期" }}</text>
+        <text class="audit-line">{{ weekdayLabel(rule.weekdayMask) }} · {{ venueDateKey(rule.effectiveFrom) || '待定' }} 至 {{ rule.effectiveTo ? venueDateKey(rule.effectiveTo) || '待定' : "长期" }}</text>
         <text class="audit-line">创建：{{ rule.createdBy?.displayName || rule.createdById }}</text>
         <text v-if="rule.transitions?.[0]" class="closure-reason">最近变更：{{ rule.transitions[0].reason }} · {{ rule.transitions[0].actor?.displayName }}</text>
         <view v-if="canManage && rule.timeSlot?.enabled !== false" class="price-actions"><button class="secondary compact" :disabled="priceRuleSubmitting" @tap="beginPriceRuleVersion(rule)">基于此版本派生</button><button class="secondary compact" :disabled="priceRuleSubmitting" @tap="setPriceRuleStatus(rule)">{{ rule.enabled ? "停用规则" : "启用规则" }}</button></view>

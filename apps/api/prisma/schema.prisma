@@ -454,6 +454,8 @@ enum DataErasureRequestStatus {
 }
 
 model User {
+  adminLoginApprovals AdminLoginChallenge[]
+  adminBrowserSessions AdminBrowserSession[]
   id                                  String                            @id @default(cuid())
   openId                              String?                           @unique
   unionId                             String?                           @unique
@@ -2359,4 +2361,33 @@ model Notification {
   createdAt DateTime  @default(now())
 
   @@index([userId, readAt, createdAt])
+}
+
+model AdminLoginChallenge {
+  id String @id
+  browserHash String @unique
+  scanHash String
+  confirmationCode String
+  browserLabel String
+  approvedById String?
+  approvedBy User? @relation(fields: [approvedById], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  approvedAt DateTime?
+  consumedAt DateTime?
+  cancelledAt DateTime?
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
+model AdminBrowserSession {
+  id String @id
+  tokenHash String @unique
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  browserLabel String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  @@index([userId, expiresAt])
 }

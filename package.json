@@ -7,7 +7,7 @@
     "dev:legacy-web": "next dev",
     "dev:api": "pnpm --dir apps/api start:dev",
     "dev:miniapp": "pnpm --dir apps/miniapp dev:mp-weixin",
-    "build": "pnpm build:api && pnpm build:miniapp",
+    "build": "pnpm build:api && pnpm build:miniapp && pnpm build:admin",
     "build:legacy-web": "next build",
     "typecheck:legacy-web": "tsc --noEmit",
     "build:api": "pnpm --dir apps/api build",
@@ -20,8 +20,10 @@
     "test:miniapp": "pnpm --dir apps/miniapp test",
     "test:shared": "pnpm --dir packages/shared test",
     "typecheck:miniapp": "pnpm --dir apps/miniapp type-check",
-    "verify": "pnpm test:shared && pnpm test:api && pnpm test:miniapp && pnpm --dir apps/api test:e2e && pnpm build:api && pnpm typecheck:miniapp && pnpm build:miniapp",
-    "verify:full": "pnpm verify && pnpm build:legacy-web"
+    "verify": "pnpm test:shared && pnpm test:api && pnpm test:miniapp && pnpm --dir apps/api test:e2e && pnpm build:api && pnpm typecheck:miniapp && pnpm build:miniapp && pnpm build:admin",
+    "verify:full": "pnpm verify && pnpm build:legacy-web",
+    "dev:admin": "pnpm --dir apps/admin dev",
+    "build:admin": "pnpm --dir apps/admin build"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

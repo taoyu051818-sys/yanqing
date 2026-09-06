@@ -13,6 +13,7 @@ import { isUrgentWorkItem } from '../../config/work-items'
 import { endpoints, type WorkItem } from '../../services/api'
 import { useSessionStore } from '../../stores/session'
 import type { AppRole } from '../../types/domain'
+import { today, venueDateKey } from '../../utils/format'
 import { resolveWorkItemDestination } from '../../utils/work-item-deep-link'
 
 const session = useSessionStore()
@@ -63,6 +64,7 @@ const filteredCenters = computed(() => {
 const urgentCount = computed(() => workItems.value.filter(isUrgentWorkItem).length)
 const priorityItems = computed(() => workItems.value.slice(0, 3))
 const quickActions = computed(() => [
+  ...(canViewAnalytics.value ? [{ key: 'pc-login', icon: 'scan', title: '电脑后台登录', description: '扫码确认登录，管理已登录的电脑', route: '/packages/ops/pages/pc-login/index' }] : []),
   {
     key: 'work',
     icon: 'work',
@@ -117,14 +119,10 @@ async function load() {
     todoCount.value = items.length
   }
   if (sessions.status === 'fulfilled') {
-    const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(new Date())
+    const businessDate = today()
     trainingCount.value = sessions.value.filter((item: any) =>
       !['COMPLETED', 'CANCELLED'].includes(item.status) &&
-      new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
-      }).format(new Date(item.startsAt)) === today,
+      venueDateKey(item.startsAt) === businessDate,
     ).length
   }
   if (lowStock.status === 'fulfilled') lowStockCount.value = lowStock.value.length

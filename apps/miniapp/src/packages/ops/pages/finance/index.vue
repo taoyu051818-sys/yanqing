@@ -234,17 +234,7 @@ function businessPeriod() {
 }
 
 function closeBusinessPeriod() {
-  const yesterday = new Date(Date.now() - 86_400_000);
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(yesterday);
-  const values = Object.fromEntries(
-    parts.map((part) => [part.type, part.value]),
-  );
-  const date = `${values.year}-${values.month}-${values.day}`;
+  const date = today(-1);
   const startsAt = new Date(`${date}T00:00:00+08:00`);
   return {
     date,

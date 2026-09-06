@@ -1,6 +1,6 @@
 # 部署与微信小程序发布
 
-当前服务器状态以 [2026-09-05 双打代填与微信搭档邀请发布记录](releases/2026-09-05-doubles-signup.md) 为准；此前小时订场见 [上一版记录](releases/2026-09-05-hourly-booking-time.md)。API 已通过 systemd 工作目录覆盖切换到独立 release；下文 Compose/旧 source 路径为部署模板，后续更新前先核对实际服务的 WorkingDirectory。原支付配置保持不变，时段目录为 1 小时，历史订单和资金不变；开发登录的生产安全限制仍需单独收口。
+当前 API 与 PC 桌面版本见 [2026-09-06 独立 PC 后台发布记录](releases/2026-09-06-pc-admin.md)，累计 34 个迁移。管理入口为 `https://api.yutechhn.cn/admin/`，API 仍为 `/api/v1`。真实微信账号 `TY` 已获超级管理员授权，开发登录和旧测试会话已关闭；旧会话需重新微信登录。旧公开 H5 已下线，不能按下文历史模板重新启用。API 当前通过 systemd WorkingDirectory 指向独立 release，PC 静态文件通过 Nginx `/admin/` 提供；下文 Compose/旧 source 路径均为模板，更新前先核对实际服务目录。
 
 ## 环境变量
 
@@ -8,6 +8,7 @@
 
 - `DATABASE_URL`：PostgreSQL 连接串。
 - `JWT_SECRET`：不少于 32 个随机字符，生产环境使用密钥管理服务。
+- `DEV_LOGIN_ENABLED`：默认 `false`。只可在隔离测试库的 `development/test/staging` 显式设为 `true`；线上保持关闭。关闭时缺少来源标记的旧令牌也失效，用户需重新微信登录。
 - `CORS_ORIGINS`：仅列出确需浏览器访问 API 的受信调试或运维来源；微信小程序 request 合法域名仍在微信公众平台单独配置。
 - `WECHAT_APP_ID`、`WECHAT_APP_SECRET`：微信小程序登录凭据。
 - `PAYMENT_PROVIDER`：默认 `mock` 用于联调；正式收费设置为 `wechat`。
@@ -42,6 +43,8 @@ pnpm --dir apps/api db:seed
 ```
 
 种子数据包含 20 片场地、17 个一小时时段（07:00–24:00）、会员产品、成人/青少年课包、主理人球局、48 人瑞士制赛事、联盟商户/券和采购/寄售库存。开发登录账号按角色取最早的一条种子用户：管理员 `13800000001`、前台 `...002`、教练 `...003`、主理人 `...004`、会员 `...005`、商户 `...006`、财务复核 `...007`、超级管理员 `...008`；开发登录不校验手机号，只按角色选择。
+
+上述开发登录需要在隔离环境显式开启 `DEV_LOGIN_ENABLED=true`，不再因 `NODE_ENV=staging` 自动可用。首次真实管理员初始化使用受控 CLI，具体预览、按用户编号执行及审计要求见 [登录收口记录](releases/2026-09-05-auth-closeout.md)。
 
 2026-09-04 域名验收环境基线为 30/30 个 Prisma 迁移；目标库 `migrate status` 最新、Schema diff 为空，种子化验收库已完成真实 HTTP/数据库回放。代码门禁数字随目标提交变化，生产部署签字必须引用该提交的 `pnpm verify`、目标库 30/30 `migrate status`、备份/恢复记录、种子或基线检查和 Schema diff 日志，不能只引用本文。
 

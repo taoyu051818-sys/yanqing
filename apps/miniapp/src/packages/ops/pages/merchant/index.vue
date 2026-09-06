@@ -10,7 +10,7 @@ import MetricCard from '../../../../components/MetricCard.vue'
 import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
-import { idempotencyKey, money } from '../../../../utils/format'
+import { idempotencyKey, money, today as shanghaiDate, venueDateKey } from '../../../../utils/format'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
 
 const task = useOperationTask()
@@ -96,15 +96,6 @@ const settlementLabels: Record<string, string> = {
   DRAFT: '草稿', PENDING_CONFIRMATION: '待商户确认', CONFIRMED: '商户已确认', SETTLED: '已结算', VOID: '已作废',
 }
 
-function shanghaiDate(offsetDays = 0) {
-  const value = new Date(Date.now() + offsetDays * 86_400_000)
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(value)
-  const fields = Object.fromEntries(parts.map((part) => [part.type, part.value]))
-  return `${fields.year}-${fields.month}-${fields.day}`
-}
-
 function cents(value: string, label: string) {
   const input = value.trim()
   if (!/^\d+(\.\d{1,2})?$/.test(input)) throw new Error(`${label}格式不正确`)
@@ -122,9 +113,7 @@ function positiveInteger(value: string, label: string, maximum: number) {
 }
 
 function displayPeriod(item: any) {
-  const format = (value: string) => new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date(value))
+  const format = (value: string) => venueDateKey(value) || '待定'
   return `${format(item.periodStart)} — ${format(item.periodEnd)}`
 }
 
@@ -318,8 +307,6 @@ function issueCodes(item: any) {
     },
   })
 }
-
-
 
 function toggleMerchantStatus() {
   if (!isAdmin.value || !merchant.value) return

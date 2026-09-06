@@ -10,7 +10,7 @@ import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
 import type { CourtAvailability } from '../../../../types/domain'
-import { idempotencyKey, money, shortDate } from '../../../../utils/format'
+import { idempotencyKey, money, shortDate, today as shanghaiDate } from '../../../../utils/format'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
 import {
   findOpsDeepLinkRecord,
@@ -336,15 +336,6 @@ async function applyCoachDeepLink() {
   focusedRecord.value = `${prefix}:${record.id}`
   await nextTick()
   uni.pageScrollTo({ selector: `#${opsDeepLinkDomId(prefix, record.id)}`, duration: 250 })
-}
-
-function shanghaiDate(offsetDays = 0) {
-  const value = new Date(Date.now() + offsetDays * 86_400_000)
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(value)
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
-  return `${values.year}-${values.month}-${values.day}`
 }
 
 async function loadCourtAvailability() {

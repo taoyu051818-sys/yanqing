@@ -39,7 +39,8 @@
         { "path": "pages/inventory/index", "style": { "navigationBarTitleText": "商品库存" } },
         { "path": "pages/members/index", "style": { "navigationBarTitleText": "客户与会员" } },
         { "path": "pages/venue/index", "style": { "navigationBarTitleText": "场馆维护日历" } },
-        { "path": "pages/governance/index", "style": { "navigationBarTitleText": "治理与权限" } }
+        { "path": "pages/governance/index", "style": { "navigationBarTitleText": "治理与权限" } },
+        { "path": "pages/pc-login/index", "style": { "navigationBarTitleText": "电脑后台登录" } }
       ]
     }
   ],

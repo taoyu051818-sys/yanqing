@@ -26,6 +26,7 @@ const setup = (options: {
   publicRoute?: boolean
   claims?: Record<string, unknown>
   user?: ReturnType<typeof activeUser> | null
+  config?: Record<string, string>
 } = {}) => {
   const reflector = {
     getAllAndOverride: vi.fn().mockReturnValue(options.publicRoute ?? false),
@@ -35,13 +36,16 @@ const setup = (options: {
       sub: 'user-1',
       displayName: '过期名称',
       roles: [AppRole.ADMIN],
+      loginMethod: 'wechat',
     }),
   }
   const prisma = {
     user: { findUnique: vi.fn().mockResolvedValue(options.user === undefined ? activeUser() : options.user) },
   }
   return {
-    guard: new JwtAuthGuard(jwt as never, reflector as never, prisma as never),
+    guard: new JwtAuthGuard(jwt as never, reflector as never, prisma as never, {
+      get: (key: string, fallback?: string) => options.config?.[key] ?? fallback,
+    } as never),
     jwt,
     prisma,
     reflector,
@@ -49,6 +53,30 @@ const setup = (options: {
 }
 
 describe('JwtAuthGuard live identity validation', () => {
+  it.each([undefined, 'development', 'unknown', null])('rejects an untrusted login source %s when development login is closed', async (loginMethod) => {
+    const { guard, prisma } = setup({ claims: { sub: 'user-1', loginMethod } })
+    await expect(guard.canActivate(requestContext({ headers: { authorization: 'Bearer signed-token' } })))
+      .rejects.toThrow('此登录会话已停用')
+    expect(prisma.user.findUnique).not.toHaveBeenCalled()
+  })
+
+  it.each([undefined, 'development'])('permits explicit isolated development sessions: %s', async (loginMethod) => {
+    const { guard } = setup({
+      claims: { sub: 'user-1', loginMethod },
+      config: { NODE_ENV: 'staging', DEV_LOGIN_ENABLED: 'true' },
+    })
+    await expect(guard.canActivate(requestContext({ headers: { authorization: 'Bearer signed-token' } }))).resolves.toBe(true)
+  })
+
+  it('rejects development tokens in production even if a switch is misconfigured', async () => {
+    const { guard } = setup({
+      claims: { sub: 'user-1', loginMethod: 'development' },
+      config: { NODE_ENV: 'production', DEV_LOGIN_ENABLED: 'true' },
+    })
+    await expect(guard.canActivate(requestContext({ headers: { authorization: 'Bearer signed-token' } })))
+      .rejects.toThrow('此登录会话已停用')
+  })
+
   it('keeps public routes database-free', async () => {
     const { guard, jwt, prisma } = setup({ publicRoute: true })
 
@@ -91,6 +119,7 @@ describe('JwtAuthGuard live identity validation', () => {
 
     await expect(guard.canActivate(requestContext(request))).resolves.toBe(true)
     expect(request.user).toEqual({
+      loginMethod: 'wechat',
       sub: 'user-1',
       displayName: '数据库名称',
       roles: [AppRole.MEMBER, AppRole.COACH],

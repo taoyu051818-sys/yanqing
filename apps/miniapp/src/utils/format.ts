@@ -32,5 +32,11 @@ export const dateTimeRange = (start?: DateValue, end?: DateValue) => {
   const from = venueDate(start)
   return from ? `${datePart(from)} ${venueTimeRange(start, end)}` : '时间待定'
 }
-export const today = () => venueDate(new Date())!.toISOString().slice(0, 10)
+export const venueDateKey = (value?: DateValue) => venueDate(value)?.toISOString().slice(0, 10) || ''
+export const venueClock = (value?: DateValue) => {
+  const date = venueDate(value)
+  return date ? timePart(date) : '待定'
+}
+// Use a fixed Beijing offset without Intl/formatToParts, including page setup.
+export const today = (offsetDays = 0) => venueDateKey(new Date(Date.now() + offsetDays * 86_400_000))
 export const idempotencyKey = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`

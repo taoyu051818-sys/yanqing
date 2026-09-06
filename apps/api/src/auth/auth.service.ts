@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 
 import { PrismaService } from '../database/prisma.service.js'
+import { developmentLoginEnabled, type LoginMethod } from '../common/auth/login-policy.js'
 import { AccountType, AppRole, UserStatus } from '../generated/prisma/enums.js'
 import type { DevLoginDto, UpdateMyProfileDto, WechatLoginDto } from './auth.dto.js'
 
@@ -71,12 +72,12 @@ export class AuthService {
       return saved
     })
     this.assertLoginAllowed(user)
-    return this.issueToken(user)
+    return this.issueToken(user, 'wechat')
   }
 
   async devLogin(dto: DevLoginDto) {
-    if (this.config.get<string>('NODE_ENV') === 'production') {
-      throw new UnauthorizedException('生产环境禁用开发登录')
+    if (!developmentLoginEnabled(this.config)) {
+      throw new UnauthorizedException('开发登录已关闭，请使用微信登录')
     }
     let user = dto.userId
       ? await this.prisma.user.findUnique({ where: { id: dto.userId }, include: { roles: true } })
@@ -94,7 +95,7 @@ export class AuthService {
     }
     if (!user) throw new UnauthorizedException('测试用户不存在或已停用')
     this.assertLoginAllowed(user)
-    return this.issueToken(user)
+    return this.issueToken(user, 'development')
   }
 
   async me(userId: string) {
@@ -196,12 +197,13 @@ export class AuthService {
     displayName: string
     primaryRole: AppRole
     roles: { role: AppRole }[]
-  }) {
+  }, loginMethod: LoginMethod) {
     const roles = [...new Set([user.primaryRole, ...user.roles.map((item) => item.role)])]
     const accessToken = await this.jwt.signAsync({
       sub: user.id,
       roles,
       displayName: user.displayName,
+      loginMethod,
     })
     return {
       accessToken,

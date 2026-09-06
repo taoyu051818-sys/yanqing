@@ -1,6 +1,6 @@
 # 延庆金羽羽毛球会员生态系统
 
-面向延庆羽毛球馆的全栈业务系统，覆盖会员及前台、教练、球局主理人、赛事、联盟商户、财务和管理员等运营角色。唯一正式客户端采用 uni-app + Vue 3，可编译为微信小程序；后端采用 NestJS + Prisma + PostgreSQL。仓库根目录的 Next.js 界面是上游原型参考，不连接本系统 API，不属于生产运行路径或业务验收范围。
+面向延庆羽毛球馆的全栈业务系统，覆盖会员及前台、教练、球局主理人、赛事、联盟商户、财务和管理员等运营角色。会员与员工移动端采用 uni-app + Vue 3 微信小程序，集中管理使用独立 Vue 3 PC 后台；两端共用 NestJS + Prisma + PostgreSQL。仓库根目录的 Next.js 界面是上游原型参考，不连接本系统 API，不属于生产运行路径或业务验收范围。
 
 ## 已实现范围
 
@@ -24,6 +24,7 @@
 ```text
 apps/api       NestJS API、Prisma 模型、迁移与种子数据
 apps/miniapp   uni-app 微信小程序
+apps/admin     Vue 3 独立 PC 管理后台（/admin/）
 packages/shared 可测试的金额、账户、瑞士制、让分等领域规则
 app            上游 Next.js 视觉原型（非生产客户端、非验收对象）
 docs           架构、接口、部署、安全和验收文档
@@ -64,12 +65,22 @@ pnpm dev:miniapp
 
 开发/mock 构建的登录页提供角色快捷入口；只有在 `VITE_DATA_MODE=remote` 下生成的生产构建才只显示微信登录。种子数据为每种角色准备了测试用户，详见 [docs/deployment.md](docs/deployment.md)。
 
+API 开发登录默认关闭。仅在独立本地/测试数据库联调时设置 `DEV_LOGIN_ENABLED=true`；线上已关闭该入口，旧会话需要重新微信登录。真实微信账号 `TY` 已授权为超级管理员，详见 [登录收口记录](docs/releases/2026-09-05-auth-closeout.md)。
+
+## 独立 PC 后台
+
+入口：[https://api.yutechhn.cn/admin/](https://api.yutechhn.cn/admin/)。服务端与桌面页面已于 2026-09-06 部署；新版小程序扫码入口的上传及真实微信确认状态见 [发布记录](docs/releases/2026-09-06-pc-admin.md)。
+
+V1 支持人员查询与超级管理员授权、五类业务配置、待办概览、订单查询、操作审计和电脑会话撤销。退款/结算复核、具体履约及批量作业仍使用小程序经营工作台。登录仅由真实微信管理员或财务扫码确认，Cookie 会话最多 8 小时；普通会员和开发身份不可授权。
+
+本地 API 设置 `ADMIN_CONSOLE_ORIGIN=http://127.0.0.1:5190`，运行 `ADMIN_DEV_API=http://127.0.0.1:3200 pnpm dev:admin`，打开 `http://127.0.0.1:5190/admin/`。默认关闭 PC 认证，启用时要求精确 HTTPS Origin（development/test 可用 localhost/127.0.0.1 HTTP）；正式部署使用同源反向代理。`pnpm build:admin` 生成 `apps/admin/dist`。
+
 ## 一键校验
 
 ```bash
-pnpm verify        # 领域规则、API 单元/E2E、API 构建、小程序类型与微信构建
+pnpm verify        # 领域规则、API 单元/E2E、API 构建、小程序与 PC 后台构建
 pnpm verify:full   # 额外确认上游 Next.js 视觉原型仍可构建
-pnpm build         # 只构建正式 NestJS API 与 uni-app 微信小程序
+pnpm build         # 构建 NestJS API、微信小程序与 PC 后台
 pnpm build:legacy-web # 单独构建非生产的上游视觉原型
 ```
 

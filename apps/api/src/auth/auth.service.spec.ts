@@ -28,12 +28,25 @@ const setup = (savedUser: ReturnType<typeof user> | null, configValues: Record<s
   }
   const jwt = { signAsync: vi.fn().mockResolvedValue('signed-token') }
   const config = {
-    get: vi.fn((key: string, fallback?: string) => configValues[key] ?? (key === 'NODE_ENV' ? 'development' : fallback)),
+    get: vi.fn((key: string, fallback?: string) => configValues[key] ?? ({ NODE_ENV: 'development', DEV_LOGIN_ENABLED: 'true' }[key] ?? fallback)),
   }
   return { service: new AuthService(prisma as never, jwt as never, config as never), prisma, jwt }
 }
 
 describe('AuthService login status checks', () => {
+  it.each([
+    { NODE_ENV: 'staging', DEV_LOGIN_ENABLED: 'false' },
+    { NODE_ENV: 'production', DEV_LOGIN_ENABLED: 'true' },
+    { NODE_ENV: 'development', DEV_LOGIN_ENABLED: 'false' },
+  ])('rejects disabled development login before any database access: %j', async (values) => {
+    const { service, prisma, jwt } = setup(user(), values)
+    await expect(service.devLogin({ role: AppRole.SUPER_ADMIN })).rejects.toThrow('开发登录已关闭')
+    await expect(service.devLogin({ userId: 'user-1' })).rejects.toThrow('开发登录已关闭')
+    expect(prisma.user.findFirst).not.toHaveBeenCalled()
+    expect(prisma.user.findUnique).not.toHaveBeenCalled()
+    expect(jwt.signAsync).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['disabled', user({ status: UserStatus.DISABLED })],
     ['deleted status', user({ status: UserStatus.DELETED })],
@@ -58,6 +71,7 @@ describe('AuthService login status checks', () => {
     expect(jwt.signAsync).toHaveBeenCalledWith(expect.objectContaining({
       sub: savedUser.id,
       roles: [AppRole.COACH, AppRole.MEMBER],
+      loginMethod: 'development',
     }))
   })
 
