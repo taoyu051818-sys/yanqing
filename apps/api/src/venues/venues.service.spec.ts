@@ -373,7 +373,7 @@ describe('VenuesService booking ownership', () => {
     const service = new VenuesService(prisma as never);
 
     await expect(
-      service.createBooking(bookingDto, frontDesk),
+      service.createBooking({ ...bookingDto, sourceChannel: SourceChannel.STORE_VISIT }, frontDesk),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.user.findFirst).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
@@ -410,7 +410,12 @@ describe('VenuesService booking ownership', () => {
     });
   });
 
-  it('records the customer as owner and the front desk as creator/audit actor', async () => {
+  it.each([
+    { actor: frontDesk, customer: 'member-2', owner: 'member-2', assisted: true },
+    { actor: administrator, customer: undefined, owner: administrator.sub, assisted: false },
+    { actor: frontDesk, customer: undefined, owner: frontDesk.sub, assisted: false },
+    { actor: { ...member, roles: [AppRole.MEMBER, AppRole.SUPER_ADMIN] }, customer: undefined, owner: member.sub, assisted: false },
+  ])('assigns the chosen owner without turning staff self-bookings into delegated orders: %j', async ({ actor, customer, owner, assisted }) => {
     const tx = {
       frontDeskShift: {
         findFirst: vi.fn().mockResolvedValue({ id: 'shift-open' }),
@@ -461,21 +466,21 @@ describe('VenuesService booking ownership', () => {
     const service = new VenuesService(prisma as never);
 
     await expect(
-      service.createBooking({ ...bookingDto, memberId: 'member-2' }, frontDesk),
+      service.createBooking({ ...bookingDto, ...(customer ? { memberId: customer } : {}) }, actor),
     ).resolves.toMatchObject({ id: 'order-assisted' });
 
     expect(tx.order.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          memberId: 'member-2',
-          createdById: frontDesk.sub,
+          memberId: owner,
+          createdById: actor.sub,
           bookings: {
-            create: expect.objectContaining({ memberId: 'member-2' }),
+            create: expect.objectContaining({ memberId: owner }),
           },
           parameterSnapshot: expect.objectContaining({
-            targetMemberId: 'member-2',
-            createdById: frontDesk.sub,
-            operatorAssisted: true,
+            targetMemberId: owner,
+            createdById: actor.sub,
+            operatorAssisted: assisted,
             operatingShare: expect.objectContaining({
               rateBps: 1_500,
               businessType: BusinessType.VENUE,
@@ -488,14 +493,15 @@ describe('VenuesService booking ownership', () => {
     );
     expect(tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        actorId: frontDesk.sub,
+        actorId: actor.sub,
         action: 'VENUE_ORDER_CREATED',
         newValue: expect.objectContaining({
-          memberId: 'member-2',
-          createdById: frontDesk.sub,
+          memberId: owner,
+          createdById: actor.sub,
         }),
       }),
     });
+    if (!assisted) { expect(tx.frontDeskShift.findFirst).not.toHaveBeenCalled(); expect(prisma.user.findFirst).not.toHaveBeenCalled() }
   });
 
   it('does not create an assisted booking when the front desk has no open shift', async () => {

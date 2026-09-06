@@ -149,7 +149,7 @@ const output = path.resolve(process.env.FRICTION_OUTPUT || 'artifacts/low-fricti
     assert((await text()).includes('已选：'))
     assert.equal(await page.locator('.confirm input').count(), 0)
     await snap('10-booking-coupon-selected-without-code')
-    await click('确认预约，下一步付款')
+    await click('确认预约')
     await page.waitForURL('**/pages/order/index?id=**')
     const booking = (await read('yanqing_mock_orders')).find(item => item.id === new URL(page.url().replace('#', '')).searchParams.get('id'))
     assert(booking && booking.discountCents === 2000)

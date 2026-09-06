@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mockRequest } from './router'
-import { mockLogin } from './core'
+import { mockLogin, mockUser } from './core'
 import { availability, getOrders } from './venue'
 import { getPriceRules, savePriceRules, saveVenueBookings } from './state'
 
@@ -9,6 +9,27 @@ vi.stubGlobal('uni', { getStorageSync: (key: string) => storage.get(key) ?? '', 
 const date = '2090-09-07'
 describe('hourly venue booking', () => {
   beforeEach(() => { storage.clear(); mockLogin('MEMBER') })
+  it.each(['ADMIN', 'SUPER_ADMIN', 'FRONT_DESK'] as const)('lets %s book personally without selecting a customer or opening a shift', async role => {
+    mockLogin(role)
+    const response = await mockRequest<any>('POST', '/venues/bookings', { date, courtId: 'court-1', slotId: 'slot-H09', sourceChannel: 'MINI_PROGRAM', creationIdempotencyKey: 'staff-personal-' + role })
+    const order = getOrders().find(item => item.id === response.id)
+    expect(order?.memberId).toBe(mockUser().id)
+    expect(order?.parameterSnapshot.operatorAssisted).toBe(false)
+    expect(order?.createdById).toBe(mockUser().id)
+  })
+  it('filters and paginates the assisted-booking member directory', async () => {
+    mockLogin('SUPER_ADMIN')
+    const filtered = await mockRequest<any>('GET', '/members', { keyword: '小周', page: 1, pageSize: 20 })
+    expect(filtered.items.map((member: any) => member.id)).toEqual(['member-2'])
+    expect(filtered.total).toBe(1)
+    const second = await mockRequest<any>('GET', '/members', { page: 2, pageSize: 1 })
+    expect(second.items.map((member: any) => member.id)).toEqual(['member-2'])
+    expect(second.total).toBe(2)
+    mockLogin('FRONT_DESK')
+    const byPhone = await mockRequest<any>('GET', '/members', { keyword: '13800000007' })
+    expect(byPhone.items.map((member: any) => member.id)).toEqual(['member-2'])
+    expect(byPhone.items[0].phone).not.toBe('13800000007')
+  })
   it('offers 17 continuous one-hour slots with hourly tariffs including midnight', () => {
     const { slots } = availability(date)
     expect(slots).toHaveLength(17)

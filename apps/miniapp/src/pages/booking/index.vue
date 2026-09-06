@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import AppIcon from '../../components/AppIcon.vue'
 import SectionEmpty from '../../components/SectionEmpty.vue'
+import BookingMemberPicker from '../../components/BookingMemberPicker.vue'
 import { endpoints } from '../../services/api'
 import { useSessionStore } from '../../stores/session'
-import type { CourtAvailability } from '../../types/domain'
+import type { CourtAvailability, MemberDirectoryItem } from '../../types/domain'
 import { money, today } from '../../utils/format'
 import { withPendingCreationKey } from '../../utils/pending-creation-key'
 import { requestMemberLogin, openMemberPage } from '../../utils/member-navigation'
@@ -13,6 +14,22 @@ import { selectableBookingCoupons } from '../../utils/booking-coupons'
 import { consumeBookingIntent } from '../../utils/member-navigation'
 
 const session = useSessionStore()
+const bookingMode = ref<'SELF' | 'ASSISTED'>('SELF')
+const targetMember = ref<MemberDirectoryItem | null>(null)
+const showMembers = ref(false)
+const canAssist = computed(() => session.roles.some(role => ['FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'].includes(role)))
+const assisted = computed(() => canAssist.value && bookingMode.value === 'ASSISTED')
+const submitting = ref(false)
+const submissionError = ref('')
+const assistedOrder = ref<{ id: string; memberName: string; payableCents?: number } | null>(null)
+function setMode(mode: 'SELF' | 'ASSISTED') {
+  if (submitting.value || (mode === 'ASSISTED' && !canAssist.value)) return
+  bookingMode.value = mode; targetMember.value = null; submissionError.value = ''
+  couponCode.value = ''; showCoupon.value = false
+}
+function selectMember(member: MemberDirectoryItem) { targetMember.value = member; showMembers.value = false; submissionError.value = '' }
+watch(() => session.user?.id, () => { bookingMode.value = 'SELF'; targetMember.value = null; showMembers.value = false; couponCode.value = ''; assistedOrder.value = null })
+watch(canAssist, allowed => { if (!allowed) { bookingMode.value = 'SELF'; targetMember.value = null; showMembers.value = false } })
 const date = ref(today())
 const data = ref<CourtAvailability | null>(null)
 const loading = ref(false)
@@ -96,42 +113,58 @@ async function load(resetSelection = false) {
 }
 
 function choose(courtId: string, slot: CourtAvailability['slots'][number]) {
-  if (unavailableReason(courtId, slot)) return
-  selected.value = { courtId, slotId: slot.id }
+  if (submitting.value || unavailableReason(courtId, slot)) return
+  selected.value = { courtId, slotId: slot.id }; submissionError.value = ''
 }
 
 async function submit() {
-  if (loading.value || couponLoading.value) return
+  if (loading.value || submitting.value || (!assisted.value && couponLoading.value)) return
   if (!session.isAuthenticated) return requestMemberLogin('/pages/booking/index')
   if (!selected.value) return
-  loading.value = true
+  if (assisted.value && !targetMember.value) { showMembers.value = true; return }
+  submitting.value = true; submissionError.value = ''
+  const isAssisted = assisted.value, customer = targetMember.value
   try {
     const command = {
-      date: date.value,
-      ...selected.value,
-      sourceChannel: 'MINI_PROGRAM',
-      couponCode: couponCode.value || undefined,
+      date: date.value, ...selected.value,
+      sourceChannel: isAssisted ? 'STORE_VISIT' : 'MINI_PROGRAM',
+      ...(isAssisted ? { memberId: customer!.id } : { couponCode: couponCode.value || undefined }),
     }
-    const order: any = await withPendingCreationKey('venue.booking.member', command, (creationIdempotencyKey) =>
+    const order: any = await withPendingCreationKey(isAssisted ? 'venue.booking.assisted' : 'venue.booking.member', command, creationIdempotencyKey =>
       endpoints.createBooking({ ...command, creationIdempotencyKey }),
     )
-    uni.showToast({ title: '已锁定10分钟', icon: 'success' })
-    openMemberPage(`/pages/order/index${order?.id ? `?id=${encodeURIComponent(order.id)}` : ''}`)
-  } catch (cause: any) { uni.showToast({ title: cause.message, icon: 'none' }); await load() }
-  finally { loading.value = false }
+    if (isAssisted) {
+      assistedOrder.value = { id: order.id, memberName: customer!.displayName, payableCents: order.payableCents }
+      selected.value = null
+      await load()
+    } else {
+      uni.showToast({ title: '已锁定10分钟', icon: 'success' })
+      openMemberPage(`/pages/order/index${order?.id ? `?id=${encodeURIComponent(order.id)}` : ''}`)
+    }
+  } catch (cause: any) { submissionError.value = cause.message || '预约未完成，请重试'; await load() }
+  finally { submitting.value = false }
+}
+function openAssistedOrder() {
+  if (assistedOrder.value) uni.navigateTo({ url: '/packages/ops/pages/frontdesk/index?focus=order&orderId=' + encodeURIComponent(assistedOrder.value.id) })
 }
 
-onShow(() => { const intent = consumeBookingIntent(); if (intent?.couponId) showCoupon.value = true; void load(); void loadCoupons(intent?.couponId) })
+onShow(async () => { await session.hydrate(); const intent = consumeBookingIntent(); if (intent?.couponId) showCoupon.value = true; void load(); void loadCoupons(intent?.couponId) })
 </script>
 
 <template>
-  <view class="page safe-bottom">
+  <view class="page booking-page">
     <view class="notice"><AppIcon name="clock" :size="30" tone="accent" /><text>每格 1 小时，显示该小时费用。下单后保留 10 分钟，未付款自动取消并释放场地。</text></view>
     <view class="card row">
       <view class="date-label"><AppIcon name="booking" :size="32" /><text>预订日期</text></view>
-      <picker mode="date" :value="date" :start="today()" @change="date = ($event.detail as any).value; load(true)">
+      <picker mode="date" :disabled="submitting" :value="date" :start="today()" @change="date = ($event.detail as any).value; load(true)">
         <view class="date"><text>{{ date }}</text><AppIcon name="chevron" :size="26" /></view>
       </picker>
+    </view>
+    <view v-if="canAssist" class="card booking-identity">
+      <text class="identity-title">为谁订场</text>
+      <view class="mode-switch"><button :class="{ active: !assisted }" :aria-pressed="!assisted" :disabled="submitting" @tap="setMode('SELF')">自己订场</button><button :class="{ active: assisted }" :aria-pressed="assisted" :disabled="submitting" @tap="setMode('ASSISTED')">代会员订场</button></view>
+      <button v-if="assisted" class="member-select" :disabled="submitting" @tap="showMembers = true"><view><text>{{ targetMember ? targetMember.displayName : '请选择代订会员' }}</text><text class="muted">{{ targetMember ? targetMember.phone || '未绑定手机号' : '按姓名或手机号搜索' }}</text></view><text>{{ targetMember ? '更换' : '选择会员' }}</text></button>
+      <text class="muted identity-note">{{ assisted ? '代订生成会员的待付款订单；现场收款请进入今日营业。' : '订单归你本人，可使用自己的优惠券和支付方式。' }}</text>
     </view>
     <view v-if="error" class="card error"><AppIcon name="warning" :size="32" tone="danger" /><text>{{ error }}</text><button class="secondary" @tap="load()">重试</button></view>
     <view v-if="loading && !data" class="matrix-skeleton skeleton" />
@@ -161,11 +194,14 @@ onShow(() => { const intent = consumeBookingIntent(); if (intent?.couponId) show
     </scroll-view>
     <SectionEmpty v-else-if="!loading && !error" icon="venue" title="暂无可订时段" description="请切换日期或联系前台" />
 
-    <view v-if="selected" class="confirm card">
-      <view class="row"><text class="confirm-title">{{ selectedCourt?.name }} · {{ selectedSlot?.label }}</text><text class="money">{{ money(selectedSlot?.price?.priceCents) }}</text></view>
-      <text class="muted">{{ date }} · {{ selectedSlot ? slotRange(selectedSlot) : '' }} · 共 1 小时</text>
-      <button class="coupon-toggle" :aria-expanded="showCoupon" @tap="showCoupon = !showCoupon">{{ selectedCoupon ? `已选：${selectedCoupon.template?.benefitDescription || '优惠券'}` : '从我的券包选择（可选）' }}</button>
-      <view v-if="showCoupon" class="coupon-picker">
+
+    <view class="booking-dock">
+      <text v-if="submissionError" class="submit-error" role="alert">{{ submissionError }}</text>
+      <view v-if="selected" class="selection-summary"><view><text class="selection-title">{{ selectedCourt?.name }} · {{ selectedSlot ? slotRange(selectedSlot) : '' }}</text><text class="muted">{{ date }} · 1 小时{{ assisted && targetMember ? ' · ' + targetMember.displayName : '' }}</text></view><button v-if="!assisted" class="coupon-toggle" :disabled="submitting" :aria-expanded="showCoupon" @tap="showCoupon = true">{{ selectedCoupon ? '已选优惠' : '优惠券' }} ›</button></view>
+      <view class="checkout-row"><view class="checkout-price"><template v-if="selected"><text class="muted">场地费{{ selectedCoupon && !assisted ? ' · 优惠下单核验' : '' }}</text><text class="total-price">{{ money(selectedSlot?.price?.priceCents) }}</text></template><text v-else class="selection-prompt">请选择场地和时段</text></view><button class="primary checkout-button" :loading="submitting" :disabled="!selected || loading || submitting || (!assisted && couponLoading) || Boolean(error)" @tap="submit">{{ !selected ? '先选场地' : assisted && !targetMember ? '选择会员' : !session.isAuthenticated ? '登录后继续' : assisted ? '确认代订' : '确认预约' }}</button></view>
+    </view>
+    <view v-if="showCoupon && !assisted" class="booking-mask" @tap="showCoupon = false"><view class="booking-sheet" role="dialog" aria-modal="true" aria-label="选择优惠券" @tap.stop><view class="sheet-heading"><text>选择优惠券</text><button class="secondary" @tap="showCoupon = false">完成</button></view>
+      <scroll-view scroll-y class="coupon-picker">
         <text v-if="!session.isAuthenticated" class="muted">登录后可直接选择已有优惠券，无需填写券码。</text>
         <text v-if="couponLoading" class="muted">正在同步券包…</text>
         <view v-if="couponError" role="alert"><text class="muted">{{ couponError }}</text><button class="secondary" :disabled="couponLoading" @tap="loadCoupons()">重新同步券包</button></view>
@@ -173,9 +209,11 @@ onShow(() => { const intent = consumeBookingIntent(); if (intent?.couponId) show
         <button v-for="coupon in couponOptions" :key="coupon.id" class="secondary" :aria-pressed="couponCode === coupon.code" :disabled="loading" @tap="couponCode = coupon.code"><text>{{ couponCode === coupon.code ? '已选 · ' : '' }}{{ coupon.template.benefitDescription || coupon.template.name }} · {{ money(coupon.template.faceValueCents) }}</text></button>
         <text v-if="session.isAuthenticated && !couponLoading && !couponOptions.length && !couponError" class="muted">暂无可选优惠券，可以直接预约。</text>
         <text class="muted">部分券限指定时段；是否适用及最终金额由下单时核验。</text>
-      </view>
-      <button class="primary" :loading="loading" :disabled="loading || couponLoading || Boolean(error)" @tap="submit"><AppIcon name="success" :size="30" tone="inverse" />{{ session.isAuthenticated ? '确认预约，下一步付款' : '登录后继续预约' }}</button>
-    </view>
+      </scroll-view>
+    </view></view>
+    <BookingMemberPicker v-if="showMembers && assisted" @select="selectMember" @close="showMembers = false" />
+    <view v-if="assistedOrder" class="booking-mask" @tap.stop><view class="booking-sheet" role="dialog" aria-modal="true" aria-label="代订成功"><text class="identity-title">已为 {{ assistedOrder.memberName }} 保留场地</text><text class="success-copy">应付 {{ money(assistedOrder.payableCents) }}，10 分钟内完成付款。会员可在自己的订单中支付；现场收款请进入今日营业处理。</text><button class="primary" @tap="openAssistedOrder">查看现场订单</button><button class="secondary" @tap="assistedOrder = null">继续订场</button></view></view>
+
   </view>
 </template>
 
@@ -195,10 +233,12 @@ onShow(() => { const intent = consumeBookingIntent(); if (intent?.couponId) show
 .court { color: #17653d; background: #f1f8f3; }
 .court.disabled { color: #9ca49f; background: #f2f3f2; }
 .court.selected { color: #fff; background: #17653d; box-shadow: inset 0 0 0 4rpx #c9ac54; }
-.confirm { margin-top: 24rpx; box-shadow: 0 16rpx 60rpx rgba(17,62,37,.18); }
-.confirm-title { min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
-.coupon-picker { display:grid; gap:16rpx; margin:20rpx 0; max-height:440rpx; overflow-y:auto; }.coupon-picker button { margin:0; padding:16rpx; font-size:25rpx; }.coupon-picker button[aria-pressed="true"] { outline:2rpx solid var(--color-primary); }.coupon-picker .muted { line-height:1.6; }
-.coupon-toggle { width:100%; margin:10rpx 0; padding:12rpx; font-size:24rpx; color:var(--color-muted); background:transparent; }
+.coupon-picker { display:grid; gap:16rpx; margin:20rpx 0; height:42vh; }.coupon-picker button { margin:0; padding:16rpx; font-size:25rpx; }.coupon-picker button[aria-pressed="true"] { outline:2rpx solid var(--color-primary); }.coupon-picker .muted { line-height:1.6; }
+.coupon-toggle { flex-shrink:0; margin:0; padding:10rpx 16rpx; font-size:24rpx; color:var(--color-primary); background:var(--color-primary-soft); border-radius:16rpx; }
 .error { display:flex; align-items:center; gap:12rpx; color: #ae2f2f; background:#fff0ef; }
 .error text { flex:1; min-width:0; overflow-wrap:anywhere; }
+.booking-page{padding-bottom:calc(350rpx + env(safe-area-inset-bottom))}.identity-title{display:block;font-size:30rpx;font-weight:750}.mode-switch{display:flex;gap:12rpx;margin:18rpx 0}.mode-switch button{flex:1;margin:0;padding:16rpx;font-size:28rpx;color:#5f6f65;background:#f0f3ef;border:2rpx solid transparent}.mode-switch button.active{color:#17653d;background:#e7f4eb;border-color:#17653d}.identity-note{display:block}.member-select{display:flex;justify-content:space-between;width:100%;margin:0 0 18rpx;padding:20rpx;text-align:left;font-size:28rpx;background:#f7f9f6;color:#17653d;border:1rpx solid #d7e1d8}.member-select>view{flex:1;min-width:0}.member-select text{display:block}.booking-dock{position:fixed;left:0;right:0;bottom:0;z-index:30;padding:18rpx 28rpx calc(18rpx + env(safe-area-inset-bottom));background:#fff;border-top:1rpx solid #dce5dd;box-shadow:0 -8rpx 28rpx rgba(18,63,41,.08);box-sizing:border-box}.selection-summary{display:flex;align-items:center;justify-content:space-between;gap:16rpx;padding-bottom:12rpx}.selection-summary>view{flex:1;min-width:0}.selection-title{display:block;font-size:26rpx;font-weight:700}.selection-summary .muted{display:block;font-size:22rpx}.checkout-row{display:flex;align-items:center;justify-content:space-between;gap:20rpx}.checkout-price{flex:1;min-width:0}.checkout-price>text{display:block}.checkout-price .muted{font-size:22rpx}.total-price{color:#17653d;font-size:42rpx;font-weight:800;line-height:1.25}.checkout-button{flex:0 0 240rpx;margin:0;min-height:88rpx;border-radius:18rpx}.selection-prompt{font-size:28rpx;font-weight:650;color:#5f6f65}.submit-error{display:block;max-height:110rpx;overflow-y:auto;padding-bottom:12rpx;color:#a52626;font-size:24rpx;line-height:1.5}.booking-mask{position:fixed;inset:0;z-index:60;background:rgba(15,31,21,.42);display:flex;align-items:flex-end}.booking-sheet{width:100%;box-sizing:border-box;padding:28rpx 28rpx calc(28rpx + env(safe-area-inset-bottom));border-radius:28rpx 28rpx 0 0;background:#fff}.sheet-heading{display:flex;justify-content:space-between;align-items:center;font-size:32rpx;font-weight:750}.sheet-heading button{margin:0}.success-copy{display:block;margin:24rpx 0;font-size:28rpx;line-height:1.6}.booking-sheet>.secondary{margin-top:18rpx}
+/* #ifdef H5 */
+.booking-dock{bottom:var(--window-bottom,50px)}
+/* #endif */
 </style>

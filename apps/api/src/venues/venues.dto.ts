@@ -82,8 +82,8 @@ export class AvailabilityQueryDto {
 export class CreateVenueBookingDto {
   /**
    * Target customer for an operator-assisted booking.  Member requests may
-   * omit it (or send their own ID); front-desk and administrator requests are
-   * required to select an active member explicitly.
+   * omit it (or send their own ID). Staff booking for themselves in the mini
+   * program omit it; assisted/store bookings must select an active member.
    */
   @IsOptional()
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)

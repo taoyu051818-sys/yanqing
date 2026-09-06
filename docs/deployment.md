@@ -1,6 +1,6 @@
 # 部署与微信小程序发布
 
-当前 API 与 PC 桌面版本见 [2026-09-06 独立 PC 后台发布记录](releases/2026-09-06-pc-admin.md)，累计 34 个迁移。管理入口为 `https://api.yutechhn.cn/admin/`，API 仍为 `/api/v1`。真实微信账号 `TY` 已获超级管理员授权，开发登录和旧测试会话已关闭；旧会话需重新微信登录。旧公开 H5 已下线，不能按下文历史模板重新启用。API 当前通过 systemd WorkingDirectory 指向独立 release，PC 静态文件通过 Nginx `/admin/` 提供；下文 Compose/旧 source 路径均为模板，更新前先核对实际服务目录。
+最新订场修复及 API release 见 [2026-09-06 订场与固定结算栏](releases/2026-09-06-booking-checkout.md)。PC 桌面版本见 [2026-09-06 独立 PC 后台发布记录](releases/2026-09-06-pc-admin.md)，累计 34 个迁移。管理入口为 `https://api.yutechhn.cn/admin/`，API 仍为 `/api/v1`。真实微信账号 `TY` 已获超级管理员授权，开发登录和旧测试会话已关闭；旧会话需重新微信登录。旧公开 H5 已下线，不能按下文历史模板重新启用。API 当前通过 systemd WorkingDirectory 指向独立 release，PC 静态文件通过 Nginx `/admin/` 提供；下文 Compose/旧 source 路径均为模板，更新前先核对实际服务目录。
 
 ## 环境变量
 

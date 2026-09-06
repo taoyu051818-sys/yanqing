@@ -460,7 +460,7 @@ export class VenuesService {
   }
 
   async createBooking(dto: CreateVenueBookingDto, actor: AuthUser) {
-    const target = this.bookingTarget(dto.memberId, actor);
+    const target = this.bookingTarget(dto, actor);
     const order = await executeOrderCreation(this.prisma, {
       memberId: target.memberId,
       creationIdempotencyKey: dto.creationIdempotencyKey,
@@ -739,17 +739,21 @@ export class VenuesService {
     }
   }
 
-  private bookingTarget(memberId: string | undefined, actor: AuthUser) {
-    const requestedMemberId = memberId?.trim();
-    const assisted = actor.roles.some((role) =>
+  private bookingTarget(dto: CreateVenueBookingDto, actor: AuthUser) {
+    const requestedMemberId = dto.memberId?.trim();
+    const canAssist = actor.roles.some((role) =>
       ASSISTED_BOOKING_ROLES.has(role),
     );
+    // A staff role grants the ability to assist; it does not change who owns
+    // a personal mini-program booking. An explicit customer or store request
+    // continues through the assisted-booking validation, shift and audit gates.
+    const assisted = canAssist && (Boolean(requestedMemberId) || dto.sourceChannel === 'STORE_VISIT');
     if (assisted) {
       if (!requestedMemberId)
         throw new BadRequestException('前台代客订场必须先选择会员');
       return { memberId: requestedMemberId, assisted: true };
     }
-    if (!actor.roles.includes(AppRole.MEMBER)) {
+    if (!canAssist && !actor.roles.includes(AppRole.MEMBER)) {
       throw new ForbiddenException('仅会员本人或前台/管理员可创建场地订单');
     }
     if (requestedMemberId && requestedMemberId !== actor.sub) {

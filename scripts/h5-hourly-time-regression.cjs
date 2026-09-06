@@ -95,7 +95,7 @@ const output = path.resolve(process.env.HOURLY_UI_OUTPUT || 'artifacts/hourly-ti
     await page.setViewportSize({ width: 375, height: 812 })
     await page.addStyleTag({ content: '.game-detail-page .fact-value,.game-detail-page .fact-caption,.confirm text { font-size: 20px !important; }' })
     await snapshot('07-booking-large-text')
-    await page.getByText('确认预约，下一步付款', { exact: true }).click()
+    await page.getByText('确认预约', { exact: true }).click()
     await page.locator('.order').waitFor()
     assert(created)
     assert((await page.locator('.order').innerText()).includes('19:00–20:00'))

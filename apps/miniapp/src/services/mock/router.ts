@@ -4737,8 +4737,9 @@ export async function mockRequest<T>(
   if (url === "/venues/bookings" && method === "POST") {
     const date = text(data.date);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("日期格式无效");
-    const assisted = hasMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
     const requestedMemberId = text(data.memberId);
+    const canAssist = hasMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
+    const assisted = canAssist && (Boolean(requestedMemberId) || data.sourceChannel === "STORE_VISIT");
     let targetMember: MockVenueMember;
     if (assisted) {
       if (!requestedMemberId) throw new Error("前台代客订场必须先选择会员");
@@ -4749,7 +4750,7 @@ export async function mockRequest<T>(
       if (!activeMember) throw new Error("所选会员不存在、未建档或已停用");
       targetMember = activeMember;
     } else {
-      requireMockRole("MEMBER");
+      if (!canAssist) requireMockRole("MEMBER");
       if (requestedMemberId && requestedMemberId !== mockUser().id)
         throw new Error("会员只能为本人预订场地");
       targetMember = {
@@ -12724,7 +12725,14 @@ export async function mockRequest<T>(
                 : maskMockPhone(member.phone),
             privacyScope,
           }));
-    return ok({ items: members, total: members.length });
+    const keyword = text(data.keyword).trim().toLowerCase();
+    const filtered = [...members].filter(member =>
+      !keyword || member.displayName.toLowerCase().includes(keyword) ||
+      (privacyScope !== 'COACH_ASSIGNED' && Boolean(MOCK_ACTIVE_MEMBERS.find(item => item.id === member.id)?.phone?.includes(keyword)))
+    );
+    const page = Math.max(1, Number(data.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(data.pageSize) || 20));
+    return ok({ items: filtered.slice((page - 1) * pageSize, page * pageSize), total: filtered.length });
   }
   if (url === "/dashboard") {
     requireMockRole("FINANCE", "ADMIN", "SUPER_ADMIN");
