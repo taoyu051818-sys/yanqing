@@ -820,6 +820,8 @@ model FrontDeskShift {
 }
 
 model RiskEvent {
+  dedupKey   String?      @unique
+  lastSeenAt DateTime?
   id         String       @id @default(cuid())
   ruleCode   String
   severity   RiskSeverity
@@ -2390,4 +2392,17 @@ model AdminBrowserSession {
   expiresAt DateTime
   revokedAt DateTime?
   @@index([userId, expiresAt])
+}
+
+// Cached, read-only AI interpretation; authoritative amounts remain in business records.
+model BossBriefing {
+  date          String   @id
+  summaryHash   String
+  text          String
+  source        String
+  model         String?
+  generatedAt   DateTime?
+  attemptedAt   DateTime?
+  leaseUntil    DateTime?
+  updatedAt     DateTime @updatedAt
 }

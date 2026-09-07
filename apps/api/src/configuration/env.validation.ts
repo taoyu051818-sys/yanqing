@@ -57,5 +57,20 @@ export const validateEnvironment = (
         `WeChat payment configuration missing: ${missing.join(', ')}`,
       );
   }
+  const monitorEnabled = String(input.BOSS_MONITOR_ENABLED ?? 'true');
+  if (!['true','false'].includes(monitorEnabled)) throw new Error('BOSS_MONITOR_ENABLED must be true or false');
+  environment.BOSS_MONITOR_ENABLED = monitorEnabled;
+  if (input.BOSS_LLM_API_KEY) {
+    const base = String(input.BOSS_LLM_BASE_URL ?? 'https://vip.aipro.love/v1');
+    let parsed: URL;
+    try { parsed = new URL(base); } catch { throw new Error('BOSS_LLM_BASE_URL must be a valid HTTPS URL'); }
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('BOSS_LLM_BASE_URL must be a credential-free HTTPS URL');
+    environment.BOSS_LLM_BASE_URL = base;
+    environment.BOSS_LLM_MODEL = String(input.BOSS_LLM_MODEL ?? 'gpt-5.6-sol');
+  }
+  for (const key of ['LARGE_ORDER_CENTS','LARGE_RECHARGE_CENTS','FREQUENT_REFUND_COUNT','PAYMENT_STUCK_MINUTES','OVERDUE_ORDER_MINUTES','LOW_UTILIZATION_PERCENT','NEAR_FULL_PERCENT','LOW_SIGNUP_PERCENT','SIGNUP_LEAD_HOURS']) {
+    const value = input['BOSS_' + key];
+    if (value !== undefined && value !== '' && (!Number.isSafeInteger(Number(value)) || Number(value) <= 0 || (key.endsWith('PERCENT') && Number(value) > 100))) throw new Error('BOSS_' + key + ' must be a positive integer in range');
+  }
   return environment;
 };

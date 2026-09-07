@@ -1,3 +1,4 @@
+import { BossModule } from './boss/boss.module.js'
 import { AdminAuthModule } from './admin-auth/admin-auth.module.js'
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
@@ -53,6 +54,7 @@ import { PrivacyModule } from './privacy/privacy.module.js'
     GamesModule,
     ReferralsModule,
     DashboardModule,
+    BossModule,
     InventoryModule,
     ReportsModule,
     MembershipsModule,
