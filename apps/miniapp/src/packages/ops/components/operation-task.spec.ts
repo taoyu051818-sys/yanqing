@@ -4,8 +4,8 @@ vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(), o
 const storage = new Map<string, unknown>()
 vi.stubGlobal('document', { querySelector: () => null })
 vi.stubGlobal('uni', { getStorageSync: (key: string) => storage.get(key), pageScrollTo: vi.fn() })
-describe('inline operation task', () => {
-  beforeEach(() => { storage.clear(); storage.set('yanqing_actor_id', 'operator-a') })
+describe('modal operation task', () => {
+  beforeEach(() => { vi.clearAllMocks(); storage.clear(); storage.set('yanqing_actor_id', 'operator-a') })
   it.each(['-1', '1.111', '1e3', 'NaN'])('rejects invalid money %s', value => {
     expect(validateTaskField({ key: 'amount', label: '金额', kind: 'money' }, value)).not.toBe('')
   })
@@ -47,6 +47,32 @@ describe('inline operation task', () => {
     await task.submit()
     expect(submit).toHaveBeenCalledTimes(1)
     expect(task.state.error).toContain('登录身份已变化')
+  })
+  it('opens and focuses validation inside the dialog without moving the background page', async () => {
+    const task = useOperationTask(), submit = vi.fn()
+    task.start({ title: '批准', description: '', confirmText: '确认批准', fields: [{ key: 'reason', label: '复核依据', min: 2 }], submit })
+    await task.submit()
+    expect(task.state.focusKey).toBe('reason')
+    expect(task.state.scrollTarget).toBe('task-field-reason')
+    expect(uni.pageScrollTo).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
+  })
+  it('cancels without submitting and cannot submit after closing', async () => {
+    const task = useOperationTask(), submit = vi.fn()
+    task.start({ title: '批准', description: '', confirmText: '确认', fields: [], submit })
+    task.cancel(); await task.submit()
+    expect(task.state.open).toBe(false)
+    expect(submit).not.toHaveBeenCalled()
+  })
+  it('keeps the dialog open during submission and dismisses the completed result explicitly', async () => {
+    const task = useOperationTask()
+    let finish!: (value: string) => void
+    task.start({ title: '批准', description: '', confirmText: '确认', fields: [], submit: () => new Promise(done => { finish = done }) })
+    const pending = task.submit(); task.cancel()
+    expect(task.state.open).toBe(true)
+    finish('已批准'); await pending
+    expect(task.state.result).toBe('已批准')
+    task.cancel(); expect(task.state.result).toBe('')
   })
   it('revalidates a dynamic option before submitting', async () => {
     const task = useOperationTask(), submit = vi.fn()

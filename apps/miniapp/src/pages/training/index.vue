@@ -282,7 +282,7 @@ onShow(load)
           <view class="refund-amount">
             <button class="secondary" :aria-pressed="!customRefund" :disabled="Boolean(refundingId)" @tap="customRefund = false; refundError = ''">全部可退余额 {{ money(refundMaximum) }}</button>
             <button class="secondary" :aria-pressed="customRefund" :disabled="Boolean(refundingId)" @tap="customRefund = true; refundError = ''">指定退费金额</button>
-            <view v-if="customRefund"><text class="student-tip">申请金额（元）</text><input v-model="refundAmount" class="input" aria-label="申请退费金额" type="digit" :disabled="Boolean(refundingId)" /></view>
+            <view v-if="customRefund"><text class="student-tip">申请金额（元）</text><input v-model="refundAmount" class="input" aria-label="申请退费金额" type="digit" :adjust-position="false" :disabled="Boolean(refundingId)" /></view>
           </view>
         </ReasonForm>
         <view v-if="item.attendances?.[0]" class="feedback">最近：{{ item.attendances[0].feedback || '已完成签到消课' }}</view>

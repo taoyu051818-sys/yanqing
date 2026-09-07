@@ -25,20 +25,10 @@ export function validateTaskField(field: TaskField, value: string): string {
   if (['choices', 'search'].includes(field.kind || '') && !field.options?.some(item => item.value === value)) return '请重新选择' + field.label
   return ''
 }
-function scrollToTask(selector: string) {
-  // #ifdef H5
-  const target = document.querySelector(selector)
-  if (target) {
-    uni.pageScrollTo({ scrollTop: Math.max(0, window.scrollY + target.getBoundingClientRect().top - 64), duration: 200 })
-    return
-  }
-  // #endif
-  uni.pageScrollTo({ selector, duration: 200 })
-}
 export function useOperationTask() {
   const state = reactive({
     open: false, title: '', description: '', confirmText: '', busy: false, error: '', result: '',
-    focusKey: '', fields: [] as TaskField[], values: {} as Record<string, string>, errors: {} as Record<string, string>,
+    focusKey: '', scrollTarget: '', fields: [] as TaskField[], values: {} as Record<string, string>, errors: {} as Record<string, string>,
     searches: {} as Record<string, { keyword: string; page: number; total: number; loading: boolean; error: string }>,
   })
   let definition: TaskDefinition | undefined
@@ -69,26 +59,25 @@ export function useOperationTask() {
   function start(task: TaskDefinition) {
     if (state.busy) return
     // Do not silently discard an unfinished task by tapping another record.
-    if (state.open) { void nextTick(() => scrollToTask('#operation-task')); return }
+    if (state.open) return
     generation++
     definition = task
     actorScope = currentActor()
     Object.assign(state, { open: true, title: task.title, description: task.description,
-      confirmText: task.confirmText, result: '', error: '', focusKey: '', errors: {}, searches: {},
+      confirmText: task.confirmText, result: '', error: '', focusKey: '', scrollTarget: '', errors: {}, searches: {},
       fields: task.fields.map(field => ({ ...field })), values: Object.fromEntries(task.fields.map(field => [field.key, field.initial || ''])) })
     for (const field of state.fields) if (field.search) void search(field.key)
-    void nextTick(() => uni.pageScrollTo({ selector: '#operation-task', duration: 200 }))
   }
   function validate(key: string) {
     const field = state.fields.find(item => item.key === key)
     if (field) state.errors[key] = validateTaskField(field.optionsFor ? { ...field, options: field.optionsFor(state.values) } : field, (state.values[key] || '').trim())
   }
   function focus(key: string) {
-    state.focusKey = key
-    void nextTick(() => scrollToTask('#task-field-' + key))
+    state.focusKey = ''; state.scrollTarget = ''
+    void nextTick(() => { state.focusKey = key; state.scrollTarget = 'task-field-' + key })
   }
   async function submit() {
-    if (!definition || state.busy) return
+    if (!state.open || !definition || state.busy) return
     state.error = ''
     if (actorScope !== currentActor()) { state.error = '登录身份已变化，请关闭此操作并重新选择记录'; return }
     const values = Object.fromEntries(Object.entries(state.values).map(([key, value]) => [key, value.trim()]))
@@ -103,7 +92,7 @@ export function useOperationTask() {
     } catch (cause: any) { if (alive) state.error = apiFeedback(cause?.message, cause?.statusCode || 0) }
     finally { state.busy = false }
   }
-  function cancel() { if (!state.busy) { generation++; state.open = false; definition = undefined; state.values = {}; state.searches = {} } }
+  function cancel() { if (!state.busy) { generation++; state.open = false; state.result = ''; definition = undefined; state.values = {}; state.searches = {}; state.focusKey = ''; state.scrollTarget = '' } }
   return { state, start, submit, cancel, search, validate, focus }
 }
 export const reasonField = (label = '原因', options: string[] = []): TaskField => ({
