@@ -40,14 +40,14 @@ describe('GamesService host application review', () => {
   })
 
   it('audits a new application and treats a repeated pending application as idempotent', async () => {
-    const { service, prisma, tx } = setup()
+    const { service, tx } = setup()
     const applied = profile()
-    prisma.hostProfile.findUnique.mockResolvedValueOnce(null)
+    tx.hostProfile.findUnique.mockResolvedValueOnce(null)
     tx.hostProfile.upsert.mockResolvedValue(applied)
     await expect(service.applyHost(member)).resolves.toEqual(applied)
     expect(tx.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'HOST_APPLIED' }) })
 
-    prisma.hostProfile.findUnique.mockResolvedValueOnce(applied)
+    tx.hostProfile.findUnique.mockResolvedValueOnce(applied)
     await expect(service.applyHost(member)).resolves.toEqual(applied)
     expect(tx.hostProfile.upsert).toHaveBeenCalledOnce()
   })

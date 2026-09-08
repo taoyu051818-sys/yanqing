@@ -732,6 +732,7 @@ describe('GamesService host workflow', () => {
       },
     }
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       gameRegistration: { findUnique: vi.fn().mockResolvedValue(storedRegistration), update: vi.fn() },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
     }
@@ -768,6 +769,7 @@ describe('GamesService host workflow', () => {
     }
     const updatedRegistration = { ...storedRegistration, status: RegistrationStatus.CHECKED_IN }
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       gameRegistration: {
         findUnique: vi.fn().mockResolvedValue(storedRegistration),
         update: vi.fn().mockResolvedValue(updatedRegistration),
@@ -793,6 +795,7 @@ describe('GamesService host workflow', () => {
       },
     }
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       gameRegistration: {
         findUnique: vi.fn().mockResolvedValue(storedRegistration),
         update: vi.fn(),

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { stateTransition, lockAdmissionOrder } from '../common/state-transition.js';
 import { membershipEligibility } from '../memberships/membership-eligibility.js';
 
 import {
@@ -3363,12 +3364,12 @@ export class EventsService {
     actor: AuthUser,
     dto: EventTeamCheckInDto = {},
   ) {
-    return this.prisma.$transaction(async (tx) => {
+    return stateTransition(this.prisma, async (tx) => {
       const team = await tx.eventTeam.findFirst({
         where: { id: teamId, eventId },
         include: {
           event: { select: { startsAt: true } },
-          order: { select: { status: true } },
+          order: { select: { id: true, status: true } },
         },
       });
       if (!team) throw new NotFoundException('参赛组合不存在');
@@ -3380,14 +3381,18 @@ export class EventsService {
       ) {
         throw new ConflictException('参赛报名尚未支付');
       }
-      if (team.status === RegistrationStatus.CHECKED_IN)
-        return eventTeamCommandResponse(team);
       if (
         team.cancellationPending ||
         team.order?.status === OrderStatus.REFUND_PENDING
       ) {
         throw new ConflictException('该报名正在等待退款审批，暂不可签到');
       }
+      if (team.order && [OrderStatus.REFUNDED, OrderStatus.CANCELLED].includes(team.order.status as never)) {
+        throw new ConflictException('该报名已退款或取消，不能签到');
+      }
+      await lockAdmissionOrder(tx, team.order?.id);
+      if (team.status === RegistrationStatus.CHECKED_IN)
+        return eventTeamCommandResponse(team);
       const checkedInAt = new Date();
       const timeWindowPolicy = await assertOperationTimeWindow(tx, {
         actor,
@@ -3402,7 +3407,10 @@ export class EventsService {
         observedAt: checkedInAt,
       });
       const updated = await tx.eventTeam.update({
-        where: { id: teamId },
+        where: {
+          id: teamId, status: RegistrationStatus.PAID,
+          AND: [{ orderId: team.orderId }], cancellationPending: false,
+        },
         data: {
           status: RegistrationStatus.CHECKED_IN,
           checkedInAt,
