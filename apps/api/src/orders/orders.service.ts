@@ -144,9 +144,10 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
   ) {}
 
   onApplicationBootstrap() {
-    void this.expirePendingOrders().catch(error => this.logger.error(String(error)));
+    const sweep = () => void this.expirePendingOrders().catch(error => this.logger.error(String(error)));
+    sweep();
     this.expiryTimer = setInterval(
-      () => void this.expirePendingVenueOrders(),
+      sweep,
       30_000,
     );
     this.expiryTimer.unref();
@@ -343,14 +344,14 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
     ) {
       throw new ConflictException('订单已经支付，请刷新后按退款流程处理');
     }
-    const processingWechat = order.payments.find(
+    const processingWechat = order.payments.filter(
       (payment) =>
-        payment.status === PaymentStatus.PROCESSING &&
+        [PaymentStatus.CREATED, PaymentStatus.PROCESSING].includes(payment.status as never) &&
         payment.channel === PaymentChannel.WECHAT,
     );
+    const realWechat = this.config.get<string>('PAYMENT_PROVIDER', 'mock') === 'wechat';
     if (
-      processingWechat &&
-      this.config.get<string>('PAYMENT_PROVIDER', 'mock') === 'wechat'
+      processingWechat.length && realWechat
     ) {
       await this.wechatPay.closeOrder(order.orderNo);
     }
@@ -380,6 +381,13 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
         ) {
           throw new ConflictException('订单已经支付，请刷新后按退款流程处理');
         }
+        // The provider close only covers attempts observed before this transaction.
+        // A newer prepay must pass through closeOrder on a fresh cancellation try.
+        if (realWechat && current.payments.some(payment =>
+          payment.channel === PaymentChannel.WECHAT &&
+          [PaymentStatus.CREATED, PaymentStatus.PROCESSING].includes(payment.status as never) &&
+          !processingWechat.some(observed => observed.id === payment.id)
+        )) throw new ConflictException('微信支付请求已变化，请刷新后重试取消');
         const cancelledAt = new Date();
         const changed = await tx.order.updateMany({
           where: { id: orderId, status: OrderStatus.PENDING },
@@ -829,6 +837,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
     // that need two distinct refunds for the same amount/reason can provide
     // explicit keys.
     const suppliedKey = dto.idempotencyKey?.trim();
+    if (suppliedKey?.startsWith('SYSTEM:')) throw new BadRequestException('此幂等键前缀仅供系统使用');
     if (suppliedKey && (suppliedKey.length < 8 || suppliedKey.length > 100)) {
       throw new BadRequestException('退款幂等键长度必须为8-100个字符');
     }
@@ -1063,7 +1072,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
       if (refund.status !== RefundStatus.REQUESTED)
         throw new ConflictException('退款申请已处理');
       if (
-        NON_REJECTABLE_SYSTEM_REFUND_PREFIXES.some((prefix) =>
+        refund.compensationOnly || NON_REJECTABLE_SYSTEM_REFUND_PREFIXES.some((prefix) =>
           refund.idempotencyKey?.startsWith(prefix),
         )
       ) {
@@ -1199,7 +1208,10 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
             }
             const payment = refund.order.payments[0];
             if (!payment) throw new ConflictException('未找到成功支付记录');
-            if (refund.order.businessType === BusinessType.TRAINING) {
+            if (refund.compensationOnly && (payment.channel !== PaymentChannel.WECHAT || this.config.get<string>('PAYMENT_PROVIDER', 'mock') !== 'wechat')) {
+              throw new ConflictException('迟到付款补偿必须通过原微信支付渠道退款');
+            }
+            if (!refund.compensationOnly && refund.order.businessType === BusinessType.TRAINING) {
               const enrollment = refund.order.trainingEnrollment;
               if (!enrollment)
                 throw new ConflictException('培训订单缺少报名与预收账本');

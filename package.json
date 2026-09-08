@@ -20,10 +20,11 @@
     "test:miniapp": "pnpm --dir apps/miniapp test",
     "test:shared": "pnpm --dir packages/shared test",
     "typecheck:miniapp": "pnpm --dir apps/miniapp type-check",
-    "verify": "pnpm test:shared && pnpm test:api && pnpm test:miniapp && pnpm --dir apps/api test:e2e && pnpm build:api && pnpm typecheck:miniapp && pnpm build:miniapp && pnpm build:admin",
+    "verify": "pnpm --dir packages/shared build && pnpm test:shared && pnpm test:api && pnpm test:miniapp && pnpm test:admin && pnpm --dir apps/api test:e2e && pnpm build:api && pnpm typecheck:miniapp && pnpm build:miniapp && pnpm build:admin",
     "verify:full": "pnpm verify && pnpm build:legacy-web",
     "dev:admin": "pnpm --dir apps/admin dev",
-    "build:admin": "pnpm --dir apps/admin build"
+    "build:admin": "pnpm --dir apps/admin build",
+    "test:admin": "pnpm --dir apps/admin test"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

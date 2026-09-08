@@ -1,0 +1,1 @@
+ALTER TABLE "Refund" ADD COLUMN "compensationOnly" BOOLEAN NOT NULL DEFAULT false;

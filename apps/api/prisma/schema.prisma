@@ -1176,6 +1176,8 @@ model Refund {
   amountCents         Int
   reason              String
   originalOrderStatus OrderStatus
+  // Server-owned evidence: payment arrived after cancellation, no benefits were granted.
+  compensationOnly    Boolean                   @default(false)
   status              RefundStatus              @default(REQUESTED)
   providerRefundNo    String?                   @unique
   requestedAt         DateTime                  @default(now())

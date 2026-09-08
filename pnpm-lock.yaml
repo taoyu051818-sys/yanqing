@@ -87,6 +87,9 @@ importers:
 
   apps/admin:
     dependencies:
+      '@yanqing/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       vue:
         specifier: 3.5.41
         version: 3.5.41(typescript@4.9.5)

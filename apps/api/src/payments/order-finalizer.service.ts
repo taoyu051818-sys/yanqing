@@ -88,10 +88,9 @@ export class OrderFinalizerService {
     });
     if (current && current.status !== OrderStatus.PENDING) {
       if (
-        order.businessType === BusinessType.EVENT &&
         current.status === OrderStatus.CANCELLED
       ) {
-        throw new ConflictException('赛事报名订单已取消，不能完成支付');
+        throw new ConflictException('订单已取消，付款必须进入补偿退款流程');
       }
       if (
         INSTANT_FULFILLMENT_TYPES.has(order.businessType) &&

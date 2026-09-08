@@ -37,6 +37,7 @@ import { applyInventoryDelta } from '../inventory/inventory-balance.js';
 import { OrderFinalizerService } from './order-finalizer.service.js';
 import { promoteNextGameWaitlist } from '../games/games.service.js';
 import { promoteNextEventWaitlist } from '../events/events.service.js';
+import { captureCancelledOrderPayment } from './late-payment.js';
 
 interface NotificationResource {
   ciphertext: string;
@@ -259,6 +260,9 @@ export class WechatPayService {
         )
           return { accepted: true, idempotent: true };
         const now = new Date();
+        if (order.status === OrderStatus.CANCELLED && order.paidCents === 0) {
+          return captureCancelledOrderPayment(tx, order, payment.id, notice.transaction_id, now);
+        }
         const invalidEventReservation =
           order.businessType === BusinessType.EVENT &&
           order.eventTeam &&
@@ -433,6 +437,17 @@ export class WechatPayService {
                   : OrderStatus.PARTIALLY_REFUNDED,
               },
             });
+            if (refund.compensationOnly) {
+              // No fulfilment happened: do not debit a recharge balance, restore
+              // unsold stock, change membership, or release an unrelated seat.
+              await tx.auditLog.create({ data: {
+                actorId: refund.approvedById || refund.requestedById,
+                actorRole: AppRole.FINANCE, action: 'WECHAT_COMPENSATION_REFUND_SUCCEEDED',
+                objectType: 'Refund', objectId: refund.id, reason: refund.reason,
+                newValue: { refundId: notice.refund_id, amountCents: refund.amountCents, compensationOnly: true },
+              } });
+              return { accepted: true, outstandingRecoveryCents: 0 };
+            }
             if (refund.order.trainingEnrollment) {
               const enrollment = refund.order.trainingEnrollment;
               const enrollmentRefunded = Math.min(

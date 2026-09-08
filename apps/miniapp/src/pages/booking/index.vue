@@ -98,22 +98,27 @@ function unavailableReason(courtId: string, slot: CourtAvailability['slots'][num
   return ''
 }
 
+let availabilitySequence = 0
 async function load(resetSelection = false) {
+  const run = ++availabilitySequence
+  const requestedDate = date.value
   loading.value = true; error.value = ''
   if (resetSelection) selected.value = null
   try {
-    data.value = await endpoints.availability(date.value)
+    const availability = await endpoints.availability(requestedDate)
+    if (run !== availabilitySequence || requestedDate !== date.value) return
+    data.value = availability
     if (selected.value && (!selectedSlot.value || unavailableReason(selected.value.courtId, selectedSlot.value))) {
       selected.value = null
       uni.showToast({ title: '原时段已不可订，请重新选择', icon: 'none' })
     }
   }
-  catch (cause: any) { error.value = cause.message }
-  finally { loading.value = false }
+  catch (cause: any) { if (run === availabilitySequence) error.value = cause.message }
+  finally { if (run === availabilitySequence) loading.value = false }
 }
 
 function choose(courtId: string, slot: CourtAvailability['slots'][number]) {
-  if (submitting.value || unavailableReason(courtId, slot)) return
+  if (loading.value || submitting.value || unavailableReason(courtId, slot)) return
   selected.value = { courtId, slotId: slot.id }; submissionError.value = ''
 }
 
