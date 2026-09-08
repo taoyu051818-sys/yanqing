@@ -1345,9 +1345,10 @@ export class InventoryOperationsService {
         for (const line of stocktake.lines) {
           if (line.countedQuantity === null)
             throw new ConflictException('盘点明细未录完');
+          const stockBefore = currentItemStocks.get(line.itemId) ?? line.item.stock;
           const balance = await this.reconciledBalance(
             tx,
-            line.item,
+            { ...line.item, stock: stockBefore },
             stocktake.locationId,
             line.batchCode,
             line.expiresAt,
@@ -1356,8 +1357,6 @@ export class InventoryOperationsService {
             throw new ConflictException('盘点期间库存已变化，请重新盘点');
           const difference = line.countedQuantity - line.bookQuantity;
           if (difference === 0) continue;
-          const stockBefore =
-            currentItemStocks.get(line.itemId) ?? line.item.stock;
           if (stockBefore + difference < 0)
             throw new BadRequestException('盘点差异会导致总库存为负数');
           const itemChanged = await tx.inventoryItem.updateMany({

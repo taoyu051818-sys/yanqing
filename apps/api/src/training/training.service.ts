@@ -67,6 +67,8 @@ import {
 } from '../common/time-window/operation-time-window.js';
 import { resolveOperatingShareSnapshot } from '../common/finance/operating-share.js';
 import { YouthTrainingRulesService } from './youth-training-rules.service.js';
+import { trainingConsumptionQuote } from './training-contract.js';
+import { trainingEnrollmentCoversSession } from './training-roster.js';
 import {
   trainingAttendanceCommandResponse,
   trainingConsumeConfirmationResponse,
@@ -1067,6 +1069,7 @@ export class TrainingService {
               productId: product.id,
               totalSessions: product.totalSessions,
               unitRevenueCents: product.unitRevenueCents,
+              consumptionPolicy: 'FROZEN_CONTRACT_CUMULATIVE_V1',
               refundRule: product.refundRule,
               classId: dto.classId,
               seatReservedUntil: seatReservedUntil?.toISOString(),
@@ -1241,7 +1244,9 @@ export class TrainingService {
             materialCostCents: trainingClass.materialCostCents,
             note,
             attendances: {
-              create: trainingClass.enrollments.map((enrollment) => ({
+              create: trainingClass.enrollments.filter(enrollment =>
+                trainingEnrollmentCoversSession(enrollment, { startsAt, endsAt }),
+              ).map((enrollment) => ({
                 enrollmentId: enrollment.id,
                 status: AttendanceStatus.PENDING,
               })),
@@ -1582,10 +1587,8 @@ export class TrainingService {
           overrideReason: explicitReason,
           observedAt: now,
         });
-        const confirmedRevenueCents = Math.min(
-          enrollment.product.unitRevenueCents,
-          enrollment.prepaidBalanceCents,
-        );
+        const consumptionQuote = trainingConsumptionQuote(enrollment);
+        const confirmedRevenueCents = consumptionQuote.amountCents;
         const rateBps = await this.contractRateAt(
           tx,
           attendance.session.startsAt,
@@ -1747,6 +1750,7 @@ export class TrainingService {
               commandHash,
               workflowStatus: 'CONFIRMED',
               confirmedRevenueCents,
+              consumptionQuote,
               contractRateBps: rateBps,
               venueContributionCents,
               venueFeeCents: 0,

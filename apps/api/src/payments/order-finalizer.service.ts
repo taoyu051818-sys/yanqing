@@ -1,4 +1,5 @@
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
+import { syncTrainingEnrollmentRoster } from '../training/training-roster.js';
 import {
   ConflictException,
   Injectable,
@@ -185,7 +186,7 @@ export class OrderFinalizerService {
           throw new ConflictException('培训班名额已满，支付未完成');
         }
       }
-      await tx.trainingEnrollment.update({
+      const activated = await tx.trainingEnrollment.update({
         where: { id: enrollment.id },
         data: {
           status: TrainingEnrollmentStatus.ACTIVE,
@@ -193,6 +194,7 @@ export class OrderFinalizerService {
           seatReservedUntil: null,
         },
       });
+      await syncTrainingEnrollmentRoster(tx, activated, now);
     }
     const paidGameRegistration = await tx.gameRegistration.updateMany({
       where: { orderId: order.id, status: 'REGISTERED' },

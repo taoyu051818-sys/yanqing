@@ -188,6 +188,7 @@ const attendanceFixture = (overrides: Record<string, unknown> = {}) => ({
     status: TrainingEnrollmentStatus.ACTIVE,
     consumedSessions: 0,
     totalSessions: 10,
+    totalAmountCents: 198_000,
     prepaidBalanceCents: 19_800,
     product: {
       unitRevenueCents: 19_800,

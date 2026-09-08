@@ -399,7 +399,10 @@ export class PrivacyService {
         },
       }),
       client.couponCode.count({ where: { holderId: userId, status: CouponStatus.CLAIMED } }),
-      client.accountAdjustmentRequest.count({ where: { requestedById: userId, status: AccountAdjustmentStatus.REQUESTED } }),
+      client.accountAdjustmentRequest.count({ where: {
+        OR: [{ account: { userId } }, { requestedById: userId }],
+        status: AccountAdjustmentStatus.REQUESTED,
+      } }),
       client.referralReward.count({
         where: { OR: [{ referrerId: userId }, { newUserId: userId }], status: { in: [RewardStatus.PENDING_OBSERVATION, RewardStatus.AVAILABLE] } },
       }),

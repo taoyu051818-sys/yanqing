@@ -83,6 +83,7 @@ describe('MembersService account adjustment approval', () => {
       commandHash: 'a'.repeat(64), status: AccountAdjustmentStatus.REQUESTED,
     }
     const tx = {
+      user: { findUnique: vi.fn().mockResolvedValue({ status: 'ACTIVE', deletedAt: null }) },
       accountAdjustmentRequest: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue(request),
@@ -136,6 +137,7 @@ describe('MembersService account adjustment approval', () => {
       account: { id: 'account-1', balance: 50, version: 2 }, transaction: null,
     }
     const tx = {
+      user: { findUnique: vi.fn().mockResolvedValue({ status: 'ACTIVE', deletedAt: null }) },
       accountAdjustmentRequest: { findUnique: vi.fn().mockResolvedValue(request) },
       account: { updateMany: vi.fn() },
     }
@@ -153,11 +155,12 @@ describe('MembersService account adjustment approval', () => {
     const request = {
       id: 'adjustment-1', accountId: 'account-1', requestedById: finance.sub,
       status: AccountAdjustmentStatus.REQUESTED, amount: -20, reason: '重复奖励追回',
-      account: { id: 'account-1', type: AccountType.BADMINTON_COIN, balance: 50, version: 2 },
+      account: { id: 'account-1', userId: 'member-1', type: AccountType.BADMINTON_COIN, balance: 50, version: 2 },
       transaction: null,
     }
     const transaction = { id: 'account-txn-1', balanceBefore: 50, balanceAfter: 30 }
     const tx = {
+      user: { findUnique: vi.fn().mockResolvedValue({ status: 'ACTIVE', deletedAt: null }) },
       accountAdjustmentRequest: {
         findUnique: vi.fn().mockResolvedValue(request),
         update: vi.fn().mockResolvedValue({ ...request, status: AccountAdjustmentStatus.POSTED, transactionId: transaction.id }),

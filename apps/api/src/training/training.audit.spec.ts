@@ -205,7 +205,7 @@ describe('TrainingService session audit', () => {
       coachCostCents: 20_000,
       assistantCostCents: 3_000,
       materialCostCents: 1_000,
-      enrollments: [{ id: 'enrollment-1' }],
+      enrollments: [{ id: 'enrollment-1', classId: 'class-1', status: 'ACTIVE', startsAt: new Date('2026-01-01'), expiresAt: new Date('2027-01-01'), prepaidBalanceCents: 198000, totalSessions: 10, consumedSessions: 0 }],
     };
     const session = {
       id: 'session-audit-1',

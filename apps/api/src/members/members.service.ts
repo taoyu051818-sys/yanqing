@@ -1191,6 +1191,7 @@ export class MembersService {
             }
             return duplicateInTransaction
           }
+          await this.assertAdjustmentOwnerExists(tx, userId);
           const request = await tx.accountAdjustmentRequest.create({
             data: {
               accountId: account.id,
@@ -1249,6 +1250,7 @@ export class MembersService {
         if (request.requestedById === actor.sub) {
           throw new ForbiddenException('账户调整申请人与复核人不能是同一账号')
         }
+        await this.assertAdjustmentOwnerExists(tx, request.account.userId);
         const balanceAfter = request.account.balance + request.amount
         if (balanceAfter < 0) throw new BadRequestException('账户余额不足')
         const changed = await tx.account.updateMany({
@@ -1297,6 +1299,14 @@ export class MembersService {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     )
     return accountAdjustmentResponse(result, actor.sub)
+  }
+
+  private async assertAdjustmentOwnerExists(tx: Prisma.TransactionClient, userId: string) {
+    // Disabled accounts may still need financial closeout; erased accounts may not.
+    const owner = await tx.user.findUnique({ where: { id: userId }, select: { status: true, deletedAt: true } });
+    if (!owner || owner.status === UserStatus.DELETED || owner.deletedAt) {
+      throw new ConflictException('账号已注销或不存在，不能提交或批准账户调整');
+    }
   }
 
   async rejectAccountAdjustment(requestId: string, dto: ReviewAccountAdjustmentDto, actor: AuthUser) {

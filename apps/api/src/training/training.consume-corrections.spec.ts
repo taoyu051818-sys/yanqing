@@ -767,6 +767,7 @@ describe('Training consume corrections', () => {
         status: TrainingEnrollmentStatus.ACTIVE,
         consumedSessions: 9,
         totalSessions: 10,
+        totalAmountCents: 198_000,
         confirmedRevenueCents: 178_200,
         prepaidBalanceCents: 19_800,
         refundedCents: 0,
