@@ -478,7 +478,12 @@ export class AllianceService {
               enabled: template.enabled,
               updatedAt: template.updatedAt,
             },
-            data: { enabled: dto.enabled, ...(dto.allowVenueBooking === undefined ? {} : { allowVenueBooking: dto.allowVenueBooking }) },
+            data: {
+              enabled: dto.enabled,
+              ...(dto.allowVenueBooking === undefined
+                ? {}
+                : { allowVenueBooking: dto.allowVenueBooking }),
+            },
           });
           if (changed.count !== 1)
             throw new ConflictException('券模板状态已由其他管理员变更');
@@ -489,8 +494,16 @@ export class AllianceService {
               action,
               objectType: 'CouponTemplate',
               objectId: templateId,
-              oldValue: { enabled: template.enabled, allowVenueBooking: template.allowVenueBooking } as never,
-              newValue: { enabled: dto.enabled, allowVenueBooking: dto.allowVenueBooking ?? template.allowVenueBooking, commandHash } as never,
+              oldValue: {
+                enabled: template.enabled,
+                allowVenueBooking: template.allowVenueBooking,
+              } as never,
+              newValue: {
+                enabled: dto.enabled,
+                allowVenueBooking:
+                  dto.allowVenueBooking ?? template.allowVenueBooking,
+                commandHash,
+              } as never,
               reason,
               requestId,
             },
@@ -589,16 +602,33 @@ export class AllianceService {
       orderBy: [{ status: 'asc' }, { expiresAt: 'asc' }],
     });
     const now = new Date();
-    return coupons.map(coupon => {
+    return coupons.map((coupon) => {
       const template = coupon.template;
       const newcomer = template.code.startsWith('NEWCOMER');
-      const reason = coupon.status !== 'CLAIMED' ? '此券不在可使用状态'
-        : coupon.expiresAt <= now || template.validTo <= now ? '此券已过期'
-        : !template.enabled || template.merchant.status !== 'ACTIVE' ? '券活动或商户已暂停'
-        : template.validFrom > now ? '尚未到使用时间'
-        : !newcomer && !template.allowVenueBooking ? '仅限所属商户消费，不可抵扣订场' : '';
-      return { ...coupon, bookingUsage: { eligible: !reason, reason,
-        label: newcomer ? '新客体验订场（限适用时段）' : template.allowVenueBooking ? '商户消费 / 订场抵扣' : '仅限所属商户消费' } };
+      const reason =
+        coupon.status !== 'CLAIMED'
+          ? '此券不在可使用状态'
+          : coupon.expiresAt <= now || template.validTo <= now
+            ? '此券已过期'
+            : !template.enabled || template.merchant.status !== 'ACTIVE'
+              ? '券活动或商户已暂停'
+              : template.validFrom > now
+                ? '尚未到使用时间'
+                : !newcomer && !template.allowVenueBooking
+                  ? '仅限所属商户消费，不可抵扣订场'
+                  : '';
+      return {
+        ...coupon,
+        bookingUsage: {
+          eligible: !reason,
+          reason,
+          label: newcomer
+            ? '新客体验订场（限适用时段）'
+            : template.allowVenueBooking
+              ? '商户消费 / 订场抵扣'
+              : '仅限所属商户消费',
+        },
+      };
     });
   }
 
@@ -1058,57 +1088,12 @@ export class AllianceService {
   async createSettlement(dto: AllianceSettlementDto, actor: AuthUser) {
     const periodStart = new Date(dto.periodStart);
     const periodEnd = new Date(dto.periodEnd);
-    if (periodEnd <= periodStart) throw new BadRequestException('结算周期无效');
-    const merchant = await this.prisma.merchant.findUnique({
-      where: { id: dto.merchantId },
-    });
-    if (!merchant) throw new NotFoundException('商户不存在');
-    const codes = await this.prisma.couponCode.findMany({
-      where: {
-        template: { merchantId: dto.merchantId },
-        createdAt: { lt: periodEnd },
-        OR: [
-          { redeemedAt: { gte: periodStart, lt: periodEnd } },
-          { claimedAt: { gte: periodStart, lt: periodEnd } },
-          { createdAt: { gte: periodStart, lt: periodEnd } },
-        ],
-      },
-      include: { holder: { include: { memberProfile: true } } },
-    });
-    const issuedCount = codes.filter(
-      (code) => code.createdAt >= periodStart,
-    ).length;
-    const claimedCount = codes.filter(
-      (code) =>
-        code.claimedAt &&
-        code.claimedAt >= periodStart &&
-        code.claimedAt < periodEnd,
-    ).length;
-    const redeemed = codes.filter(
-      (code) =>
-        code.redeemedAt &&
-        code.redeemedAt >= periodStart &&
-        code.redeemedAt < periodEnd,
-    );
-    const effectiveNewCustomers = new Set(
-      redeemed
-        .filter((code) => code.holder?.memberProfile?.isNewCustomer)
-        .map((code) => code.holderId),
-    ).size;
-    const attributedGmvCents = redeemed.reduce(
-      (sum, code) => sum + code.attributedAmountCents,
-      0,
-    );
-    const cooperationFeeCents = this.computeCooperationFee(
-      merchant.settlementRule,
-      redeemed.length,
-      effectiveNewCustomers,
-    );
-    const roi = calculateRoi(
-      dto.attributedGrossProfitCents,
-      cooperationFeeCents,
-    );
-
+    if (
+      !Number.isFinite(periodStart.getTime()) ||
+      !Number.isFinite(periodEnd.getTime()) ||
+      periodEnd <= periodStart
+    )
+      throw new BadRequestException('结算周期无效');
     const uniqueWhere = {
       merchantId_periodStart_periodEnd: {
         merchantId: dto.merchantId,
@@ -1116,77 +1101,144 @@ export class AllianceService {
         periodEnd,
       },
     };
-    const existing = await this.prisma.allianceSettlement.findUnique({
-      where: uniqueWhere,
-    });
-    if (existing) {
+    const overlapWhere = {
+      merchantId: dto.merchantId,
+      status: { not: SettlementStatus.VOID },
+      periodStart: { lt: periodEnd },
+      periodEnd: { gt: periodStart },
+    };
+    const replay = (existing: { attributedGrossProfitCents: number }) => {
       if (
         existing.attributedGrossProfitCents !== dto.attributedGrossProfitCents
-      ) {
+      )
         throw new ConflictException(
           '该商户结算周期已生成，利润口径不同，请先提出调整申请',
         );
-      }
       return allianceSettlementResponse(existing);
-    }
-
+    };
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const settlement = await tx.allianceSettlement.create({
-          data: {
-            merchantId: dto.merchantId,
-            periodStart,
-            periodEnd,
-            issuedCount,
-            claimedCount,
-            redeemedCount: redeemed.length,
-            effectiveNewCustomers,
-            attributedGmvCents,
-            attributedGrossProfitCents: dto.attributedGrossProfitCents,
-            cooperationFeeCents,
-            roi,
-            status: SettlementStatus.DRAFT,
-            detail: {
-              codeIds: redeemed.map((code) => code.id),
-              settlementRule: merchant.settlementRule,
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const existing = await tx.allianceSettlement.findUnique({
+            where: uniqueWhere,
+          });
+          if (existing) return replay(existing);
+          if (
+            await tx.allianceSettlement.findFirst({
+              where: overlapWhere,
+              select: { id: true },
+            })
+          )
+            throw new ConflictException(
+              '该商户已有重叠账期的结算单，请核对起止时间',
+            );
+          const merchant = await tx.merchant.findUnique({
+            where: { id: dto.merchantId },
+          });
+          if (!merchant) throw new NotFoundException('商户不存在');
+          const codes = await tx.couponCode.findMany({
+            where: {
+              template: { merchantId: dto.merchantId },
+              createdAt: { lt: periodEnd },
+              OR: [
+                { redeemedAt: { gte: periodStart, lt: periodEnd } },
+                { claimedAt: { gte: periodStart, lt: periodEnd } },
+                { createdAt: { gte: periodStart, lt: periodEnd } },
+              ],
             },
-          },
-        });
-        await tx.auditLog.create({
-          data: {
-            actorId: actor.sub,
-            actorRole: actor.roles[0],
-            action: 'ALLIANCE_SETTLEMENT_CREATED',
-            objectType: 'AllianceSettlement',
-            objectId: settlement.id,
-            newValue: {
+            include: { holder: { include: { memberProfile: true } } },
+          });
+          const issuedCount = codes.filter(
+            (code) => code.createdAt >= periodStart,
+          ).length;
+          const claimedCount = codes.filter(
+            (code) =>
+              code.claimedAt &&
+              code.claimedAt >= periodStart &&
+              code.claimedAt < periodEnd,
+          ).length;
+          const redeemed = codes.filter(
+            (code) =>
+              code.redeemedAt &&
+              code.redeemedAt >= periodStart &&
+              code.redeemedAt < periodEnd,
+          );
+          const effectiveNewCustomers = new Set(
+            redeemed
+              .filter((code) => code.holder?.memberProfile?.isNewCustomer)
+              .map((code) => code.holderId),
+          ).size;
+          const attributedGmvCents = redeemed.reduce(
+            (sum, code) => sum + code.attributedAmountCents,
+            0,
+          );
+          const cooperationFeeCents = this.computeCooperationFee(
+            merchant.settlementRule,
+            redeemed.length,
+            effectiveNewCustomers,
+          );
+          const roi = calculateRoi(
+            dto.attributedGrossProfitCents,
+            cooperationFeeCents,
+          );
+
+          const settlement = await tx.allianceSettlement.create({
+            data: {
+              merchantId: dto.merchantId,
+              periodStart,
+              periodEnd,
+              issuedCount,
+              claimedCount,
               redeemedCount: redeemed.length,
+              effectiveNewCustomers,
+              attributedGmvCents,
+              attributedGrossProfitCents: dto.attributedGrossProfitCents,
               cooperationFeeCents,
               roi,
-            } as never,
-          },
-        });
-        return allianceSettlementResponse(settlement);
-      });
+              status: SettlementStatus.DRAFT,
+              detail: {
+                codeIds: redeemed.map((code) => code.id),
+                settlementRule: merchant.settlementRule,
+              },
+            },
+          });
+          await tx.auditLog.create({
+            data: {
+              actorId: actor.sub,
+              actorRole: actor.roles[0],
+              action: 'ALLIANCE_SETTLEMENT_CREATED',
+              objectType: 'AllianceSettlement',
+              objectId: settlement.id,
+              newValue: {
+                redeemedCount: redeemed.length,
+                cooperationFeeCents,
+                roi,
+              } as never,
+            },
+          });
+          return allianceSettlementResponse(settlement);
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
     } catch (error) {
-      // A second worker can pass the preflight before the first one commits.
-      // Resolve the composite unique-key race outside the failed transaction;
-      // never catch a constraint error inside the transaction itself.
-      if (isPrismaErrorCode(error, 'P2002')) {
+      // Resolve unique/exclusion races outside the rolled-back transaction.
+      // The PostgreSQL exclusion constraint also protects non-service writers.
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
         const duplicate = await this.prisma.allianceSettlement.findUnique({
           where: uniqueWhere,
         });
-        if (duplicate) {
-          if (
-            duplicate.attributedGrossProfitCents !==
-            dto.attributedGrossProfitCents
-          ) {
-            throw new ConflictException(
-              '该商户结算周期已生成，利润口径不同，请先提出调整申请',
-            );
-          }
-          return allianceSettlementResponse(duplicate);
-        }
+        if (duplicate) return replay(duplicate);
+        if (
+          await this.prisma.allianceSettlement.findFirst({
+            where: overlapWhere,
+            select: { id: true },
+          })
+        )
+          throw new ConflictException(
+            '该商户已有重叠账期的结算单，请核对起止时间',
+          );
+        if (error.code === 'P2034')
+          throw new ConflictException('联盟结算发生并发冲突，请刷新后重试');
       }
       throw error;
     }
@@ -1309,7 +1361,8 @@ export class AllianceService {
       // A retried request is safe and returns the already-posted state.  This
       // is important for mobile clients that retry after a weak-network
       // timeout.
-      if (current.status === input.to) return allianceSettlementResponse(current);
+      if (current.status === input.to)
+        return allianceSettlementResponse(current);
       if (current.status !== input.from) {
         throw new ConflictException(
           `联盟结算单当前状态为 ${current.status}，不能执行${input.action}`,
@@ -1335,7 +1388,8 @@ export class AllianceService {
         const latest = await tx.allianceSettlement.findUnique({
           where: { id: input.id },
         });
-        if (latest?.status === input.to) return allianceSettlementResponse(latest);
+        if (latest?.status === input.to)
+          return allianceSettlementResponse(latest);
         throw new ConflictException('联盟结算单已被其他操作更新，请刷新后重试');
       }
       const updated = await tx.allianceSettlement.findUniqueOrThrow({

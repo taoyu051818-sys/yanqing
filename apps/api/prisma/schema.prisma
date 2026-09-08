@@ -1847,6 +1847,8 @@ model CouponCode {
   @@index([redeemedMerchantId, redeemedAt])
 }
 
+// Active merchant periods cannot overlap. The GiST exclusion constraint lives
+// in migration 20260908173000_alliance_settlement_overlap.
 model AllianceSettlement {
   id                         String           @id @default(cuid())
   merchantId                 String

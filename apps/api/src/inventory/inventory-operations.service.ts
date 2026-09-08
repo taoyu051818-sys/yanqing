@@ -812,7 +812,7 @@ export class InventoryOperationsService {
     );
     if (new Set(keys).size !== keys.length)
       throw new BadRequestException('采购明细不能重复');
-    return this.prisma.$transaction(async (tx) => {
+    return this.documentTransaction(async (tx) => {
       const supplier = await tx.supplier.findUnique({
         where: { id: dto.supplierId },
       });
@@ -874,7 +874,7 @@ export class InventoryOperationsService {
 
   submitPurchaseOrder(id: string, actor: AuthUser) {
     this.requireRole(actor, FRONT_ROLES);
-    return this.prisma.$transaction(async (tx) => {
+    return this.documentTransaction(async (tx) => {
       const order = await tx.purchaseOrder.findUnique({
         where: { id },
         include: { lines: true },
@@ -886,7 +886,7 @@ export class InventoryOperationsService {
       if (!order.lines.length) throw new ConflictException('采购单没有明细');
       const submittedAt = new Date();
       await tx.purchaseOrder.update({
-        where: { id },
+        where: { id, status: order.status },
         data: {
           status: PurchaseOrderStatus.SUBMITTED,
           submittedById: actor.sub,
@@ -912,7 +912,7 @@ export class InventoryOperationsService {
 
   approvePurchaseOrder(id: string, actor: AuthUser) {
     this.requireRole(actor, ADMIN_ROLES);
-    return this.prisma.$transaction(async (tx) => {
+    return this.documentTransaction(async (tx) => {
       const order = await tx.purchaseOrder.findUnique({ where: { id } });
       if (!order) throw new NotFoundException('采购单不存在');
       if (order.status === PurchaseOrderStatus.APPROVED) return order;
@@ -925,7 +925,7 @@ export class InventoryOperationsService {
         throw new ForbiddenException('采购制单/提交人与审批人不能为同一账号');
       }
       await tx.purchaseOrder.update({
-        where: { id },
+        where: { id, status: order.status },
         data: {
           status: PurchaseOrderStatus.APPROVED,
           approvedById: actor.sub,
@@ -964,7 +964,7 @@ export class InventoryOperationsService {
         throw new ConflictException('收货幂等键已用于其他采购单');
       return purchaseReceiptResponse(existing);
     }
-    return this.prisma.$transaction(
+    return this.documentTransaction(
       async (tx) => {
         const order = await tx.purchaseOrder.findUnique({
           where: { id },
@@ -1008,15 +1008,15 @@ export class InventoryOperationsService {
           if (quantity > line.orderedQuantity - line.receivedQuantity) {
             throw new BadRequestException('收货数量超过采购未收数量');
           }
+          const stockBefore =
+            currentItemStocks.get(line.itemId) ?? line.item.stock;
           const balance = await this.reconciledBalance(
             tx,
-            line.item,
+            { ...line.item, stock: stockBefore },
             line.locationId,
             line.batchCode,
             line.expiresAt,
           );
-          const stockBefore =
-            currentItemStocks.get(line.itemId) ?? line.item.stock;
           const itemChanged = await tx.inventoryItem.updateMany({
             where: { id: line.itemId, stock: stockBefore },
             data: { stock: { increment: quantity } },
@@ -1076,7 +1076,10 @@ export class InventoryOperationsService {
         const status = complete
           ? PurchaseOrderStatus.RECEIVED
           : PurchaseOrderStatus.PARTIAL_RECEIVED;
-        await tx.purchaseOrder.update({ where: { id }, data: { status } });
+        await tx.purchaseOrder.update({
+          where: { id, status: order.status },
+          data: { status },
+        });
         await this.audit(
           tx,
           actor,
@@ -1100,7 +1103,7 @@ export class InventoryOperationsService {
 
   cancelPurchaseOrder(id: string, dto: CancelDocumentDto, actor: AuthUser) {
     this.requireRole(actor, ADMIN_ROLES);
-    return this.prisma.$transaction(async (tx) => {
+    return this.documentTransaction(async (tx) => {
       const order = await tx.purchaseOrder.findUnique({ where: { id } });
       if (!order) throw new NotFoundException('采购单不存在');
       if (order.status === PurchaseOrderStatus.CANCELLED) return order;
@@ -1112,7 +1115,7 @@ export class InventoryOperationsService {
         throw new ConflictException('已收货采购单不能取消');
       }
       const cancelled = await tx.purchaseOrder.update({
-        where: { id },
+        where: { id, status: order.status },
         data: {
           status: PurchaseOrderStatus.CANCELLED,
           cancelledAt: new Date(),
@@ -1491,42 +1494,40 @@ export class InventoryOperationsService {
 
   approveOperation(id: string, actor: AuthUser) {
     this.requireRole(actor, ADMIN_ROLES);
-    return this.prisma
-      .$transaction(async (tx) => {
-        const operation = await tx.inventoryOperation.findUnique({
-          where: { id },
-        });
-        if (!operation) throw new NotFoundException('库存业务单不存在');
-        if (operation.status === InventoryOperationStatus.APPROVED)
-          return operation;
-        if (operation.status !== InventoryOperationStatus.SUBMITTED)
-          throw new ConflictException('库存业务单尚未提交');
-        if (operation.createdById === actor.sub)
-          throw new ForbiddenException('库存业务制单人与审批人不能为同一账号');
-        await tx.inventoryOperation.update({
-          where: { id },
-          data: {
-            status: InventoryOperationStatus.APPROVED,
-            approvedById: actor.sub,
-            approvedAt: new Date(),
-          },
-        });
-        await this.audit(
-          tx,
-          actor,
-          'INVENTORY_OPERATION_APPROVED',
-          'InventoryOperation',
-          id,
-          operation.status,
-          InventoryOperationStatus.APPROVED,
-          operation.reason,
-        );
-        return tx.inventoryOperation.findUniqueOrThrow({
-          where: { id },
-          include: { item: true, sourceLocation: true, targetLocation: true },
-        });
-      })
-      .then(inventoryOperationResponse);
+    return this.documentTransaction(async (tx) => {
+      const operation = await tx.inventoryOperation.findUnique({
+        where: { id },
+      });
+      if (!operation) throw new NotFoundException('库存业务单不存在');
+      if (operation.status === InventoryOperationStatus.APPROVED)
+        return operation;
+      if (operation.status !== InventoryOperationStatus.SUBMITTED)
+        throw new ConflictException('库存业务单尚未提交');
+      if (operation.createdById === actor.sub)
+        throw new ForbiddenException('库存业务制单人与审批人不能为同一账号');
+      await tx.inventoryOperation.update({
+        where: { id, status: operation.status },
+        data: {
+          status: InventoryOperationStatus.APPROVED,
+          approvedById: actor.sub,
+          approvedAt: new Date(),
+        },
+      });
+      await this.audit(
+        tx,
+        actor,
+        'INVENTORY_OPERATION_APPROVED',
+        'InventoryOperation',
+        id,
+        operation.status,
+        InventoryOperationStatus.APPROVED,
+        operation.reason,
+      );
+      return tx.inventoryOperation.findUniqueOrThrow({
+        where: { id },
+        include: { item: true, sourceLocation: true, targetLocation: true },
+      });
+    }).then(inventoryOperationResponse);
   }
 
   async postOperation(
@@ -1535,7 +1536,7 @@ export class InventoryOperationsService {
     actor: AuthUser,
   ) {
     this.requireRole(actor, FRONT_ROLES);
-    return this.prisma.$transaction(
+    return this.documentTransaction(
       async (tx) => {
         const operation = await tx.inventoryOperation.findUnique({
           where: { id },
@@ -1569,6 +1570,23 @@ export class InventoryOperationsService {
         );
         if (source.quantity < operation.quantity)
           throw new BadRequestException('来源库位库存不足');
+        // Validate both locations against the complete opening ledger before
+        // either balance changes. A half-posted transfer is not a discrepancy.
+        if (
+          operation.type === InventoryOperationType.TRANSFER &&
+          !operation.targetLocationId
+        )
+          throw new ConflictException('调拨单缺少目标库位');
+        const target =
+          operation.type === InventoryOperationType.TRANSFER
+            ? await this.reconciledBalance(
+                tx,
+                operation.item,
+                operation.targetLocationId!,
+                operation.batchCode,
+                operation.expiresAt,
+              )
+            : null;
         await tx.inventoryStockBalance.update({
           where: { id: source.id },
           data: { quantity: { decrement: operation.quantity } },
@@ -1576,15 +1594,7 @@ export class InventoryOperationsService {
         let sourceTransactionId: string;
         let targetTransactionId: string | null = null;
         if (operation.type === InventoryOperationType.TRANSFER) {
-          if (!operation.targetLocationId)
-            throw new ConflictException('调拨单缺少目标库位');
-          const target = await this.reconciledBalance(
-            tx,
-            operation.item,
-            operation.targetLocationId,
-            operation.batchCode,
-            operation.expiresAt,
-          );
+          if (!target) throw new ConflictException('调拨单缺少目标库位');
           await tx.inventoryStockBalance.update({
             where: { id: target.id },
             data: {
@@ -1657,7 +1667,7 @@ export class InventoryOperationsService {
           sourceTransactionId = loss.id;
         }
         await tx.inventoryOperation.update({
-          where: { id },
+          where: { id, status: operation.status },
           data: {
             status: InventoryOperationStatus.POSTED,
             postedById: actor.sub,
@@ -1690,42 +1700,40 @@ export class InventoryOperationsService {
 
   cancelOperation(id: string, dto: CancelDocumentDto, actor: AuthUser) {
     this.requireRole(actor, ADMIN_ROLES);
-    return this.prisma
-      .$transaction(async (tx) => {
-        const operation = await tx.inventoryOperation.findUnique({
-          where: { id },
-        });
-        if (!operation) throw new NotFoundException('库存业务单不存在');
-        if (operation.status === InventoryOperationStatus.CANCELLED)
-          return operation;
-        if (
-          operation.status !== InventoryOperationStatus.DRAFT &&
-          operation.status !== InventoryOperationStatus.SUBMITTED &&
-          operation.status !== InventoryOperationStatus.APPROVED
-        ) {
-          throw new ConflictException('已过账库存业务单不能取消');
-        }
-        const cancelled = await tx.inventoryOperation.update({
-          where: { id },
-          data: {
-            status: InventoryOperationStatus.CANCELLED,
-            cancelledAt: new Date(),
-            reason: `${operation.reason}；取消：${dto.reason.trim()}`,
-          },
-        });
-        await this.audit(
-          tx,
-          actor,
-          'INVENTORY_OPERATION_CANCELLED',
-          'InventoryOperation',
-          id,
-          operation.status,
-          InventoryOperationStatus.CANCELLED,
-          dto.reason.trim(),
-        );
-        return cancelled;
-      })
-      .then(inventoryOperationResponse);
+    return this.documentTransaction(async (tx) => {
+      const operation = await tx.inventoryOperation.findUnique({
+        where: { id },
+      });
+      if (!operation) throw new NotFoundException('库存业务单不存在');
+      if (operation.status === InventoryOperationStatus.CANCELLED)
+        return operation;
+      if (
+        operation.status !== InventoryOperationStatus.DRAFT &&
+        operation.status !== InventoryOperationStatus.SUBMITTED &&
+        operation.status !== InventoryOperationStatus.APPROVED
+      ) {
+        throw new ConflictException('已过账库存业务单不能取消');
+      }
+      const cancelled = await tx.inventoryOperation.update({
+        where: { id, status: operation.status },
+        data: {
+          status: InventoryOperationStatus.CANCELLED,
+          cancelledAt: new Date(),
+          reason: `${operation.reason}；取消：${dto.reason.trim()}`,
+        },
+      });
+      await this.audit(
+        tx,
+        actor,
+        'INVENTORY_OPERATION_CANCELLED',
+        'InventoryOperation',
+        id,
+        operation.status,
+        InventoryOperationStatus.CANCELLED,
+        dto.reason.trim(),
+      );
+      return cancelled;
+    }).then(inventoryOperationResponse);
   }
 
   private moveOperation(
@@ -1734,7 +1742,7 @@ export class InventoryOperationsService {
     to: InventoryOperationStatus,
     actor: AuthUser,
   ) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.documentTransaction(async (tx) => {
       const operation = await tx.inventoryOperation.findUnique({
         where: { id },
       });
@@ -1743,7 +1751,7 @@ export class InventoryOperationsService {
       if (operation.status !== from)
         throw new ConflictException('库存业务单状态不允许该操作');
       const moved = await tx.inventoryOperation.update({
-        where: { id },
+        where: { id, status: operation.status },
         data: { status: to, submittedAt: new Date() },
       });
       await this.audit(
@@ -1758,6 +1766,24 @@ export class InventoryOperationsService {
       );
       return moved;
     });
+  }
+
+  private async documentTransaction<T>(
+    work: (tx: Prisma.TransactionClient) => Promise<T>,
+    options = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  ): Promise<T> {
+    try {
+      return await this.prisma.$transaction(work, options);
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        ['P2034', 'P2025'].includes(error.code)
+      )
+        throw new ConflictException(
+          '库存单据或库存已被其他操作更新，请刷新后重试',
+        );
+      throw error;
+    }
   }
 
   private async reconciledBalance(

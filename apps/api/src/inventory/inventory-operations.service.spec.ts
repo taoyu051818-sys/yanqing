@@ -117,7 +117,7 @@ describe('InventoryOperationsService', () => {
       data: { quantity: { increment: 4 }, expiresAt: null },
     });
     expect(tx.purchaseOrder.update).toHaveBeenLastCalledWith({
-      where: { id: order.id },
+      where: { id: order.id, status: order.status },
       data: { status: PurchaseOrderStatus.PARTIAL_RECEIVED },
     });
   });

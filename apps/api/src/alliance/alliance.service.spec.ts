@@ -379,7 +379,7 @@ describe('AllianceService settlement workflow', () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(created);
     const tx = {
-      allianceSettlement: { create: vi.fn().mockResolvedValue(created) },
+      allianceSettlement: { create: vi.fn().mockResolvedValue(created), findUnique, findFirst: vi.fn().mockResolvedValue(null) },
       reconciliationPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
     };
@@ -396,6 +396,7 @@ describe('AllianceService settlement workflow', () => {
       allianceSettlement: { findUnique },
       $transaction: runner(tx),
     };
+    Object.assign(tx, { merchant: prisma.merchant, couponCode: prisma.couponCode });
     const service = new AllianceService(prisma as never);
     const dto = {
       merchantId: 'merchant-1',
@@ -430,6 +431,8 @@ describe('AllianceService settlement workflow', () => {
     const tx = {
       reconciliationPeriod: { findFirst: vi.fn().mockResolvedValue(locked) },
       allianceSettlement: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({
           id: 'statement-new',
           merchantId: 'merchant-1',
@@ -440,7 +443,7 @@ describe('AllianceService settlement workflow', () => {
       },
       auditLog: { create: vi.fn() },
     };
-    const createService = new AllianceService({
+    const prisma = {
       merchant: {
         findUnique: vi
           .fn()
@@ -449,7 +452,9 @@ describe('AllianceService settlement workflow', () => {
       couponCode: { findMany: vi.fn().mockResolvedValue([]) },
       allianceSettlement: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: runner(tx),
-    } as never);
+    };
+    Object.assign(tx, { merchant: prisma.merchant, couponCode: prisma.couponCode });
+    const createService = new AllianceService(prisma as never);
     await expect(
       createService.createSettlement(
         {

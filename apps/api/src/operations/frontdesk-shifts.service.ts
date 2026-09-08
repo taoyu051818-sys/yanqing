@@ -443,13 +443,14 @@ export class FrontDeskShiftsService {
         where: {
           status: RefundStatus.SUCCEEDED,
           completedAt: { gte: day.start, lt: day.end },
+          // Cash approval executes the payout. Attribute it to that operator,
+          // including refunds for member-created orders or another cashier's sale.
+          approvedById: operatorId,
           order: {
-            createdById: operatorId,
             payments: {
               some: {
                 channel: PaymentChannel.OFFLINE_CASH,
                 status: PaymentStatus.SUCCEEDED,
-                operatorId,
               },
             },
           },

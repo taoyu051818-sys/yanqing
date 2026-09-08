@@ -368,11 +368,12 @@ describe('FrontDeskShiftsService', () => {
     });
     expect(tx.refund.aggregate).toHaveBeenCalledWith({
       where: expect.objectContaining({
-        order: expect.objectContaining({
+        approvedById: frontDesk.sub,
+        order: {
           payments: {
-            some: expect.objectContaining({ operatorId: frontDesk.sub }),
+            some: { channel: 'OFFLINE_CASH', status: 'SUCCEEDED' },
           },
-        }),
+        },
       }),
       _sum: { amountCents: true },
     });

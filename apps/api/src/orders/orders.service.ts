@@ -1558,6 +1558,16 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
                 newValue: {
                   amountCents: refund.amountCents,
                   fullyRefunded,
+                  ...(payment.channel === PaymentChannel.OFFLINE_CASH
+                    ? {
+                        cashDisbursement: {
+                          paymentId: payment.id,
+                          operatorId: actor.sub,
+                          completedAt: completedAt.toISOString(),
+                          amountCents: refund.amountCents,
+                        },
+                      }
+                    : {}),
                 } as never,
               },
             });
