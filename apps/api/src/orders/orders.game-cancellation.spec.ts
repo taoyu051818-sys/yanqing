@@ -6,7 +6,7 @@ import { AppRole, OrderStatus, PaymentStatus } from '../generated/prisma/enums.j
 const actor: AuthUser = { sub: 'member-1', displayName: '球友', roles: [AppRole.MEMBER] }
 const command = { idempotencyKey: 'cancel-my-game-1', reason: '临时有事' }
 function harness(overrides: Record<string, any> = {}) {
-  const game = { id: 'game-1', title: '双打球局', hostId: 'host-1', capacity: 6, feeCents: 6800, status: 'FULL' }
+  const game = { startsAt: new Date(Date.now() + 3600000), endsAt: new Date(Date.now() + 7200000), id: 'game-1', title: '双打球局', hostId: 'host-1', capacity: 6, feeCents: 6800, status: 'FULL' }
   const before = { id: 'order-1', orderNo: 'GO-1', status: 'PENDING', memberId: actor.sub, businessType: 'GAME', title: game.title, payments: [], items: [], refunds: [], bookings: [], gameRegistration: { id: 'reg-1', gameId: game.id, status: 'REGISTERED', game }, ...overrides }
   const tx = {
     order: { findUnique: vi.fn().mockResolvedValue(before), updateMany: vi.fn().mockResolvedValue({ count: 1 }), findUniqueOrThrow: vi.fn().mockResolvedValue({ ...before, status: 'CANCELLED' }), create: vi.fn().mockResolvedValue({ id: 'promoted-order' }) },
@@ -35,9 +35,9 @@ describe('pending game order cancellation', () => {
 
   it('promotes the oldest waiting member exactly once into a new unpaid order', async () => {
     const { service, tx } = harness()
-    tx.gameRegistration.findFirst.mockResolvedValue({ id: 'waiting-1', userId: 'waiting-member' } as never)
+    tx.gameRegistration.findFirst.mockResolvedValue({ id: 'waiting-1', userId: 'waiting-member', waitlistVersion: 1 } as never)
     await service.cancelPending('order-1', command, actor)
-    expect(tx.gameRegistration.findFirst).toHaveBeenCalledWith({ where: { gameId: 'game-1', status: 'WAITLISTED', orderId: null }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true, userId: true } })
+    expect(tx.gameRegistration.findFirst).toHaveBeenCalledWith({ where: { gameId: 'game-1', status: 'WAITLISTED', orderId: null }, orderBy: [{ waitlistedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { id: true, userId: true, waitlistVersion: true } })
     expect(tx.order.create).toHaveBeenCalledOnce()
     expect(tx.order.create.mock.calls[0][0].data).toMatchObject({ memberId: 'waiting-member', status: 'PENDING', payableCents: 6800 })
     expect(tx.gameRegistration.update).toHaveBeenCalledWith({ where: { id: 'waiting-1' }, data: { orderId: 'promoted-order' } })

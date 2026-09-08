@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { gameRegistrationOpen } from './game-registration-policy.js'
 
 import {
   BadRequestException,
@@ -250,10 +251,11 @@ export async function promoteNextGameWaitlist(
 ) {
   const game = await tx.game.findUnique({
     where: { id: gameId },
-    select: { id: true, title: true, hostId: true, feeCents: true, capacity: true, status: true },
+    select: { id: true, title: true, hostId: true, feeCents: true, capacity: true, status: true, startsAt: true, endsAt: true },
   })
   if (!game || (game.status !== GameStatus.OPEN && game.status !== GameStatus.FULL)) return null
   if (!isValidGameCapacity(game.capacity)) return null
+  if (!gameRegistrationOpen(game)) return null
 
   const seated = await tx.gameRegistration.count({
     where: { gameId, status: { in: [...GAME_SEAT_STATUSES] } },
@@ -261,8 +263,8 @@ export async function promoteNextGameWaitlist(
   if (seated >= game.capacity) return null
   const next = await tx.gameRegistration.findFirst({
     where: { gameId, status: RegistrationStatus.WAITLISTED, orderId: null },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    select: { id: true, userId: true },
+    orderBy: [{ waitlistedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    select: { id: true, userId: true, waitlistVersion: true },
   })
   if (!next) {
     if (game.status === GameStatus.FULL) {
@@ -275,7 +277,7 @@ export async function promoteNextGameWaitlist(
   // compare-and-set boundary that prevents two refund workers from creating
   // two orders for the same waiting member.
   const claimed = await tx.gameRegistration.updateMany({
-    where: { id: next.id, status: RegistrationStatus.WAITLISTED, orderId: null },
+    where: { id: next.id, status: RegistrationStatus.WAITLISTED, orderId: null, waitlistVersion: next.waitlistVersion },
     data: { status: RegistrationStatus.REGISTERED },
   })
   if (claimed.count !== 1) return null
@@ -286,9 +288,9 @@ export async function promoteNextGameWaitlist(
 
   const order = await tx.order.create({
     data: {
-      creationIdempotencyKey: `SYSTEM:GAME_WAITLIST:${next.id}`,
+      creationIdempotencyKey: `SYSTEM:GAME_WAITLIST:${next.id}:${next.waitlistVersion}`,
       creationCommandHash: orderCreationCommandHash({
-        kind: 'GAME_WAITLIST_PROMOTION', gameId, registrationId: next.id, memberId: next.userId,
+        kind: 'GAME_WAITLIST_PROMOTION', gameId, registrationId: next.id, memberId: next.userId, waitlistVersion: next.waitlistVersion,
       }),
       orderNo: serial('GO'),
       memberId: next.userId,
@@ -303,6 +305,8 @@ export async function promoteNextGameWaitlist(
         gameId,
         hostId: game.hostId,
         promotedFromWaitlist: true,
+        waitlistVersion: next.waitlistVersion,
+        gameStartsAt: game.startsAt.toISOString(),
         operatingShare,
       },
       items: {
@@ -387,13 +391,14 @@ export class GamesService {
     // Retrieve order metadata only for the authenticated account, not the roster.
     const mine = await this.prisma.gameRegistration.findUnique({
       where: { gameId_userId: { gameId: id, userId: actor.sub } },
-      select: { id: true, status: true, createdAt: true, order: { select: { id: true, status: true } } },
+      select: { id: true, status: true, createdAt: true, waitlistedAt: true, order: { select: { id: true, status: true } } },
     })
     const waitlistPosition = mine?.status === RegistrationStatus.WAITLISTED
       ? await this.prisma.gameRegistration.count({
           where: { gameId: id, status: RegistrationStatus.WAITLISTED, OR: [
-            { createdAt: { lt: mine.createdAt } },
-            { createdAt: mine.createdAt, id: { lte: mine.id } },
+            { waitlistedAt: { lt: mine.waitlistedAt } },
+            { waitlistedAt: mine.waitlistedAt, createdAt: { lt: mine.createdAt } },
+            { waitlistedAt: mine.waitlistedAt, createdAt: mine.createdAt, id: { lte: mine.id } },
           ] },
         })
       : null
@@ -1120,6 +1125,8 @@ export class GamesService {
             feeCents: true,
             capacity: true,
             status: true,
+            startsAt: true,
+            endsAt: true,
           },
         })
         // FULL still accepts a waitlist entry.  It is a member-facing
@@ -1131,6 +1138,7 @@ export class GamesService {
         if (!isValidGameCapacity(game.capacity)) {
           throw new ConflictException(`普通主理人球局人数上限必须在${GAME_CAPACITY_MIN}-${GAME_CAPACITY_MAX}人之间`)
         }
+        if (!gameRegistrationOpen(game)) throw new ConflictException('球局报名已截止或时间无效')
         const duplicate = await tx.gameRegistration.findUnique({
           where: { gameId_userId: { gameId, userId: actor.sub } },
         })
@@ -1138,7 +1146,7 @@ export class GamesService {
           const queue = await tx.gameRegistration.findMany({
             where: { gameId, status: RegistrationStatus.WAITLISTED },
             select: { id: true },
-            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+            orderBy: [{ waitlistedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           })
           const queueIndex = queue.findIndex((item) => item.id === duplicate.id)
           return {
@@ -1168,6 +1176,8 @@ export class GamesService {
                   status: RegistrationStatus.WAITLISTED,
                   orderId: null,
                   checkedInAt: null,
+                  waitlistVersion: { increment: 1 },
+                  waitlistedAt: new Date(),
                 },
               })
             : await tx.gameRegistration.create({
@@ -1175,6 +1185,8 @@ export class GamesService {
                   gameId,
                   userId: actor.sub,
                   status: RegistrationStatus.WAITLISTED,
+                  waitlistVersion: 1,
+                  waitlistedAt: new Date(),
                 },
               })
           await tx.game.updateMany({
@@ -1222,6 +1234,7 @@ export class GamesService {
             parameterSnapshot: {
               gameId,
               hostId: game.hostId,
+              gameStartsAt: game.startsAt.toISOString(),
               operatingShare,
             },
             items: {
@@ -1271,6 +1284,9 @@ export class GamesService {
               checkedInAt: null,
             },
           })
+          if (seated + 1 >= game.capacity) {
+            await tx.game.updateMany({ where: { id: gameId, status: GameStatus.OPEN }, data: { status: GameStatus.FULL } })
+          }
           return { ...order, gameRegistration: registration }
         }
         if (seated + 1 >= game.capacity) {

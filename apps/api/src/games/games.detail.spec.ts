@@ -61,7 +61,7 @@ describe('shared game detail and authenticated roster', () => {
     })
     const selection = prisma.game.findFirst.mock.calls[0][0].select.registrations.select
     expect(selection).toEqual({ userId: true, status: true, user: { select: { displayName: true, avatarUrl: true } } })
-    expect(prisma.gameRegistration.findUnique).toHaveBeenCalledWith({ where: { gameId_userId: { gameId: 'game-1', userId: actor.sub } }, select: { id: true, status: true, createdAt: true, order: { select: { id: true, status: true } } } })
+    expect(prisma.gameRegistration.findUnique).toHaveBeenCalledWith({ where: { gameId_userId: { gameId: 'game-1', userId: actor.sub } }, select: { id: true, status: true, createdAt: true, waitlistedAt: true, order: { select: { id: true, status: true } } } })
     expect(prisma.gameRegistration.count).not.toHaveBeenCalled()
   })
 
@@ -70,10 +70,10 @@ describe('shared game detail and authenticated roster', () => {
     expect((await service.participants('game-1', actor)).participants).toEqual([{ displayName: '我', avatarUrl: null, isMe: true }])
   })
 
-  it('computes a private FIFO waitlist position with the same creation-time/id tiebreaker', async () => {
+  it('computes a private FIFO waitlist position with the entry time followed by creation-time/id tiebreaker', async () => {
     const createdAt = new Date('2026-09-05T02:00:00Z')
-    const { service, prisma } = context({ registrations: [] }, { id: 'wait-2', status: 'WAITLISTED', createdAt, order: null })
+    const { service, prisma } = context({ registrations: [] }, { id: 'wait-2', status: 'WAITLISTED', createdAt, waitlistedAt: createdAt, order: null })
     expect((await service.participants('game-1', actor)).myRegistration).toEqual({ id: 'wait-2', status: 'WAITLISTED', order: null, waitlistPosition: 2 })
-    expect(prisma.gameRegistration.count).toHaveBeenCalledWith({ where: { gameId: 'game-1', status: 'WAITLISTED', OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lte: 'wait-2' } }] } })
+    expect(prisma.gameRegistration.count).toHaveBeenCalledWith({ where: { gameId: 'game-1', status: 'WAITLISTED', OR: [{ waitlistedAt: { lt: createdAt } }, { waitlistedAt: createdAt, createdAt: { lt: createdAt } }, { waitlistedAt: createdAt, createdAt, id: { lte: 'wait-2' } }] } })
   })
 })

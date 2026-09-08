@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { membershipEligibility } from '../memberships/membership-eligibility.js';
 
 import {
   BadRequestException,
@@ -686,15 +687,6 @@ export class EventsService {
         seen.add(normalized);
       }
     }
-  }
-
-  private isMemberSelfService(actor: AuthUser): boolean {
-    return (
-      actor.roles.includes(AppRole.MEMBER) &&
-      !actor.roles.some((role) =>
-        ASSISTED_EVENT_REGISTRATION_ROLES.includes(role),
-      )
-    );
   }
 
   private async resolvePartnerInvite(
@@ -2157,8 +2149,8 @@ export class EventsService {
   }
 
   async register(eventId: string, dto: RegisterEventTeamDto, actor: AuthUser) {
-    const memberSelfService =
-      this.isMemberSelfService(actor) || Boolean(dto.registrationMode);
+    const canAssist = actor.roles.some((role) => ASSISTED_EVENT_REGISTRATION_ROLES.includes(role));
+    const memberSelfService = !canAssist || Boolean(dto.registrationMode);
     if (memberSelfService && !actor.roles.includes(AppRole.MEMBER))
       throw new ForbiddenException('请使用会员身份提交报名');
     const manual = dto.registrationMode === 'MANUAL';
@@ -2215,6 +2207,7 @@ export class EventsService {
       dto.creationIdempotencyKey,
     );
     if (creationIdempotencyKey) {
+      if (creationIdempotencyKey.startsWith('SYSTEM:')) throw new BadRequestException('此幂等键前缀仅供系统使用');
       this.assertCommandKey(creationIdempotencyKey, '赛事报名幂等键');
     }
     const commandHash = orderCreationCommandHash({
@@ -2426,9 +2419,9 @@ export class EventsService {
                 where: { userId: actor.sub },
               })
             : preflightProfile;
+          const eligibility = membershipEligibility(profile, now);
           const feeCents =
-            profile &&
-            ['GOLD', 'BLACK'].includes(profile.level) &&
+            eligibility.eligible &&
             event.memberFeeCents !== null
               ? event.memberFeeCents
               : event.feeCents;
@@ -2563,6 +2556,7 @@ export class EventsService {
                   eventId,
                   status: RegistrationStatus.WAITLISTED,
                   position: waitlistedTeams + 1,
+                  membershipEligibility: eligibility,
                   teamName,
                   ...(manual
                     ? {
@@ -2610,6 +2604,7 @@ export class EventsService {
               parameterSnapshot: {
                 eventId,
                 memberFeeApplied: feeCents !== event.feeCents,
+                membershipEligibility: eligibility,
                 rules: event.rules,
                 paymentDueAt: paymentDueAt.toISOString(),
                 operatingShare,

@@ -79,6 +79,7 @@ describe('OrdersService command response privacy', () => {
     const orders = service({
       eventTeam: { findUnique: vi.fn().mockResolvedValue(null) },
       payment: { findUnique: vi.fn().mockResolvedValue(payment) },
+      order: { findUnique: vi.fn().mockResolvedValue({ businessType: 'VENUE' }) },
     })
 
     const result = await orders.pay(

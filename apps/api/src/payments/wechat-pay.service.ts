@@ -1,3 +1,4 @@
+import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import {
   createDecipheriv,
   createSign,
@@ -243,6 +244,7 @@ export class WechatPayService {
             membership: { include: { product: true } },
             member: { select: { openId: true } },
             eventTeam: { include: { event: true } },
+            gameRegistration: { include: { game: true } },
             payments: {
               where: { channel: PaymentChannel.WECHAT },
               orderBy: { createdAt: 'desc' },
@@ -262,6 +264,15 @@ export class WechatPayService {
         const now = new Date();
         if (order.status === OrderStatus.CANCELLED && order.paidCents === 0) {
           return captureCancelledOrderPayment(tx, order, payment.id, notice.transaction_id, now);
+        }
+        if (order.businessType === BusinessType.GAME && order.status === OrderStatus.PENDING && gamePaymentUnavailable(order.gameRegistration, order.createdAt, now)) {
+          // The external payment succeeded, but the seat is no longer payable.
+          // Close this reservation before recording a compensation-only refund.
+          await tx.order.update({ where: { id: order.id }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
+          await tx.gameRegistration.updateMany({ where: { orderId: order.id, status: RegistrationStatus.REGISTERED }, data: { status: RegistrationStatus.CANCELLED } });
+          const captured = await captureCancelledOrderPayment(tx, { ...order, status: OrderStatus.CANCELLED }, payment.id, notice.transaction_id, now);
+          if (order.gameRegistration) await promoteNextGameWaitlist(tx, order.gameRegistration.gameId, undefined, undefined);
+          return captured;
         }
         const invalidEventReservation =
           order.businessType === BusinessType.EVENT &&

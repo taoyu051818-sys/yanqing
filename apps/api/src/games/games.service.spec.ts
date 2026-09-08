@@ -193,6 +193,7 @@ describe('GamesService management listing', () => {
 describe('GamesService host workflow', () => {
   it('creates a pending order while a seat is available and marks the game full at capacity', async () => {
     const storedGame = {
+      startsAt: new Date(Date.now() + 3600000), endsAt: new Date(Date.now() + 7200000),
       id: 'game-1',
       title: '周末球局',
       hostId: 'host-1',
@@ -292,6 +293,7 @@ describe('GamesService host workflow', () => {
 
   it('puts a member on the FIFO waitlist without creating a payable order', async () => {
     const storedGame = {
+      startsAt: new Date(Date.now() + 3600000), endsAt: new Date(Date.now() + 7200000),
       id: 'game-1',
       title: '已满球局',
       hostId: 'host-1',
@@ -338,6 +340,7 @@ describe('GamesService host workflow', () => {
 
   it('replays an existing waitlist result after the original response is lost', async () => {
     const storedGame = {
+      startsAt: new Date(Date.now() + 3600000), endsAt: new Date(Date.now() + 7200000),
       id: 'game-1',
       title: '已满球局',
       hostId: 'host-1',
@@ -385,7 +388,7 @@ describe('GamesService host workflow', () => {
     expect(tx.gameRegistration.findMany).toHaveBeenCalledWith({
       where: { gameId: 'game-1', status: RegistrationStatus.WAITLISTED },
       select: { id: true },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      orderBy: [{ waitlistedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     })
     expect(tx.gameRegistration.count).not.toHaveBeenCalled()
     expect(tx.order.create).not.toHaveBeenCalled()
@@ -401,7 +404,7 @@ describe('GamesService host workflow', () => {
       game: {
         findUnique: vi.fn().mockResolvedValue({
           id: 'game-1', title: '球局', hostId: 'host-1', feeCents: 6800,
-          capacity: 4, status: GameStatus.OPEN,
+          capacity: 4, status: GameStatus.OPEN, startsAt: new Date(Date.now() + 3600000), endsAt: new Date(Date.now() + 7200000),
         }),
       },
       gameRegistration: {
@@ -445,6 +448,7 @@ describe('GamesService host workflow', () => {
 
   it('promotes the oldest waiting member into a fresh pending order exactly once', async () => {
     const storedGame = {
+      startsAt: new Date(Date.now() + 3600000), endsAt: new Date(Date.now() + 7200000),
       id: 'game-1',
       title: '候补递补球局',
       hostId: 'host-1',
@@ -454,6 +458,7 @@ describe('GamesService host workflow', () => {
     }
     const waiting = {
       id: 'wait-1',
+      waitlistVersion: 1,
       gameId: 'game-1',
       userId: 'member-waiting',
       status: RegistrationStatus.WAITLISTED,
@@ -484,13 +489,13 @@ describe('GamesService host workflow', () => {
 
     expect(result).toEqual({ order, registration: promoted })
     expect(tx.gameRegistration.updateMany).toHaveBeenCalledWith({
-      where: { id: waiting.id, status: RegistrationStatus.WAITLISTED, orderId: null },
+      where: { id: waiting.id, status: RegistrationStatus.WAITLISTED, orderId: null, waitlistVersion: 1 },
       data: { status: RegistrationStatus.REGISTERED },
     })
     expect(tx.order.create).toHaveBeenCalledOnce()
     expect(tx.order.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        creationIdempotencyKey: `SYSTEM:GAME_WAITLIST:${waiting.id}`,
+        creationIdempotencyKey: `SYSTEM:GAME_WAITLIST:${waiting.id}:1`,
         creationCommandHash: expect.stringMatching(/^[0-9a-f]{64}$/),
         parameterSnapshot: expect.objectContaining({ promotedFromWaitlist: true }),
       }),

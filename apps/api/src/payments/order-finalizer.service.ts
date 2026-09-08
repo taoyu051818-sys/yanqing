@@ -1,3 +1,4 @@
+import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import {
   ConflictException,
   Injectable,
@@ -108,6 +109,11 @@ export class OrderFinalizerService {
       }
       return;
     }
+    if (order.businessType === BusinessType.GAME) {
+      const registration = await tx.gameRegistration.findUnique({ where: { orderId: order.id }, include: { game: true } });
+      const unavailable = gamePaymentUnavailable(registration, order.createdAt, now);
+      if (unavailable) throw new ConflictException(unavailable);
+    }
     if (order.businessType === BusinessType.EVENT) {
       const eventTeam = await tx.eventTeam.findUnique({
         where: { orderId: order.id },
@@ -188,10 +194,11 @@ export class OrderFinalizerService {
         },
       });
     }
-    await tx.gameRegistration.updateMany({
+    const paidGameRegistration = await tx.gameRegistration.updateMany({
       where: { orderId: order.id, status: 'REGISTERED' },
       data: { status: 'PAID' },
     });
+    if (order.businessType === BusinessType.GAME && paidGameRegistration.count !== 1) throw new ConflictException('球局报名席位已变化');
     if (order.businessType === BusinessType.EVENT) {
       const paidTeam = await tx.eventTeam.updateMany({
         where: {

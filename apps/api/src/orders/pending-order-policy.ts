@@ -7,6 +7,13 @@ export const PURCHASE_TIMEOUT_TYPES = ['GAME', 'TRAINING', 'MEMBERSHIP', 'RECHAR
 
 export function pendingPaymentDeadline(order: Record<string, any>): Date | null {
   if (order.status !== 'PENDING') return null
+  if (order.businessType === 'GAME') {
+    const created = +new Date(order.createdAt)
+    const startsAt = order.gameRegistration?.game?.startsAt || order.parameterSnapshot?.gameStartsAt
+    const start = startsAt ? +new Date(startsAt) : NaN
+    // Missing historical context must fail closed until the game is loaded.
+    return new Date(Number.isFinite(created) && Number.isFinite(start) ? Math.min(created + PURCHASE_HOLD_MS, start) : 0)
+  }
   const domain = order.bookings?.[0]?.holdExpiresAt
     || order.eventTeam?.paymentDueAt || order.trainingEnrollment?.seatReservedUntil
   if (domain) return new Date(domain)

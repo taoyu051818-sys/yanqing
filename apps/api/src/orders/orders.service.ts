@@ -1,3 +1,4 @@
+import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import { createHash, randomBytes } from 'node:crypto';
 
 import {
@@ -237,16 +238,17 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
         status: OrderStatus.PENDING,
         OR: [
           { businessType: { in: PURCHASE_TIMEOUT_TYPES as BusinessType[] }, createdAt: { lte: new Date(now.getTime() - PURCHASE_HOLD_MS) } },
+          { businessType: BusinessType.GAME, gameRegistration: { is: { game: { OR: [{ startsAt: { lte: now } }, { status: { notIn: ['OPEN', 'FULL'] } }] } } } },
           { businessType: BusinessType.TRAINING, trainingEnrollment: { is: { status: TrainingEnrollmentStatus.PENDING_PAYMENT, seatReservedUntil: { lte: now } } } },
           { businessType: BusinessType.EVENT, eventTeam: { is: { status: RegistrationStatus.REGISTERED, paymentDueAt: { lte: now } } } },
         ],
       },
-      select: { id: true, status: true, businessType: true, createdAt: true, trainingEnrollment: { select: { seatReservedUntil: true } }, eventTeam: { select: { paymentDueAt: true } } }, orderBy: { createdAt: 'asc' }, take: 100,
+      select: { id: true, status: true, businessType: true, createdAt: true, gameRegistration: { include: { game: true } }, trainingEnrollment: { select: { seatReservedUntil: true } }, eventTeam: { select: { paymentDueAt: true } } }, orderBy: { createdAt: 'asc' }, take: 100,
     });
     let count = venueCount;
     for (const item of candidates) {
       const deadline = pendingPaymentDeadline(item);
-      if (deadline && deadline > now) continue;
+      if (deadline && deadline > now && !(item.businessType === BusinessType.GAME && gamePaymentUnavailable(item.gameRegistration, item.createdAt, now))) continue;
       try {
         await this.cancelUnpaidOrder(item.id, '订单支付保留期届满', `AUTO:PURCHASE_ORDER:${item.id}`);
         count++;
@@ -482,13 +484,14 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
       // A cashier is not entitled to inspect another member's payment balances.
       const order = await tx.order.findFirst({
         where: { id: orderId, memberId: actor.sub },
-        include: { bookings: true, eventTeam: true, trainingEnrollment: true, items: true, payments: true,
+        include: { bookings: true, eventTeam: true, gameRegistration: { include: { game: true } }, trainingEnrollment: true, items: true, payments: true,
           member: { select: { openId: true, accounts: { select: { type: true, balance: true, frozenBalance: true } } } } },
       });
       if (!order) throw new NotFoundException('订单不存在或不属于当前账号');
       const now = new Date();
       const deadline = pendingPaymentDeadline(order);
       let unavailable = order.status !== OrderStatus.PENDING ? '订单已不在待付款状态' : deadline && deadline <= now ? '支付保留期已过，请重新下单' : '';
+      if (!unavailable && order.businessType === BusinessType.GAME) unavailable = gamePaymentUnavailable(order.gameRegistration, order.createdAt, now);
       if (!unavailable && order.businessType === BusinessType.GOODS) {
         try { await this.assertGoodsStockAvailable(tx, order.items); }
         catch (error) { unavailable = error instanceof Error ? error.message : '商品库存不足'; }
@@ -570,6 +573,13 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
       this.assertPaymentAuthorization(existing.userId, dto.channel, actor);
       if (existing.operatorId !== actor.sub)
         throw new ForbiddenException('支付请求只能由原操作人重试');
+      if (existing.channel === PaymentChannel.WECHAT && existing.status === PaymentStatus.PROCESSING) {
+        const pending = await this.prisma.order.findUnique({ where: { id: orderId }, include: { gameRegistration: { include: { game: true } } } });
+        if (pending?.businessType === BusinessType.GAME) {
+          const unavailable = pending.status !== OrderStatus.PENDING ? '订单当前状态不可支付' : gamePaymentUnavailable(pending.gameRegistration, pending.createdAt);
+          if (unavailable) throw new ConflictException(unavailable);
+        }
+      }
       return paymentCommandResponse(existing);
     }
 
@@ -585,6 +595,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
               member: { select: { openId: true } },
               trainingEnrollment: true,
               eventTeam: true,
+              gameRegistration: { include: { game: true } },
               payments: true,
             },
           });
@@ -597,6 +608,10 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
           await this.assertBookingCouponScope(tx, order);
           const deadline = pendingPaymentDeadline(order);
           if (deadline && deadline <= new Date()) throw new ConflictException('支付保留期已过，请刷新订单后重新下单');
+          if (order.businessType === BusinessType.GAME) {
+            const unavailable = gamePaymentUnavailable(order.gameRegistration, order.createdAt);
+            if (unavailable) throw new ConflictException(unavailable);
+          }
           if (order.businessType === BusinessType.VENUE) {
             const booking = order.bookings[0];
             if (

@@ -68,6 +68,7 @@ export async function executeOrderCreation<T>(
 ): Promise<T> {
   const key = options.creationIdempotencyKey?.trim()
   if (!key) return options.create({})
+  if (key.startsWith('SYSTEM:')) throw new BadRequestException('此幂等键前缀仅供系统使用')
   if (key.length < 8 || key.length > 100) throw new BadRequestException('订单创建幂等键长度必须为8-100个字符')
 
   const commandHash = orderCreationCommandHash(options.command)
