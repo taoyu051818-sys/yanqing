@@ -8,6 +8,7 @@ import ExcelJS from 'exceljs';
 import type { AuthUser } from '../common/auth/auth-user.js';
 import { PrismaService } from '../database/prisma.service.js';
 import { AppRole, BusinessType } from '../generated/prisma/enums.js';
+import { Prisma } from '../generated/prisma/client.js';
 
 const EXPORT_ROW_LIMIT = 10_000;
 const SCOPES = [
@@ -280,11 +281,22 @@ export class ReportsService {
       throw new ForbiddenException('财务角色仅可导出订单与财务账簿数据');
     }
     const exportedAt = new Date();
-    const datasets = await Promise.all(
-      DATASETS_BY_SCOPE[exportScope].map(async (name) => ({
-        name,
-        rows: await this.data(name, exportScope, isAdministrator),
-      })),
+    const datasets = await this.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+        const result: Array<{ name: DatasetName; rows: ExportRow[] }> = [];
+        for (const name of DATASETS_BY_SCOPE[exportScope]) {
+          result.push({
+            name,
+            rows: await this.data(tx, name, exportScope, isAdministrator),
+          });
+        }
+        return result;
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        timeout: 30000,
+      },
     );
 
     const workbook = new ExcelJS.Workbook();
@@ -346,6 +358,7 @@ export class ReportsService {
       { field: 'actorId', value: actor.sub },
       { field: 'actorRole', value: actorRole },
       { field: 'format', value: 'xlsx' },
+      { field: 'consistency', value: 'REPEATABLE_READ' },
       { field: 'rowLimitPerSheet', value: EXPORT_ROW_LIMIT },
       ...datasets.flatMap(({ name, rows }) => [
         { field: `sheet.${name}.rows`, value: rows.length },
@@ -401,11 +414,12 @@ export class ReportsService {
   }
 
   private async data(
+    client: Prisma.TransactionClient,
     dataset: DatasetName,
     scope: ExportScope,
     isAdministrator: boolean,
   ): Promise<ExportRow[]> {
-    if (!isAdministrator) return this.financeData(dataset);
+    if (!isAdministrator) return this.financeData(client, dataset);
 
     const scopedBusinessType =
       scope === 'training'
@@ -416,7 +430,7 @@ export class ReportsService {
             ? BusinessType.GOODS
             : undefined;
     if (dataset === 'Orders') {
-      return this.prisma.order.findMany({
+      return client.order.findMany({
         where: scopedBusinessType
           ? { businessType: scopedBusinessType }
           : undefined,
@@ -425,7 +439,7 @@ export class ReportsService {
       }) as never;
     }
     if (dataset === 'OrderItems') {
-      return this.prisma.orderItem.findMany({
+      return client.orderItem.findMany({
         where: scopedBusinessType
           ? { order: { businessType: scopedBusinessType } }
           : undefined,
@@ -434,7 +448,7 @@ export class ReportsService {
       }) as never;
     }
     if (dataset === 'Payments') {
-      return this.prisma.payment.findMany({
+      return client.payment.findMany({
         where: scopedBusinessType
           ? { order: { businessType: scopedBusinessType } }
           : undefined,
@@ -457,7 +471,7 @@ export class ReportsService {
       }) as never;
     }
     if (dataset === 'Refunds') {
-      return this.prisma.refund.findMany({
+      return client.refund.findMany({
         where: scopedBusinessType
           ? { order: { businessType: scopedBusinessType } }
           : undefined,
@@ -466,7 +480,7 @@ export class ReportsService {
       }) as never;
     }
     if (dataset === 'Members') {
-      return this.prisma.user.findMany({
+      return client.user.findMany({
         where: { memberProfile: { isNot: null } },
         select: {
           id: true,
@@ -482,163 +496,163 @@ export class ReportsService {
       }) as never;
     }
     if (dataset === 'Accounts') {
-      return this.prisma.account.findMany({
+      return client.account.findMany({
         orderBy: [{ userId: 'asc' }, { type: 'asc' }],
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'AccountTransactions') {
-      return this.prisma.accountTransaction.findMany({
+      return client.accountTransaction.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'Students') {
-      return this.prisma.student.findMany({
+      return client.student.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'TrainingProducts') {
-      return this.prisma.trainingProduct.findMany({
+      return client.trainingProduct.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'TrainingClasses') {
-      return this.prisma.trainingClass.findMany({
+      return client.trainingClass.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'TrainingEnrollments') {
-      return this.prisma.trainingEnrollment.findMany({
+      return client.trainingEnrollment.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'TrainingSessions') {
-      return this.prisma.trainingSession.findMany({
+      return client.trainingSession.findMany({
         orderBy: { startsAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'TrainingAttendances') {
-      return this.prisma.trainingAttendance.findMany({
+      return client.trainingAttendance.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'TrainingRevenue') {
-      return this.prisma.trainingRevenueRecognition.findMany({
+      return client.trainingRevenueRecognition.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'TrainingConsumeCorrections') {
-      return this.prisma.trainingConsumeCorrection.findMany({
+      return client.trainingConsumeCorrection.findMany({
         orderBy: { requestedAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'TrainingSettlements') {
-      return this.prisma.trainingSettlement.findMany({
+      return client.trainingSettlement.findMany({
         orderBy: { periodEnd: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'Events') {
-      return this.prisma.event.findMany({
+      return client.event.findMany({
         orderBy: { startsAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'EventTeams') {
-      return this.prisma.eventTeam.findMany({
+      return client.eventTeam.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'EventMatches') {
-      return this.prisma.eventMatch.findMany({
+      return client.eventMatch.findMany({
         orderBy: [{ eventId: 'asc' }, { round: 'asc' }, { createdAt: 'asc' }],
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'EventPrizeAwards') {
-      return this.prisma.eventPrizeAward.findMany({
+      return client.eventPrizeAward.findMany({
         orderBy: { issuedAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'Merchants') {
-      return this.prisma.merchant.findMany({
+      return client.merchant.findMany({
         orderBy: { code: 'asc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'CouponTemplates') {
-      return this.prisma.couponTemplate.findMany({
+      return client.couponTemplate.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'CouponCodes') {
-      return this.prisma.couponCode.findMany({
+      return client.couponCode.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'AllianceSettlements') {
-      return this.prisma.allianceSettlement.findMany({
+      return client.allianceSettlement.findMany({
         orderBy: { periodEnd: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'Suppliers') {
-      return this.prisma.supplier.findMany({
+      return client.supplier.findMany({
         orderBy: { code: 'asc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'ConsignmentPayableEntries') {
-      return this.prisma.consignmentPayableEntry.findMany({
+      return client.consignmentPayableEntry.findMany({
         orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'ConsignmentSettlements') {
-      return this.prisma.consignmentSettlement.findMany({
+      return client.consignmentSettlement.findMany({
         orderBy: [{ periodEnd: 'desc' }, { version: 'desc' }],
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'ConsignmentSettlementLines') {
-      return this.prisma.consignmentSettlementLine.findMany({
+      return client.consignmentSettlementLine.findMany({
         orderBy: [{ settlementId: 'asc' }, { createdAt: 'asc' }],
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'ConsignmentTransitions') {
-      return this.prisma.consignmentSettlementTransition.findMany({
+      return client.consignmentSettlementTransition.findMany({
         orderBy: [{ settlementId: 'asc' }, { createdAt: 'asc' }],
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'InventoryLocations') {
-      return this.prisma.inventoryLocation.findMany({
+      return client.inventoryLocation.findMany({
         orderBy: { code: 'asc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'InventoryItems') {
-      return this.prisma.inventoryItem.findMany({
+      return client.inventoryItem.findMany({
         orderBy: { sku: 'asc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'InventoryStockBalances') {
-      return this.prisma.inventoryStockBalance.findMany({
+      return client.inventoryStockBalance.findMany({
         orderBy: [
           { itemId: 'asc' },
           { locationId: 'asc' },
@@ -648,60 +662,60 @@ export class ReportsService {
       }) as never;
     }
     if (dataset === 'InventoryTransactions') {
-      return this.prisma.inventoryTransaction.findMany({
+      return client.inventoryTransaction.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'PurchaseOrders') {
-      return this.prisma.purchaseOrder.findMany({
+      return client.purchaseOrder.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'PurchaseOrderLines') {
-      return this.prisma.purchaseOrderLine.findMany({
+      return client.purchaseOrderLine.findMany({
         orderBy: { id: 'asc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'PurchaseReceipts') {
-      return this.prisma.purchaseReceipt.findMany({
+      return client.purchaseReceipt.findMany({
         orderBy: { receivedAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'PurchaseReceiptLines') {
-      return this.prisma.purchaseReceiptLine.findMany({
+      return client.purchaseReceiptLine.findMany({
         orderBy: { id: 'asc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'Stocktakes') {
-      return this.prisma.stocktake.findMany({
+      return client.stocktake.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'StocktakeLines') {
-      return this.prisma.stocktakeLine.findMany({
+      return client.stocktakeLine.findMany({
         orderBy: { id: 'asc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'InventoryOperations') {
-      return this.prisma.inventoryOperation.findMany({
+      return client.inventoryOperation.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
     if (dataset === 'AuditLogs') {
-      return this.prisma.auditLog.findMany({
+      return client.auditLog.findMany({
         orderBy: { createdAt: 'desc' },
         take: EXPORT_ROW_LIMIT,
       }) as never;
     }
-    return this.prisma.reconciliationPeriod.findMany({
+    return client.reconciliationPeriod.findMany({
       orderBy: { businessDate: 'desc' },
       take: EXPORT_ROW_LIMIT,
     }) as never;
@@ -712,11 +726,14 @@ export class ReportsService {
    * selects explicit so internal replay evidence and business-rule snapshots
    * cannot be exposed merely because a model gains another column.
    */
-  private async financeData(dataset: DatasetName): Promise<ExportRow[]> {
+  private async financeData(
+    client: Prisma.TransactionClient,
+    dataset: DatasetName,
+  ): Promise<ExportRow[]> {
     let rows: ExportRow[];
 
     if (dataset === 'Orders') {
-      rows = (await this.prisma.order.findMany({
+      rows = (await client.order.findMany({
         select: {
           id: true,
           orderNo: true,
@@ -745,7 +762,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'OrderItems') {
-      rows = (await this.prisma.orderItem.findMany({
+      rows = (await client.orderItem.findMany({
         select: {
           id: true,
           orderId: true,
@@ -760,7 +777,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'Payments') {
-      rows = (await this.prisma.payment.findMany({
+      rows = (await client.payment.findMany({
         select: {
           id: true,
           paymentNo: true,
@@ -779,7 +796,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'Refunds') {
-      rows = (await this.prisma.refund.findMany({
+      rows = (await client.refund.findMany({
         select: {
           id: true,
           refundNo: true,
@@ -799,7 +816,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'Accounts') {
-      rows = (await this.prisma.account.findMany({
+      rows = (await client.account.findMany({
         select: {
           id: true,
           userId: true,
@@ -814,7 +831,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'AccountTransactions') {
-      rows = (await this.prisma.accountTransaction.findMany({
+      rows = (await client.accountTransaction.findMany({
         select: {
           id: true,
           accountId: true,
@@ -833,7 +850,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'TrainingRevenue') {
-      rows = (await this.prisma.trainingRevenueRecognition.findMany({
+      rows = (await client.trainingRevenueRecognition.findMany({
         select: {
           id: true,
           attendanceId: true,
@@ -853,7 +870,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'TrainingSettlements') {
-      rows = (await this.prisma.trainingSettlement.findMany({
+      rows = (await client.trainingSettlement.findMany({
         select: {
           id: true,
           periodStart: true,
@@ -873,6 +890,7 @@ export class ReportsService {
           status: true,
           confirmedById: true,
           confirmedAt: true,
+          settledAt: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -880,7 +898,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'AllianceSettlements') {
-      rows = (await this.prisma.allianceSettlement.findMany({
+      rows = (await client.allianceSettlement.findMany({
         select: {
           id: true,
           merchantId: true,
@@ -904,7 +922,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'ConsignmentPayableEntries') {
-      rows = (await this.prisma.consignmentPayableEntry.findMany({
+      rows = (await client.consignmentPayableEntry.findMany({
         select: {
           id: true,
           type: true,
@@ -926,7 +944,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'ConsignmentSettlements') {
-      rows = (await this.prisma.consignmentSettlement.findMany({
+      rows = (await client.consignmentSettlement.findMany({
         select: {
           id: true,
           statementNo: true,
@@ -958,7 +976,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'ConsignmentSettlementLines') {
-      rows = (await this.prisma.consignmentSettlementLine.findMany({
+      rows = (await client.consignmentSettlementLine.findMany({
         select: {
           id: true,
           settlementId: true,
@@ -974,7 +992,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'ConsignmentTransitions') {
-      rows = (await this.prisma.consignmentSettlementTransition.findMany({
+      rows = (await client.consignmentSettlementTransition.findMany({
         select: {
           id: true,
           settlementId: true,
@@ -989,7 +1007,7 @@ export class ReportsService {
         take: EXPORT_ROW_LIMIT,
       })) as unknown as ExportRow[];
     } else if (dataset === 'ReconciliationPeriods') {
-      rows = (await this.prisma.reconciliationPeriod.findMany({
+      rows = (await client.reconciliationPeriod.findMany({
         select: {
           id: true,
           businessDate: true,

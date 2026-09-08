@@ -3278,7 +3278,13 @@ export class TrainingService {
         }
         const changed = await tx.trainingSettlement.updateMany({
           where: { id: input.id, status: input.from },
-          data: { status: input.to, ...input.data },
+          data: {
+            status: input.to,
+            ...input.data,
+            ...(input.to === SettlementStatus.SETTLED
+              ? { settledAt: new Date() }
+              : {}),
+          },
         });
         if (changed.count !== 1) {
           const latest = await tx.trainingSettlement.findUnique({
@@ -3307,6 +3313,7 @@ export class TrainingService {
               status: input.to,
               confirmedById: updated.confirmedById,
               confirmedAt: updated.confirmedAt,
+              settledAt: updated.settledAt,
             } as never,
             reason,
             requestId,

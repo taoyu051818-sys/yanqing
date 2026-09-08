@@ -832,6 +832,8 @@ model RiskEvent {
   objectId   String?
   summary    String
   evidence   Json?
+  /// Human handling is independent of periodically refreshed observations.
+  handling   Json?
   resolvedBy String?
   resolvedAt DateTime?
   user       User?        @relation("RiskUser", fields: [userId], references: [id], onDelete: SetNull)
@@ -1615,12 +1617,14 @@ model TrainingSettlement {
   status                      SettlementStatus             @default(DRAFT)
   confirmedById               String?
   confirmedAt                 DateTime?
+  settledAt                   DateTime?
   recognitions                TrainingRevenueRecognition[]
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
 
   @@unique([periodStart, periodEnd, version])
   @@index([status, periodEnd])
+  @@index([settledAt])
 }
 
 model TrainingRevenueRecognition {
@@ -1877,6 +1881,7 @@ model AllianceSettlement {
 
   @@unique([merchantId, periodStart, periodEnd])
   @@index([status, periodEnd])
+  @@index([settledAt])
 }
 
 model ReferralReward {

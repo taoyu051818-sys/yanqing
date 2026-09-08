@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { riskEventView } from '../common/risk/risk-event-view.js';
 
 import {
   BadRequestException,
@@ -537,18 +538,11 @@ export class GovernanceService {
           ) {
             throw new ConflictException('风险事件状态已变化');
           }
-          const evidence =
-            risk.evidence &&
-            typeof risk.evidence === 'object' &&
-            !Array.isArray(risk.evidence)
-              ? (risk.evidence as Record<string, unknown>)
-              : {};
           const changed = await tx.riskEvent.updateMany({
             where: { id: riskId, status: risk.status },
             data: {
               status: target,
-              evidence: {
-                ...evidence,
+              handling: {
                 lastAction: action,
                 lastReason: reason,
                 lastActorId: actor.sub,
@@ -726,7 +720,8 @@ export class GovernanceService {
   }
 
   private riskView<T extends { evidence: unknown }>(risk: T): T {
-    return { ...risk, evidence: redactEvidence(risk.evidence) } as T;
+    const view = riskEventView(risk);
+    return { ...view, evidence: redactEvidence(view.evidence) } as T;
   }
 
   private async assertAnotherSuperAdmin(

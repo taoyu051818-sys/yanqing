@@ -543,16 +543,14 @@ export class ReconciliationService {
       client.allianceSettlement.aggregate({
         where: {
           status: SettlementStatus.SETTLED,
-          periodStart: { lt: day.end },
-          periodEnd: { gt: day.start },
+          settledAt: { gte: day.start, lt: day.end },
         },
         _sum: { attributedGmvCents: true, cooperationFeeCents: true },
       }),
       client.trainingSettlement.aggregate({
         where: {
           status: SettlementStatus.SETTLED,
-          periodStart: { lt: day.end },
-          periodEnd: { gt: day.start },
+          settledAt: { gte: day.start, lt: day.end },
         },
         _sum: { venueContributionCents: true },
       }),
@@ -653,6 +651,9 @@ export class ReconciliationService {
     return {
       businessDate: day.label,
       timezone: 'Asia/Shanghai',
+      settlementBasis: 'SETTLED_AT_V2',
+      settlementDefinition:
+        '培训及联盟结算金额按实际入账日统计一次，不按结算覆盖周期重复计入。',
       generatedAt: new Date().toISOString(),
       blockers: snapshot.blockers,
       ...(reason ? { reason } : {}),

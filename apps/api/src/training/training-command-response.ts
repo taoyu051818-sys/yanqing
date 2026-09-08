@@ -90,6 +90,7 @@ export const trainingSettlementListResponse = (
     cashContributionMarginCents: settlement.cashContributionMarginCents,
     status: settlement.status,
     confirmedAt: settlement.confirmedAt,
+    settledAt: settlement.settledAt,
     createdAt: settlement.createdAt,
     updatedAt: settlement.updatedAt,
     isOwnCreator: context.isOwnCreator,

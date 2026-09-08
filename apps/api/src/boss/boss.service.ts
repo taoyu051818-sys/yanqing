@@ -3,10 +3,11 @@ import {
   Logger,
   OnApplicationBootstrap,
   OnModuleDestroy,
-} from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
-import { PrismaService } from '../database/prisma.service.js'
-import { Prisma } from '../generated/prisma/client.js'
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { riskEventView } from '../common/risk/risk-event-view.js';
+import { PrismaService } from '../database/prisma.service.js';
+import { Prisma } from '../generated/prisma/client.js';
 import {
   DAY,
   activitySummary,
@@ -15,47 +16,47 @@ import {
   detectEvents,
   utilization,
   venueDay,
-} from './boss.logic.js'
-import type { BossSummary } from '@yanqing/shared'
+} from './boss.logic.js';
+import type { BossSummary } from '@yanqing/shared';
 
-const paidStates = ['SUCCEEDED', 'REFUNDED'] as const
+const paidStates = ['SUCCEEDED', 'REFUNDED'] as const;
 const inside = (value: any, start: Date, end: Date) =>
-  value && +new Date(value) >= +start && +new Date(value) < +end
+  value && +new Date(value) >= +start && +new Date(value) < +end;
 @Injectable()
 export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
-  private readonly logger = new Logger(BossService.name)
-  private timer?: ReturnType<typeof setInterval>
-  private pending?: Promise<void>
+  private readonly logger = new Logger(BossService.name);
+  private timer?: ReturnType<typeof setInterval>;
+  private pending?: Promise<void>;
   private scanState: { lastSucceededAt: string | null; error: string | null } =
-    { lastSucceededAt: null, error: null }
+    { lastSucceededAt: null, error: null };
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {}
   thresholds() {
-    const result = { ...defaultThresholds }
+    const result = { ...defaultThresholds };
     for (const key of Object.keys(result) as Array<keyof typeof result>) {
       const env = 'BOSS_' + key.replace(/[A-Z]/g, (c) => '_' + c).toUpperCase(),
-        value = Number(this.config.get(env))
-      if (Number.isFinite(value) && value > 0) result[key] = value
+        value = Number(this.config.get(env));
+      if (Number.isFinite(value) && value > 0) result[key] = value;
     }
-    return result
+    return result;
   }
   onApplicationBootstrap() {
     if (
       this.config.get('BOSS_MONITOR_ENABLED', 'true') === 'false' ||
       this.config.get('NODE_ENV') === 'test'
     )
-      return
-    void this.scan()
-    this.timer = setInterval(() => void this.scan(), 5 * 60000)
-    this.timer.unref()
+      return;
+    void this.scan();
+    this.timer = setInterval(() => void this.scan(), 5 * 60000);
+    this.timer.unref();
   }
   onModuleDestroy() {
-    if (this.timer) clearInterval(this.timer)
+    if (this.timer) clearInterval(this.timer);
   }
   async summary(date?: string): Promise<BossSummary<Date>> {
-    const data = await this.read(date)
+    const data = await this.read(date);
     const eventWhere = {
       ruleCode: { startsWith: 'BOSS_' },
       OR: [
@@ -64,7 +65,7 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
           ? [{ status: { in: ['OPEN', 'REVIEWING'] as const } }]
           : []),
       ],
-    }
+    };
     const events = await this.prisma.riskEvent.findMany({
       where: eventWhere as Prisma.RiskEventWhereInput,
       select: {
@@ -77,18 +78,19 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
         objectId: true,
         orderId: true,
         evidence: true,
+        handling: true,
         createdAt: true,
         lastSeenAt: true,
       },
       orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
       take: 100,
-    })
+    });
     const eventCount = await this.prisma.riskEvent.count({
       where: eventWhere as Prisma.RiskEventWhereInput,
-    })
+    });
     return {
       ...data.summary,
-      events,
+      events: events.map(riskEventView),
       eventCount,
       eventsTruncated: eventCount > events.length,
       monitor: {
@@ -97,11 +99,11 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
         thresholds: this.thresholds(),
       },
       aiConfigured: Boolean(this.config.get('BOSS_LLM_API_KEY')),
-    }
+    };
   }
   async read(date?: string, now = new Date()) {
     const range = dayRange(date, now),
-      { start, end } = range
+      { start, end } = range;
     const data = await this.prisma.$transaction(
       async (tx) => {
         const [
@@ -274,7 +276,7 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
             },
             orderBy: { startsAt: 'asc' },
           }),
-        ])
+        ]);
         return {
           courts,
           slots,
@@ -285,14 +287,14 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
           refunds,
           games,
           events,
-        }
+        };
       },
       {
         isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
         timeout: 30000,
       },
-    )
-    const { orders, payments, refunds } = data
+    );
+    const { orders, payments, refunds } = data;
     const created = orders.filter((o) => inside(o.createdAt, start, end)),
       paid = payments.filter(
         (p) =>
@@ -300,10 +302,10 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
       ),
       refunded = refunds.filter(
         (r) => r.status === 'SUCCEEDED' && inside(r.completedAt, start, end),
-      )
+      );
     const completed = orders.filter(
       (o) => o.businessType === 'VENUE' && inside(o.completedAt, start, end),
-    )
+    );
     const venueRevenueCents =
       completed.reduce(
         (sum, o) =>
@@ -321,18 +323,18 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
             r.order.completedAt &&
             +r.order.completedAt <= +r.completedAt!,
         )
-        .reduce((s, r) => s + r.amountCents, 0)
+        .reduce((s, r) => s + r.amountCents, 0);
     const venue = utilization(
       data.courts,
       data.slots,
       data.bookings,
       data.closures,
       start,
-    )
+    );
     const activities = [
       ...data.games.map((g) => activitySummary(g, 'GAME')),
       ...data.events.map((e) => activitySummary(e, 'EVENT')),
-    ].sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt))
+    ].sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt));
     const summary = {
       date: range.date,
       timezone: 'Asia/Shanghai',
@@ -382,25 +384,25 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
         activities:
           '活动为查询时当前及未来开放球局/积分赛。双打每队按2人；确认报名、待支付占位、候补分别统计。已收报名费为累计实付减成功退款。',
       },
-    }
-    return { range, summary, data }
+    };
+    return { range, summary, data };
   }
   scan(): Promise<void> {
-    if (this.pending) return this.pending
+    if (this.pending) return this.pending;
     this.pending = this.runScan()
       .catch(() => {
         this.scanState.error =
-          '事件扫描失败，已记录事件仍可查看；系统将在下一轮重试'
-        this.logger.error('Business event scan failed')
+          '事件扫描失败，已记录事件仍可查看；系统将在下一轮重试';
+        this.logger.error('Business event scan failed');
       })
       .finally(() => {
-        this.pending = undefined
-      })
-    return this.pending
+        this.pending = undefined;
+      });
+    return this.pending;
   }
   private async runScan() {
     const now = new Date(),
-      { data, range, summary } = await this.read(undefined, now)
+      { data, range, summary } = await this.read(undefined, now);
     const history = Array.from({ length: 7 }, (_, i) =>
       utilization(
         data.courts,
@@ -409,7 +411,7 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
         data.closures,
         new Date(+range.start - (i + 1) * DAY),
       ),
-    )
+    );
     const candidates = detectEvents({
       now,
       orders: data.orders,
@@ -419,11 +421,11 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
       activities: summary.activities,
       history,
       thresholds: this.thresholds(),
-    })
+    });
     for (const c of candidates) {
       const evidence = JSON.parse(
         JSON.stringify({ ...c.evidence, observedAt: now.toISOString() }),
-      )
+      );
       await this.prisma.riskEvent.upsert({
         where: { dedupKey: c.key },
         create: {
@@ -438,8 +440,8 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
           lastSeenAt: now,
         },
         update: { lastSeenAt: now, evidence },
-      })
+      });
     }
-    this.scanState = { lastSucceededAt: now.toISOString(), error: null }
+    this.scanState = { lastSucceededAt: now.toISOString(), error: null };
   }
 }

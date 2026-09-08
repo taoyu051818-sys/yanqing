@@ -1,6 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable } from '@nestjs/common';
 
-import { PrismaService } from '../database/prisma.service.js'
+import { Prisma } from '../generated/prisma/client.js';
+import { venueCapacityRows } from '../common/venue/venue-capacity.js';
+import { PrismaService } from '../database/prisma.service.js';
 import {
   AccountTxnKind,
   AccountType,
@@ -17,15 +19,15 @@ import {
   TrainingEnrollmentStatus,
   TrainingSessionStatus,
   UserStatus,
-} from '../generated/prisma/enums.js'
+} from '../generated/prisma/enums.js';
 import {
   DEFAULT_OPERATING_SHARE_RATE_BPS,
   operatingShareCents,
   operatingShareSnapshotFromOrder,
-} from '../common/finance/operating-share.js'
+} from '../common/finance/operating-share.js';
 
-const DAY_MS = 86_400_000
-const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000
+const DAY_MS = 86_400_000;
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
 
 const shanghaiDay = () => {
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -33,13 +35,13 @@ const shanghaiDay = () => {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  })
-  const day = formatter.format(new Date())
+  });
+  const day = formatter.format(new Date());
   return {
     start: new Date(`${day}T00:00:00+08:00`),
     end: new Date(`${day}T24:00:00+08:00`),
-  }
-}
+  };
+};
 
 const collectionOrderStatuses = [
   OrderStatus.PAID,
@@ -48,14 +50,14 @@ const collectionOrderStatuses = [
   OrderStatus.REFUND_PENDING,
   OrderStatus.PARTIALLY_REFUNDED,
   OrderStatus.REFUNDED,
-]
+];
 
 const repeatEligibleStatuses = [
   OrderStatus.PAID,
   OrderStatus.CHECKED_IN,
   OrderStatus.COMPLETED,
   OrderStatus.PARTIALLY_REFUNDED,
-]
+];
 
 const venueBusinessTypes: BusinessType[] = [
   BusinessType.VENUE,
@@ -63,97 +65,40 @@ const venueBusinessTypes: BusinessType[] = [
   BusinessType.EVENT,
   BusinessType.GOODS,
   BusinessType.MEMBERSHIP,
-]
+];
 
 const cashPaymentChannels: PaymentChannel[] = [
   PaymentChannel.WECHAT,
   PaymentChannel.OFFLINE_CASH,
-]
+];
 
-type SlotDefinition = {
-  startMinutes: number
-  endMinutes: number
-  period: SlotPeriod
-}
-
-type PeriodHours = Record<SlotPeriod, number>
-
-const emptyPeriodHours = (): PeriodHours => ({
+const emptyPeriodHours = () => ({
   [SlotPeriod.EARLY]: 0,
   [SlotPeriod.DAYTIME]: 0,
   [SlotPeriod.PRIME]: 0,
-})
+});
 
 const percentage = (numerator: number, denominator: number) =>
-  denominator <= 0 ? 0 : Math.round((numerator / denominator) * 10_000) / 100
-
-const nonnegative = (value: number) => Math.max(0, value)
+  denominator <= 0 ? 0 : Math.round((numerator / denominator) * 10_000) / 100;
 
 const sum = (values: number[]) =>
-  values.reduce((total, value) => total + value, 0)
-
-/**
- * Allocate an absolute interval into the configured Shanghai business slots.
- * Bookings and closures normally stay inside one day, but iterating by local
- * business day also keeps overnight maintenance and custom periods correct.
- */
-const allocateIntervalHours = (
-  startsAt: Date,
-  endsAt: Date,
-  rangeStart: Date,
-  rangeEnd: Date,
-  slots: SlotDefinition[],
-): PeriodHours => {
-  const result = emptyPeriodHours()
-  const clippedStart = Math.max(startsAt.getTime(), rangeStart.getTime())
-  const clippedEnd = Math.min(endsAt.getTime(), rangeEnd.getTime())
-  if (clippedEnd <= clippedStart) return result
-
-  const shiftedStart = new Date(clippedStart + SHANGHAI_OFFSET_MS)
-  let localDayStart =
-    Date.UTC(
-      shiftedStart.getUTCFullYear(),
-      shiftedStart.getUTCMonth(),
-      shiftedStart.getUTCDate(),
-    ) - SHANGHAI_OFFSET_MS
-
-  while (localDayStart < clippedEnd) {
-    const localDayEnd = localDayStart + DAY_MS
-    const intervalStartMinutes =
-      (Math.max(clippedStart, localDayStart) - localDayStart) / 60_000
-    const intervalEndMinutes =
-      (Math.min(clippedEnd, localDayEnd) - localDayStart) / 60_000
-    for (const slot of slots) {
-      const overlapMinutes =
-        Math.min(intervalEndMinutes, slot.endMinutes) -
-        Math.max(intervalStartMinutes, slot.startMinutes)
-      if (overlapMinutes > 0) result[slot.period] += overlapMinutes / 60
-    }
-    localDayStart = localDayEnd
-  }
-  return result
-}
-
-const addPeriodHours = (target: PeriodHours, source: PeriodHours) => {
-  for (const period of Object.values(SlotPeriod))
-    target[period] += source[period]
-}
+  values.reduce((total, value) => total + value, 0);
 
 const countShanghaiDays = (start: Date, end: Date): number => {
-  const shiftedStart = new Date(start.getTime() + SHANGHAI_OFFSET_MS)
-  const shiftedEnd = new Date(end.getTime() - 1 + SHANGHAI_OFFSET_MS)
+  const shiftedStart = new Date(start.getTime() + SHANGHAI_OFFSET_MS);
+  const shiftedEnd = new Date(end.getTime() - 1 + SHANGHAI_OFFSET_MS);
   const first = Date.UTC(
     shiftedStart.getUTCFullYear(),
     shiftedStart.getUTCMonth(),
     shiftedStart.getUTCDate(),
-  )
+  );
   const last = Date.UTC(
     shiftedEnd.getUTCFullYear(),
     shiftedEnd.getUTCMonth(),
     shiftedEnd.getUTCDate(),
-  )
-  return Math.max(1, Math.round((last - first) / DAY_MS) + 1)
-}
+  );
+  return Math.max(1, Math.round((last - first) / DAY_MS) + 1);
+};
 
 const byBusinessType = <
   T extends { businessType: BusinessType; amountCents: number },
@@ -162,58 +107,55 @@ const byBusinessType = <
 ) => {
   const result = Object.fromEntries(
     Object.values(BusinessType).map((type) => [type, 0]),
-  ) as Record<BusinessType, number>
-  for (const row of rows) result[row.businessType] += row.amountCents
-  return result
-}
+  ) as Record<BusinessType, number>;
+  for (const row of rows) result[row.businessType] += row.amountCents;
+  return result;
+};
 
 const repurchaseWindow = (
   orders: Array<{ memberId: string; paidAt: Date | null }>,
   startsAt: Date,
   endsAt: Date,
 ) => {
-  const counts = new Map<string, number>()
+  const counts = new Map<string, number>();
   for (const order of orders) {
     if (!order.paidAt || order.paidAt < startsAt || order.paidAt >= endsAt)
-      continue
-    counts.set(order.memberId, (counts.get(order.memberId) ?? 0) + 1)
+      continue;
+    counts.set(order.memberId, (counts.get(order.memberId) ?? 0) + 1);
   }
-  const purchaserCount = counts.size
+  const purchaserCount = counts.size;
   const repeatCustomerCount = [...counts.values()].filter(
     (count) => count >= 2,
-  ).length
+  ).length;
   return {
     purchaserCount,
     repeatCustomerCount,
     rate: percentage(repeatCustomerCount, purchaserCount),
-  }
-}
+  };
+};
 
 @Injectable()
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async overview(periodStart?: Date, periodEnd?: Date) {
-    const today = shanghaiDay()
-    const start = periodStart ?? today.start
-    const end = periodEnd ?? today.end
+    const today = shanghaiDay();
+    const start = periodStart ?? today.start;
+    const end = periodEnd ?? today.end;
     if (
       Number.isNaN(start.getTime()) ||
       Number.isNaN(end.getTime()) ||
       end <= start
     ) {
-      throw new BadRequestException('驾驶舱查询结束时间必须晚于开始时间')
+      throw new BadRequestException('驾驶舱查询结束时间必须晚于开始时间');
     }
 
-    const lookback30Start = new Date(end.getTime() - 30 * DAY_MS)
-    const lookback7Start = new Date(end.getTime() - 7 * DAY_MS)
-    const expiringEnd = new Date(end.getTime() + 30 * DAY_MS)
+    const lookback30Start = new Date(end.getTime() - 30 * DAY_MS);
+    const lookback7Start = new Date(end.getTime() - 7 * DAY_MS);
+    const expiringEnd = new Date(end.getTime() + 30 * DAY_MS);
 
     const [
-      courtCount,
-      timeSlots,
-      venueBookings,
-      venueClosures,
+      capacity,
       paidOrders,
       completedOrders,
       completedRefunds,
@@ -240,34 +182,71 @@ export class DashboardService {
       trainingSettlements,
       operatingShareParameter,
     ] = await Promise.all([
-      this.prisma.court.count({ where: { enabled: true } }),
-      this.prisma.timeSlot.findMany({
-        where: { enabled: true },
-        select: { startMinutes: true, endMinutes: true, period: true },
-        orderBy: { startMinutes: 'asc' },
-      }),
-      this.prisma.courtBooking.findMany({
-        where: {
-          startsAt: { lt: end },
-          endsAt: { gt: start },
-          status: {
-            in: [
-              BookingStatus.CONFIRMED,
-              BookingStatus.CHECKED_IN,
-              BookingStatus.COMPLETED,
-            ],
-          },
+      this.prisma.$transaction(
+        async (tx) => {
+          const [courts, slots, bookings, closures] = await Promise.all([
+            tx.court.findMany({
+              where: { enabled: true },
+              select: { id: true, createdAt: true },
+            }),
+            tx.timeSlot.findMany({
+              where: { enabled: true },
+              select: {
+                id: true,
+                label: true,
+                startMinutes: true,
+                endMinutes: true,
+                period: true,
+              },
+              orderBy: { startMinutes: 'asc' },
+            }),
+            tx.courtBooking.findMany({
+              where: {
+                startsAt: { lt: end },
+                endsAt: { gt: start },
+                status: {
+                  in: [
+                    BookingStatus.CONFIRMED,
+                    BookingStatus.CHECKED_IN,
+                    BookingStatus.COMPLETED,
+                  ],
+                },
+              },
+              select: {
+                courtId: true,
+                status: true,
+                startsAt: true,
+                endsAt: true,
+              },
+            }),
+            tx.courtClosure.findMany({
+              where: {
+                status: 'ACTIVE',
+                startsAt: { lt: end },
+                endsAt: { gt: start },
+              },
+              select: { courtId: true, startsAt: true, endsAt: true },
+            }),
+          ]);
+          const ids = new Set(courts.map((c) => c.id));
+          return {
+            courtCount: courts.length,
+            bookingCount: bookings.filter((b) => ids.has(b.courtId)).length,
+            rows: venueCapacityRows(
+              courts,
+              slots,
+              bookings,
+              closures,
+              start,
+              end,
+            ),
+          };
         },
-        select: { startsAt: true, endsAt: true },
-      }),
-      this.prisma.courtClosure.findMany({
-        where: {
-          status: 'ACTIVE',
-          startsAt: { lt: end },
-          endsAt: { gt: start },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+          timeout: 30000,
         },
-        select: { startsAt: true, endsAt: true },
-      }),
+      ),
       this.prisma.order.findMany({
         where: {
           status: { in: collectionOrderStatuses },
@@ -518,26 +497,26 @@ export class DashboardService {
         },
         orderBy: { effectiveFrom: 'desc' },
       }),
-    ])
+    ]);
 
     const collectedOrdersByBusiness = byBusinessType(
       paidOrders.map((order) => ({
         businessType: order.businessType,
         amountCents: order.paidCents,
       })),
-    )
+    );
     const collectedRefundsByBusiness = byBusinessType(
       completedRefunds.map((refund) => ({
         businessType: refund.order.businessType,
         amountCents: refund.amountCents,
       })),
-    )
+    );
     const netCollectionsByBusiness = Object.fromEntries(
       Object.values(BusinessType).map((type) => [
         type,
         collectedOrdersByBusiness[type] - collectedRefundsByBusiness[type],
       ]),
-    ) as Record<BusinessType, number>
+    ) as Record<BusinessType, number>;
 
     const recognizedOrdersByBusiness = byBusinessType(
       completedOrders.map((order) => ({
@@ -554,80 +533,49 @@ export class DashboardService {
             0,
           ),
       })),
-    )
+    );
     const recognizedRefunds = completedRefunds.filter(
       (refund) =>
         refund.completedAt !== null &&
         refund.order.completedAt !== null &&
         refund.order.completedAt <= refund.completedAt &&
         venueBusinessTypes.includes(refund.order.businessType),
-    )
+    );
     const recognizedRefundsByBusiness = byBusinessType(
       recognizedRefunds.map((refund) => ({
         businessType: refund.order.businessType,
         amountCents: refund.amountCents,
       })),
-    )
+    );
     const realizedBusinessRevenue = Object.fromEntries(
       Object.values(BusinessType).map((type) => [
         type,
         recognizedOrdersByBusiness[type] - recognizedRefundsByBusiness[type],
       ]),
-    ) as Record<BusinessType, number>
+    ) as Record<BusinessType, number>;
 
-    const slots = timeSlots as SlotDefinition[]
-    const businessDays = countShanghaiDays(start, end)
-    const baselineHours = allocateIntervalHours(start, end, start, end, slots)
-    for (const period of Object.values(SlotPeriod)) {
-      baselineHours[period] *= courtCount
+    const businessDays = countShanghaiDays(start, end);
+    const availableHours = emptyPeriodHours(),
+      bookedHours = emptyPeriodHours();
+    for (const row of capacity.rows) {
+      availableHours[row.period] += row.availableMinutes / 60;
+      bookedHours[row.period] += row.occupiedMinutes / 60;
     }
-    const closureHours = emptyPeriodHours()
-    for (const closure of venueClosures) {
-      addPeriodHours(
-        closureHours,
-        allocateIntervalHours(
-          closure.startsAt,
-          closure.endsAt,
-          start,
-          end,
-          slots,
-        ),
-      )
-    }
-    const availableHours = emptyPeriodHours()
-    for (const period of Object.values(SlotPeriod)) {
-      availableHours[period] = nonnegative(
-        baselineHours[period] - closureHours[period],
-      )
-    }
-    const bookedHours = emptyPeriodHours()
-    for (const booking of venueBookings) {
-      addPeriodHours(
-        bookedHours,
-        allocateIntervalHours(
-          booking.startsAt,
-          booking.endsAt,
-          start,
-          end,
-          slots,
-        ),
-      )
-    }
-    const totalAvailableCourtHours = sum(Object.values(availableHours))
-    const totalBookedCourtHours = sum(Object.values(bookedHours))
+    const totalAvailableCourtHours = sum(Object.values(availableHours));
+    const totalBookedCourtHours = sum(Object.values(bookedHours));
     const daytimeAvailableCourtHours =
-      availableHours[SlotPeriod.EARLY] + availableHours[SlotPeriod.DAYTIME]
+      availableHours[SlotPeriod.EARLY] + availableHours[SlotPeriod.DAYTIME];
     const daytimeBookedCourtHours =
-      bookedHours[SlotPeriod.EARLY] + bookedHours[SlotPeriod.DAYTIME]
-    const primeAvailableCourtHours = availableHours[SlotPeriod.PRIME]
-    const primeBookedCourtHours = bookedHours[SlotPeriod.PRIME]
+      bookedHours[SlotPeriod.EARLY] + bookedHours[SlotPeriod.DAYTIME];
+    const primeAvailableCourtHours = availableHours[SlotPeriod.PRIME];
+    const primeBookedCourtHours = bookedHours[SlotPeriod.PRIME];
 
     const trainingRevenue = sum(
       trainingRecognitions.map((item) => item.effectiveRevenueCents),
-    )
+    );
     const trainingVenueContribution = sum(
       trainingRecognitions.map((item) => item.venueContributionCents),
-    )
+    );
     const trainingDirectCosts = sum(
       trainingSessions.map(
         (session) =>
@@ -635,66 +583,68 @@ export class DashboardService {
           session.assistantCostCents +
           session.materialCostCents,
       ),
-    )
-    const trainingCashContributionMargin = trainingRevenue - trainingDirectCosts
+    );
+    const trainingCashContributionMargin =
+      trainingRevenue - trainingDirectCosts;
     const occupiedCourtHours = sum(
       trainingSessions.map((session) => Number(session.occupiedCourtHours)),
-    )
+    );
 
     const coachOutputMap = new Map<
       string,
       {
-        coachId: string | null
-        classNames: Set<string>
-        completedSessions: number
-        confirmedRevenueCents: number
-        directCostCents: number
+        coachId: string | null;
+        classNames: Set<string>;
+        completedSessions: number;
+        confirmedRevenueCents: number;
+        directCostCents: number;
       }
-    >()
+    >();
     const coachOutput = (coachId: string | null, className: string) => {
-      const key = coachId ?? 'UNASSIGNED'
+      const key = coachId ?? 'UNASSIGNED';
       const current = coachOutputMap.get(key) ?? {
         coachId,
         classNames: new Set<string>(),
         completedSessions: 0,
         confirmedRevenueCents: 0,
         directCostCents: 0,
-      }
-      current.classNames.add(className)
-      coachOutputMap.set(key, current)
-      return current
-    }
+      };
+      current.classNames.add(className);
+      coachOutputMap.set(key, current);
+      return current;
+    };
     for (const session of trainingSessions) {
-      const output = coachOutput(session.class.coachId, session.class.name)
-      output.completedSessions += 1
+      const output = coachOutput(session.class.coachId, session.class.name);
+      output.completedSessions += 1;
       output.directCostCents +=
         session.coachCostCents +
         session.assistantCostCents +
-        session.materialCostCents
+        session.materialCostCents;
     }
     for (const recognition of trainingRecognitions) {
-      const trainingClass = recognition.attendance.session.class
-      const output = coachOutput(trainingClass.coachId, trainingClass.name)
-      output.confirmedRevenueCents += recognition.effectiveRevenueCents
+      const trainingClass = recognition.attendance.session.class;
+      const output = coachOutput(trainingClass.coachId, trainingClass.name);
+      output.confirmedRevenueCents += recognition.effectiveRevenueCents;
     }
 
-    const participantEvents = new Map<string, Set<string>>()
+    const participantEvents = new Map<string, Set<string>>();
     for (const team of eventTeams) {
       const participantIds = new Set(
         [team.captainId, team.playerAUserId, team.playerBUserId].filter(
           (value): value is string => Boolean(value),
         ),
-      )
+      );
       for (const participantId of participantIds) {
-        const events = participantEvents.get(participantId) ?? new Set<string>()
-        events.add(team.eventId)
-        participantEvents.set(participantId, events)
+        const events =
+          participantEvents.get(participantId) ?? new Set<string>();
+        events.add(team.eventId);
+        participantEvents.set(participantId, events);
       }
     }
     const repeatedEventParticipants = [...participantEvents.values()].filter(
       (events) => events.size >= 2,
-    ).length
-    const eventParticipantIds = [...participantEvents.keys()]
+    ).length;
+    const eventParticipantIds = [...participantEvents.keys()];
     const eventMemberProfiles = eventParticipantIds.length
       ? await this.prisma.memberProfile.findMany({
           where: { userId: { in: eventParticipantIds } },
@@ -711,10 +661,10 @@ export class DashboardService {
             },
           },
         })
-      : []
+      : [];
     const paidMemberParticipants = eventMemberProfiles.filter(
       (profile) => profile.subscriptions.length > 0,
-    ).length
+    ).length;
 
     const goodsCostCents = goodsCostTransactions.reduce(
       (total, transaction) =>
@@ -723,17 +673,17 @@ export class DashboardService {
           Math.abs(transaction.quantity) *
           (transaction.unitCostCents ?? 0),
       0,
-    )
+    );
     const inventoryValueCents = inventoryItems.reduce(
       (total, item) => total + item.stock * item.purchasePriceCents,
       0,
-    )
-    const goodsRevenueCents = realizedBusinessRevenue[BusinessType.GOODS]
+    );
+    const goodsRevenueCents = realizedBusinessRevenue[BusinessType.GOODS];
     const venueBusinessRevenueCents = venueBusinessTypes.reduce(
       (total, type) => total + realizedBusinessRevenue[type],
       0,
-    )
-    const realizedRevenueCents = venueBusinessRevenueCents + trainingRevenue
+    );
+    const realizedRevenueCents = venueBusinessRevenueCents + trainingRevenue;
     const completedOrderShareCents = completedOrders.reduce((total, order) => {
       const recognizedCents =
         order.paidCents -
@@ -745,7 +695,7 @@ export class DashboardService {
               ? refundTotal + refund.amountCents
               : refundTotal,
           0,
-        )
+        );
       return (
         total +
         operatingShareCents(
@@ -755,8 +705,8 @@ export class DashboardService {
             order.businessType,
           ),
         )
-      )
-    }, 0)
+      );
+    }, 0);
     const completedRefundShareCents = recognizedRefunds.reduce(
       (total, refund) =>
         total +
@@ -768,7 +718,7 @@ export class DashboardService {
           ),
         ),
       0,
-    )
+    );
     const trainingOperatingShareCents = trainingRecognitions.reduce(
       (total, recognition) =>
         total +
@@ -780,11 +730,11 @@ export class DashboardService {
           ),
         ),
       0,
-    )
+    );
     const accruedOperatingShareCents =
       completedOrderShareCents -
       completedRefundShareCents +
-      trainingOperatingShareCents
+      trainingOperatingShareCents;
     const periodEndOperatingShare = operatingShareSnapshotFromOrder(
       operatingShareParameter
         ? {
@@ -795,42 +745,42 @@ export class DashboardService {
           }
         : null,
       BusinessType.VENUE,
-    )
+    );
     const venueContractRevenueCents =
-      venueBusinessRevenueCents + trainingVenueContribution
+      venueBusinessRevenueCents + trainingVenueContribution;
     const completedRefundCents = completedRefunds.reduce(
       (total, refund) => total + refund.amountCents,
       0,
-    )
+    );
     const grossPaymentCents = sum(
       periodPayments.map((payment) => payment.amountCents),
-    )
+    );
     const cashCollectedCents = sum(
       periodPayments
         .filter((payment) => cashPaymentChannels.includes(payment.channel))
         .map((payment) => payment.amountCents),
-    )
+    );
     const cashRefundedCents = sum(
       completedRefunds
         .filter((refund) => {
-          const channel = refund.order.payments[0]?.channel
-          return channel !== undefined && cashPaymentChannels.includes(channel)
+          const channel = refund.order.payments[0]?.channel;
+          return channel !== undefined && cashPaymentChannels.includes(channel);
         })
         .map((refund) => refund.amountCents),
-    )
+    );
     const sevenDayRepurchase = repurchaseWindow(
       repeatOrders,
       lookback7Start,
       end,
-    )
+    );
     const thirtyDayRepurchase = repurchaseWindow(
       repeatOrders,
       lookback30Start,
       end,
-    )
+    );
     const allianceGrossProfit =
-      allianceSettlements._sum.attributedGrossProfitCents ?? 0
-    const allianceFee = allianceSettlements._sum.cooperationFeeCents ?? 0
+      allianceSettlements._sum.attributedGrossProfitCents ?? 0;
+    const allianceFee = allianceSettlements._sum.cooperationFeeCents ?? 0;
 
     return {
       period: { start, end, timezone: 'Asia/Shanghai', businessDays },
@@ -871,11 +821,14 @@ export class DashboardService {
           '逐笔使用订单创建时保存的分成规则；履约确认计提，退款按原订单比例反冲，充值不参与',
       },
       venue: {
-        courtCount,
-        bookingCount: venueBookings.length,
+        courtCount: capacity.courtCount,
+        bookingCount: capacity.bookingCount,
         bookedCourtHours: totalBookedCourtHours,
         availableCourtHours: totalAvailableCourtHours,
-        closureCourtHours: sum(Object.values(closureHours)),
+        closureCourtHours: capacity.rows.reduce(
+          (sum, row) => sum + row.closedMinutes / 60,
+          0,
+        ),
         utilizationRate: percentage(
           totalBookedCourtHours,
           totalAvailableCourtHours,
@@ -1003,6 +956,6 @@ export class DashboardService {
         venueContractRevenueCents,
       },
       contractSettlements: trainingSettlements,
-    }
+    };
   }
 }

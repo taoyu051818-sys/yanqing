@@ -1,12 +1,12 @@
-import { BadRequestException } from '@nestjs/common'
-import type { BossActivity } from '@yanqing/shared'
-export const DAY = 86_400_000
+import { BadRequestException } from '@nestjs/common';
+import type { BossActivity } from '@yanqing/shared';
+export const DAY = 86_400_000;
 export const venueDay = (date = new Date()) =>
-  new Date(date.getTime() + 8 * 3_600_000).toISOString().slice(0, 10)
+  new Date(date.getTime() + 8 * 3_600_000).toISOString().slice(0, 10);
 export function dayRange(value = venueDay(), now = new Date()) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value))
-    throw new BadRequestException('日期格式应为 YYYY-MM-DD')
-  const start = new Date(value + 'T00:00:00+08:00')
+    throw new BadRequestException('日期格式应为 YYYY-MM-DD');
+  const start = new Date(value + 'T00:00:00+08:00');
   if (
     !Number.isFinite(start.getTime()) ||
     venueDay(start) !== value ||
@@ -14,80 +14,34 @@ export function dayRange(value = venueDay(), now = new Date()) {
     start.getTime() <
       new Date(venueDay(now) + 'T00:00:00+08:00').getTime() - 90 * DAY
   )
-    throw new BadRequestException('仅支持今天及过去90天的有效日期')
-  return { date: value, start, end: new Date(start.getTime() + DAY) }
+    throw new BadRequestException('仅支持今天及过去90天的有效日期');
+  return { date: value, start, end: new Date(start.getTime() + DAY) };
 }
-type Interval = { startsAt: Date; endsAt: Date }
-export function coveredMinutes(
-  intervals: Interval[],
-  start: number,
-  end: number,
-) {
-  const clipped = intervals
-    .map((i) => [
-      Math.max(start, +new Date(i.startsAt)),
-      Math.min(end, +new Date(i.endsAt)),
-    ])
-    .filter((i) => i[1] > i[0])
-    .sort((a, b) => a[0] - b[0])
-  let total = 0,
-    until = start
-  for (const [a, b] of clipped) {
-    total += Math.max(0, b - Math.max(a, until))
-    until = Math.max(until, b)
-  }
-  return total / 60000
-}
+export { coveredMinutes } from '../common/venue/venue-capacity.js';
+import {
+  venueCapacityRows,
+  type CapacityCourt,
+  type CapacitySlot,
+  type CapacityBooking,
+  type CapacityClosure,
+} from '../common/venue/venue-capacity.js';
 export function utilization(
-  courts: { id: string; createdAt?: Date }[],
-  slots: {
-    id: string
-    label: string
-    startMinutes: number
-    endMinutes: number
-  }[],
-  bookings: Array<Interval & { courtId: string; status: string }>,
-  closures: Array<Interval & { courtId: string }>,
+  courts: CapacityCourt[],
+  slots: CapacitySlot[],
+  bookings: CapacityBooking[],
+  closures: CapacityClosure[],
   start: Date,
 ) {
-  // De-duplicate overlapping closures and bookings before calculating capacity.
-  const rows = slots.map((slot) => {
-    const a = +start + slot.startMinutes * 60000,
-      b = +start + slot.endMinutes * 60000
-    let availableMinutes = 0,
-      occupiedMinutes = 0
-    for (const court of courts) {
-      const courtStart = Math.max(
-        a,
-        court.createdAt ? +new Date(court.createdAt) : a,
-      )
-      if (courtStart >= b) continue
-      const closed = closures.filter((i) => i.courtId === court.id)
-      const booked = bookings.filter(
-        (i) =>
-          i.courtId === court.id &&
-          ['CONFIRMED', 'CHECKED_IN', 'COMPLETED'].includes(i.status),
-      )
-      const closedMinutes = coveredMinutes(closed, courtStart, b)
-      availableMinutes += (b - courtStart) / 60000 - closedMinutes
-      occupiedMinutes +=
-        coveredMinutes([...closed, ...booked], courtStart, b) - closedMinutes
-    }
-    return {
-      id: slot.id,
-      label: slot.label,
-      startMinutes: slot.startMinutes,
-      endMinutes: slot.endMinutes,
-      availableMinutes,
-      occupiedMinutes,
-      emptyMinutes: availableMinutes - occupiedMinutes,
-      utilizationRate: availableMinutes
-        ? Math.round((occupiedMinutes / availableMinutes) * 10000) / 100
-        : null,
-    }
-  })
+  const rows = venueCapacityRows(
+    courts,
+    slots,
+    bookings,
+    closures,
+    start,
+    new Date(+start + DAY),
+  );
   const availableMinutes = rows.reduce((sum, r) => sum + r.availableMinutes, 0),
-    occupiedMinutes = rows.reduce((sum, r) => sum + r.occupiedMinutes, 0)
+    occupiedMinutes = rows.reduce((sum, r) => sum + r.occupiedMinutes, 0);
   return {
     availableMinutes,
     occupiedMinutes,
@@ -102,24 +56,24 @@ export function utilization(
           b.emptyMinutes - a.emptyMinutes || a.startMinutes - b.startMinutes,
       )
       .slice(0, 3),
-  }
+  };
 }
 export function activitySummary(
   value: any,
   kind: 'GAME' | 'EVENT',
 ): BossActivity<Date> {
-  const size = kind === 'EVENT' ? 2 : 1
-  const entries = kind === 'EVENT' ? value.teams : value.registrations
+  const size = kind === 'EVENT' ? 2 : 1;
+  const entries = kind === 'EVENT' ? value.teams : value.registrations;
   const usable = (entries || []).filter(
     (r: any) =>
       ['REGISTERED', 'PAID', 'CHECKED_IN', 'COMPLETED'].includes(r.status) &&
       !['CANCELLED', 'REFUNDED'].includes(r.order?.status),
-  )
+  );
   const confirmed = usable.filter((r: any) =>
     ['PAID', 'CHECKED_IN', 'COMPLETED'].includes(r.status),
-  )
-  const held = usable.filter((r: any) => r.status === 'REGISTERED')
-  const capacity = kind === 'EVENT' ? value.capacityPeople : value.capacity
+  );
+  const held = usable.filter((r: any) => r.status === 'REGISTERED');
+  const capacity = kind === 'EVENT' ? value.capacityPeople : value.capacity;
   return {
     id: value.id,
     kind,
@@ -141,17 +95,17 @@ export function activitySummary(
         Math.max(0, (r.order?.paidCents || 0) - (r.order?.refundedCents || 0)),
       0,
     ),
-  }
+  };
 }
 export interface Candidate {
-  key: string
-  ruleCode: string
-  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
-  objectType: string
-  objectId?: string
-  orderId?: string
-  summary: string
-  evidence: Record<string, any>
+  key: string;
+  ruleCode: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  objectType: string;
+  objectId?: string;
+  orderId?: string;
+  summary: string;
+  evidence: Record<string, any>;
 }
 export const defaultThresholds = {
   largeOrderCents: 100000,
@@ -163,16 +117,16 @@ export const defaultThresholds = {
   nearFullPercent: 90,
   lowSignupPercent: 30,
   signupLeadHours: 24,
-}
+};
 export function detectEvents(input: {
-  now: Date
-  orders: any[]
-  payments: any[]
-  refunds: any[]
-  bookings: any[]
-  activities: ReturnType<typeof activitySummary>[]
-  history: ReturnType<typeof utilization>[]
-  thresholds: typeof defaultThresholds
+  now: Date;
+  orders: any[];
+  payments: any[];
+  refunds: any[];
+  bookings: any[];
+  activities: ReturnType<typeof activitySummary>[];
+  history: ReturnType<typeof utilization>[];
+  thresholds: typeof defaultThresholds;
 }) {
   const {
       now,
@@ -185,10 +139,10 @@ export function detectEvents(input: {
       thresholds: t,
     } = input,
     day = venueDay(now),
-    result: Candidate[] = []
+    result: Candidate[] = [];
   for (const o of orders) {
     const amount =
-      o.businessType === 'RECHARGE' ? t.largeRechargeCents : t.largeOrderCents
+      o.businessType === 'RECHARGE' ? t.largeRechargeCents : t.largeOrderCents;
     // Large recharge means received money, not merely a newly created unpaid request.
     if (o.paidAt && +new Date(o.paidAt) >= +now - DAY && o.paidCents >= amount)
       result.push({
@@ -208,7 +162,7 @@ export function detectEvents(input: {
           thresholdCents: amount,
           paidAt: o.paidAt,
         },
-      })
+      });
     if (
       o.status === 'PENDING' &&
       +new Date(o.createdAt) <= +now - t.overdueOrderMinutes * 60000
@@ -226,7 +180,7 @@ export function detectEvents(input: {
           thresholdMinutes: t.overdueOrderMinutes,
           payableCents: o.payableCents,
         },
-      })
+      });
   }
   for (const p of payments) {
     if (
@@ -249,14 +203,14 @@ export function detectEvents(input: {
           createdAt: p.createdAt,
           thresholdMinutes: t.paymentStuckMinutes,
         },
-      })
+      });
   }
   const recent = refunds.filter(
     (r) =>
       r.status === 'SUCCEEDED' &&
       r.completedAt &&
       +new Date(r.completedAt) >= +now - DAY,
-  )
+  );
   if (recent.length >= t.frequentRefundCount)
     result.push({
       key: `refunds:${day}`,
@@ -271,16 +225,16 @@ export function detectEvents(input: {
         threshold: t.frequentRefundCount,
         windowHours: 24,
       },
-    })
+    });
   for (const a of activities) {
-    const deadline = +new Date(a.registrationEndsAt)
+    const deadline = +new Date(a.registrationEndsAt);
     if (
       !['OPEN', 'FULL'].includes(a.status) ||
       deadline <= +now ||
       +new Date(a.startsAt) <= +now ||
       !a.capacityPeople
     )
-      continue
+      continue;
     if ((a.reservedPeople / a.capacityPeople) * 100 >= t.nearFullPercent)
       result.push({
         key: `nearfull:${day}:${a.kind}:${a.id}`,
@@ -296,7 +250,7 @@ export function detectEvents(input: {
           unpaidPeople: a.unpaidPeople,
           thresholdPercent: t.nearFullPercent,
         },
-      })
+      });
     if (
       deadline - +now <= t.signupLeadHours * 3600000 &&
       (a.confirmedPeople / a.capacityPeople) * 100 < t.lowSignupPercent
@@ -316,7 +270,7 @@ export function detectEvents(input: {
           registrationEndsAt: a.registrationEndsAt,
           thresholdPercent: t.lowSignupPercent,
         },
-      })
+      });
   }
   if (history.length >= 3) {
     for (const slot of history[0].slots) {
@@ -324,9 +278,9 @@ export function detectEvents(input: {
         .map((h) => h.slots.find((r) => r.id === slot.id))
         .filter(
           (r) => r && r.availableMinutes > 0,
-        ) as (typeof history)[0]['slots']
+        ) as (typeof history)[0]['slots'];
       const available = samples.reduce((s, r) => s + r.availableMinutes, 0),
-        occupied = samples.reduce((s, r) => s + r.occupiedMinutes, 0)
+        occupied = samples.reduce((s, r) => s + r.occupiedMinutes, 0);
       if (
         samples.length >= 3 &&
         available &&
@@ -345,7 +299,7 @@ export function detectEvents(input: {
             utilizationRate: Math.round((occupied / available) * 10000) / 100,
             thresholdPercent: t.lowUtilizationPercent,
           },
-        })
+        });
     }
   }
   const active = bookings
@@ -356,7 +310,7 @@ export function detectEvents(input: {
           b.holdExpiresAt &&
           +new Date(b.holdExpiresAt) > +now),
     )
-    .sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt))
+    .sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt));
   for (let i = 0; i < active.length; i++)
     for (
       let j = i + 1;
@@ -365,9 +319,9 @@ export function detectEvents(input: {
       j++
     ) {
       const a = active[i],
-        b = active[j]
-      if (a.courtId !== b.courtId) continue
-      const ids = [a.id, b.id].sort()
+        b = active[j];
+      if (a.courtId !== b.courtId) continue;
+      const ids = [a.id, b.id].sort();
       result.push({
         key: `conflict:${ids.join(':')}`,
         ruleCode: 'BOSS_COURT_CONFLICT',
@@ -381,7 +335,7 @@ export function detectEvents(input: {
           startsAt: a.startsAt,
           endsAt: a.endsAt,
         },
-      })
+      });
     }
-  return result
+  return result;
 }
