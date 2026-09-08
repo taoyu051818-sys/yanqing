@@ -58,7 +58,9 @@ const orderNo = () =>
   `VN${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`;
 
 const atMinutes = (date: string, minutes: number): Date => {
-  return new Date(new Date(`${date}T00:00:00+08:00`).getTime() + minutes * 60_000);
+  return new Date(
+    new Date(`${date}T00:00:00+08:00`).getTime() + minutes * 60_000,
+  );
 };
 
 const ASSISTED_BOOKING_ROLES = new Set<AppRole>([
@@ -100,7 +102,12 @@ const courtClosureView = (closure: any) => ({
   cancelledAt: closure.cancelledAt ?? null,
   cancelReason: closure.cancelReason ?? null,
   court: closure.court
-    ? { id: closure.court.id, code: closure.court.code, name: closure.court.name, enabled: closure.court.enabled }
+    ? {
+        id: closure.court.id,
+        code: closure.court.code,
+        name: closure.court.name,
+        enabled: closure.court.enabled,
+      }
     : undefined,
   createdBy: closure.createdBy
     ? { displayName: closure.createdBy.displayName }
@@ -137,18 +144,18 @@ const priceRuleTransitionView = <T extends Record<string, unknown>>(
 export class VenuesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async availability(date: string) {
+  async availability(date: string, includeUnavailable = false) {
     await this.releaseExpiredHolds();
     const dayStart = atMinutes(date, 0);
     const dayEnd = atMinutes(date, 24 * 60);
     const [courts, slots, bookings, closures] = await Promise.all([
       this.prisma.court.findMany({
-        where: { enabled: true },
+        where: includeUnavailable ? undefined : { enabled: true },
         select: { id: true, name: true, usage: true, enabled: true },
         orderBy: { sortOrder: 'asc' },
       }),
       this.prisma.timeSlot.findMany({
-        where: { enabled: true },
+        where: includeUnavailable ? undefined : { enabled: true },
         select: {
           id: true,
           label: true,
@@ -189,7 +196,7 @@ export class VenuesService {
       }),
     ]);
     const prices = await Promise.all(
-      slots.map((slot) => this.resolvePrice(slot.id, date)),
+      slots.map((slot) => this.resolvePrice(slot.id, date, slot.startMinutes)),
     );
     return {
       date,
@@ -267,7 +274,8 @@ export class VenuesService {
       where: { creationIdempotencyKey: command.creationIdempotencyKey },
       include: { court: true, createdBy: true, cancelledBy: true },
     });
-    if (replay) return courtClosureView(this.assertClosureReplay(replay, command, actor));
+    if (replay)
+      return courtClosureView(this.assertClosureReplay(replay, command, actor));
 
     try {
       const created = await this.prisma.$transaction(
@@ -380,7 +388,9 @@ export class VenuesService {
           include: { court: true, createdBy: true, cancelledBy: true },
         });
         if (concurrent)
-          return courtClosureView(this.assertClosureReplay(concurrent, command, actor));
+          return courtClosureView(
+            this.assertClosureReplay(concurrent, command, actor),
+          );
       }
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -407,7 +417,8 @@ export class VenuesService {
           include: { court: true, createdBy: true, cancelledBy: true },
         });
         if (!before) throw new NotFoundException('封场记录不存在');
-        if (before.status === CourtClosureStatus.CANCELLED) return courtClosureView(before);
+        if (before.status === CourtClosureStatus.CANCELLED)
+          return courtClosureView(before);
 
         const cancelledAt = new Date();
         const changed = await tx.courtClosure.updateMany({
@@ -424,7 +435,8 @@ export class VenuesService {
             where: { id },
             include: { court: true, createdBy: true, cancelledBy: true },
           });
-          if (latest?.status === CourtClosureStatus.CANCELLED) return courtClosureView(latest);
+          if (latest?.status === CourtClosureStatus.CANCELLED)
+            return courtClosureView(latest);
           throw new ConflictException('封场状态已被其他操作更新，请刷新后重试');
         }
         const after = await tx.courtClosure.findUniqueOrThrow({
@@ -461,6 +473,20 @@ export class VenuesService {
 
   async createBooking(dto: CreateVenueBookingDto, actor: AuthUser) {
     const target = this.bookingTarget(dto, actor);
+    if (dto.overrideReason !== undefined) {
+      if (typeof dto.overrideReason !== 'string')
+        throw new BadRequestException('特殊代订原因须为2-300字');
+      if (
+        !target.assisted ||
+        !actor.roles.some((role) => ASSISTED_BOOKING_ROLES.has(role))
+      )
+        throw new ForbiddenException('仅前台或管理员代会员订场可使用特殊代订');
+      if (
+        dto.overrideReason.trim().length < 2 ||
+        dto.overrideReason.trim().length > 300
+      )
+        throw new BadRequestException('特殊代订原因须为2-300字');
+    }
     const order = await executeOrderCreation(this.prisma, {
       memberId: target.memberId,
       creationIdempotencyKey: dto.creationIdempotencyKey,
@@ -472,6 +498,9 @@ export class VenuesService {
         slotId: dto.slotId,
         sourceChannel: dto.sourceChannel,
         couponCode: dto.couponCode?.trim() || null,
+        ...(dto.overrideReason
+          ? { overrideReason: dto.overrideReason.trim() }
+          : {}),
       },
       loadExisting: (id) =>
         this.prisma.order.findUniqueOrThrow({
@@ -490,101 +519,111 @@ export class VenuesService {
     target: { memberId: string; assisted: boolean },
     creation: OrderCreationFields,
   ) {
-    // Validate delegated targets only when creating a new order.  An exact
-    // idempotent replay is allowed to return its original order even if the
-    // customer was disabled after the first request committed.
-    if (target.assisted) {
-      const activeMember = await this.prisma.user.findFirst(
-        this.activeMemberQuery(target.memberId),
-      );
-      if (!activeMember)
-        throw new NotFoundException('所选会员不存在、未建档或已停用');
-    }
-
-    const [court, slot, profile] = await Promise.all([
-      this.prisma.court.findUnique({ where: { id: dto.courtId } }),
-      this.prisma.timeSlot.findUnique({ where: { id: dto.slotId } }),
-      this.prisma.memberProfile.findUnique({
-        where: { userId: target.memberId },
-      }),
-    ]);
-    if (!court?.enabled || !slot?.enabled)
-      throw new NotFoundException('场地或时段不存在');
-    if (court.usage === CourtUsage.MAINTENANCE)
-      throw new ConflictException('场地维护中');
-    if (court.usage === CourtUsage.TRAINING)
-      throw new ConflictException('该场地为培训专用场，不能零售预订');
-    if (court.usage === CourtUsage.MEMBER_BLOCK && !profile?.level) {
-      throw new ConflictException('该场地为会员预留场，请先完成会员建档');
-    }
-
-    const startsAt = atMinutes(dto.date, slot.startMinutes);
-    const endsAt = atMinutes(dto.date, slot.endMinutes);
-    if (startsAt <= new Date())
-      throw new BadRequestException('不能预订已开始的时段');
-    const price = await this.resolvePrice(slot.id, dto.date);
-    if (!price) throw new NotFoundException('该时段尚未配置价格');
-
-    let payableCents = price.priceCents;
-    let discountCents = 0;
-    let couponId: string | undefined;
-    let newcomerPolicy: {
-      parameterId: string | null;
-      allowedPeriods: SlotPeriod[];
-    } | null = null;
-    if (dto.couponCode) {
-      const coupon = await this.prisma.couponCode.findUnique({
-        where: { code: dto.couponCode },
-        include: {
-          template: { include: { merchant: { select: { status: true } } } },
-        },
-      });
-      const now = new Date();
-      if (
-        !coupon ||
-        coupon.holderId !== target.memberId ||
-        coupon.status !== CouponStatus.CLAIMED ||
-        coupon.expiresAt <= now ||
-        !coupon.template.enabled ||
-        coupon.template.merchant.status !== UserStatus.ACTIVE ||
-        coupon.template.validFrom > now ||
-        coupon.template.validTo <= now
-      ) {
-        throw new BadRequestException('优惠券无效、已过期或不属于当前会员');
-      }
-      couponId = coupon.id;
-      if (coupon.template.code.startsWith(NEWCOMER_COUPON_PREFIX)) {
-        newcomerPolicy = await this.resolveNewcomerAllowedPeriods(now);
-        if (!newcomerPolicy.allowedPeriods.includes(slot.period)) {
-          throw new ConflictException('新客体验权益仅限非黄金时段使用');
-        }
-        if (price.newcomerPriceCents === null) {
-          throw new ConflictException('该时段未配置新客体验价');
-        }
-        payableCents = price.newcomerPriceCents;
-      } else {
-        if (!coupon.template.allowVenueBooking) throw new BadRequestException('此券仅限所属商户消费，不可抵扣订场');
-        payableCents = Math.max(
-          0,
-          price.priceCents - coupon.template.faceValueCents,
-        );
-      }
-      discountCents = price.priceCents - payableCents;
-    }
-
     try {
       return await this.prisma.$transaction(
         async (tx) => {
+          if (target.assisted) {
+            const activeMember = await tx.user.findFirst(
+              this.activeMemberQuery(target.memberId),
+            );
+            if (!activeMember)
+              throw new NotFoundException('所选会员不存在、未建档或已停用');
+          }
+
+          const [court, slot, profile] = await Promise.all([
+            tx.court.findUnique({ where: { id: dto.courtId } }),
+            tx.timeSlot.findUnique({ where: { id: dto.slotId } }),
+            tx.memberProfile.findUnique({
+              where: { userId: target.memberId },
+            }),
+          ]);
+          const operatorOverride = Boolean(dto.overrideReason);
+          if (!court || !slot) throw new NotFoundException('场地或时段不存在');
+          if (!operatorOverride && (!court.enabled || !slot.enabled))
+            throw new NotFoundException('场地或时段不存在');
+          if (!operatorOverride && court.usage === CourtUsage.MAINTENANCE)
+            throw new ConflictException('场地维护中');
+          if (!operatorOverride && court.usage === CourtUsage.TRAINING)
+            throw new ConflictException('该场地为培训专用场，不能零售预订');
+          if (
+            !operatorOverride &&
+            court.usage === CourtUsage.MEMBER_BLOCK &&
+            !profile?.level
+          ) {
+            throw new ConflictException('该场地为会员预留场，请先完成会员建档');
+          }
+
+          await tx.$queryRaw`SELECT "id" FROM "Court" WHERE "id" = ${court.id} FOR SHARE`;
+          await tx.$queryRaw`SELECT "id" FROM "TimeSlot" WHERE "id" = ${slot.id} FOR SHARE`;
+          const startsAt = atMinutes(dto.date, slot.startMinutes);
+          const endsAt = atMinutes(dto.date, slot.endMinutes);
+          if (!operatorOverride && startsAt <= new Date())
+            throw new BadRequestException('不能预订已开始的时段');
+          const price = await this.resolvePrice(
+            slot.id,
+            dto.date,
+            slot.startMinutes,
+            tx,
+          );
+          if (!price) throw new NotFoundException('该时段尚未配置价格');
+
+          let payableCents = price.priceCents;
+          let discountCents = 0;
+          let couponId: string | undefined;
+          let newcomerPolicy: {
+            parameterId: string | null;
+            allowedPeriods: SlotPeriod[];
+          } | null = null;
+          if (dto.couponCode) {
+            const coupon = await tx.couponCode.findUnique({
+              where: { code: dto.couponCode },
+              include: {
+                template: {
+                  include: { merchant: { select: { status: true } } },
+                },
+              },
+            });
+            const now = new Date();
+            if (
+              !coupon ||
+              coupon.holderId !== target.memberId ||
+              coupon.status !== CouponStatus.CLAIMED ||
+              coupon.expiresAt <= now ||
+              !coupon.template.enabled ||
+              coupon.template.merchant.status !== UserStatus.ACTIVE ||
+              coupon.template.validFrom > now ||
+              coupon.template.validTo <= now
+            ) {
+              throw new BadRequestException(
+                '优惠券无效、已过期或不属于当前会员',
+              );
+            }
+            couponId = coupon.id;
+            if (coupon.template.code.startsWith(NEWCOMER_COUPON_PREFIX)) {
+              newcomerPolicy = await this.resolveNewcomerAllowedPeriods(now);
+              if (!newcomerPolicy.allowedPeriods.includes(slot.period)) {
+                throw new ConflictException('新客体验权益仅限非黄金时段使用');
+              }
+              if (price.newcomerPriceCents === null) {
+                throw new ConflictException('该时段未配置新客体验价');
+              }
+              payableCents = price.newcomerPriceCents;
+            } else {
+              if (!coupon.template.allowVenueBooking)
+                throw new BadRequestException(
+                  '此券仅限所属商户消费，不可抵扣订场',
+                );
+              payableCents = Math.max(
+                0,
+                price.priceCents - coupon.template.faceValueCents,
+              );
+            }
+            discountCents = price.priceCents - payableCents;
+          }
+
           const shiftAuthorization = target.assisted
             ? await requireOpenFrontDeskShift(tx, actor)
             : null;
-          if (target.assisted) {
-            const stillActive = await tx.user.findFirst(
-              this.activeMemberQuery(target.memberId),
-            );
-            if (!stillActive)
-              throw new NotFoundException('所选会员不存在、未建档或已停用');
-          }
           const closure = await tx.courtClosure.findFirst({
             where: {
               courtId: court.id,
@@ -594,7 +633,7 @@ export class VenuesService {
             },
             select: { id: true, startsAt: true, endsAt: true, reason: true },
           });
-          if (closure)
+          if (closure && !operatorOverride)
             throw new ConflictException(`该时段已封场：${closure.reason}`);
           const conflict = await tx.courtBooking.findFirst({
             where: {
@@ -604,7 +643,8 @@ export class VenuesService {
               status: { not: BookingStatus.CANCELLED },
             },
           });
-          if (conflict) throw new ConflictException('该场地时段刚刚被预订');
+          if (conflict && !operatorOverride)
+            throw new ConflictException('该场地时段刚刚被预订');
           const operatingShare = await resolveOperatingShareSnapshot(
             tx,
             BusinessType.VENUE,
@@ -625,6 +665,20 @@ export class VenuesService {
               payableCents,
               consumedCouponCode: dto.couponCode,
               parameterSnapshot: {
+                ...(operatorOverride
+                  ? {
+                      assistedBookingOverride: {
+                        reason: dto.overrideReason!.trim(),
+                        actorId: actor.sub,
+                        past: startsAt <= new Date(),
+                        courtEnabled: court.enabled,
+                        courtUsage: court.usage,
+                        slotEnabled: slot.enabled,
+                        conflictingBookingId: conflict?.id ?? null,
+                        closureId: closure?.id ?? null,
+                      },
+                    }
+                  : {}),
                 priceRuleId: price.id,
                 priceRuleCode: price.code,
                 priceRuleVersion: price.version,
@@ -649,6 +703,11 @@ export class VenuesService {
                 targetMemberId: target.memberId,
                 createdById: actor.sub,
                 operatorAssisted: target.assisted,
+                operatorOverride,
+                conflictingBookingId: operatorOverride
+                  ? conflict?.id
+                  : undefined,
+                closureId: operatorOverride ? closure?.id : undefined,
                 operatingShare,
               },
               items: {
@@ -675,6 +734,10 @@ export class VenuesService {
                   endsAt,
                   holdExpiresAt: new Date(Date.now() + 10 * 60_000),
                   usage: CourtUsage.RETAIL,
+                  operatorOverride,
+                  overrideReason: operatorOverride
+                    ? dto.overrideReason!.trim()
+                    : null,
                 },
               },
             },
@@ -695,6 +758,7 @@ export class VenuesService {
               actorId: actor.sub,
               actorRole: actor.roles[0],
               action: 'VENUE_ORDER_CREATED',
+              reason: operatorOverride ? dto.overrideReason!.trim() : undefined,
               objectType: 'Order',
               objectId: created.id,
               newValue: {
@@ -705,6 +769,11 @@ export class VenuesService {
                 memberId: target.memberId,
                 createdById: actor.sub,
                 operatorAssisted: target.assisted,
+                operatorOverride,
+                conflictingBookingId: operatorOverride
+                  ? conflict?.id
+                  : undefined,
+                closureId: operatorOverride ? closure?.id : undefined,
                 frontDeskShiftId:
                   shiftAuthorization?.mode === 'OPEN_SHIFT'
                     ? shiftAuthorization.shiftId
@@ -720,6 +789,21 @@ export class VenuesService {
       );
     } catch (error) {
       if (error instanceof ConflictException) throw error;
+      const failure = error as {
+        code?: string;
+        meta?: {
+          code?: string;
+          driverAdapterError?: { cause?: { originalCode?: string } };
+        };
+      };
+      const sqlState =
+        failure?.meta?.code ??
+        failure?.meta?.driverAdapterError?.cause?.originalCode;
+      if (
+        failure?.code === 'P2010' &&
+        ['40001', '40P01'].includes(sqlState ?? '')
+      )
+        throw new ConflictException('场地或时段刚刚更新，请刷新后重试');
       if (isOrderCreationKeyViolation(error)) throw error;
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -747,7 +831,9 @@ export class VenuesService {
     // A staff role grants the ability to assist; it does not change who owns
     // a personal mini-program booking. An explicit customer or store request
     // continues through the assisted-booking validation, shift and audit gates.
-    const assisted = canAssist && (Boolean(requestedMemberId) || dto.sourceChannel === 'STORE_VISIT');
+    const assisted =
+      canAssist &&
+      (Boolean(requestedMemberId) || dto.sourceChannel === 'STORE_VISIT');
     if (assisted) {
       if (!requestedMemberId)
         throw new BadRequestException('前台代客订场必须先选择会员');
@@ -1571,11 +1657,16 @@ export class VenuesService {
       : AppRole.ADMIN;
   }
 
-  private async resolvePrice(slotId: string, date: string) {
-    const at = atMinutes(date, 0);
+  private async resolvePrice(
+    slotId: string,
+    date: string,
+    startMinutes = 0,
+    client: Pick<Prisma.TransactionClient, 'priceRule'> = this.prisma,
+  ) {
+    const at = atMinutes(date, startMinutes);
     const dayOfWeek = new Date(`${date}T00:00:00Z`).getUTCDay();
     const weekdayBit = 1 << dayOfWeek;
-    const rules = await this.prisma.priceRule.findMany({
+    const rules = await client.priceRule.findMany({
       where: {
         enabled: true,
         OR: [{ timeSlotId: slotId }, { timeSlotId: null }],
@@ -1702,7 +1793,11 @@ export class VenuesService {
             },
           });
         }
-        if (!order || order.status === OrderStatus.PENDING || order.status === OrderStatus.CANCELLED) {
+        if (
+          !order ||
+          order.status === OrderStatus.PENDING ||
+          order.status === OrderStatus.CANCELLED
+        ) {
           await tx.courtBooking.updateMany({
             where: { id: booking.id, status: BookingStatus.HELD },
             data: { status: BookingStatus.CANCELLED, holdExpiresAt: null },

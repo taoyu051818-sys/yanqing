@@ -1,3 +1,4 @@
+import { canManageGames, GAME_MANAGEMENT_ROLES, trainingSessionScope } from '../common/auth/operation-scopes.js';
 import { Injectable } from '@nestjs/common';
 
 import type { AuthUser } from '../common/auth/auth-user.js';
@@ -172,12 +173,7 @@ export class WorkItemsService {
       AppRole.ADMIN,
       AppRole.SUPER_ADMIN,
     ]);
-    const canOperateGames = hasAny(roles, [
-      AppRole.HOST,
-      AppRole.FRONT_DESK,
-      AppRole.ADMIN,
-      AppRole.SUPER_ADMIN,
-    ]);
+    const canOperateGames = canManageGames(roles);
     const canOperateCustomers = hasAny(roles, [
       AppRole.FRONT_DESK,
       AppRole.ADMIN,
@@ -611,9 +607,7 @@ export class WorkItemsService {
                 ],
               },
               startsAt: { lte: nowDate },
-              ...(roles.includes(AppRole.COACH) && !isOperationsAdmin
-                ? { class: { coachId: actor.sub } }
-                : {}),
+              ...trainingSessionScope(actor),
             },
             select: {
               id: true,
@@ -679,12 +673,7 @@ export class WorkItemsService {
           priority: ended ? 90 : 84,
           title: `${ended ? '球局待完赛' : '球局现场待处理'} · ${game.title}`,
           description: `${game._count.registrations} 名已支付/签到 · 主理人现场队列`,
-          ownerRoles: [
-            AppRole.HOST,
-            AppRole.FRONT_DESK,
-            AppRole.ADMIN,
-            AppRole.SUPER_ADMIN,
-          ],
+          ownerRoles: [...GAME_MANAGEMENT_ROLES],
           createdAt: game.startsAt.toISOString(),
           dueAt: (ended ? game.endsAt : game.startsAt).toISOString(),
           action: `/packages/ops/pages/host/index?focus=game&gameId=${game.id}`,

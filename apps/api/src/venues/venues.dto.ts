@@ -80,6 +80,14 @@ export class AvailabilityQueryDto {
 }
 
 export class CreateVenueBookingDto {
+  /** Explicit, audited exception; only an administrator booking for a member. */
+  @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  overrideReason?: string
+
   /**
    * Target customer for an operator-assisted booking.  Member requests may
    * omit it (or send their own ID). Staff booking for themselves in the mini

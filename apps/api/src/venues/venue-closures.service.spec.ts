@@ -350,6 +350,7 @@ describe('VenuesService closure integration with availability and booking', () =
       },
       $transaction: runner(tx),
     };
+    Object.assign(tx, { court: prisma.court, timeSlot: prisma.timeSlot, memberProfile: prisma.memberProfile, priceRule: prisma.priceRule, $queryRaw: vi.fn().mockResolvedValue([]) });
     const service = new VenuesService(prisma as never);
 
     await expect(

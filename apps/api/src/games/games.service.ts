@@ -1,3 +1,4 @@
+import { canManageGames } from '../common/auth/operation-scopes.js'
 import { randomBytes } from 'node:crypto'
 import { stateTransition, lockAdmissionOrder } from '../common/state-transition.js'
 import { gameRegistrationOpen } from './game-registration-policy.js'
@@ -465,7 +466,7 @@ export class GamesService {
     const canManageAll = actor.roles.some((role) =>
       [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never),
     )
-    if (!canManageAll && !actor.roles.includes(AppRole.HOST)) {
+    if (!canManageGames(actor.roles)) {
       throw new ForbiddenException('当前角色无权访问球局经营列表')
     }
     const observedAt = new Date()

@@ -1,3 +1,4 @@
+import { GAME_MANAGEMENT_ROLES } from '../common/auth/operation-scopes.js'
 import { Body, Controller, Get, Param, Post } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 
@@ -27,7 +28,7 @@ export class GamesController {
   }
 
   @Get('managed')
-  @Roles(AppRole.HOST, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(...GAME_MANAGEMENT_ROLES)
   managed(@CurrentUser() actor: AuthUser) {
     return this.games.managed(actor)
   }

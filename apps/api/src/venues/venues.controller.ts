@@ -30,6 +30,12 @@ export class VenuesController {
     return this.venues.availability(query.date)
   }
 
+  @Get('availability/assisted')
+  @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  assistedAvailability(@Query() query: AvailabilityQueryDto) {
+    return this.venues.availability(query.date, true)
+  }
+
   @Post('bookings')
   book(@Body() dto: CreateVenueBookingDto, @CurrentUser() actor: AuthUser) {
     return this.venues.createBooking(dto, actor)

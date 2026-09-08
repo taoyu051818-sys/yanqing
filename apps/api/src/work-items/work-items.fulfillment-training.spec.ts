@@ -270,7 +270,7 @@ describe('WorkItemsService fulfillment and training handoffs', () => {
     );
     expect(prisma.trainingSession.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ class: { coachId: 'coach-1' } }),
+        where: expect.objectContaining({ class: { OR: [{ coachId: 'coach-1' }, { assistantId: 'coach-1' }] } }),
       }),
     );
   });

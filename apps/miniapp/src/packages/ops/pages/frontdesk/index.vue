@@ -12,6 +12,7 @@ import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
 import type { MemberDirectoryItem } from '../../../../types/domain'
 import { idempotencyKey, money, shortDate, today } from '../../../../utils/format'
+import { openMemberPage } from '../../../../utils/member-navigation'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
 import {
   findOpsDeepLinkRecord,
@@ -182,27 +183,8 @@ function closeShift() {
 
 function manualOrder() {
   if (!ensureShiftOpen()) return
-  const customer = selectedMember.value
-  if (!customer || !availability.value) { uni.showToast({ title: '请先选择代订会员并加载可售场地', icon: 'none' }); return }
-  const day = today(), available = availability.value
-  task.start({ title: '为会员代订场地', description: customer.displayName + ' · ' + day + '。只创建待付款订单，不代扣会员余额。', confirmText: '确认创建待付款订单',
-    fields: [
-      { key: 'courtId', label: '场地', kind: 'choices', options: available.courts.filter((court: any) => court.enabled && court.usage === 'PUBLIC').map((court: any) => ({ value: court.id, label: court.name })) },
-      { key: 'slotId', label: '可售一小时时段', kind: 'choices', hint: '先选场地，再选时间；服务器提交时再次校验冲突。',
-        optionsFor: values => available.slots.filter((slot: any) => {
-          if (!values.courtId || !slot.enabled || !slot.price) return false
-          const midnight = new Date(day + 'T00:00:00+08:00').getTime()
-          const start = midnight + slot.startMinutes * 60000, end = midnight + slot.endMinutes * 60000
-          return start > Date.now() && ![...(available.bookings || []), ...(available.closures || [])].some((booking: any) => booking.courtId === values.courtId && booking.status !== 'CANCELLED' && new Date(booking.startsAt).getTime() < end && new Date(booking.endsAt).getTime() > start)
-        }).map((slot: any) => ({ value: slot.id, label: slot.label, description: money(slot.price.priceCents) })) },
-    ],
-    submit: async ({ courtId, slotId }) => {
-      if (!ensureShiftOpen()) throw new Error('请先开启班次')
-      const command = { memberId: customer.id, date: day, courtId, slotId, sourceChannel: 'STORE_VISIT' }
-      const result: any = await withPendingCreationKey('venue.booking.frontdesk', command, creationIdempotencyKey => endpoints.createBooking({ ...command, creationIdempotencyKey }))
-      await load(); return '已为 ' + customer.displayName + ' 建单，应付 ' + money(result.payableCents) + '。请在待收款订单继续处理；10分钟未付自动释放。'
-    },
-  })
+  if (!selectedMember.value) { uni.showToast({ title: '请先选择代订会员', icon: 'none' }); return }
+  openMemberPage('/pages/booking/index?mode=ASSISTED&memberId=' + encodeURIComponent(selectedMember.value.id))
 }
 
 function checkIn(order: any) {

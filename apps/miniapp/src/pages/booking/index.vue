@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import AppIcon from '../../components/AppIcon.vue'
 import SectionEmpty from '../../components/SectionEmpty.vue'
+import ActionDialog from '../../components/ActionDialog.vue'
 import BookingMemberPicker from '../../components/BookingMemberPicker.vue'
 import { endpoints } from '../../services/api'
 import { useSessionStore } from '../../stores/session'
@@ -19,13 +20,16 @@ const targetMember = ref<MemberDirectoryItem | null>(null)
 const showMembers = ref(false)
 const canAssist = computed(() => session.roles.some(role => ['FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'].includes(role)))
 const assisted = computed(() => canAssist.value && bookingMode.value === 'ASSISTED')
+const showOverride = ref(false)
+const overrideReason = ref('')
 const submitting = ref(false)
 const submissionError = ref('')
 const assistedOrder = ref<{ id: string; memberName: string; payableCents?: number } | null>(null)
 function setMode(mode: 'SELF' | 'ASSISTED') {
   if (submitting.value || (mode === 'ASSISTED' && !canAssist.value)) return
   bookingMode.value = mode; targetMember.value = null; submissionError.value = ''
-  couponCode.value = ''; showCoupon.value = false
+  couponCode.value = ''; showCoupon.value = false; showOverride.value = false
+  void load(true)
 }
 function selectMember(member: MemberDirectoryItem) { targetMember.value = member; showMembers.value = false; submissionError.value = '' }
 watch(() => session.user?.id, () => { bookingMode.value = 'SELF'; targetMember.value = null; showMembers.value = false; couponCode.value = ''; assistedOrder.value = null })
@@ -90,13 +94,21 @@ function isClosed(courtId: string, slot: CourtAvailability['slots'][number]) {
 
 function unavailableReason(courtId: string, slot: CourtAvailability['slots'][number]) {
   const court = data.value?.courts.find((item) => item.id === courtId)
+  if (!slot.price) return '未定价'
   if (!court?.enabled || !slot.enabled) return '不可售'
+  if (court.usage === 'MAINTENANCE') return '维护中'
+  if (court.usage === 'TRAINING') return '培训专用'
   if (slotTimes(slot).start <= Date.now()) return '已过时段'
   if (isClosed(courtId, slot)) return '已封场'
   if (isBooked(courtId, slot)) return '已占用'
-  if (!slot.price) return '未定价'
   return ''
 }
+
+function blockedReason(courtId: string, slot: CourtAvailability['slots'][number]) {
+  if (!slot.price) return '未定价'
+  return assisted.value ? '' : unavailableReason(courtId, slot)
+}
+const needsOverride = computed(() => Boolean(assisted.value && selected.value && selectedSlot.value && unavailableReason(selected.value.courtId, selectedSlot.value)))
 
 let availabilitySequence = 0
 async function load(resetSelection = false) {
@@ -105,10 +117,10 @@ async function load(resetSelection = false) {
   loading.value = true; error.value = ''
   if (resetSelection) selected.value = null
   try {
-    const availability = await endpoints.availability(requestedDate)
+    const availability = await (assisted.value ? endpoints.assistedAvailability(requestedDate) : endpoints.availability(requestedDate))
     if (run !== availabilitySequence || requestedDate !== date.value) return
     data.value = availability
-    if (selected.value && (!selectedSlot.value || unavailableReason(selected.value.courtId, selectedSlot.value))) {
+    if (selected.value && (!selectedSlot.value || blockedReason(selected.value.courtId, selectedSlot.value))) {
       selected.value = null
       uni.showToast({ title: '原时段已不可订，请重新选择', icon: 'none' })
     }
@@ -118,26 +130,31 @@ async function load(resetSelection = false) {
 }
 
 function choose(courtId: string, slot: CourtAvailability['slots'][number]) {
-  if (loading.value || submitting.value || unavailableReason(courtId, slot)) return
+  if (loading.value || submitting.value || blockedReason(courtId, slot)) return
   selected.value = { courtId, slotId: slot.id }; submissionError.value = ''
 }
 
-async function submit() {
+async function submit(confirmedOverride = false) {
   if (loading.value || submitting.value || (!assisted.value && couponLoading.value)) return
   if (!session.isAuthenticated) return requestMemberLogin('/pages/booking/index')
   if (!selected.value) return
   if (assisted.value && !targetMember.value) { showMembers.value = true; return }
+  if (needsOverride.value && !confirmedOverride) { overrideReason.value = ''; showOverride.value = true; submissionError.value = ''; return }
+  if (needsOverride.value && overrideReason.value.trim().length < 2) { submissionError.value = '请填写至少2字的代订原因'; return }
+  const reason = needsOverride.value ? overrideReason.value.trim() : undefined
   submitting.value = true; submissionError.value = ''
   const isAssisted = assisted.value, customer = targetMember.value
   try {
     const command = {
       date: date.value, ...selected.value,
+      ...(reason ? { overrideReason: reason } : {}),
       sourceChannel: isAssisted ? 'STORE_VISIT' : 'MINI_PROGRAM',
       ...(isAssisted ? { memberId: customer!.id } : { couponCode: couponCode.value || undefined }),
     }
     const order: any = await withPendingCreationKey(isAssisted ? 'venue.booking.assisted' : 'venue.booking.member', command, creationIdempotencyKey =>
       endpoints.createBooking({ ...command, creationIdempotencyKey }),
     )
+    showOverride.value = false
     if (isAssisted) {
       assistedOrder.value = { id: order.id, memberName: customer!.displayName, payableCents: order.payableCents }
       selected.value = null
@@ -153,7 +170,22 @@ function openAssistedOrder() {
   if (assistedOrder.value) uni.navigateTo({ url: '/packages/ops/pages/frontdesk/index?focus=order&orderId=' + encodeURIComponent(assistedOrder.value.id) })
 }
 
-onShow(async () => { await session.hydrate(); const intent = consumeBookingIntent(); if (intent?.couponId) showCoupon.value = true; void load(); void loadCoupons(intent?.couponId) })
+onShow(async () => {
+  await session.hydrate()
+  const intent = consumeBookingIntent()
+  if (intent?.mode === 'ASSISTED' && canAssist.value) {
+    setMode('ASSISTED')
+    if (intent.memberId) {
+      const userId = session.user?.id
+      try {
+        const detail = await endpoints.member360(intent.memberId)
+        if (session.user?.id === userId && assisted.value) targetMember.value = { ...detail.member, privacyScope: detail.privacyScope }
+      } catch { if (assisted.value) { showMembers.value = true; submissionError.value = '原会员信息未能同步，请重新选择会员' } }
+    }
+  }
+  if (intent?.couponId) showCoupon.value = true
+  void load(); void loadCoupons(intent?.couponId)
+})
 </script>
 
 <template>
@@ -161,7 +193,7 @@ onShow(async () => { await session.hydrate(); const intent = consumeBookingInten
     <view class="notice"><AppIcon name="clock" :size="30" tone="accent" /><text>每格 1 小时，显示该小时费用。下单后保留 10 分钟，未付款自动取消并释放场地。</text></view>
     <view class="card row">
       <view class="date-label"><AppIcon name="booking" :size="32" /><text>预订日期</text></view>
-      <picker mode="date" :disabled="submitting" :value="date" :start="today()" @change="date = ($event.detail as any).value; load(true)">
+      <picker mode="date" :disabled="submitting" :value="date" :start="assisted ? undefined : today()" @change="date = ($event.detail as any).value; load(true)">
         <view class="date"><text>{{ date }}</text><AppIcon name="chevron" :size="26" /></view>
       </picker>
     </view>
@@ -169,7 +201,7 @@ onShow(async () => { await session.hydrate(); const intent = consumeBookingInten
       <text class="identity-title">为谁订场</text>
       <view class="mode-switch"><button :class="{ active: !assisted }" :aria-pressed="!assisted" :disabled="submitting" @tap="setMode('SELF')">自己订场</button><button :class="{ active: assisted }" :aria-pressed="assisted" :disabled="submitting" @tap="setMode('ASSISTED')">代会员订场</button></view>
       <button v-if="assisted" class="member-select" :disabled="submitting" @tap="showMembers = true"><view><text>{{ targetMember ? targetMember.displayName : '请选择代订会员' }}</text><text class="muted">{{ targetMember ? targetMember.phone || '未绑定手机号' : '按姓名或手机号搜索' }}</text></view><text>{{ targetMember ? '更换' : '选择会员' }}</text></button>
-      <text class="muted identity-note">{{ assisted ? '代订生成会员的待付款订单；现场收款请进入今日营业。' : '订单归你本人，可使用自己的优惠券和支付方式。' }}</text>
+      <text class="muted identity-note">{{ assisted ? '可选择已过时、已占用及停用场次；特殊代订需填写原因，原订单继续保留，由会员付款。' : '订单归你本人，可使用自己的优惠券和支付方式。' }}</text>
     </view>
     <view v-if="error" class="card error"><AppIcon name="warning" :size="32" tone="danger" /><text>{{ error }}</text><button class="secondary" @tap="load()">重试</button></view>
     <view v-if="loading && !data" class="matrix-skeleton skeleton" />
@@ -182,17 +214,17 @@ onShow(async () => { await session.hydrate(); const intent = consumeBookingInten
           <view class="slot-label cell"><text>{{ slotRange(slot) }}</text><text class="muted">1 小时</text></view>
           <view
             v-for="court in data.courts" :key="`${slot.id}-${court.id}`" class="cell court"
-            :class="{ disabled: Boolean(unavailableReason(court.id, slot)), selected: selected?.courtId === court.id && selected?.slotId === slot.id }"
-            :role="unavailableReason(court.id, slot) ? undefined : 'button'"
+            :class="{ disabled: Boolean(blockedReason(court.id, slot)), override: assisted && Boolean(unavailableReason(court.id, slot)) && !blockedReason(court.id, slot), selected: selected?.courtId === court.id && selected?.slotId === slot.id }"
+            :role="blockedReason(court.id, slot) ? undefined : 'button'"
             :aria-label="`${court.name}，${slot.label}，${unavailableReason(court.id, slot) || money(slot.price?.priceCents)}`"
-            :aria-disabled="Boolean(unavailableReason(court.id, slot))"
+            :aria-disabled="Boolean(blockedReason(court.id, slot))"
             :aria-pressed="selected?.courtId === court.id && selected?.slotId === slot.id"
-            :tabindex="unavailableReason(court.id, slot) ? -1 : 0"
+            :tabindex="blockedReason(court.id, slot) ? -1 : 0"
             @tap="choose(court.id, slot)"
             @keyup.enter="choose(court.id, slot)"
           >
             <text>{{ unavailableReason(court.id, slot) || money(slot.price?.priceCents) }}</text>
-            <text v-if="selected?.courtId === court.id && selected?.slotId === slot.id">已选</text>
+            <text v-if="selected?.courtId === court.id && selected?.slotId === slot.id">已选</text><text v-else-if="assisted && unavailableReason(court.id, slot) && !blockedReason(court.id, slot)">可代订 · {{ money(slot.price?.priceCents) }}</text>
           </view>
         </template>
       </view>
@@ -203,7 +235,7 @@ onShow(async () => { await session.hydrate(); const intent = consumeBookingInten
     <view class="booking-dock">
       <text v-if="submissionError" class="submit-error" role="alert">{{ submissionError }}</text>
       <view v-if="selected" class="selection-summary"><view><text class="selection-title">{{ selectedCourt?.name }} · {{ selectedSlot ? slotRange(selectedSlot) : '' }}</text><text class="muted">{{ date }} · 1 小时{{ assisted && targetMember ? ' · ' + targetMember.displayName : '' }}</text></view><button v-if="!assisted" class="coupon-toggle" :disabled="submitting" :aria-expanded="showCoupon" @tap="showCoupon = true">{{ selectedCoupon ? '已选优惠' : '优惠券' }} ›</button></view>
-      <view class="checkout-row"><view class="checkout-price"><template v-if="selected"><text class="muted">场地费{{ selectedCoupon && !assisted ? ' · 优惠下单核验' : '' }}</text><text class="total-price">{{ money(selectedSlot?.price?.priceCents) }}</text></template><text v-else class="selection-prompt">请选择场地和时段</text></view><button class="primary checkout-button" :loading="submitting" :disabled="!selected || loading || submitting || (!assisted && couponLoading) || Boolean(error)" @tap="submit">{{ !selected ? '先选场地' : assisted && !targetMember ? '选择会员' : !session.isAuthenticated ? '登录后继续' : assisted ? '确认代订' : '确认预约' }}</button></view>
+      <view class="checkout-row"><view class="checkout-price"><template v-if="selected"><text class="muted">场地费{{ selectedCoupon && !assisted ? ' · 优惠下单核验' : '' }}</text><text class="total-price">{{ money(selectedSlot?.price?.priceCents) }}</text></template><text v-else class="selection-prompt">请选择场地和时段</text></view><button class="primary checkout-button" :loading="submitting" :disabled="!selected || loading || submitting || (!assisted && couponLoading) || Boolean(error)" @tap="submit()">{{ !selected ? '先选场地' : assisted && !targetMember ? '选择会员' : !session.isAuthenticated ? '登录后继续' : assisted ? '确认代订' : '确认预约' }}</button></view>
     </view>
     <view v-if="showCoupon && !assisted" class="booking-mask" @tap="showCoupon = false"><view class="booking-sheet" role="dialog" aria-modal="true" aria-label="选择优惠券" @tap.stop><view class="sheet-heading"><text>选择优惠券</text><button class="secondary" @tap="showCoupon = false">完成</button></view>
       <scroll-view scroll-y class="coupon-picker">
@@ -216,6 +248,14 @@ onShow(async () => { await session.hydrate(); const intent = consumeBookingInten
         <text class="muted">部分券限指定时段；是否适用及最终金额由下单时核验。</text>
       </scroll-view>
     </view></view>
+    <ActionDialog v-if="showOverride" title="确认特殊代订" :busy="submitting" @close="showOverride = false">
+      <view class="override-form"><text class="identity-title">{{ targetMember?.displayName }} · {{ selectedCourt?.name }}</text><text>{{ date }} · {{ selectedSlot ? slotRange(selectedSlot) : '' }} · {{ money(selectedSlot?.price?.priceCents) }}</text>
+        <text class="override-note">当前场次：{{ selected && selectedSlot ? unavailableReason(selected.courtId, selectedSlot) || '可订' : '请重新选择' }}。已有订单和封场安排会保留，请确认现场已协调。会员须在 10 分钟内付款。</text>
+        <label for="booking-override-reason">代订原因</label><textarea id="booking-override-reason" v-model="overrideReason" class="override-input" :disabled="submitting" :maxlength="300" placeholder="例如：补录实际使用，或已协调同场安排" aria-label="代订原因，2至300字" />
+        <text v-if="submissionError" class="submit-error" role="alert">{{ submissionError }}</text>
+      </view>
+      <template #footer><view class="override-actions"><button class="secondary" :disabled="submitting" @tap="showOverride = false">返回修改</button><button class="primary" :loading="submitting" :disabled="submitting || loading || !selected || overrideReason.trim().length < 2" @tap="submit(true)">确认代订</button></view></template>
+    </ActionDialog>
     <BookingMemberPicker v-if="showMembers && assisted" @select="selectMember" @close="showMembers = false" />
     <view v-if="assistedOrder" class="booking-mask" @tap.stop><view class="booking-sheet" role="dialog" aria-modal="true" aria-label="代订成功"><text class="identity-title">已为 {{ assistedOrder.memberName }} 保留场地</text><text class="success-copy">应付 {{ money(assistedOrder.payableCents) }}，10 分钟内完成付款。会员可在自己的订单中支付；现场收款请进入今日营业处理。</text><button class="primary" @tap="openAssistedOrder">查看现场订单</button><button class="secondary" @tap="assistedOrder = null">继续订场</button></view></view>
 
@@ -223,6 +263,11 @@ onShow(async () => { await session.hydrate(); const intent = consumeBookingInten
 </template>
 
 <style scoped>
+.override-form { display:flex; flex-direction:column; gap:20rpx; line-height:1.6; }
+.override-note { color:var(--color-text-secondary,#5f6e64); font-size:25rpx; }
+.override-input { width:100%; box-sizing:border-box; min-height:144rpx; height:160rpx; padding:20rpx; border:1px solid var(--color-border); border-radius:16rpx; background:var(--color-surface-subtle,#f7f9f6); }
+.override-actions { display:flex; gap:16rpx; }
+.override-actions button { flex:1; min-height:48px; margin:0; }
 .notice { display:flex; align-items:center; gap:12rpx; padding: 18rpx 24rpx; margin-bottom: 20rpx; color: #7b5910; background: #fff3d9; border-radius: 18rpx; font-size: 23rpx; }
 .notice text { flex:1; min-width:0; line-height:1.5; overflow-wrap:anywhere; }
 .date-label,.date { display:flex; align-items:center; gap:10rpx; }
@@ -237,6 +282,7 @@ onShow(async () => { await session.hydrate(); const intent = consumeBookingInten
 .slot-label { padding: 8rpx; font-weight: 700; }
 .court { color: #17653d; background: #f1f8f3; }
 .court.disabled { color: #9ca49f; background: #f2f3f2; }
+.court.override { color:var(--color-primary-strong,#123f29); background:var(--color-accent-soft,#fff3d9); }
 .court.selected { color: #fff; background: #17653d; box-shadow: inset 0 0 0 4rpx #c9ac54; }
 .coupon-picker { display:grid; gap:16rpx; margin:20rpx 0; height:42vh; }.coupon-picker button { margin:0; padding:16rpx; font-size:25rpx; }.coupon-picker button[aria-pressed="true"] { outline:2rpx solid var(--color-primary); }.coupon-picker .muted { line-height:1.6; }
 .coupon-toggle { flex-shrink:0; margin:0; padding:10rpx 16rpx; font-size:24rpx; color:var(--color-primary); background:var(--color-primary-soft); border-radius:16rpx; }

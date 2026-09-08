@@ -228,6 +228,7 @@ onPullDownRefresh(() => load())
       <view class="row order-head"><view class="order-identity"><view class="order-icon"><AppIcon :name="businessTypeIcon[order.businessType] || 'receipt'" :size="30" /></view><text class="order-no">订单号 {{ order.orderNo }}</text></view><StatusBadge :value="order.status" :label="order.status === 'PENDING' ? '待付款' : undefined" /></view>
       <text class="title">{{ order.title }}</text>
       <view class="row order-meta"><view class="order-meta-copy"><text class="muted">{{ orderTimeLabel(order) }}</text><text class="muted">{{ displayBusinessType(order.businessType) }}</text></view><text class="money">{{ money(order.payableCents) }}</text></view>
+      <text v-if="order.bookings?.some((booking: any) => booking.operatorOverride)" class="use-note">特殊代订 · 场次已由工作人员协调，请核对日期和时间后付款。</text>
       <text v-if="order.businessType === 'VENUE' && order.status === 'PAID'" class="use-note">{{ order.bookings?.[0]?.court?.name }} · 到店向前台出示本订单，完成核销后入场。</text>
       <text v-if="order.status === 'CANCELLED'" class="use-note">订单已取消，无需付款。{{ order.businessType === 'VENUE' ? '场地保留已解除。' : '' }}</text>
       <text v-if="order.businessType === 'GOODS' && order.status === 'PAID'" class="use-note">请到场馆出示本订单领取商品，取货进度以工作人员确认为准。</text>

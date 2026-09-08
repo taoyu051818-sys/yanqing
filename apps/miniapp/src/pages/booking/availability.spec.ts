@@ -10,7 +10,7 @@ function fixture() {
   const date={value:'2026-09-09'},data={value:null as any},loading={value:false},error={value:''},selected={value:null}
   const pending: Record<string,{resolve:(data:unknown)=>void;reject:(cause:Error)=>void}>={}
   const endpoints={availability:(day:string)=>new Promise((resolve,reject)=>{pending[day]={resolve,reject}})}
-  const load=new Function('date','data','loading','error','selected','endpoints',js+';return load')(date,data,loading,error,selected,endpoints)
+  const load=new Function('date','data','loading','error','selected','endpoints','assisted',js+';return load')(date,data,loading,error,selected,endpoints,{value:false})
   return {date,data,loading,error,pending,load}
 }
 describe('booking date query ownership',()=>{

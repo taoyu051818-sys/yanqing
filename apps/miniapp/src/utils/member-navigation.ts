@@ -76,7 +76,7 @@ function consumeTabIntent(path: string, keys: string[]): Record<string, string> 
 }
 
 export const consumeCommunityIntent = () => consumeTabIntent('/pages/community/index', ['tab', 'gameId', 'eventId', 'view'])
-export const consumeBookingIntent = () => consumeTabIntent('/pages/booking/index', ['couponId'])
+export const consumeBookingIntent = () => consumeTabIntent('/pages/booking/index', ['couponId', 'memberId', 'mode'])
 
 export function finishMemberLogin() {
   const target = consumeLoginReturn() || '/pages/home/index'

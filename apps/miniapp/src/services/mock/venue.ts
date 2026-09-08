@@ -72,7 +72,7 @@ export function getMockVenueCourts() {
 }
 
 export function resolveMockPriceRule(date: string, slotId: string) {
-  const pricingAt = new Date(`${date}T00:00:00+08:00`).getTime()
+  const pricingAt = new Date(`${date}T00:00:00+08:00`).getTime() + (hourlyVenueSlots.find(slot => slot.id === slotId)?.startMinutes || 0) * 60_000
   const weekdayBit = 1 << new Date(`${date}T00:00:00Z`).getUTCDay()
   return getPriceRules()
     .filter((candidate) =>

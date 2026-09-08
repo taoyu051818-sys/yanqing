@@ -1107,6 +1107,7 @@ const mockOrderResponse = (value: any) => {
             status: booking.status,
             startsAt: booking.startsAt,
             endsAt: booking.endsAt,
+            operatorOverride: booking.operatorOverride || undefined,
             checkedInAt: booking.checkedInAt,
             completedAt: booking.completedAt,
             court: booking.court
@@ -4043,9 +4044,8 @@ export async function mockRequest<T>(
         (game) =>
           ["OPEN", "FULL", "IN_PROGRESS"].includes(game.status) &&
           new Date(game.startsAt) <= new Date() &&
-          (!roles.includes("HOST") ||
-            hasMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN") ||
-            game.hostId === mockUser().id),
+          hasMockRole("HOST", "ADMIN", "SUPER_ADMIN") &&
+          (hasMockRole("ADMIN", "SUPER_ADMIN") || game.hostId === mockUser().id),
       )
       .map((game) => {
         const registrations = (game.registrations || []).filter((entry: any) =>
@@ -4061,7 +4061,7 @@ export async function mockRequest<T>(
           priority: ended ? 90 : 84,
           title: `${ended ? "球局待完赛" : "球局现场待处理"} · ${game.title}`,
           description: `${registrations.length} 名已支付/签到 · 主理人现场队列`,
-          ownerRoles: ["HOST", "FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
+          ownerRoles: ["HOST", "ADMIN", "SUPER_ADMIN"],
           createdAt: game.startsAt,
           dueAt: ended ? game.endsAt : game.startsAt,
           action: `/packages/ops/pages/host/index?focus=game&gameId=${game.id}`,
@@ -4072,7 +4072,9 @@ export async function mockRequest<T>(
       .filter(
         (trainingSession) =>
           ["SCHEDULED", "IN_PROGRESS"].includes(trainingSession.status) &&
-          new Date(trainingSession.startsAt).getTime() <= Date.now(),
+          new Date(trainingSession.startsAt).getTime() <= Date.now() &&
+          (!roles.includes("COACH") || hasMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN") ||
+            getTrainingProducts().flatMap(product => product.classes || []).some((cls: any) => cls.id === trainingSession.classId && (cls.coachId === mockUser().id || cls.assistantId === mockUser().id))),
       )
       .map((trainingSession) => {
         const pendingAttendanceCount = getEnrollments().filter(
@@ -4729,7 +4731,8 @@ export async function mockRequest<T>(
       idempotent: false,
     });
   }
-  if (url === "/venues/availability") {
+  if (url === "/venues/availability" || url === "/venues/availability/assisted") {
+    if (url.endsWith("/assisted")) requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
     const date = text(data.date || new Date().toISOString().slice(0, 10));
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("日期格式无效");
     return ok(availability(date));
@@ -4759,6 +4762,10 @@ export async function mockRequest<T>(
         memberProfile: mockUser().memberProfile,
       };
     }
+    const operatorOverride = data.overrideReason !== undefined;
+    const overrideReason = text(data.overrideReason);
+    if (operatorOverride && (!assisted || !canAssist)) throw new Error("仅前台或管理员代会员订场可使用特殊代订");
+    if (operatorOverride && (overrideReason.length < 2 || overrideReason.length > 300)) throw new Error("特殊代订原因须为2-300字");
     const creation = beginMockOrderCreation(
       data.creationIdempotencyKey,
       {
@@ -4769,6 +4776,7 @@ export async function mockRequest<T>(
         slotId: text(data.slotId),
         sourceChannel: text(data.sourceChannel) || "MINI_PROGRAM",
         couponCode: text(data.couponCode) || null,
+        ...(operatorOverride ? { overrideReason } : {}),
       },
       targetMember.id,
     );
@@ -4777,18 +4785,18 @@ export async function mockRequest<T>(
     const calendar = availability(date);
     const court = calendar.courts.find((item: any) => item.id === data.courtId);
     const slot = calendar.slots.find((item: any) => item.id === data.slotId);
-    if (!court || !slot || !court.enabled) throw new Error("场地或时段不存在");
+    if (!court || !slot || (!operatorOverride && (!court.enabled || !slot.enabled))) throw new Error("场地或时段不存在");
     const priceRule = resolveMockPriceRule(date, slot.id);
     if (!priceRule) throw new Error("该时段未配置有效价格");
-    if (court.usage === "MAINTENANCE") throw new Error("场地维护中");
-    if (court.usage === "TRAINING")
+    if (!operatorOverride && court.usage === "MAINTENANCE") throw new Error("场地维护中");
+    if (!operatorOverride && court.usage === "TRAINING")
       throw new Error("该场地为培训专用场，不能零售预订");
     const startsAt = startsAtDate(date, Number(slot.startMinutes));
     const endsAt = startsAtDate(date, Number(slot.endMinutes));
     if (
       Number.isNaN(startsAt.getTime()) ||
       Number.isNaN(endsAt.getTime()) ||
-      startsAt <= new Date()
+      (!operatorOverride && startsAt <= new Date())
     ) {
       throw new Error("不能预订已开始的时段");
     }
@@ -4799,7 +4807,7 @@ export async function mockRequest<T>(
         new Date(item.startsAt).getTime() < endsAt.getTime() &&
         new Date(item.endsAt).getTime() > startsAt.getTime(),
     );
-    if (closure) throw new Error(`该时段已封场：${closure.reason}`);
+    if (closure && !operatorOverride) throw new Error(`该时段已封场：${closure.reason}`);
     const overlap = (calendar.bookings || []).some(
       (booking: any) =>
         booking.courtId === court.id &&
@@ -4808,7 +4816,7 @@ export async function mockRequest<T>(
         new Date(booking.startsAt).getTime() < endsAt.getTime() &&
         new Date(booking.endsAt).getTime() > startsAt.getTime(),
     );
-    if (overlap) throw new Error("该场地时段刚刚被预订");
+    if (overlap && !operatorOverride) throw new Error("该场地时段刚刚被预订");
 
     let payableCents = Number(priceRule.priceCents || 0);
     let discountCents = 0;
@@ -4882,6 +4890,8 @@ export async function mockRequest<T>(
       endsAt: endsAt.toISOString(),
       holdExpiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
       usage: "RETAIL",
+      operatorOverride,
+      overrideReason: operatorOverride ? overrideReason : null,
     };
     const order = {
       id: orderId,
@@ -4904,6 +4914,11 @@ export async function mockRequest<T>(
       },
       bookings: [booking],
       parameterSnapshot: {
+        ...(operatorOverride ? { assistedBookingOverride: {
+          reason: overrideReason, actorId: mockUser().id,
+          past: startsAt <= new Date(), courtEnabled: court.enabled, courtUsage: court.usage, slotEnabled: slot.enabled,
+          overlapping: overlap, closureId: closure?.id || null,
+        } } : {}),
         courtId: court.id,
         slotId: slot.id,
         priceRuleId: priceRule.id,

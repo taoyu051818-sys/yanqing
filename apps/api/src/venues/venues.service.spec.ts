@@ -280,6 +280,7 @@ describe('VenuesService booking ownership', () => {
       },
       $transaction: transaction,
     };
+    Object.assign(tx, Object.fromEntries(['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode'].filter(key => key in prisma).map(key => [key, (prisma as any)[key]])), { $queryRaw: vi.fn().mockResolvedValue([]) });
     const service = new VenuesService(prisma as never);
 
     const results = await Promise.allSettled([
@@ -391,7 +392,7 @@ describe('VenuesService booking ownership', () => {
 
   it('rejects a delegated target that is missing, disabled, or not a member', async () => {
     const user = { findFirst: vi.fn().mockResolvedValue(null) };
-    const service = new VenuesService({ user } as never);
+    const service = new VenuesService({ $transaction: runner({ user }) } as never);
 
     await expect(
       service.createBooking(
@@ -463,6 +464,7 @@ describe('VenuesService booking ownership', () => {
       },
       $transaction: runner(tx),
     };
+    Object.assign(tx, Object.fromEntries(['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode'].filter(key => key in prisma).map(key => [key, (prisma as any)[key]])), { $queryRaw: vi.fn().mockResolvedValue([]) });
     const service = new VenuesService(prisma as never);
 
     await expect(
@@ -544,6 +546,8 @@ describe('VenuesService booking ownership', () => {
       $transaction: runner(tx),
     };
 
+    Object.assign(tx, Object.fromEntries(['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode'].filter(key => key in prisma).map(key => [key, (prisma as any)[key]])), { $queryRaw: vi.fn().mockResolvedValue([]) });
+    tx.user.findFirst.mockResolvedValue({ id: 'member-2' } as never);
     await expect(
       new VenuesService(prisma as never).createBooking(
         { ...bookingDto, memberId: 'member-2' },
@@ -651,6 +655,7 @@ describe('VenuesService booking ownership', () => {
       systemParameter,
       $transaction: vi.fn(),
     };
+    prisma.$transaction = runner({ ...prisma, $queryRaw: vi.fn().mockResolvedValue([]) });
     const service = new VenuesService(prisma as never);
 
     await expect(
@@ -670,7 +675,7 @@ describe('VenuesService booking ownership', () => {
         select: { id: true, value: true },
       }),
     );
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 
   it('snapshots the newcomer non-prime policy and applies the configured experience price', async () => {
@@ -742,6 +747,7 @@ describe('VenuesService booking ownership', () => {
       },
       $transaction: runner(tx),
     };
+    Object.assign(tx, Object.fromEntries(['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode'].filter(key => key in prisma).map(key => [key, (prisma as any)[key]])), { $queryRaw: vi.fn().mockResolvedValue([]) });
     const service = new VenuesService(prisma as never);
 
     await expect(

@@ -949,6 +949,9 @@ model CourtBooking {
   startsAt                  DateTime
   endsAt                    DateTime
   holdExpiresAt             DateTime?
+  /// Explicit staff-assisted exception. Normal reservations retain the active-slot unique guard.
+  operatorOverride          Boolean        @default(false)
+  overrideReason            String?
   usage                     CourtUsage     @default(RETAIL)
   trainingClassId           String?
   gameId                    String?

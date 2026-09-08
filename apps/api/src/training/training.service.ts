@@ -1,3 +1,4 @@
+import { trainingSessionScope } from '../common/auth/operation-scopes.js';
 import { randomBytes } from 'node:crypto';
 
 import {
@@ -341,27 +342,11 @@ export class TrainingService {
   }
 
   async listSessions(actor?: AuthUser) {
-    const coachScope =
-      actor?.roles.includes(AppRole.COACH) &&
-      !actor.roles.some((role) =>
-        [
-          AppRole.ADMIN,
-          AppRole.SUPER_ADMIN,
-          AppRole.FINANCE,
-          AppRole.FRONT_DESK,
-        ].includes(role as never),
-      );
     const observedAt = new Date();
     const [sessions, attendanceConfiguration, completionConfiguration] =
       await Promise.all([
         this.prisma.trainingSession.findMany({
-          where: coachScope
-            ? {
-                class: {
-                  OR: [{ coachId: actor?.sub }, { assistantId: actor?.sub }],
-                },
-              }
-            : undefined,
+          where: trainingSessionScope(actor),
           include: {
             class: { include: { product: true } },
             attendances: {

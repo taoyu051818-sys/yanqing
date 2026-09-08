@@ -63,6 +63,7 @@ const bookingView = (value: unknown) => {
     startsAt: booking.startsAt,
     endsAt: booking.endsAt,
     checkedInAt: booking.checkedInAt,
+    operatorOverride: booking.operatorOverride || undefined,
     completedAt: booking.completedAt,
     court: court.id
       ? compact({ id: court.id, code: court.code, name: court.name })

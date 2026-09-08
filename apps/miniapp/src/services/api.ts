@@ -47,6 +47,7 @@ export interface ReconciliationPeriod {
 }
 
 export interface CreateVenueBookingCommand {
+  overrideReason?: string;
   memberId?: string;
   date: string;
   courtId: string;
@@ -98,6 +99,8 @@ export const endpoints = {
       data,
     ),
   workItems: (limit = 50) => api.get<WorkItem[]>("/work-items", { limit }),
+  assistedAvailability: (date: string) =>
+    api.get<CourtAvailability>("/venues/availability/assisted", { date }),
   availability: (date: string) =>
     api.get<CourtAvailability>("/venues/availability", { date }),
   venueTimeSlots: () => api.get<any[]>("/venues/time-slots/manage"),

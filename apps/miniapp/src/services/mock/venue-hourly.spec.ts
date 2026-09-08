@@ -71,4 +71,29 @@ describe('hourly venue booking', () => {
     expect(getPriceRules()).toEqual(rules)
     expect(storage.get('yanqing_mock_orders')).toEqual(original)
   })
+  it.each(['ADMIN', 'SUPER_ADMIN', 'FRONT_DESK'] as const)('lets %s create a reasoned past booking for a member while preserving occupancy', async role => {
+    mockLogin(role)
+    if (role === 'FRONT_DESK') await mockRequest('POST', '/operations/shifts/open', { openingCashCents: 0 })
+    const command = { date: '2026-09-01', courtId: 'court-1', slotId: 'slot-H09', memberId: 'member-2', sourceChannel: 'STORE_VISIT', overrideReason: '补录已协调同场使用', creationIdempotencyKey: 'past-override-first' }
+    const first = await mockRequest<any>('POST', '/venues/bookings', command)
+    expect(first.bookings[0].operatorOverride).toBe(true)
+    expect(first.bookings[0].overrideReason).toBeUndefined()
+    expect((await mockRequest<any>('POST', '/venues/bookings', command)).id).toBe(first.id)
+    const second = await mockRequest<any>('POST', '/venues/bookings', { ...command, creationIdempotencyKey: 'past-override-second' })
+    expect(second.id).not.toBe(first.id)
+    expect(getOrders().find(o => o.id === first.id)?.status).toBe('PENDING')
+    expect(getOrders().find(o => o.id === second.id)?.parameterSnapshot.assistedBookingOverride.actorId).toBe(mockUser().id)
+    await expect(mockRequest('POST', '/venues/bookings', { ...command, creationIdempotencyKey: 'past-self', memberId: undefined, sourceChannel: 'MINI_PROGRAM' })).rejects.toThrow('代会员')
+  })
+  it('does not grant exception discovery or booking to a member', async () => {
+    await expect(mockRequest('GET', '/venues/availability/assisted', { date })).rejects.toThrow()
+    await expect(mockRequest('POST', '/venues/bookings', { date, courtId: 'court-1', slotId: 'slot-H09', overrideReason: '自行跳过限制' })).rejects.toThrow('代会员')
+  })
+  it('selects a noon price change using the actual hour', () => {
+    const rules = getPriceRules().filter(rule => rule.timeSlotId !== 'slot-H18')
+    const base = { timeSlotId: 'slot-H18', weekdayMask: 127, enabled: true, version: 1 }
+    savePriceRules([...rules, { ...base, id: 'old', code: 'old', effectiveFrom: '2020-01-01T00:00:00+08:00', effectiveTo: date + 'T12:00:00+08:00', priceCents: 5000 }, { ...base, id: 'new', code: 'new', effectiveFrom: date + 'T12:00:00+08:00', priceCents: 8000 }])
+    expect(availability(date).slots.find(slot => slot.id === 'slot-H18')?.price?.priceCents).toBe(8000)
+  })
+
 })
