@@ -1,3 +1,4 @@
+import { cancelMembershipEntitlement, membershipPurchaseUnavailable } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import {
   createDecipheriv,
@@ -264,6 +265,14 @@ export class WechatPayService {
         const now = new Date();
         if (order.status === OrderStatus.CANCELLED && order.paidCents === 0) {
           return captureCancelledOrderPayment(tx, order, payment.id, notice.transaction_id, now);
+        }
+        if (order.membership && order.status === OrderStatus.PENDING) {
+          const reason = await membershipPurchaseUnavailable(tx, order.membership.memberId, order.membership.product.level, order.membership.id, now);
+          if (reason) {
+            await tx.order.update({ where: { id: order.id }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
+            await tx.memberSubscription.update({ where: { id: order.membership.id }, data: { status: MembershipStatus.CANCELLED } });
+            return captureCancelledOrderPayment(tx, { ...order, status: OrderStatus.CANCELLED }, payment.id, notice.transaction_id, now, `会员权益冲突，未授予新权益：${reason}`);
+          }
         }
         if (order.businessType === BusinessType.GAME && order.status === OrderStatus.PENDING && gamePaymentUnavailable(order.gameRegistration, order.createdAt, now)) {
           // The external payment succeeded, but the seat is no longer payable.
@@ -537,26 +546,7 @@ export class WechatPayService {
                 data: { status: BookingStatus.CANCELLED },
               });
               if (refund.order.membership) {
-                await tx.memberSubscription.update({
-                  where: { id: refund.order.membership.id },
-                  data: { status: MembershipStatus.CANCELLED },
-                });
-                const latest = await tx.memberSubscription.findFirst({
-                  where: {
-                    memberId: refund.order.membership.memberId,
-                    status: MembershipStatus.ACTIVE,
-                    id: { not: refund.order.membership.id },
-                  },
-                  include: { product: true },
-                  orderBy: { endsAt: 'desc' },
-                });
-                await tx.memberProfile.update({
-                  where: { id: refund.order.membership.memberId },
-                  data: {
-                    level: latest?.product.level ?? 'EXPERIENCE',
-                    membershipExpiresAt: latest?.endsAt,
-                  },
-                });
+                await cancelMembershipEntitlement(tx, refund.order.membership);
               }
               if (refund.order.businessType === BusinessType.GOODS) {
                 for (const item of refund.order.items) {

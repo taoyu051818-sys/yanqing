@@ -199,7 +199,7 @@ const attendanceFixture = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const txRunner = (tx: Record<string, unknown>) =>
-  vi.fn(async (work: (value: Record<string, unknown>) => unknown) => work(tx));
+  vi.fn(async (work: (value: Record<string, unknown>) => unknown) => work({ trainingSettlement: { findFirst: vi.fn().mockResolvedValue(null) }, ...tx }));
 
 const consumePrisma = (attendance = attendanceFixture()) => {
   const updatedAttendance = { ...attendance };
@@ -1096,6 +1096,7 @@ describe('TrainingService attendance workflow', () => {
     const updated = { ...attendance };
     const tx = {
       trainingAttendance: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique: vi.fn().mockResolvedValue(attendance),
         update: vi
           .fn()

@@ -29,6 +29,7 @@ const transaction = (tx: Record<string, unknown>) =>
   vi.fn(async (work: (client: Record<string, unknown>) => unknown) =>
     work({
       reconciliationPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
+      trainingSettlement: { findFirst: vi.fn().mockResolvedValue(null) },
       ...tx,
     }),
   );

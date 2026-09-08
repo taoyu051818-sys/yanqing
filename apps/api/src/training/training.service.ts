@@ -68,6 +68,12 @@ import {
 import { resolveOperatingShareSnapshot } from '../common/finance/operating-share.js';
 import { YouthTrainingRulesService } from './youth-training-rules.service.js';
 import { trainingConsumptionQuote } from './training-contract.js';
+import {
+  readTrainingLedger,
+  assertTrainingLedgerOpen,
+  assertTrainingSettlementSources,
+  trainingTransaction,
+} from './training-settlement-ledger.js';
 import { trainingEnrollmentCoversSession } from './training-roster.js';
 import {
   trainingAttendanceCommandResponse,
@@ -122,9 +128,6 @@ const TRAINING_SESSION_OPERATOR_ROLES: readonly AppRole[] = [
   AppRole.SUPER_ADMIN,
 ];
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
-
-const isPrismaErrorCode = (error: unknown, code: string): boolean =>
-  error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
 
 @Injectable()
 export class TrainingService {
@@ -1481,7 +1484,8 @@ export class TrainingService {
       reason,
     });
 
-    const recognition = await this.prisma.$transaction(
+    const recognition = await trainingTransaction(
+      this.prisma,
       async (tx) => {
         const attendance = await tx.trainingAttendance.findUnique({
           where: {
@@ -1587,6 +1591,7 @@ export class TrainingService {
           overrideReason: explicitReason,
           observedAt: now,
         });
+        await assertTrainingLedgerOpen(tx, now);
         const consumptionQuote = trainingConsumptionQuote(enrollment);
         const confirmedRevenueCents = consumptionQuote.amountCents;
         const rateBps = await this.contractRateAt(
@@ -1603,8 +1608,7 @@ export class TrainingService {
         const fullyConsumed =
           consumedSessions >= enrollment.totalSessions ||
           remainingPrepaidCents <= 0;
-        const feedback =
-          dto.feedback?.trim() || attendance.feedback || undefined;
+        const feedback = dto.feedback?.trim() || attendance.feedback || undefined;
         const proposedById = attendance.operatorId;
         const nextSequence =
           attendance.revenueRecognitions.reduce(
@@ -1669,6 +1673,7 @@ export class TrainingService {
             venueFeeCents: 0,
             trainingPayableVenueCents: 0,
             idempotencyKey: recognitionIdempotencyKey,
+            createdAt: now,
           },
         });
         if (enrollment.product.audience === TrainingAudience.YOUTH) {
@@ -1762,7 +1767,6 @@ export class TrainingService {
         });
         return recognition;
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
     return trainingConsumeConfirmationResponse(recognition);
   }
@@ -1794,7 +1798,8 @@ export class TrainingService {
       throw new ForbiddenException('当前账号无权登记培训出勤');
     }
 
-    return this.prisma.$transaction(
+    return trainingTransaction(
+      this.prisma,
       async (tx) => {
         const attendance = await tx.trainingAttendance.findUnique({
           where: {
@@ -1835,7 +1840,7 @@ export class TrainingService {
           throw new BadRequestException('请假或取消课次必须填写原因');
         }
 
-        const nextStatus =
+        let nextStatus =
           dto.status === AttendanceStatus.LEAVE
             ? AttendanceStatus.MAKEUP_REQUIRED
             : dto.status;
@@ -1844,6 +1849,7 @@ export class TrainingService {
           AttendanceStatus.ABSENT,
           AttendanceStatus.CANCELLED,
           AttendanceStatus.MAKEUP_REQUIRED,
+          AttendanceStatus.MADE_UP,
         ]);
         if (
           terminalStatuses.has(attendance.status) &&
@@ -1854,8 +1860,7 @@ export class TrainingService {
         if (attendance.status === nextStatus)
           return trainingAttendanceCommandResponse(attendance);
 
-        const feedback =
-          dto.feedback?.trim() || attendance.feedback || undefined;
+        const feedback = dto.feedback?.trim() || attendance.feedback || undefined;
         const now = new Date();
         const timeWindowPolicy = await assertOperationTimeWindow(tx, {
           actor,
@@ -1869,6 +1874,43 @@ export class TrainingService {
           overrideReason: dto.reason,
           observedAt: now,
         });
+        if (
+          [
+            AttendanceStatus.LEAVE,
+            AttendanceStatus.CANCELLED,
+            AttendanceStatus.ABSENT,
+          ].includes(dto.status as never)
+        ) {
+          const original = await tx.trainingAttendance.findFirst({
+            where: { makeupTargetId: attendance.id },
+          });
+          if (original) {
+            await tx.trainingAttendance.update({
+              where: { id: original.id },
+              data: {
+                makeupTargetId: null,
+                status: AttendanceStatus.MAKEUP_REQUIRED,
+              },
+            });
+            // This is a replacement slot, not a second missed entitlement.
+            nextStatus = AttendanceStatus.CANCELLED;
+            await tx.auditLog.create({
+              data: {
+                actorId: actor.sub,
+                actorRole: actor.roles[0],
+                action: 'TRAINING_MAKEUP_RELEASED',
+                objectType: 'TrainingAttendance',
+                objectId: original.id,
+                reason: dto.reason?.trim() || '补课未到场，原课恢复待安排',
+                oldValue: { makeupTargetId: attendance.id },
+                newValue: {
+                  makeupTargetId: null,
+                  status: AttendanceStatus.MAKEUP_REQUIRED,
+                },
+              },
+            });
+          }
+        }
         const updated = await tx.trainingAttendance.update({
           where: { id: attendance.id },
           data: {
@@ -1907,7 +1949,6 @@ export class TrainingService {
         });
         return trainingAttendanceCommandResponse(updated);
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   }
 
@@ -1932,7 +1973,8 @@ export class TrainingService {
       throw new ForbiddenException('当前账号无权安排补课');
     }
 
-    return this.prisma.$transaction(
+    return trainingTransaction(
+      this.prisma,
       async (tx) => {
         const original = await tx.trainingAttendance.findUnique({
           where: {
@@ -1943,13 +1985,19 @@ export class TrainingService {
           },
           include: {
             session: { include: { class: true } },
+            makeupTarget: { select: { sessionId: true } },
           },
         });
         if (!original) throw new NotFoundException('原课次签到记录不存在');
         this.assertAttendanceOperator(original.session.class, actor);
 
         if (original.status === AttendanceStatus.MADE_UP) {
-          return trainingMakeupCommandResponse(original, dto.makeupSessionId);
+          if (original.makeupTarget?.sessionId !== dto.makeupSessionId)
+            throw new ConflictException('该请假已安排其他补课课次，请刷新核对');
+          return trainingMakeupCommandResponse(
+            original,
+            original.makeupTarget.sessionId,
+          );
         }
         if (
           original.status !== AttendanceStatus.MAKEUP_REQUIRED &&
@@ -1982,8 +2030,7 @@ export class TrainingService {
           throw new ConflictException('已取消或已结束的课次不能安排补课');
         }
         const target = makeupSession.attendances[0];
-        if (!target)
-          throw new ConflictException('补课课次没有该学员的签到名额');
+        if (!target) throw new ConflictException('补课课次没有该学员的签到名额');
         if (
           target.status !== AttendanceStatus.PENDING &&
           target.status !== AttendanceStatus.LEAVE
@@ -1991,10 +2038,23 @@ export class TrainingService {
           throw new ConflictException('补课课次的学员名额已被处理');
         }
 
+        if (
+          await tx.trainingAttendance.findFirst({
+            where: { makeupTargetId: target.id },
+          })
+        )
+          throw new ConflictException('该学员的补课名额已被其他请假占用');
+        if (
+          await tx.trainingAttendance.findFirst({
+            where: { makeupTargetId: original.id },
+          })
+        )
+          throw new ConflictException('请先处理该课次已有的补课安排');
         const updated = await tx.trainingAttendance.update({
-          where: { id: original.id },
+          where: { id: original.id, status: original.status },
           data: {
             status: AttendanceStatus.MADE_UP,
+            makeupTargetId: target.id,
             feedback: [original.feedback, `补课安排:${makeupSession.id}`]
               .filter(Boolean)
               .join('；'),
@@ -2019,7 +2079,6 @@ export class TrainingService {
         });
         return trainingMakeupCommandResponse(updated, makeupSession.id);
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   }
 
@@ -2069,7 +2128,7 @@ export class TrainingService {
       sessionId,
       reason,
     });
-    return this.prisma.$transaction(async (tx) => {
+    return trainingTransaction(this.prisma, async (tx) => {
       // The fallback keeps the command compatible with older lightweight
       // adapters used by the first mini-app release; Prisma always exposes
       // findUnique in production.
@@ -2125,6 +2184,7 @@ export class TrainingService {
         objectId: sessionId,
         overrideReason: dto.reason,
       });
+      await assertTrainingLedgerOpen(tx, session.startsAt);
       const pending = await tx.trainingAttendance.count({
         where: {
           sessionId,
@@ -2440,7 +2500,8 @@ export class TrainingService {
         ),
       );
     }
-    return this.prisma.$transaction(
+    return trainingTransaction(
+      this.prisma,
       async (tx) => {
         const correction = await tx.trainingConsumeCorrection.findUnique({
           where: { id },
@@ -2496,9 +2557,7 @@ export class TrainingService {
           throw new ConflictException('目标消课流水已冲正或不可冲正');
         }
         if (correction.recognition.settlementId) {
-          throw new ConflictException(
-            '目标消课流水已进入结算单，不可直接冲正',
-          );
+          throw new ConflictException('目标消课流水已进入结算单，不可直接冲正');
         }
         const attendance = correction.attendance;
         const enrollment = attendance.enrollment;
@@ -2522,6 +2581,8 @@ export class TrainingService {
           where: { attendanceId: attendance.id },
           _max: { sequence: true },
         });
+        const reversalAt = new Date();
+        await assertTrainingLedgerOpen(tx, reversalAt);
         const reversal = await tx.trainingRevenueRecognition.create({
           data: {
             attendanceId: attendance.id,
@@ -2529,14 +2590,14 @@ export class TrainingService {
             type: TrainingRecognitionType.REVERSAL,
             sequence: (sequence._max.sequence ?? 0) + 1,
             reversalOfId: correction.recognition.id,
-            effectiveRevenueCents:
-              -correction.recognition.effectiveRevenueCents,
+            effectiveRevenueCents: -correction.recognition.effectiveRevenueCents,
             contractRateBps: correction.recognition.contractRateBps,
             venueContributionCents:
               -correction.recognition.venueContributionCents,
             venueFeeCents: 0,
             trainingPayableVenueCents: 0,
             idempotencyKey: `TRAINING_REVERSAL:${dto.idempotencyKey}`,
+            createdAt: reversalAt,
           },
         });
         const nextEnrollmentStatus =
@@ -2747,7 +2808,6 @@ export class TrainingService {
         });
         return this.correctionCommandResponse(approved);
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   }
 
@@ -2830,120 +2890,71 @@ export class TrainingService {
   }
 
   async financialSummary(periodStart: Date, periodEnd: Date) {
-    const [recognitions, sessions, enrollments] = await Promise.all([
-      this.prisma.trainingRevenueRecognition.findMany({
-        where: { createdAt: { gte: periodStart, lt: periodEnd } },
-      }),
-      this.prisma.trainingSession.findMany({
-        where: {
-          status: TrainingSessionStatus.COMPLETED,
-          startsAt: { gte: periodStart, lt: periodEnd },
-        },
-      }),
-      this.prisma.trainingEnrollment.aggregate({
-        _sum: { prepaidBalanceCents: true, refundedCents: true },
-      }),
-    ]);
-    const confirmedRevenueCents = recognitions.reduce(
-      (sum, item) => sum + item.effectiveRevenueCents,
-      0,
-    );
-    const coachCostCents = sessions.reduce(
-      (sum, session) => sum + session.coachCostCents,
-      0,
-    );
-    const assistantCostCents = sessions.reduce(
-      (sum, session) => sum + session.assistantCostCents,
-      0,
-    );
-    const materialCostCents = sessions.reduce(
-      (sum, session) => sum + session.materialCostCents,
-      0,
-    );
-    const occupiedCourtHours = sessions.reduce(
-      (sum, session) => sum + Number(session.occupiedCourtHours),
-      0,
-    );
-    const contractRateBps = 2_000;
-    const venueContractContributionCents =
-      confirmedRevenueCents >= 0
-        ? trainingContractContributionCents(confirmedRevenueCents, 2_000)
-        : -trainingContractContributionCents(-confirmedRevenueCents, 2_000);
-    const directCostCents =
-      coachCostCents + assistantCostCents + materialCostCents;
-    const cashContributionMarginCents = confirmedRevenueCents - directCostCents;
-    const summary = {
-      effectiveRevenueCents: confirmedRevenueCents,
-      contractRateBps,
-      venueContractContributionCents,
-      venueFeeCents: 0,
-      trainingPayableFromVenueCents: 0,
-      directCostCents,
-      cashContributionMarginCents,
-      occupiedCourtHours,
-      resourceEfficiencyCentsPerCourtHour:
-        occupiedCourtHours === 0
-          ? null
-          : Math.round(cashContributionMarginCents / occupiedCourtHours),
-    };
-    return {
-      ...summary,
-      unusedBalanceCents: enrollments._sum.prepaidBalanceCents ?? 0,
-      refundedCents: enrollments._sum.refundedCents ?? 0,
-      recognitionCount: recognitions.length,
-      consumeCount: recognitions.filter(
-        (item) => item.type === TrainingRecognitionType.CONSUME,
-      ).length,
-      reversalCount: recognitions.filter(
-        (item) => item.type === TrainingRecognitionType.REVERSAL,
-      ).length,
-      coachCostCents,
-      assistantCostCents,
-      materialCostCents,
-    };
+    return (await readTrainingLedger(this.prisma, periodStart, periodEnd))
+      .summary;
   }
 
   async createSettlement(dto: CreateTrainingSettlementDto, actor: AuthUser) {
     this.assertTrainingSettlementRole(actor);
-    const periodStart = new Date(dto.periodStart);
-    const periodEnd = new Date(dto.periodEnd);
-    if (periodEnd <= periodStart)
-      throw new BadRequestException('结算结束时间必须晚于开始时间');
-    const uniqueWhere = {
-      periodStart_periodEnd: { periodStart, periodEnd },
+    const periodStart = new Date(dto.periodStart),
+      periodEnd = new Date(dto.periodEnd);
+    if (
+      !Number.isFinite(+periodStart) ||
+      !Number.isFinite(+periodEnd) ||
+      periodEnd <= periodStart
+    )
+      throw new BadRequestException('结算周期无效');
+    const activeWhere = {
+      periodStart,
+      periodEnd,
+      status: { not: SettlementStatus.VOID },
     };
-    const existing = await this.prisma.trainingSettlement.findUnique({
-      where: uniqueWhere,
-    });
-    if (existing) {
+    const replay = (
+      existing: NonNullable<
+        Awaited<ReturnType<typeof this.prisma.trainingSettlement.findFirst>>
+      >,
+    ) => {
       this.assertSettlementDraftMatches(existing, dto);
       return existing;
-    }
-
-    const base = await this.financialSummary(periodStart, periodEnd);
-    const directCostCents =
-      base.coachCostCents +
-      base.assistantCostCents +
-      base.materialCostCents +
-      dto.acquisitionCostCents +
-      dto.marketingCostCents;
-    const cashContributionMarginCents =
-      base.effectiveRevenueCents - directCostCents;
-
+    };
     try {
       return await this.prisma.$transaction(
         async (tx) => {
-          const duplicate = await tx.trainingSettlement.findUnique({
-            where: uniqueWhere,
+          const existing = await tx.trainingSettlement.findFirst({
+            where: activeWhere,
           });
-          if (duplicate) {
-            this.assertSettlementDraftMatches(duplicate, dto);
-            return duplicate;
-          }
+          if (existing) return replay(existing);
+          if (
+            await tx.trainingSettlement.findFirst({
+              where: {
+                status: { not: SettlementStatus.VOID },
+                periodStart: { lt: periodEnd },
+                periodEnd: { gt: periodStart },
+              },
+            })
+          )
+            throw new ConflictException(
+              '已有重叠账期的培训结算单，请核对起止时间',
+            );
+          const previous = await tx.trainingSettlement.aggregate({
+            where: { periodStart, periodEnd },
+            _max: { version: true },
+          });
+          const {
+            summary: base,
+            snapshot,
+            recognitions,
+          } = await readTrainingLedger(tx, periodStart, periodEnd);
+          if (recognitions.some((r) => r.settlementId !== null))
+            throw new ConflictException(
+              '账期包含已归属其他结算单的收入，请核对来源',
+            );
           const settlement = await tx.trainingSettlement.create({
             data: {
               periodStart,
               periodEnd,
+              version: (previous._max.version ?? 0) + 1,
+              sourceSnapshot: snapshot,
               effectiveRevenueCents: base.effectiveRevenueCents,
               contractRateBps: base.contractRateBps,
               venueContributionCents: base.venueContractContributionCents,
@@ -2955,17 +2966,22 @@ export class TrainingService {
               acquisitionCostCents: dto.acquisitionCostCents,
               marketingCostCents: dto.marketingCostCents,
               occupiedCourtHours: base.occupiedCourtHours,
-              cashContributionMarginCents,
+              cashContributionMarginCents:
+                base.cashContributionMarginCents -
+                dto.acquisitionCostCents -
+                dto.marketingCostCents,
               status: SettlementStatus.DRAFT,
             },
           });
-          await tx.trainingRevenueRecognition.updateMany({
+          const bound = await tx.trainingRevenueRecognition.updateMany({
             where: {
+              id: { in: recognitions.map((r) => r.id) },
               settlementId: null,
-              createdAt: { gte: periodStart, lt: periodEnd },
             },
             data: { settlementId: settlement.id },
           });
+          if (bound.count !== recognitions.length)
+            throw new ConflictException('结算来源发生变化，请刷新后重试');
           await tx.auditLog.create({
             data: {
               actorId: actor.sub,
@@ -2973,15 +2989,17 @@ export class TrainingService {
               action: 'TRAINING_SETTLEMENT_CREATED',
               objectType: 'TrainingSettlement',
               objectId: settlement.id,
-              oldValue: { exists: false } as never,
+              oldValue: { exists: false },
               newValue: {
-                status: SettlementStatus.DRAFT,
+                status: settlement.status,
+                version: settlement.version,
                 effectiveRevenueCents: settlement.effectiveRevenueCents,
                 venueContributionCents: settlement.venueContributionCents,
                 acquisitionCostCents: settlement.acquisitionCostCents,
                 marketingCostCents: settlement.marketingCostCents,
                 venueFeeCents: 0,
-              } as never,
+                recognitionCount: recognitions.length,
+              },
               reason: '生成培训结算单',
             },
           });
@@ -2990,14 +3008,25 @@ export class TrainingService {
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
     } catch (error) {
-      if (isPrismaErrorCode(error, 'P2002')) {
-        const duplicate = await this.prisma.trainingSettlement.findUnique({
-          where: uniqueWhere,
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        const existing = await this.prisma.trainingSettlement.findFirst({
+          where: activeWhere,
         });
-        if (duplicate) {
-          this.assertSettlementDraftMatches(duplicate, dto);
-          return duplicate;
-        }
+        if (existing) return replay(existing);
+        if (
+          await this.prisma.trainingSettlement.findFirst({
+            where: {
+              status: { not: SettlementStatus.VOID },
+              periodStart: { lt: periodEnd },
+              periodEnd: { gt: periodStart },
+            },
+          })
+        )
+          throw new ConflictException(
+            '已有重叠账期的培训结算单，请核对起止时间',
+          );
+        if (error.code === 'P2034')
+          throw new ConflictException('培训结算发生并发变更，请刷新后重试');
       }
       throw error;
     }
@@ -3178,7 +3207,8 @@ export class TrainingService {
       reason,
     });
 
-    return this.prisma.$transaction(
+    return trainingTransaction(
+      this.prisma,
       async (tx) => {
         const current = await tx.trainingSettlement.findUnique({
           where: { id: input.id },
@@ -3220,9 +3250,7 @@ export class TrainingService {
               replay.reason !== reason ||
               replayValue?.commandHash !== commandHash
             ) {
-              throw new ConflictException(
-                '培训结算幂等键已用于其他操作人或命令',
-              );
+              throw new ConflictException('培训结算幂等键已用于其他操作人或命令');
             }
             return current;
           }
@@ -3234,6 +3262,20 @@ export class TrainingService {
             `培训结算单当前状态为 ${current.status}，不能执行该操作`,
           );
         }
+        if (
+          [
+            SettlementStatus.PENDING_CONFIRMATION,
+            SettlementStatus.CONFIRMED,
+            SettlementStatus.SETTLED,
+          ].includes(input.to as never)
+        )
+          await assertTrainingSettlementSources(tx, current);
+        if (input.to === SettlementStatus.VOID) {
+          await tx.trainingRevenueRecognition.updateMany({
+            where: { settlementId: current.id },
+            data: { settlementId: null },
+          });
+        }
         const changed = await tx.trainingSettlement.updateMany({
           where: { id: input.id, status: input.from },
           data: { status: input.to, ...input.data },
@@ -3243,9 +3285,7 @@ export class TrainingService {
             where: { id: input.id },
           });
           if (latest?.status === input.to) return latest;
-          throw new ConflictException(
-            '培训结算单已被其他操作更新，请刷新后重试',
-          );
+          throw new ConflictException('培训结算单已被其他操作更新，请刷新后重试');
         }
         const updated = await tx.trainingSettlement.findUniqueOrThrow({
           where: { id: input.id },
@@ -3274,7 +3314,6 @@ export class TrainingService {
         });
         return updated;
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   }
 

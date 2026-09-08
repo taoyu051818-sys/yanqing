@@ -24,6 +24,8 @@ const admin: AuthUser = {
 
 const settlement = (status = SettlementStatus.DRAFT) => ({
   id: 'training-settlement-1',
+  version: 1,
+  sourceSnapshot: { version: 1, recognitions: [{ id: 'recognition-1', effectiveRevenueCents: 100_000 }], sessions: [{ id: 'session-1', coachCostCents: 20_000, assistantCostCents: 5_000, materialCostCents: 2_000, occupiedCourtHours: 4 }] },
   periodStart: new Date('2026-08-01T16:00:00.000Z'),
   periodEnd: new Date('2026-08-02T16:00:00.000Z'),
   effectiveRevenueCents: 100_000,
@@ -59,6 +61,7 @@ function workflowPrisma(initialStatus = SettlementStatus.DRAFT) {
     },
   ];
   const tx = {
+    trainingRevenueRecognition: { findMany: vi.fn().mockResolvedValue([{ id: 'recognition-1', effectiveRevenueCents: 100_000 }]), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     trainingSettlement: {
       findUnique: vi
         .fn()

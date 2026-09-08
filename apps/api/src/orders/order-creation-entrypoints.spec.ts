@@ -47,6 +47,7 @@ describe('all direct order creation entrypoints', () => {
     prisma.order.create.mockResolvedValue({ id: 'order-new' })
     const auditCreate = vi.fn().mockResolvedValue({})
     prisma.$transaction.mockImplementation(async (work: (tx: unknown) => unknown) => work({
+      memberSubscription: { findFirst: vi.fn().mockResolvedValue(null) },
       membershipProduct: prisma.membershipProduct,
       memberProfile: prisma.memberProfile,
       order: prisma.order,

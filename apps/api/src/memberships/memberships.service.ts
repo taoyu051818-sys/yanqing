@@ -1,3 +1,4 @@
+import { assertMembershipPurchaseCompatible } from './membership-entitlements.js'
 import { createHash, randomBytes } from 'node:crypto'
 
 import {
@@ -594,6 +595,7 @@ export class MembershipsService {
           throw new NotFoundException('会员产品不存在、未生效或已停用')
         }
         if (!member) throw new NotFoundException('会员档案不存在')
+        await assertMembershipPurchaseCompatible(tx, member.id, product.level, undefined, now)
         const startsAt = now
         const endsAt = new Date(startsAt.getTime() + product.durationDays * 86_400_000)
         const operatingShare = await resolveOperatingShareSnapshot(
@@ -652,6 +654,10 @@ export class MembershipsService {
           },
         })
         return created
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }).catch(error => {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034')
+          throw new ConflictException('会员订单发生并发变更，请刷新后重试')
+        throw error
       }),
     })
     return orderResponse(order)

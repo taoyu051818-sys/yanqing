@@ -27,7 +27,7 @@ const member: AuthUser = {
 };
 
 const runner = (tx: Record<string, unknown>) =>
-  vi.fn(async (work: (value: Record<string, unknown>) => unknown) => work(tx));
+  vi.fn(async (work: (value: Record<string, unknown>) => unknown) => work({ trainingSettlement: { findFirst: vi.fn().mockResolvedValue(null) }, ...tx }));
 
 describe('TrainingService configuration audit', () => {
   it('creates a product and its complete audit in one transaction, then replays the exact command once', async () => {

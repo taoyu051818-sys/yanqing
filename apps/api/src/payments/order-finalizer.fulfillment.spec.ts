@@ -88,8 +88,13 @@ function harness(order: ReturnType<typeof baseOrder>) {
     gameRegistration: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     eventTeam: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     user: { findUnique: vi.fn().mockResolvedValue(null) },
-    memberSubscription: { update: vi.fn().mockResolvedValue({}) },
-    memberProfile: { update: vi.fn().mockResolvedValue({}) },
+    memberSubscription: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ status: 'FROZEN' }),
+      findMany: vi.fn().mockResolvedValue([{ startsAt: now, endsAt: new Date(+now + 365 * 86400000), product: { level: 'REGULAR', durationDays: 365 } }]),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    memberProfile: { findUnique: vi.fn().mockResolvedValue(null), update: vi.fn().mockResolvedValue({}) },
     account: {
       findUniqueOrThrow: vi.fn().mockResolvedValue({
         id: 'account-1',
@@ -142,7 +147,7 @@ describe('instant order fulfillment after successful payment', () => {
           id: 'subscription-1',
           memberId: 'member-1',
           endsAt: new Date('2027-08-30T00:00:00.000Z'),
-          product: { level: 'REGULAR' },
+          product: { level: 'REGULAR', durationDays: 365 },
         },
       }),
     ],
@@ -192,13 +197,13 @@ describe('instant order fulfillment after successful payment', () => {
         where: { id: order.id, status: OrderStatus.PAID, completedAt: null },
         data: { status: OrderStatus.COMPLETED, completedAt: now },
       });
-      expect(tx.auditLog.create).toHaveBeenNthCalledWith(1, {
+      expect(tx.auditLog.create).toHaveBeenNthCalledWith(businessType === BusinessType.MEMBERSHIP ? 2 : 1, {
         data: expect.objectContaining({
           actorId: payment.operatorId,
           action: 'ORDER_PAID',
         }),
       });
-      expect(tx.auditLog.create).toHaveBeenNthCalledWith(2, {
+      expect(tx.auditLog.create).toHaveBeenNthCalledWith(businessType === BusinessType.MEMBERSHIP ? 3 : 2, {
         data: expect.objectContaining({
           actorId: payment.operatorId,
           action: 'ORDER_COMPLETED',

@@ -1,3 +1,4 @@
+import { activateMembership } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import { syncTrainingEnrollmentRoster } from '../training/training-roster.js';
 import {
@@ -14,7 +15,6 @@ import {
   BusinessType,
   EventStatus,
   InventoryTxnType,
-  MembershipStatus,
   OrderStatus,
   PaymentChannel,
   Prisma,
@@ -216,17 +216,12 @@ export class OrderFinalizerService {
     }
 
     if (order.membership) {
-      await tx.memberSubscription.update({
-        where: { id: order.membership.id },
-        data: { status: MembershipStatus.ACTIVE },
-      });
-      await tx.memberProfile.update({
-        where: { id: order.membership.memberId },
-        data: {
-          level: order.membership.product.level,
-          membershipExpiresAt: order.membership.endsAt,
-        },
-      });
+      const entitlement = await activateMembership(tx, { parameterSnapshot: order.parameterSnapshot, membership: order.membership }, now);
+      await tx.auditLog.create({ data: {
+        actorId: paymentActorId, actorRole, action: 'MEMBERSHIP_ENTITLEMENT_ACTIVATED', objectType: 'MemberSubscription', objectId: order.membership.id,
+        reason: '会员付款激活，同等级续费顺延',
+        newValue: { startsAt: entitlement.startsAt.toISOString(), endsAt: entitlement.endsAt.toISOString(), level: entitlement.profile.level },
+      } });
     }
 
     if (order.businessType === BusinessType.RECHARGE) {

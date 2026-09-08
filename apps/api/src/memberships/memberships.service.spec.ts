@@ -17,7 +17,7 @@ const creationHarness = (orderId: string, delegates: Record<string, unknown> = {
     return stored
   })
   const auditCreate = vi.fn().mockResolvedValue({})
-  const tx = { ...delegates, order: { create: orderCreate }, auditLog: { create: auditCreate } }
+  const tx = { memberSubscription: { findFirst: vi.fn().mockResolvedValue(null) }, ...delegates, order: { create: orderCreate }, auditLog: { create: auditCreate } }
   const prisma = {
     order: {
       findUnique: vi.fn().mockImplementation(async () => stored && ({

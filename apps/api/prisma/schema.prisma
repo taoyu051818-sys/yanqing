@@ -1584,6 +1584,9 @@ model TrainingAttendance {
   operator                    User?                        @relation("AttendanceOperator", fields: [operatorId], references: [id], onDelete: SetNull)
   revenueRecognitions         TrainingRevenueRecognition[]
   consumeCorrections          TrainingConsumeCorrection[]
+  makeupTargetId              String?                      @unique
+  makeupTarget                TrainingAttendance?          @relation("TrainingMakeup", fields: [makeupTargetId], references: [id], onDelete: Restrict)
+  makeupOriginal              TrainingAttendance?          @relation("TrainingMakeup")
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
 
@@ -1595,6 +1598,8 @@ model TrainingSettlement {
   id                          String                       @id @default(cuid())
   periodStart                 DateTime
   periodEnd                   DateTime
+  version                     Int                          @default(1)
+  sourceSnapshot              Json?
   effectiveRevenueCents       Int
   contractRateBps             Int                          @default(2000)
   venueContributionCents      Int
@@ -1614,7 +1619,7 @@ model TrainingSettlement {
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
 
-  @@unique([periodStart, periodEnd])
+  @@unique([periodStart, periodEnd, version])
   @@index([status, periodEnd])
 }
 

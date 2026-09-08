@@ -24,6 +24,7 @@ export async function captureCancelledOrderPayment(
   paymentId: string,
   tradeNo: string,
   now: Date,
+  unavailableReason?: string,
 ) {
   if (order.status !== OrderStatus.CANCELLED || order.paidCents !== 0) {
     throw new ConflictException('迟到付款订单状态需人工核对')
@@ -64,7 +65,7 @@ export async function captureCancelledOrderPayment(
             orderId: order.id,
             requestedById: order.memberId,
             amountCents: order.payableCents,
-            reason: '订单已取消后收到微信付款，未授予权益，待财务原路退款',
+            reason: unavailableReason ? `${unavailableReason}；待财务原路退款` : '订单已取消后收到微信付款，未授予权益，待财务原路退款',
             originalOrderStatus: OrderStatus.PAID,
             status: RefundStatus.REQUESTED,
             compensationOnly: true,
@@ -84,13 +85,14 @@ export async function captureCancelledOrderPayment(
       orderId: order.id,
       objectType: 'Order',
       objectId: order.id,
-      summary: '已取消订单收到付款，需核对并原路退款',
+      summary: unavailableReason ? '会员权益冲突订单收到付款，需核对并原路退款' : '已取消订单收到付款，需核对并原路退款',
       lastSeenAt: now,
       evidence: {
         amountCents: order.payableCents,
         paymentId,
         refundId: refund?.id ?? null,
         benefitsGranted: false,
+        ...(unavailableReason ? { unavailableReason } : {}),
       },
     },
   })
@@ -101,7 +103,7 @@ export async function captureCancelledOrderPayment(
       action: 'CANCELLED_ORDER_PAYMENT_CAPTURED',
       objectType: 'Order',
       objectId: order.id,
-      reason: '微信成功付款晚于本地订单取消',
+      reason: unavailableReason ?? '微信成功付款晚于本地订单取消',
       newValue: {
         paymentId,
         providerTradeNo: tradeNo,

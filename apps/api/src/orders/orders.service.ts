@@ -1,3 +1,4 @@
+import { cancelMembershipEntitlement, membershipPurchaseUnavailable, assertMembershipPurchaseCompatible } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -484,13 +485,14 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
       // A cashier is not entitled to inspect another member's payment balances.
       const order = await tx.order.findFirst({
         where: { id: orderId, memberId: actor.sub },
-        include: { bookings: true, eventTeam: true, gameRegistration: { include: { game: true } }, trainingEnrollment: true, items: true, payments: true,
+        include: { membership: { include: { product: true } }, bookings: true, eventTeam: true, gameRegistration: { include: { game: true } }, trainingEnrollment: true, items: true, payments: true,
           member: { select: { openId: true, accounts: { select: { type: true, balance: true, frozenBalance: true } } } } },
       });
       if (!order) throw new NotFoundException('订单不存在或不属于当前账号');
       const now = new Date();
       const deadline = pendingPaymentDeadline(order);
       let unavailable = order.status !== OrderStatus.PENDING ? '订单已不在待付款状态' : deadline && deadline <= now ? '支付保留期已过，请重新下单' : '';
+      if (!unavailable && order.membership) unavailable = await membershipPurchaseUnavailable(tx, order.membership.memberId, order.membership.product.level, order.membership.id, now) ?? '';
       if (!unavailable && order.businessType === BusinessType.GAME) unavailable = gamePaymentUnavailable(order.gameRegistration, order.createdAt, now);
       if (!unavailable && order.businessType === BusinessType.GOODS) {
         try { await this.assertGoodsStockAvailable(tx, order.items); }
@@ -574,7 +576,11 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
       if (existing.operatorId !== actor.sub)
         throw new ForbiddenException('支付请求只能由原操作人重试');
       if (existing.channel === PaymentChannel.WECHAT && existing.status === PaymentStatus.PROCESSING) {
-        const pending = await this.prisma.order.findUnique({ where: { id: orderId }, include: { gameRegistration: { include: { game: true } } } });
+        const pending = await this.prisma.order.findUnique({ where: { id: orderId }, include: { membership: { include: { product: true } }, gameRegistration: { include: { game: true } } } });
+        if (pending?.membership) {
+          if (pending.status !== OrderStatus.PENDING) throw new ConflictException('订单当前状态不可支付');
+          await assertMembershipPurchaseCompatible(this.prisma, pending.membership.memberId, pending.membership.product.level, pending.membership.id);
+        }
         if (pending?.businessType === BusinessType.GAME) {
           const unavailable = pending.status !== OrderStatus.PENDING ? '订单当前状态不可支付' : gamePaymentUnavailable(pending.gameRegistration, pending.createdAt);
           if (unavailable) throw new ConflictException(unavailable);
@@ -605,6 +611,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
             throw new ConflictException('订单当前状态不可支付');
           if (dto.channel !== PaymentChannel.WECHAT && order.payments?.some(payment => payment.channel === PaymentChannel.WECHAT && payment.status === PaymentStatus.PROCESSING))
             throw new ConflictException('微信支付结果确认中，暂不能改用其他渠道');
+          if (order.membership) await assertMembershipPurchaseCompatible(tx, order.membership.memberId, order.membership.product.level, order.membership.id);
           await this.assertBookingCouponScope(tx, order);
           const deadline = pendingPaymentDeadline(order);
           if (deadline && deadline <= new Date()) throw new ConflictException('支付保留期已过，请刷新订单后重新下单');
@@ -808,6 +815,8 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
           return paymentCommandResponse(concurrent);
         }
       }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034')
+        throw new ConflictException('支付数据发生并发变更，请刷新后重试');
       throw error;
     }
   }
@@ -1440,26 +1449,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
                 data: { status: BookingStatus.CANCELLED },
               });
               if (refund.order.membership) {
-                await tx.memberSubscription.update({
-                  where: { id: refund.order.membership.id },
-                  data: { status: MembershipStatus.CANCELLED },
-                });
-                const latest = await tx.memberSubscription.findFirst({
-                  where: {
-                    memberId: refund.order.membership.memberId,
-                    status: MembershipStatus.ACTIVE,
-                    id: { not: refund.order.membership.id },
-                  },
-                  include: { product: true },
-                  orderBy: { endsAt: 'desc' },
-                });
-                await tx.memberProfile.update({
-                  where: { id: refund.order.membership.memberId },
-                  data: {
-                    level: latest?.product.level ?? 'EXPERIENCE',
-                    membershipExpiresAt: latest?.endsAt,
-                  },
-                });
+                await cancelMembershipEntitlement(tx, refund.order.membership);
               }
               if (refund.order.businessType === BusinessType.GOODS) {
                 for (const item of refund.order.items) {
