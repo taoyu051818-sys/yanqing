@@ -33,7 +33,7 @@ import {
   TrainingEnrollmentStatus,
   RewardStatus,
 } from '../generated/prisma/client.js';
-import { applyInventoryDelta } from '../inventory/inventory-balance.js';
+import { assertGoodsStockAvailable, restoreGoodsSale } from '../inventory/goods-stock.js';
 import type {
   CancelPendingOrderDto,
   OrderQueryDto,
@@ -495,7 +495,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
       if (!unavailable && order.membership) unavailable = await membershipPurchaseUnavailable(tx, order.membership.memberId, order.membership.product.level, order.membership.id, now) ?? '';
       if (!unavailable && order.businessType === BusinessType.GAME) unavailable = gamePaymentUnavailable(order.gameRegistration, order.createdAt, now);
       if (!unavailable && order.businessType === BusinessType.GOODS) {
-        try { await this.assertGoodsStockAvailable(tx, order.items); }
+        try { await assertGoodsStockAvailable(tx, order.items, { orderId: order.id, reservePayments: true }); }
         catch (error) { unavailable = error instanceof Error ? error.message : '商品库存不足'; }
       }
       if (!unavailable) {
@@ -631,7 +631,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
             }
           }
           if (order.businessType === BusinessType.GOODS) {
-            await this.assertGoodsStockAvailable(tx, order.items);
+            await assertGoodsStockAvailable(tx, order.items, { orderId: order.id, reservePayments: true, lock: true });
           }
           if (
             order.businessType === BusinessType.RECHARGE &&
@@ -818,39 +818,6 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034')
         throw new ConflictException('支付数据发生并发变更，请刷新后重试');
       throw error;
-    }
-  }
-
-  private async assertGoodsStockAvailable(
-    tx: Prisma.TransactionClient,
-    orderItems: Array<{
-      itemId: string | null;
-      name: string;
-      quantity: number;
-    }>,
-  ) {
-    const required = new Map<string, { name: string; quantity: number }>();
-    for (const item of orderItems) {
-      if (!item.itemId) continue;
-      const current = required.get(item.itemId);
-      required.set(item.itemId, {
-        name: item.name,
-        quantity: (current?.quantity ?? 0) + item.quantity,
-      });
-    }
-    if (!required.size) throw new ConflictException('商品订单缺少可出库明细');
-
-    const inventory = await tx.inventoryItem.findMany({
-      where: { id: { in: [...required.keys()] }, enabled: true },
-      select: { id: true, name: true, stock: true },
-    });
-    const available = new Map(inventory.map((item) => [item.id, item]));
-    for (const [itemId, demand] of required) {
-      const item = available.get(itemId);
-      if (!item) throw new BadRequestException(`${demand.name} 已下架，无法支付`);
-      if (item.stock < demand.quantity) {
-        throw new BadRequestException(`${item.name} 库存不足，无法支付`);
-      }
     }
   }
 
@@ -1457,10 +1424,11 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
                   const inventory = await tx.inventoryItem.findUniqueOrThrow({
                     where: { id: item.itemId },
                   });
-                  const { stockAfter } = await applyInventoryDelta(
+                  const { stockAfter } = await restoreGoodsSale(
                     tx,
                     inventory,
                     item.quantity,
+                    item.id,
                   );
                   await tx.inventoryTransaction.create({
                     data: {

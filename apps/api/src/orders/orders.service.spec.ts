@@ -630,7 +630,9 @@ describe('OrdersService goods payment stock gate', () => {
     }
     const tx = {
       order: { findUnique: vi.fn().mockResolvedValue(goodsOrder) },
+      orderItem: { findMany: vi.fn().mockResolvedValue([]) },
       inventoryItem: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findMany: vi.fn().mockResolvedValue([{
           id: 'goods-empty',
           name: '售罄羽毛球',

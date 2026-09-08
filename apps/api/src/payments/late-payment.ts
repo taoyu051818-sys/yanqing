@@ -85,7 +85,7 @@ export async function captureCancelledOrderPayment(
       orderId: order.id,
       objectType: 'Order',
       objectId: order.id,
-      summary: unavailableReason ? '会员权益冲突订单收到付款，需核对并原路退款' : '已取消订单收到付款，需核对并原路退款',
+      summary: unavailableReason ? '无法履约订单收到付款，需核对并原路退款' : '已取消订单收到付款，需核对并原路退款',
       lastSeenAt: now,
       evidence: {
         amountCents: order.payableCents,

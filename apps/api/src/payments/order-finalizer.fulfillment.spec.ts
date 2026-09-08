@@ -122,7 +122,7 @@ function harness(order: ReturnType<typeof baseOrder>) {
     },
     inventoryStockBalance: {
       findUnique: vi.fn().mockResolvedValue({ id: 'balance-1', quantity: 10 }),
-      findMany: vi.fn().mockResolvedValue([{ quantity: 10 }]),
+      findMany: vi.fn().mockResolvedValue([{ id: 'balance-1', locationId: 'location-1', batchCode: 'DEFAULT', quantity: 10 }]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     inventoryTransaction: {

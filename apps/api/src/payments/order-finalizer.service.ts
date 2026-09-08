@@ -22,7 +22,7 @@ import {
   RegistrationStatus,
   TrainingEnrollmentStatus,
 } from '../generated/prisma/client.js';
-import { applyInventoryDelta } from '../inventory/inventory-balance.js';
+import { applyGoodsSale } from '../inventory/goods-stock.js';
 import { ConsignmentSettlementService } from '../inventory/consignment-settlement.service.js';
 import { completeOrderFulfillment } from '../orders/order-fulfillment.js';
 
@@ -284,10 +284,10 @@ export class OrderFinalizerService {
           where: { idempotencyKey },
         });
         if (existing) continue;
-        const { stockAfter } = await applyInventoryDelta(
+        const { stockAfter, allocations } = await applyGoodsSale(
           tx,
           inventory,
-          -item.quantity,
+          item.quantity,
         );
         await tx.inventoryTransaction.create({
           data: {
@@ -301,6 +301,7 @@ export class OrderFinalizerService {
             operatorId: paymentActorId,
             reason: `订单 ${order.orderNo} 销售出库`,
             idempotencyKey,
+            metadata: { allocations },
           },
         });
       }

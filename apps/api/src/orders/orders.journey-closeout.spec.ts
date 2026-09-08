@@ -31,6 +31,7 @@ function setup(type = 'RECHARGE', overrides: Record<string, any> = {}) {
     courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     couponCode: { findUnique: vi.fn().mockResolvedValue(null) },
     inventoryItem: { findMany: vi.fn().mockResolvedValue([{ id: 'goods-1', name: '羽毛球', stock: 10 }]) },
+    orderItem: { findMany: vi.fn().mockResolvedValue([]) },
     auditLog: { create: vi.fn().mockResolvedValue({}) },
     event: { findUnique: vi.fn().mockResolvedValue({ id: 'event-1', status: 'COMPLETED' }) },
     eventTeam: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },

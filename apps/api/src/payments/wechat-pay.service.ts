@@ -35,7 +35,7 @@ import {
   RegistrationStatus,
   RewardStatus,
 } from '../generated/prisma/client.js';
-import { applyInventoryDelta } from '../inventory/inventory-balance.js';
+import { assertGoodsStockAvailable, restoreGoodsSale } from '../inventory/goods-stock.js';
 import { OrderFinalizerService } from './order-finalizer.service.js';
 import { promoteNextGameWaitlist } from '../games/games.service.js';
 import { promoteNextEventWaitlist } from '../events/events.service.js';
@@ -377,6 +377,37 @@ export class WechatPayService {
             refundReviewRequired: order.payableCents > 0,
           };
         }
+        if (
+          order.businessType === BusinessType.GOODS &&
+          order.status === OrderStatus.PENDING
+        ) {
+          // Validate every line before any fulfillment writes. Never swallow a
+          // failed finalizer after it may already have changed stock or benefits.
+          let unavailable: string | undefined;
+          try {
+            await assertGoodsStockAvailable(tx, order.items);
+          } catch (error) {
+            if (
+              !(error instanceof BadRequestException) &&
+              !(error instanceof ConflictException)
+            ) throw error;
+            unavailable = error.message;
+          }
+          if (unavailable) {
+            await tx.order.update({
+              where: { id: order.id },
+              data: { status: OrderStatus.CANCELLED, cancelledAt: now },
+            });
+            return captureCancelledOrderPayment(
+              tx,
+              { ...order, status: OrderStatus.CANCELLED },
+              payment.id,
+              notice.transaction_id,
+              now,
+              `商品无法出库，未交付商品：${unavailable}`,
+            );
+          }
+        }
         const succeeded = await tx.payment.update({
           where: { id: payment.id },
           data: {
@@ -554,10 +585,11 @@ export class WechatPayService {
                   const inventory = await tx.inventoryItem.findUniqueOrThrow({
                     where: { id: item.itemId },
                   });
-                  const { stockAfter } = await applyInventoryDelta(
+                  const { stockAfter } = await restoreGoodsSale(
                     tx,
                     inventory,
                     item.quantity,
+                    item.id,
                   );
                   await tx.inventoryTransaction.create({
                     data: {
