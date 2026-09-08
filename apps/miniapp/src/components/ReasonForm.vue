@@ -28,9 +28,18 @@ const reason = computed(() => selected.value === '其他原因' ? note.value.tri
   </template></ActionDialog>
 </template>
 <style scoped>
-.reason-form { display:grid; gap:20rpx; min-width:0;  }
-.reason-title { font-size:30rpx; font-weight:750; }.reason-description { font-size:25rpx; line-height:1.65; color:var(--color-muted); }.reason-label { font-size:26rpx; }
-.reason-options { display:flex; gap:16rpx; flex-wrap:wrap; }.reason-options button { min-height:44px; flex:1 1 160rpx; margin:0; padding:16rpx; font-size:25rpx; background:#fff; border:1rpx solid var(--color-border); }.reason-options .selected { color:var(--color-primary); border-color:var(--color-primary); background:var(--color-primary-soft); }
-.reason-form .input { box-sizing:border-box; width:100%; margin-top:14rpx; }.reason-error { color:var(--color-danger); font-size:25rpx; line-height:1.6; }.reason-actions { display:flex; flex-wrap:wrap; gap:16rpx; }.reason-actions button { min-height:44px; flex:1 1 180rpx; margin:0; padding:18rpx 12rpx; font-size:26rpx; }
+.reason-form { display:grid; gap:24rpx; min-width:0; }
+.reason-description { color:var(--color-muted,#5f6f65); font-size:26rpx; line-height:1.65; }
+.reason-label { color:var(--color-foreground); font-size:28rpx; font-weight:700; }
+.reason-options { display:flex; gap:16rpx; flex-wrap:wrap; }
+.reason-options button { min-height:44px; flex:1 1 160rpx; margin:0; padding:18rpx 16rpx; color:var(--color-muted); font-size:26rpx; border-radius:var(--radius-sm,16rpx); background:var(--color-surface-subtle,#f7f9f6); border:1rpx solid var(--color-border); }
+.reason-options .selected { color:var(--color-primary-strong); border-color:var(--color-primary); background:var(--color-primary-soft); }
+.reason-form .input { box-sizing:border-box; width:100%; margin-top:14rpx; padding:20rpx 22rpx; color:var(--color-foreground); background:var(--color-surface-subtle); border:1rpx solid var(--color-border); border-radius:18rpx; font-size:28rpx; }
+.reason-error { color:var(--color-danger); font-size:25rpx; line-height:1.65; }
+.reason-actions { display:flex; flex-wrap:wrap; gap:16rpx; }
+.reason-actions button { flex:1 1 40%; min-height:48px; margin:0; padding:18rpx 16rpx; border-radius:22rpx; font-size:28rpx; }
+.reason-actions .primary { flex-grow:1.2; }
+.reason-actions .primary[disabled] { opacity:1; color:var(--color-muted); background:var(--color-background); box-shadow:none; }
 .reason-form text { overflow-wrap:anywhere; }
+@media (max-width:350px) { .reason-actions button { flex-basis:100%; } }
 </style>

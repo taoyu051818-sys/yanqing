@@ -31,7 +31,7 @@ function select(key: string, value: string) {
           <button :disabled="task.state.busy || task.state.searches[field.key]?.loading" @tap="task.search(field.key, keywords[field.key])">搜索</button>
         </view>
         <view v-if="['choices','search','reason'].includes(field.kind || '')" class="task-options">
-          <button v-for="option in (field.optionsFor ? field.optionsFor(task.state.values) : field.options)" :key="option.value" :aria-pressed="task.state.values[field.key] === option.value" :disabled="task.state.busy" @tap="customReasons[field.key] = false; select(field.key, option.value)">
+          <button v-for="option in (field.optionsFor ? field.optionsFor(task.state.values) : field.options)" :key="option.value" :class="{ selected: task.state.values[field.key] === option.value }" :aria-pressed="task.state.values[field.key] === option.value" :disabled="task.state.busy" @tap="customReasons[field.key] = false; select(field.key, option.value)">
             <text>{{ task.state.values[field.key] === option.value ? '已选 · ' : '' }}{{ option.label }}</text>
             <text v-if="option.description" class="task-hint">{{ option.description }}</text>
           </button>
@@ -45,7 +45,7 @@ function select(key: string, value: string) {
         </template>
         <textarea v-if="!['choices','search','number','money'].includes(field.kind || '') && (field.kind !== 'reason' || customReasons[field.key] || !field.options?.length)" v-model="task.state.values[field.key]" :focus="task.state.focusKey === field.key" @input="validateEdited(field.key)" @blur="task.validate(field.key)" :aria-labelledby="'task-label-' + field.key" :aria-describedby="'task-error-' + field.key" :disabled="task.state.busy" :maxlength="field.max || 500" :adjust-position="false" auto-height />
         <input v-if="field.kind === 'number' || field.kind === 'money'" v-model="task.state.values[field.key]" :focus="task.state.focusKey === field.key" @input="validateEdited(field.key)" @blur="task.validate(field.key)" :type="field.kind === 'money' ? 'digit' : 'number'" :aria-labelledby="'task-label-' + field.key" :aria-describedby="'task-error-' + field.key" :disabled="task.state.busy" maxlength="12" :adjust-position="false" />
-        <text :id="'task-error-' + field.key" class="task-error field-error" aria-live="polite">{{ task.state.errors[field.key] }}</text>
+        <text v-if="task.state.errors[field.key]" :id="'task-error-' + field.key" class="task-error field-error" aria-live="polite">{{ task.state.errors[field.key] }}</text>
       </view>
       <text v-if="task.state.error" class="task-error" role="alert">{{ task.state.error }}。内容已保留，可修改后重试。</text>
     </template>
@@ -62,14 +62,24 @@ function select(key: string, value: string) {
 
 <style scoped>
 .operation-task { color:var(--color-foreground,#18221c); overflow-wrap:anywhere; }
-.task-title,.task-description,.task-label,.task-hint,.task-error { display:block; line-height:1.65; }
-.field-error { min-height:1.65em; }
-.task-title { font-size:34rpx; font-weight:800; }.task-description { margin:12rpx 0 24rpx; font-size:28rpx; }.task-label { font-weight:700; font-size:28rpx; }.task-hint { color:var(--color-muted-foreground,#5f6f65); font-size:25rpx; }
-.task-field { margin:24rpx 0; min-width:0; }.task-options { display:flex; flex-wrap:wrap; gap:16rpx; margin:16rpx 0; }
-.operation-task button,.task-actions button,.result-close { display:flex; flex-direction:column; justify-content:center; align-items:center; min-height:44px; height:auto; margin:0; padding:16rpx 20rpx; font-size:27rpx; line-height:1.6; white-space:normal; min-width:0; max-width:100%; box-sizing:border-box; }
-.task-options button { flex:1 1 44%; border:1px solid var(--color-border); background:var(--color-background); }.task-options button[aria-pressed="true"] { border-color:var(--color-primary); background:var(--color-primary-soft,#e7f4eb); color:var(--color-primary); }
-.operation-task input,.operation-task textarea { width:100%; box-sizing:border-box; min-height:44px; margin:12rpx 0; padding:16rpx; background:var(--color-background); border:1px solid var(--color-border); border-radius:12rpx; font-size:30rpx; line-height:1.6; }
-.task-actions,.task-search { display:flex; flex-wrap:wrap; align-items:center; gap:16rpx; }.task-actions button { flex:1 1 44%; }.task-search input { flex:1 1 55%; min-width:0; }.task-search button { flex:0 0 auto; }.task-error { margin:12rpx 0; color:var(--color-danger,#a52626); font-size:26rpx; }.task-result { display:grid; gap:20rpx; font-size:28rpx; line-height:1.65; }
-.operation-task button:focus-visible,.operation-task input:focus-visible,.operation-task textarea:focus-visible { outline:2px solid var(--color-primary); outline-offset:3px; }
+.task-description,.task-label,.task-hint,.task-error { display:block; line-height:1.65; }
+.task-description { margin:0 0 24rpx; color:var(--color-muted,#5f6f65); font-size:26rpx; }
+.task-label { font-weight:700; font-size:28rpx; }
+.task-hint { margin-top:8rpx; color:var(--color-muted,#5f6f65); font-size:24rpx; }
+.task-field { margin:24rpx 0 0; min-width:0; }
+.task-options { display:flex; flex-wrap:wrap; gap:16rpx; margin-top:16rpx; }
+.operation-task button,.task-actions button,.result-close { display:flex; flex-direction:column; justify-content:center; align-items:center; min-height:44px; height:auto; margin:0; padding:18rpx 20rpx; border-radius:var(--radius-sm,16rpx); font-size:27rpx; line-height:1.5; white-space:normal; min-width:0; max-width:100%; box-sizing:border-box; }
+.task-options button { flex:1 1 44%; color:var(--color-muted,#5f6f65); border:1rpx solid var(--color-border); background:var(--color-surface-subtle,#f7f9f6); }
+.task-options button.selected { border-color:var(--color-primary,#17653d); background:var(--color-primary-soft,#e7f4eb); color:var(--color-primary-strong,#123f29); }
+.operation-task input,.operation-task textarea { width:100%; box-sizing:border-box; min-height:44px; margin:14rpx 0 0; padding:20rpx 22rpx; background:var(--color-surface-subtle,#f7f9f6); color:var(--color-foreground,#18221c); border:1rpx solid var(--color-border); border-radius:18rpx; font-size:28rpx; line-height:1.6; }
+.operation-task textarea { min-height:128rpx; }
+.task-actions,.task-search { display:flex; flex-wrap:wrap; align-items:center; gap:16rpx; }
+.task-actions button { flex:1 1 40%; min-height:48px; border-radius:22rpx; font-size:28rpx; }
+.task-actions .primary { flex-grow:1.2; }
+.result-close { width:100%; min-height:48px; border-radius:22rpx; font-size:28rpx; }
+.task-search { margin-top:14rpx; }.task-search input { flex:1 1 55%; min-width:0; margin:0; }.task-search button { flex:0 0 auto; color:var(--color-primary); background:var(--color-primary-soft); }
+.task-error { margin:14rpx 0 0; color:var(--color-danger,#a52626); font-size:25rpx; }
+.task-result { font-size:28rpx; line-height:1.75; color:var(--color-primary-strong,#123f29); }
+.operation-task button:focus-visible,.operation-task input:focus-visible,.operation-task textarea:focus-visible { outline:2px solid var(--color-accent,#b68b22); outline-offset:2px; }
 @media (max-width:350px) { .task-actions button,.task-options button { flex-basis:100%; } }
 </style>
