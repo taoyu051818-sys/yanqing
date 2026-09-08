@@ -80,6 +80,8 @@ export interface BossSummary<TDate = string> {
   definitions: Record<string, string>
   events: BossRiskEvent<TDate>[]
   eventCount: number
+  pendingEventCount: number
+  handledEventCount: number
   eventsTruncated: boolean
   monitor: {
     lastSucceededAt: string | null
@@ -96,4 +98,5 @@ export interface BossBriefing {
   model: string | null
   generatedAt: string | null
   message?: string
+  warning?: string | null
 }

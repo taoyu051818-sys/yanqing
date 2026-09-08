@@ -303,7 +303,7 @@ onMounted(load);
       <p v-if="data.eventsTruncated" class="muted small">
         共有
         {{ data.eventCount }}
-        条相关事件，当前按严重程度展示前100条；其余可在风险治理中查询。
+        条相关事件，优先展示待处理事件，再按严重程度展示前100条；其余可在风险治理中查询。
       </p>
       <details class="definitions">
         <summary>统计口径与事件阈值</summary>

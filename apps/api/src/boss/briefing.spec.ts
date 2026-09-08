@@ -7,7 +7,7 @@ import { ROLES_KEY, IS_PUBLIC_KEY } from '../common/auth/auth.decorators.js'
 const summary:any={date:'2026-09-07',timezone:'Asia/Shanghai',daily:{venueOrderCount:2,assistedVenueOrderCount:1,paidCents:10000,wechatPaidCents:10000,venueRevenueCents:3000,pendingOrderCount:1,cancelledOrderCount:0,refundedOrderCount:0},venue:{utilizationRate:30,emptiestSlots:[{id:'secret-slot-id',label:'09:00–10:00'}]},activities:[{name:'公开活动',phone:'secret-phone',id:'secret-id'}],activityCount:1,events:[{ruleCode:'BOSS_PAYMENT_EXCEPTION',summary:'支付待核实',evidence:{providerPayload:'secret'}}],eventCount:1,monitor:{lastSucceededAt:null,error:null},definitions:{}}
 function setup(config:Record<string,any>={},claim=1,old:any={}){
  const prisma:any={bossBriefing:{upsert:vi.fn().mockResolvedValue({}),findUniqueOrThrow:vi.fn().mockResolvedValue(old),updateMany:vi.fn().mockResolvedValue({count:claim}),update:vi.fn().mockResolvedValue({})}}
- const boss:any={summary:vi.fn().mockResolvedValue(summary)}
+ const boss:any={summary:vi.fn().mockResolvedValue(summary),monitorStatus:()=>summary.monitor}
  return {service:new BossBriefingService(prisma,boss,new ConfigService(config)),prisma}
 }
 afterEach(()=>vi.unstubAllGlobals())

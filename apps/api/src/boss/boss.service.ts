@@ -5,7 +5,10 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { riskEventView } from '../common/risk/risk-event-view.js';
+import {
+  PENDING_RISK_STATUSES,
+  riskEventView,
+} from '../common/risk/risk-event-view.js';
 import { PrismaService } from '../database/prisma.service.js';
 import { Prisma } from '../generated/prisma/client.js';
 import {
@@ -55,43 +58,89 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
   onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
   }
+  monitorStatus() {
+    return { ...this.scanState };
+  }
   async summary(date?: string): Promise<BossSummary<Date>> {
     const data = await this.read(date);
-    const eventWhere = {
-      ruleCode: { startsWith: 'BOSS_' },
+    const eventWhere: Prisma.RiskEventWhereInput = {
+      AND: [
+        {
+          OR: [
+            { ruleCode: { startsWith: 'BOSS_' } },
+            { ruleCode: 'RECHARGE_REFUND_BALANCE_SHORTFALL' },
+          ],
+        },
+      ],
       OR: [
         { createdAt: { gte: data.range.start, lt: data.range.end } },
         ...(data.range.date === venueDay()
-          ? [{ status: { in: ['OPEN', 'REVIEWING'] as const } }]
+          ? [{ status: { in: [...PENDING_RISK_STATUSES] } }]
           : []),
       ],
     };
-    const events = await this.prisma.riskEvent.findMany({
-      where: eventWhere as Prisma.RiskEventWhereInput,
-      select: {
-        id: true,
-        ruleCode: true,
-        severity: true,
-        status: true,
-        summary: true,
-        objectType: true,
-        objectId: true,
-        orderId: true,
-        evidence: true,
-        handling: true,
-        createdAt: true,
-        lastSeenAt: true,
-      },
-      orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
-      take: 100,
-    });
-    const eventCount = await this.prisma.riskEvent.count({
-      where: eventWhere as Prisma.RiskEventWhereInput,
-    });
+    const select = {
+      id: true,
+      ruleCode: true,
+      severity: true,
+      status: true,
+      summary: true,
+      objectType: true,
+      objectId: true,
+      orderId: true,
+      evidence: true,
+      handling: true,
+      createdAt: true,
+      lastSeenAt: true,
+    } satisfies Prisma.RiskEventSelect;
+    const { events, eventCount, pendingEventCount } =
+      await this.prisma.$transaction(
+        async (tx) => {
+          const pendingWhere = {
+            ...eventWhere,
+            status: { in: [...PENDING_RISK_STATUSES] },
+          };
+          const orderBy: Prisma.RiskEventOrderByWithRelationInput[] = [
+            { severity: 'desc' },
+            { createdAt: 'desc' },
+            { id: 'asc' },
+          ];
+          const [pending, eventCount, pendingEventCount] = await Promise.all([
+            tx.riskEvent.findMany({
+              where: pendingWhere,
+              select,
+              orderBy,
+              take: 100,
+            }),
+            tx.riskEvent.count({ where: eventWhere }),
+            tx.riskEvent.count({ where: pendingWhere }),
+          ]);
+          const handled =
+            pending.length < 100
+              ? await tx.riskEvent.findMany({
+                  where: {
+                    ...eventWhere,
+                    status: { notIn: [...PENDING_RISK_STATUSES] },
+                  },
+                  select,
+                  orderBy,
+                  take: 100 - pending.length,
+                })
+              : [];
+          return {
+            events: [...pending, ...handled],
+            eventCount,
+            pendingEventCount,
+          };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      );
     return {
       ...data.summary,
       events: events.map(riskEventView),
       eventCount,
+      pendingEventCount,
+      handledEventCount: eventCount - pendingEventCount,
       eventsTruncated: eventCount > events.length,
       monitor: {
         ...this.scanState,

@@ -5,6 +5,7 @@ import { PrismaService } from '../database/prisma.service.js'
 import { BossService } from './boss.service.js'
 import { dayRange } from './boss.logic.js'
 import type { BossSummary } from '@yanqing/shared'
+import { prioritizeRiskEvents } from '../common/risk/risk-event-view.js'
 
 export function briefingFacts(summary: BossSummary<Date>) {
   // Never send customer/contact data, IDs, order titles, payment payloads or credentials.
@@ -24,21 +25,19 @@ export function briefingFacts(summary: BossSummary<Date>) {
     },
     definitions: summary.definitions,
     activityCount: summary.activityCount,
-    activities: summary.activities
-      .slice(0, 30)
-      .map((a: any, i: number) => ({
-        label: `活动${i + 1}`,
-        kind: a.kind,
-        name: String(a.name).slice(0, 80),
-        startsAt: a.startsAt,
-        registrationEndsAt: a.registrationEndsAt,
-        capacityPeople: a.capacityPeople,
-        confirmedPeople: a.confirmedPeople,
-        unpaidPeople: a.unpaidPeople,
-        remainingPeople: a.remainingPeople,
-        collectedCents: a.collectedCents,
-      })),
-    events: summary.events
+    activities: summary.activities.slice(0, 30).map((a: any, i: number) => ({
+      label: `活动${i + 1}`,
+      kind: a.kind,
+      name: String(a.name).slice(0, 80),
+      startsAt: a.startsAt,
+      registrationEndsAt: a.registrationEndsAt,
+      capacityPeople: a.capacityPeople,
+      confirmedPeople: a.confirmedPeople,
+      unpaidPeople: a.unpaidPeople,
+      remainingPeople: a.remainingPeople,
+      collectedCents: a.collectedCents,
+    })),
+    events: prioritizeRiskEvents(summary.events)
       .slice(0, 30)
       .map((e: any) => ({
         ruleCode: e.ruleCode,
@@ -47,7 +46,11 @@ export function briefingFacts(summary: BossSummary<Date>) {
         summary: e.summary,
       })),
     eventCount: summary.eventCount,
-    eventsTruncated: summary.eventsTruncated,
+    pendingEventCount: summary.pendingEventCount,
+    handledEventCount: summary.handledEventCount,
+    eventsTruncated:
+      summary.eventsTruncated ||
+      summary.eventCount > Math.min(summary.events.length, 30),
     monitor: {
       lastSucceededAt: summary.monitor.lastSucceededAt,
       error: summary.monitor.error,
@@ -66,8 +69,21 @@ export class BossBriefingService {
     private readonly boss: BossService,
     private readonly config: ConfigService,
   ) {}
+  private withMonitorWarning<T extends { text: string }>(
+    briefing: T,
+  ): T & { warning: string | null } {
+    const warning = this.boss.monitorStatus().error
+      ? '事件扫描失败，异常信息可能不完整，请核对关键事件并稍后刷新。'
+      : null
+    // Decorate responses only: transient health warnings must not contaminate persisted text.
+    return {
+      ...briefing,
+      text: warning ? `${warning}\n${briefing.text}` : briefing.text,
+      warning,
+    }
+  }
   async cached(date?: string) {
-    return this.prisma.bossBriefing.findUnique({
+    const briefing = await this.prisma.bossBriefing.findUnique({
       where: { date: dayRange(date).date },
       select: {
         date: true,
@@ -78,6 +94,7 @@ export class BossBriefingService {
         updatedAt: true,
       },
     })
+    return briefing ? this.withMonitorWarning(briefing) : null
   }
   async generate(date?: string) {
     const summary = await this.boss.summary(date),
@@ -102,7 +119,7 @@ export class BossBriefingService {
       previous.generatedAt &&
       +previous.generatedAt > +now - 15 * 60000
     )
-      return { ...previous, cached: true }
+      return this.withMonitorWarning({ ...previous, cached: true })
     const claimed = await this.prisma.bossBriefing.updateMany({
       where: {
         date: key,
@@ -119,14 +136,14 @@ export class BossBriefingService {
       data: { leaseUntil: new Date(+now + 90000), attemptedAt: now },
     })
     if (!claimed.count)
-      return {
+      return this.withMonitorWarning({
         date: key,
         text: factualBriefing(summary),
         source: 'FACTS',
         model: null,
         generatedAt: now,
         message: '简报正在生成或刚刚更新，请稍后刷新；先展示最新数据摘要。',
-      }
+      })
     let text = factualBriefing(summary),
       source = 'FACTS',
       model: string | null = null,
@@ -194,6 +211,13 @@ export class BossBriefingService {
         leaseUntil: null,
       },
     })
-    return { date: key, text, source, model, generatedAt: now, message }
+    return this.withMonitorWarning({
+      date: key,
+      text,
+      source,
+      model,
+      generatedAt: now,
+      message,
+    })
   }
 }
