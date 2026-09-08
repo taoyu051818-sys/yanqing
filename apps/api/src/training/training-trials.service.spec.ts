@@ -77,7 +77,7 @@ describe('TrainingTrialsService', () => {
       trainingSession: { findUnique: vi.fn() },
       trainingEnrollment: { findUnique: vi.fn() },
       student: { findUnique: vi.fn() },
-      customerLead: { findUnique: vi.fn(), update: vi.fn() },
+      customerLead: { findUnique: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       user: { findUnique: vi.fn() },
       courtBooking: { findFirst: vi.fn() },
       courtClosure: { findFirst: vi.fn() },
@@ -192,8 +192,8 @@ describe('TrainingTrialsService', () => {
         },
       }),
     })
-    expect(prisma.customerLead.update).toHaveBeenCalledWith({
-      where: { id: 'lead-1' },
+    expect(prisma.customerLead.updateMany).toHaveBeenCalledWith({
+      where: { id: 'lead-1', status: LeadStatus.CONTACTING },
       data: expect.objectContaining({ status: LeadStatus.TRIAL_RESERVED }),
     })
     expect(prisma.leadFollowUp.create).toHaveBeenCalled()

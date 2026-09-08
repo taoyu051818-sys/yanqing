@@ -965,6 +965,15 @@ export class AllianceService {
             where: { code: dto.code },
             include: { template: true },
           });
+          // Hold a shared row lock until redemption commits. Status changes
+          // acquire a conflicting update lock on this same merchant row.
+          await tx.$queryRaw`SELECT "id" FROM "Merchant" WHERE "id" = ${dto.merchantId} FOR SHARE`;
+          const currentMerchant = await tx.merchant.findUnique({
+            where: { id: dto.merchantId }, select: { status: true },
+          });
+          if (!currentMerchant) throw new NotFoundException('商户不存在');
+          if (currentMerchant.status !== UserStatus.ACTIVE)
+            throw new ConflictException('商户已停用，不能核销券码');
           if (!coupon) throw new NotFoundException('券码不存在');
           if (coupon.status !== CouponStatus.CLAIMED)
             throw new ConflictException('券码已被并发核销');
@@ -1040,8 +1049,7 @@ export class AllianceService {
         await this.recordDuplicateRedemption(preflight);
       }
       if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
+        isPrismaErrorCode(error, 'P2002') || isPrismaErrorCode(error, 'P2034')
       ) {
         const duplicate = await this.prisma.couponCode.findUnique({
           where: { idempotencyKey: dto.idempotencyKey },
@@ -1055,6 +1063,7 @@ export class AllianceService {
             throw new ConflictException('券核销幂等键已用于不同成交金额');
           return couponRedemptionResponse(duplicate);
         }
+        throw new ConflictException('商户或券码状态刚刚发生变化，请使用原幂等键重试');
       }
       throw error;
     }

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
+import { leadEvidenceStatus, leadTransitionData } from '../common/leads/lead-state.js'
 import { PrismaService } from '../database/prisma.service.js'
 import {
   AppRole,
@@ -474,6 +475,10 @@ export class TrainingTrialsService {
           scheduledStartsAt,
           scheduledEndsAt,
         )
+        const currentLead = lead ? await tx.customerLead.findUnique({ where: { id: lead.id } }) : null
+        if (lead && (!currentLead || !activeLeadStatuses.includes(currentLead.status))) {
+          throw new ConflictException('线索已变化，不能预约试听，请刷新后重试')
+        }
         const created = await tx.trainingTrial.create({
           data: {
             trialNo: trialNo(),
@@ -512,10 +517,10 @@ export class TrainingTrialsService {
             },
           },
         })
-        if (lead) {
+        if (currentLead) {
           await this.appendLeadEvidence(
             tx,
-            lead,
+            currentLead,
             actor,
             LeadStatus.TRIAL_RESERVED,
             'TRIAL_RESERVED',
@@ -781,7 +786,7 @@ export class TrainingTrialsService {
             tx,
             current.lead,
             actor,
-            options.leadStatus ?? current.lead.status,
+            options.leadStatus,
             `TRIAL_${options.action}`,
             reason,
             options.convertedMemberId,
@@ -899,24 +904,23 @@ export class TrainingTrialsService {
       convertedMemberId?: string | null
     },
     actor: AuthUser,
-    statusAfter: LeadStatus,
+    requestedStatus: LeadStatus | undefined,
     kind: string,
     reason: string,
     convertedMemberId?: string | null,
   ) {
-    const now = new Date()
-    await tx.customerLead.update({
-      where: { id: lead.id },
-      data: {
-        status: statusAfter,
-        ...(statusAfter === LeadStatus.CONVERTED
-          ? { convertedMemberId, convertedAt: now }
-          : {}),
-        ...(statusAfter === LeadStatus.LOST
-          ? { lostAt: now, lostReason: reason }
-          : {}),
-      },
-    })
+    if (convertedMemberId && lead.convertedMemberId && convertedMemberId !== lead.convertedMemberId) {
+      throw new ConflictException('试听转换会员与线索已关联会员不一致')
+    }
+    const statusAfter = leadEvidenceStatus(lead.status, requestedStatus)
+    const data = leadTransitionData(lead.status, statusAfter, { convertedMemberId, reason })
+    if (statusAfter !== lead.status) {
+      const changed = await tx.customerLead.updateMany({
+        where: { id: lead.id, status: lead.status },
+        data,
+      })
+      if (changed.count !== 1) throw new ConflictException('线索状态已变化，请刷新后重试')
+    }
     await tx.leadFollowUp.create({
       data: {
         leadId: lead.id,

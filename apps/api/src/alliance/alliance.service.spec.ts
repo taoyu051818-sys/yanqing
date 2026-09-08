@@ -187,6 +187,8 @@ const makeRedemptionPrisma = (shiftId: string | null = 'shift-1') => {
     .fn()
     .mockResolvedValue(shiftId ? { id: shiftId } : null);
   const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([{ id: 'merchant-1' }]),
+    merchant: { findUnique: vi.fn().mockResolvedValue({ status: UserStatus.ACTIVE }) },
     couponCode: {
       findUnique: vi.fn().mockResolvedValue(coupon),
       updateMany,

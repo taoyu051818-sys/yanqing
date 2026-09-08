@@ -10,6 +10,7 @@ import {
 import { validateDirectReferral } from '@yanqing/shared'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
+import { assertLeadProgression, LEAD_TERMINAL_STATUSES, leadTransitionData } from '../common/leads/lead-state.js'
 import { PrismaService } from '../database/prisma.service.js'
 import {
   AccountAdjustmentStatus,
@@ -41,7 +42,6 @@ import type {
   ReviewAccountAdjustmentDto,
 } from './members.dto.js'
 
-const LEAD_TERMINAL_STATUSES: LeadStatus[] = [LeadStatus.CONVERTED, LeadStatus.LOST, LeadStatus.ARCHIVED]
 const LEAD_WRITE_ROLES: AppRole[] = [AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN]
 const LEAD_VIEW_ROLES: AppRole[] = [...LEAD_WRITE_ROLES, AppRole.COACH]
 const referralInviteTokenHash = (value: string) =>
@@ -455,6 +455,7 @@ export class MembersService {
         convertedMemberId: true,
         createdAt: true,
         convertedAt: true,
+        lostAt: true,
         followUps: { select: { statusAfter: true } },
       },
       orderBy: [{ convertedAt: 'desc' }, { createdAt: 'desc' }],
@@ -503,7 +504,9 @@ export class MembersService {
         lead.status,
         ...lead.followUps.map((item) => item.statusAfter),
       ])
-      if (lead.status === LeadStatus.CONVERTED) {
+      const wasConverted = Boolean(lead.convertedAt)
+      const wasLost = Boolean(lead.lostAt)
+      if (wasConverted) {
         observedStatuses.add(LeadStatus.CONTACTING)
         observedStatuses.add(LeadStatus.TRIAL_RESERVED)
         observedStatuses.add(LeadStatus.ATTENDED)
@@ -518,8 +521,8 @@ export class MembersService {
         if (observedStatuses.has(LeadStatus.CONTACTING)) target.contacted += 1
         if (observedStatuses.has(LeadStatus.TRIAL_RESERVED)) target.trialReserved += 1
         if (observedStatuses.has(LeadStatus.ATTENDED)) target.attended += 1
-        if (lead.status === LeadStatus.CONVERTED) target.converted += 1
-        if (lead.status === LeadStatus.LOST) target.lost += 1
+        if (wasConverted) target.converted += 1
+        if (wasLost) target.lost += 1
       }
     }
     for (const member of members) {
@@ -665,7 +668,12 @@ export class MembersService {
       if (!lead) throw new NotFoundException('客户线索不存在')
       if (LEAD_TERMINAL_STATUSES.includes(lead.status)) throw new ConflictException('终态线索不能重新分配')
       if (lead.ownerId === dto.ownerId) return lead
-      const updated = await tx.customerLead.update({ where: { id }, data: { ownerId: dto.ownerId } })
+      const changed = await tx.customerLead.updateMany({
+        where: { id, status: lead.status, ownerId: lead.ownerId, updatedAt: lead.updatedAt },
+        data: { ownerId: dto.ownerId },
+      })
+      if (changed.count !== 1) throw new ConflictException('线索状态或负责人已变化，请刷新后重试')
+      const updated = await tx.customerLead.findUniqueOrThrow({ where: { id } })
       await this.auditLead(tx, actor, id, 'CUSTOMER_LEAD_ASSIGNED', { ownerId: lead.ownerId }, { ownerId: dto.ownerId })
       return updated
     })
@@ -678,11 +686,11 @@ export class MembersService {
       if (!lead) throw new NotFoundException('客户线索不存在')
       if (LEAD_TERMINAL_STATUSES.includes(lead.status)) throw new ConflictException('终态线索不能继续跟进')
       const nextStatus = dto.nextStatus ?? (lead.status === LeadStatus.NEW ? LeadStatus.CONTACTING : lead.status)
-      this.assertFollowUpTransition(lead.status, nextStatus)
+      assertLeadProgression(lead.status, nextStatus)
       const nextFollowUpAt = dto.nextFollowUpAt ? new Date(dto.nextFollowUpAt) : lead.nextFollowUpAt
       const changed = await tx.customerLead.updateMany({
         where: { id, status: lead.status },
-        data: { status: nextStatus, nextFollowUpAt },
+        data: { ...leadTransitionData(lead.status, nextStatus), nextFollowUpAt },
       })
       if (changed.count !== 1) throw new ConflictException('线索状态已变化，请刷新后重试')
       const followUp = await tx.leadFollowUp.create({
@@ -715,10 +723,9 @@ export class MembersService {
       if (!member?.memberProfile) throw new NotFoundException('转换目标不是有效会员')
       if (lead.status === LeadStatus.CONVERTED && lead.convertedMemberId === dto.memberId) return lead
       if (LEAD_TERMINAL_STATUSES.includes(lead.status)) throw new ConflictException('终态线索不能转换')
-      const convertedAt = new Date()
       const changed = await tx.customerLead.updateMany({
         where: { id, status: lead.status },
-        data: { status: LeadStatus.CONVERTED, convertedMemberId: dto.memberId, convertedAt, nextFollowUpAt: null },
+        data: leadTransitionData(lead.status, LeadStatus.CONVERTED, { convertedMemberId: dto.memberId }),
       })
       if (changed.count !== 1) throw new ConflictException('线索状态已变化，请刷新后重试')
       const updated = await tx.customerLead.findUniqueOrThrow({ where: { id } })
@@ -736,7 +743,7 @@ export class MembersService {
       if (LEAD_TERMINAL_STATUSES.includes(lead.status)) throw new ConflictException('终态线索不能标记丢失')
       const changed = await tx.customerLead.updateMany({
         where: { id, status: lead.status },
-        data: { status: LeadStatus.LOST, lostReason: dto.reason.trim(), lostAt: new Date(), nextFollowUpAt: null },
+        data: leadTransitionData(lead.status, LeadStatus.LOST, { reason: dto.reason }),
       })
       if (changed.count !== 1) throw new ConflictException('线索状态已变化，请刷新后重试')
       const updated = await tx.customerLead.findUniqueOrThrow({ where: { id } })
@@ -1522,18 +1529,6 @@ export class MembersService {
     if (!owner || owner.status !== UserStatus.ACTIVE || owner.deletedAt ||
       ![owner.primaryRole, ...owner.roles.map(({ role }) => role)].some((role) => assignable.includes(role))) {
       throw new BadRequestException('负责人不存在、已停用或角色不可分配')
-    }
-  }
-
-  private assertFollowUpTransition(before: LeadStatus, after: LeadStatus) {
-    const rank: Partial<Record<LeadStatus, number>> = {
-      [LeadStatus.NEW]: 0,
-      [LeadStatus.CONTACTING]: 1,
-      [LeadStatus.TRIAL_RESERVED]: 2,
-      [LeadStatus.ATTENDED]: 3,
-    }
-    if (rank[after] === undefined || rank[before] === undefined || rank[after]! < rank[before]!) {
-      throw new ConflictException('跟进状态不能回退或直接进入终态')
     }
   }
 
