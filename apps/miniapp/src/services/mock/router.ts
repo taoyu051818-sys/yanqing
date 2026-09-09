@@ -5001,6 +5001,37 @@ export async function mockRequest<T>(
     if (!['VENUE', 'GAME', 'TRAINING', 'MEMBERSHIP', 'RECHARGE', 'GOODS'].includes(order.businessType))
       throw new Error('请从赛事报名详情退出');
     if (order.status === "CANCELLED") return ok(mockOrderResponse(order));
+    if (order.businessType === 'VENUE' && order.status === 'PAID' && order.payableCents === 0 && order.paidCents === 0 && !order.refundedCents) {
+      const allBookings = getVenueBookings();
+      const bookings = allBookings.filter((row: any) => row.orderId === order.id);
+      const now = new Date();
+      if (order.completedAt || !bookings.length || bookings.some((row: any) => row.status !== 'CONFIRMED' || new Date(row.startsAt) <= now))
+        throw new Error('仅未开始、未核销的免费预约可取消');
+      if (order.refunds?.length || order.payments?.some((row: any) => row.amountCents > 0 && ['CREATED', 'PROCESSING', 'SUCCEEDED', 'REFUNDED'].includes(row.status)))
+        throw new Error('订单付款记录已变化，请刷新后重试');
+      const coupons = getCoupons();
+      const templates = getCouponTemplates();
+      const coupon = order.consumedCouponCode ? coupons.find((row: any) => row.code === order.consumedCouponCode) : null;
+      const template = coupon ? templates.find((row: any) => row.id === coupon.templateId) : null;
+      if (order.consumedCouponCode && (!coupon || coupon.status !== 'REDEEMED' || coupon.attributionOrderId !== order.id || coupon.holderId !== order.memberId || !template || template.redeemedCount < 1))
+        throw new Error('预约优惠券记录不一致，请联系工作人员核对');
+      if (coupon && template) {
+        Object.assign(coupon, { status: new Date(coupon.expiresAt) > now ? 'CLAIMED' : 'EXPIRED', redeemedAt: null, redeemedById: null,
+          redeemedMerchantId: null, attributionOrderId: null, attributedAmountCents: 0, idempotencyKey: null });
+        template.redeemedCount--;
+        saveCoupons(coupons); saveCouponTemplates(templates);
+      }
+      order.status = 'CANCELLED'; order.cancelledAt = now.toISOString();
+      order.bookings = bookings.map((row: any) => ({ ...row, status: 'CANCELLED', holdExpiresAt: null }));
+      saveVenueBookings(allBookings.map((row: any) => row.orderId === order.id ? { ...row, status: 'CANCELLED', holdExpiresAt: null } : row));
+      saveReferralRewards(getReferralRewards().map((row: any) => row.triggerOrderId === order.id && ['PENDING_OBSERVATION', 'AVAILABLE'].includes(row.status)
+        ? { ...row, status: 'REVERSED', reversedAt: now.toISOString() } : row));
+      saveOrders(orders);
+      saveMockMasterAudit({ action: 'ZERO_AMOUNT_VENUE_CANCELLED', objectType: 'Order', objectId: order.id, requestId: text(data.idempotencyKey),
+        commandHash: creationCommandHash({ kind: 'ZERO_AMOUNT_VENUE_CANCEL', orderId: order.id, reason: text(data.reason) }),
+        oldValue: { status: 'PAID' }, newValue: { status: 'CANCELLED', bookingStatus: 'CANCELLED', refundRequired: false, couponRestored: Boolean(coupon) }, reason: text(data.reason) });
+      return ok(mockOrderResponse(order));
+    }
     if (order.status !== "PENDING")
       throw new Error("订单已进入支付或履约流程，不能直接取消");
     if (order.businessType === 'GAME') {

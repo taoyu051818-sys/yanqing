@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onHide, onLoad, onPullDownRefresh, onShow, onUnload } from '@dcloudio/uni-app'
 import AppIcon from '../../components/AppIcon.vue'
 import SectionEmpty from '../../components/SectionEmpty.vue'
@@ -7,6 +7,8 @@ import ReasonForm from '../../components/ReasonForm.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 import { endpoints } from '../../services/api'
 import { isMockMode } from '../../services/http'
+import { captureAuthSession, isAuthSessionCurrent } from '../../services/auth-session'
+import { createPaymentConfirmation, canCancelFreeVenue } from '../../utils/payment-confirmation'
 import { apiFeedback } from '../../services/api-feedback'
 import { withPendingCreationKey } from '../../utils/pending-creation-key'
 import { dateTimeRange, idempotencyKey, money, shortDate } from '../../utils/format'
@@ -32,6 +34,13 @@ const paymentQuote = ref<any>(null)
 const balanceLoading = ref(false)
 const refundingId = ref('')
 const refundError = ref('')
+const confirmation = createPaymentConfirmation(endpoints.order, async (order) => {
+  orders.value = orders.value.map(item => item.id === order.id ? order : item)
+  await load()
+  await session.hydrate()
+})
+const paymentConfirmation = confirmation.state
+watch([() => session.isAuthenticated, () => session.user?.id], () => confirmation.stop(), { flush: 'sync' })
 let canWechatPay = isMockMode
 // #ifdef MP-WEIXIN
 canWechatPay = true
@@ -51,7 +60,7 @@ const paymentChoices = computed<Array<{ channel: string; label: string; note: st
 }))
 const refundableAmount = (order: any) => Math.max(0, Number(order.paidCents ?? order.payableCents ?? 0) - Number(order.refundedCents || 0))
 async function preparePay(order: any) {
-  if (actionKey.value || balanceLoading.value) return
+  if (actionKey.value || balanceLoading.value || paymentConfirmation.value?.orderId === order.id) return
   payingId.value = order.id; paymentChannel.value = 'WECHAT'; paymentError.value = ''
   paymentQuote.value = null; balanceLoading.value = true
   try {
@@ -136,7 +145,9 @@ onLoad((query) => {
   if (filters.some((item) => item.status === query?.status)) statusFilter.value = String(query?.status || '')
 })
 async function pay(order: any) {
-  if (actionKey.value || deadlineExpired(order) || order.status !== 'PENDING') return
+  if (actionKey.value || paymentConfirmation.value?.orderId === order.id || deadlineExpired(order) || order.status !== 'PENDING') return
+  const owner = captureAuthSession()
+  let nativePaymentStarted = false
   const channel = paymentChannel.value
   if (!paymentChoices.value.some(item => item.channel === channel && !item.disabled)) return
   paymentError.value = ''
@@ -144,37 +155,46 @@ async function pay(order: any) {
   try {
     const payment: any = await withPendingCreationKey('order.payment', { orderId: order.id, channel, expectedDebitAmount: paymentQuote.value?.options.find((item: any) => item.channel === channel)?.debitAmount }, idempotencyKey =>
       endpoints.payOrder(order.id, { channel, idempotencyKey, expectedDebitAmount: paymentQuote.value?.options.find((item: any) => item.channel === channel)?.debitAmount }))
+    if (!isAuthSessionCurrent(owner)) return
     const wechatPay = payment.wechatPay || payment.providerPayload?.wechatPay
     if (!isMockMode && channel === 'WECHAT' && wechatPay) {
+      nativePaymentStarted = true
       await uni.requestPayment(wechatPay)
+      if (!isAuthSessionCurrent(owner)) return
       uni.showToast({ title: '支付结果确认中', icon: 'success' })
     } else {
       uni.showToast({ title: payment.status === 'SUCCEEDED' ? (order.payableCents === 0 ? '订单确认成功' : '支付成功') : '正在同步支付结果', icon: 'none' })
     }
     payingId.value = ''
+    if (!isMockMode && channel === 'WECHAT' && payment.status === 'PROCESSING') { confirmation.start(order.id); return }
     await load()
     await session.hydrate()
   } catch (cause: any) {
+    if (!isAuthSessionCurrent(owner)) return
+    if (nativePaymentStarted && !/cancel/.test(cause?.errMsg || '')) { payingId.value = ''; confirmation.start(order.id) }
     paymentError.value = /cancel/.test(cause?.errMsg || '') ? '你已取消付款，订单仍保留，可稍后重试。' : apiFeedback(cause?.message, cause?.statusCode || 0)
   }
   finally { actionKey.value = '' }
 }
 async function cancelPending(order: any) {
-  if (actionKey.value) return
+  if (actionKey.value || paymentConfirmation.value?.orderId === order.id) return
+  const owner = captureAuthSession()
+  const free = canCancelFreeVenue(order)
+  if (order.status !== 'PENDING' && !free) return
   const result = await uni.showModal({
-    title: '取消待支付订单',
-    content: order.businessType === 'GAME' ? `取消“${order.title}”后将释放你的报名名额，有候补时按顺序晋级。不会取消整场球局。` : order.businessType === 'VENUE' ? `取消“${order.title}”后将立即释放场地。` : order.businessType === 'TRAINING' ? '取消后释放班级预留名额，不产生消课或退款。' : `取消“${order.title}”不扣款，不会发放会员权益、充值余额或扣减库存。`,
+    title: free ? '取消免费预约' : '取消待支付订单',
+    content: free ? '取消后立即释放场地，不产生退款。使用的优惠券将退回，已过期的券无法继续使用。' : order.businessType === 'GAME' ? `取消“${order.title}”后将释放你的报名名额，有候补时按顺序晋级。不会取消整场球局。` : order.businessType === 'VENUE' ? `取消“${order.title}”后将立即释放场地。` : order.businessType === 'TRAINING' ? '取消后释放班级预留名额，不产生消课或退款。' : `取消“${order.title}”不扣款，不会发放会员权益、充值余额或扣减库存。`,
     confirmText: '确认取消',
     confirmColor: '#a52626',
   })
-  if (!result.confirm) return
+  if (!result.confirm || actionKey.value || !isAuthSessionCurrent(owner)) return
   actionKey.value = `cancel:${order.id}`
   try {
     await endpoints.cancelPendingOrder(order.id, {
-      reason: '会员主动取消待支付订单',
+      reason: free ? '会员主动取消免费场地预约' : '会员主动取消待支付订单',
       idempotencyKey: idempotencyKey(`cancel-${order.id}`),
     })
-    uni.showToast({ title: '待付款订单已取消', icon: 'success' })
+    uni.showToast({ title: free ? '免费预约已取消' : '待付款订单已取消', icon: 'success' })
     await load()
   } catch (cause: any) {
     uni.showToast({ title: cause?.message || '取消订单失败', icon: 'none' })
@@ -214,9 +234,9 @@ function stopCountdown() {
   if (countdownTimer) clearInterval(countdownTimer)
   countdownTimer = undefined
 }
-onShow(() => { startCountdown(); void load() })
-onHide(stopCountdown)
-onUnload(stopCountdown)
+onShow(() => { startCountdown(); confirmation.resume(); void load() })
+onHide(() => { stopCountdown(); confirmation.pause() })
+onUnload(() => { stopCountdown(); confirmation.stop() })
 onPullDownRefresh(() => load())
 </script>
 
@@ -238,14 +258,19 @@ onPullDownRefresh(() => load())
       <button v-if="order.businessType === 'MEMBERSHIP' && order.status === 'COMPLETED'" class="secondary related-order" @tap="openMemberPage('/pages/profile/index')">查看我的会员权益</button>
       <text v-if="order.status === 'REFUND_PENDING'" class="use-note">退款申请处理中，请在本订单查看处理结果。</text>
       <view v-if="order.refunds?.length" class="refund-history"><text v-for="item in order.refunds" :key="item.id">退款 {{ money(item.amountCents) }} · {{ ({ REQUESTED: '待审核', PENDING: '待审核', APPROVED: '已通过', PROCESSING: '处理中', SUCCEEDED: '已退款', REJECTED: '未通过', FAILED: '处理失败', CANCELLED: '已撤回' } as any)[item.status] || '处理中' }}</text></view>
-      <view v-if="order.status === 'PENDING'" class="pending-panel">
+      <view v-if="paymentConfirmation?.orderId === order.id && order.status === 'PENDING'" class="payment-selection" role="status" aria-live="polite">
+        <text class="title">支付结果确认中</text>
+        <text class="use-note">{{ paymentConfirmation?.message }}</text>
+        <button class="secondary" :loading="paymentConfirmation?.checking" :disabled="paymentConfirmation?.checking" @tap="confirmation.start(order.id)">{{ paymentConfirmation?.checking ? '正在查询…' : '重新查询支付结果' }}</button>
+      </view>
+      <view v-if="order.status === 'PENDING' && paymentConfirmation?.orderId !== order.id" class="pending-panel">
         <view class="payment-window"><AppIcon name="clock" :size="28" :tone="deadlineExpired(order) ? 'danger' : 'accent'" /><text>{{ paymentCountdown(order) }}</text></view>
         <view class="actions">
           <button v-if="['VENUE', 'GAME', 'TRAINING', 'MEMBERSHIP', 'RECHARGE', 'GOODS'].includes(order.businessType)" class="danger small" :loading="actionKey === `cancel:${order.id}`" :disabled="Boolean(actionKey) || deadlineExpired(order)" @tap="cancelPending(order)"><AppIcon name="close" :size="30" tone="danger" />取消订单</button>
           <button v-if="payingId !== order.id" class="primary small" :loading="actionKey === `pay:${order.id}`" :disabled="Boolean(actionKey) || deadlineExpired(order)" @tap="preparePay(order)"><AppIcon name="finance" :size="30" tone="inverse" />{{ order.payableCents === 0 ? '确认订单' : '立即支付' }}</button>
         </view>
       </view>
-      <view v-if="payingId === order.id && order.status === 'PENDING'" class="payment-selection">
+      <view v-if="payingId === order.id && order.status === 'PENDING' && paymentConfirmation?.orderId !== order.id" class="payment-selection">
         <text class="title">{{ order.payableCents === 0 ? '确认免费订单' : '选择支付方式' }}</text>
         <text v-if="order.businessType === 'RECHARGE'" class="use-note">充值订单仅支持微信支付，不可使用已有余额充值。</text>
         <text v-if="balanceLoading" class="use-note">正在核对订单…</text>
@@ -256,6 +281,7 @@ onPullDownRefresh(() => load())
         <button class="primary" :loading="actionKey === 'pay:' + order.id" :disabled="Boolean(actionKey) || deadlineExpired(order) || !paymentChoices.some(item => item.channel === paymentChannel && !item.disabled)" @tap="pay(order)">{{ order.payableCents === 0 ? '免费确认' : '确认支付 ' + money(order.payableCents) }}</button>
         <button class="secondary" :disabled="Boolean(actionKey)" @tap="payingId = ''">{{ order.payableCents === 0 ? '稍后确认' : '暂不付款' }}</button>
       </view>
+      <button v-if="canCancelFreeVenue(order, nowMs)" class="secondary related-order" :loading="actionKey === 'cancel:' + order.id" :disabled="Boolean(actionKey)" @tap="cancelPending(order)">取消免费预约</button>
       <button v-if="['GAME','EVENT','TRAINING'].includes(order.businessType)" class="secondary related-order" @tap="openRelated(order)">{{ order.businessType === 'TRAINING' ? '查看课程与退费' : order.businessType === 'EVENT' ? '查看报名与取消' : '查看球局安排' }}</button>
       <view v-if="!['EVENT','TRAINING'].includes(order.businessType) && ['PAID','CHECKED_IN','COMPLETED','PARTIALLY_REFUNDED'].includes(order.status) && refundableAmount(order) > 0" class="actions"><button class="secondary small" :disabled="Boolean(actionKey)" @tap="refundingId = order.id; refundError = ''"><AppIcon name="refund" :size="28" />申请退款</button></view>
       <ReasonForm v-if="refundingId === order.id && !['EVENT','TRAINING'].includes(order.businessType) && ['PAID','CHECKED_IN','COMPLETED','PARTIALLY_REFUNDED'].includes(order.status) && refundableAmount(order) > 0" :key="order.id" title="申请退款" :description="'申请金额 ' + money(refundableAmount(order)) + '。提交后由工作人员按订单状态和退款规则审核，进度在本订单查看。'" :busy="Boolean(actionKey)" :error="refundError" confirm-text="确认申请退款" @cancel="refundingId = ''" @submit="refund(order, $event)" />

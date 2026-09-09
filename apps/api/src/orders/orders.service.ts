@@ -1,3 +1,4 @@
+import { cancelZeroAmountVenueOrder } from './zero-amount-venue-order.js';
 import { applyTrainingRefund } from '../training/training-refund.js';
 import { cancelMembershipEntitlement, membershipPurchaseUnavailable, assertMembershipPurchaseCompatible } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
@@ -341,6 +342,10 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
       throw new BadRequestException('请从赛事报名详情退出，系统会同步队伍和候补名额');
     }
     if (order.status === OrderStatus.CANCELLED) return orderResponse(order);
+    if (actor && order.businessType === BusinessType.VENUE && order.status === OrderStatus.PAID &&
+      order.payableCents === 0 && order.paidCents === 0 && order.refundedCents === 0) {
+      return cancelZeroAmountVenueOrder(this.prisma, orderId, actor, reason, idempotencyKey);
+    }
     if (order.status !== OrderStatus.PENDING) {
       throw new ConflictException('订单已进入支付或履约流程，不能直接取消');
     }
