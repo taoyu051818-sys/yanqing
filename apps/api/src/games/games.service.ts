@@ -1,3 +1,4 @@
+import { cancelZeroAmountActivityOrder, isZeroAmountConfirmedActivityOrder } from '../orders/zero-amount-activity-order.js';
 import { canManageGames } from '../common/auth/operation-scopes.js'
 import { randomBytes } from 'node:crypto'
 import { stateTransition, lockAdmissionOrder } from '../common/state-transition.js'
@@ -973,6 +974,10 @@ export class GamesService {
             })
             if (cancelled.count !== 1) continue
             cancelledRegistrationIds.push(registration.id)
+            if (isZeroAmountConfirmedActivityOrder(registration.order)) {
+              await cancelZeroAmountActivityOrder(tx, registration.order, actor, reason, now)
+              continue
+            }
             if (registration.order?.status !== OrderStatus.PENDING) continue
             const cancelledOrder = await tx.order.updateMany({
               where: { id: registration.order.id, status: OrderStatus.PENDING },

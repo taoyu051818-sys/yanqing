@@ -1,3 +1,4 @@
+import { cancelZeroAmountActivityOrder, isZeroAmountConfirmedActivityOrder } from '../orders/zero-amount-activity-order.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { stateTransition, lockAdmissionOrder } from '../common/state-transition.js';
 import { membershipEligibility } from '../memberships/membership-eligibility.js';
@@ -2827,9 +2828,11 @@ export class EventsService {
             cancelRequestedAt: now,
           };
 
+          const zeroAmountOrder = team.status === RegistrationStatus.PAID &&
+            isZeroAmountConfirmedActivityOrder(team.order);
           if (
             team.status === RegistrationStatus.WAITLISTED ||
-            team.status === RegistrationStatus.REGISTERED
+            team.status === RegistrationStatus.REGISTERED || zeroAmountOrder
           ) {
             if (
               team.status === RegistrationStatus.REGISTERED &&
@@ -2856,14 +2859,18 @@ export class EventsService {
               throw new ConflictException('报名状态已变化，请使用原命令重试');
             }
             if (team.order) {
-              const cancelled = await tx.order.updateMany({
-                where: { id: team.order.id, status: OrderStatus.PENDING },
-                data: { status: OrderStatus.CANCELLED, cancelledAt: now },
-              });
-              if (cancelled.count !== 1) {
-                throw new ConflictException(
-                  '待支付订单状态已变化，请刷新后重试',
-                );
+              if (zeroAmountOrder) {
+                await cancelZeroAmountActivityOrder(tx, team.order, actor, reason, now);
+              } else {
+                const cancelled = await tx.order.updateMany({
+                  where: { id: team.order.id, status: OrderStatus.PENDING },
+                  data: { status: OrderStatus.CANCELLED, cancelledAt: now },
+                });
+                if (cancelled.count !== 1) {
+                  throw new ConflictException(
+                    '待支付订单状态已变化，请刷新后重试',
+                  );
+                }
               }
               await tx.payment.updateMany({
                 where: {
@@ -3231,6 +3238,9 @@ export class EventsService {
                 },
                 data: { status: PaymentStatus.CLOSED },
               });
+            }
+            if (isZeroAmountConfirmedActivityOrder(team.order)) {
+              await cancelZeroAmountActivityOrder(tx, team.order, actor, reason, now);
             }
             await tx.eventTeam.updateMany({
               where: {

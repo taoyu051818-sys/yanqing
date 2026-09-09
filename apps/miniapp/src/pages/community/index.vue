@@ -35,7 +35,11 @@ const errorMessage = ref("");
 const cancellingEventId = ref("");
 const cancelError = ref("");
 function eventCancelDescription(event: any) {
-  const status = eventRegistration(event.id)?.registration?.status;
+  const registration = eventRegistration(event.id)?.registration;
+  const status = registration?.status;
+  if (status === 'PAID' && registration.order?.payableCents === 0 && registration.order?.paidCents === 0) {
+    return '确认后退出报名，无需退款，释放席位并按顺序晋级候补。';
+  }
   return status === 'PAID'
     ? '确认后进入退款审批；审批成功前仍占用席位且不能签到，驳回后恢复报名。'
     : status === 'WAITLISTED'
