@@ -1,12 +1,13 @@
+import { createOrderFinalizerService } from './support/domain-consumer-fixtures.js';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../src/database/prisma.service.js';
-import { GamesService } from '../src/games/games.service.js';
+import { GamesService } from './support/games-fixture.js';
 import { EventsService } from './support/events-service-fixture.js';
-import { OrdersService } from '../src/orders/orders.service.js';
-import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';
-import { ConsignmentSettlementService } from '../src/inventory/consignment-settlement.service.js';
+import { OrdersService } from './support/orders-fixture.js';
+
+import { ConsignmentSettlementService } from './support/consignment-settlement-fixture.js';
 import type { AuthUser } from '../src/common/auth/auth-user.js';
 import type { AppRole } from '../src/generated/prisma/client.js';
 
@@ -45,7 +46,7 @@ describe.skipIf(!url)('admission and host state transitions', () => {
     orders = new OrdersService(
       db,
       new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
-      new OrderFinalizerService(new ConsignmentSettlementService(db)),
+      createOrderFinalizerService(new ConsignmentSettlementService(db)),
       {} as never,
     );
     admin = await person('ADMIN');
@@ -465,7 +466,7 @@ describe.skipIf(!url)('admission and host state transitions', () => {
       const refundService = new OrdersService(
         refundDb as never,
         new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
-        new OrderFinalizerService(
+        createOrderFinalizerService(
           new ConsignmentSettlementService(refundDb as never),
         ),
         {} as never,

@@ -1,3 +1,4 @@
+import { createOrderFinalizerService } from '../../test/support/domain-consumer-fixtures.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -10,10 +11,7 @@ import {
   SourceChannel,
   SubjectAccount,
 } from '../generated/prisma/client.js';
-import {
-  OrderFinalizerService,
-  type PayableOrder,
-} from './order-finalizer.service.js';
+import { type PayableOrder } from './order-finalizer.service.js';
 
 const consignmentHooks = () => ({
   recordCompletedGoodsSale: vi.fn().mockResolvedValue([]),
@@ -80,7 +78,7 @@ describe('event payment finalization reservation boundary', () => {
     };
 
     await expect(
-      new OrderFinalizerService(consignmentHooks() as never).finalize(
+      createOrderFinalizerService(consignmentHooks() as never).finalize(
         tx as never,
         eventOrder(),
         {
@@ -121,7 +119,7 @@ describe('event payment finalization reservation boundary', () => {
     };
     const now = new Date('2026-08-30T00:00:00Z');
 
-    await new OrderFinalizerService(consignmentHooks() as never).finalize(
+    await createOrderFinalizerService(consignmentHooks() as never).finalize(
       tx as never,
       eventOrder(),
       {

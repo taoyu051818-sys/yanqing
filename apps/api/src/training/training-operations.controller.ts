@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
+import { Inject } from '@nestjs/common';
+import { TrainingTrialBookingService } from './trials/booking/training-trials-booking.service.js';
+import { TrainingTrialFollowUpService } from './trials/follow-up/training-trials-follow-up.service.js';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
-import { CurrentUser, Roles } from '../common/auth/auth.decorators.js'
-import type { AuthUser } from '../common/auth/auth-user.js'
-import { AppRole } from '../generated/prisma/enums.js'
+import { CurrentUser, Roles } from '../common/auth/auth.decorators.js';
+import type { AuthUser } from '../common/auth/auth-user.js';
+import { AppRole } from '../generated/prisma/enums.js';
 import {
   AssessTrainingTrialDto,
   ConvertTrainingTrialDto,
@@ -13,31 +16,36 @@ import {
   TrainingTrialActionDto,
   TrainingTrialQueryDto,
   YouthTrainingRuleQueryDto,
-} from './training-operations.dto.js'
-import { TrainingTrialsService } from './training-trials.service.js'
-import { YouthTrainingRulesService } from './youth-training-rules.service.js'
+} from './training-operations.dto.js';
+
+import { YouthTrainingRulesService } from './youth-training-rules.service.js';
 
 @ApiTags('培训试听')
 @ApiBearerAuth()
 @Controller('training/trials')
 export class TrainingTrialsController {
-  constructor(private readonly trials: TrainingTrialsService) {}
+  constructor(
+    @Inject(TrainingTrialBookingService)
+    private readonly trialsTrainingTrialBooking: TrainingTrialBookingService,
+    @Inject(TrainingTrialFollowUpService)
+    private readonly trialsTrainingTrialFollowUp: TrainingTrialFollowUpService,
+  ) {}
 
   @Get('mine')
   mine(@Query() query: TrainingTrialQueryDto, @CurrentUser() actor: AuthUser) {
-    return this.trials.list(query, actor, true)
+    return this.trialsTrainingTrialBooking.list(query, actor, true);
   }
 
   @Get()
   @Roles(AppRole.COACH, AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   list(@Query() query: TrainingTrialQueryDto, @CurrentUser() actor: AuthUser) {
-    return this.trials.list(query, actor)
+    return this.trialsTrainingTrialBooking.list(query, actor);
   }
 
   @Post()
   @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   create(@Body() dto: CreateTrainingTrialDto, @CurrentUser() actor: AuthUser) {
-    return this.trials.create(dto, actor)
+    return this.trialsTrainingTrialBooking.create(dto, actor);
   }
 
   @Post(':id/check-in')
@@ -47,7 +55,7 @@ export class TrainingTrialsController {
     @Body() dto: TrainingTrialActionDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.trials.checkIn(id, dto, actor)
+    return this.trialsTrainingTrialFollowUp.checkIn(id, dto, actor);
   }
 
   @Post(':id/no-show')
@@ -57,7 +65,7 @@ export class TrainingTrialsController {
     @Body() dto: TrainingTrialActionDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.trials.noShow(id, dto, actor)
+    return this.trialsTrainingTrialFollowUp.noShow(id, dto, actor);
   }
 
   @Post(':id/assess')
@@ -67,7 +75,7 @@ export class TrainingTrialsController {
     @Body() dto: AssessTrainingTrialDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.trials.assess(id, dto, actor)
+    return this.trialsTrainingTrialFollowUp.assess(id, dto, actor);
   }
 
   @Post(':id/convert')
@@ -77,7 +85,7 @@ export class TrainingTrialsController {
     @Body() dto: ConvertTrainingTrialDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.trials.convert(id, dto, actor)
+    return this.trialsTrainingTrialFollowUp.convert(id, dto, actor);
   }
 
   @Post(':id/lost')
@@ -87,7 +95,7 @@ export class TrainingTrialsController {
     @Body() dto: TrainingTrialActionDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.trials.lost(id, dto, actor)
+    return this.trialsTrainingTrialFollowUp.lost(id, dto, actor);
   }
 
   @Post(':id/cancel')
@@ -97,7 +105,7 @@ export class TrainingTrialsController {
     @Body() dto: TrainingTrialActionDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.trials.cancel(id, dto, actor)
+    return this.trialsTrainingTrialFollowUp.cancel(id, dto, actor);
   }
 }
 
@@ -109,7 +117,7 @@ export class YouthTrainingRulesController {
 
   @Get('active')
   active() {
-    return this.rules.active()
+    return this.rules.active();
   }
 
   @Get()
@@ -118,7 +126,7 @@ export class YouthTrainingRulesController {
     @Query() query: YouthTrainingRuleQueryDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.rules.list(query, actor)
+    return this.rules.list(query, actor);
   }
 
   @Post()
@@ -127,7 +135,7 @@ export class YouthTrainingRulesController {
     @Body() dto: CreateYouthTrainingRuleDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.rules.create(dto, actor)
+    return this.rules.create(dto, actor);
   }
 
   @Post(':id/publish')
@@ -137,7 +145,7 @@ export class YouthTrainingRulesController {
     @Body() dto: DecideYouthTrainingRuleDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.rules.publish(id, dto, actor)
+    return this.rules.publish(id, dto, actor);
   }
 
   @Post(':id/reject')
@@ -147,6 +155,6 @@ export class YouthTrainingRulesController {
     @Body() dto: DecideYouthTrainingRuleDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.rules.reject(id, dto, actor)
+    return this.rules.reject(id, dto, actor);
   }
 }

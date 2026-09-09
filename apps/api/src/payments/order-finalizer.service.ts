@@ -1,7 +1,12 @@
+import { Inject } from '@nestjs/common';
+import { ConsignmentLedgerService } from '../inventory/consignment/ledger/consignment-settlement-ledger.service.js';
 import { transitionOrder } from '../orders/order-transition.js';
 import { activateMembership } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
-import { syncTrainingEnrollmentRoster, trainingActiveSeatWhere } from '../training/training-roster.js';
+import {
+  syncTrainingEnrollmentRoster,
+  trainingActiveSeatWhere,
+} from '../training/training-roster.js';
 import {
   ConflictException,
   Injectable,
@@ -24,7 +29,7 @@ import {
   TrainingEnrollmentStatus,
 } from '../generated/prisma/client.js';
 import { applyGoodsSale } from '../inventory/goods-stock.js';
-import { ConsignmentSettlementService } from '../inventory/consignment-settlement.service.js';
+
 import { completeOrderFulfillment } from '../orders/order-fulfillment.js';
 
 const INSTANT_FULFILLMENT_TYPES: ReadonlySet<BusinessType> = new Set([
@@ -52,7 +57,8 @@ export type PayableOrder = Prisma.OrderGetPayload<{
 @Injectable()
 export class OrderFinalizerService {
   constructor(
-    private readonly consignmentSettlements: ConsignmentSettlementService,
+    @Inject(ConsignmentLedgerService)
+    private readonly consignmentSettlementsConsignmentLedger: ConsignmentLedgerService,
   ) {}
 
   async finalize(
@@ -90,9 +96,7 @@ export class OrderFinalizerService {
       },
     });
     if (current && current.status !== OrderStatus.PENDING) {
-      if (
-        current.status === OrderStatus.CANCELLED
-      ) {
+      if (current.status === OrderStatus.CANCELLED) {
         throw new ConflictException('订单已取消，付款必须进入补偿退款流程');
       }
       if (
@@ -112,8 +116,15 @@ export class OrderFinalizerService {
       return;
     }
     if (order.businessType === BusinessType.GAME) {
-      const registration = await tx.gameRegistration.findUnique({ where: { orderId: order.id }, include: { game: true } });
-      const unavailable = gamePaymentUnavailable(registration, order.createdAt, now);
+      const registration = await tx.gameRegistration.findUnique({
+        where: { orderId: order.id },
+        include: { game: true },
+      });
+      const unavailable = gamePaymentUnavailable(
+        registration,
+        order.createdAt,
+        now,
+      );
       if (unavailable) throw new ConflictException(unavailable);
     }
     if (order.businessType === BusinessType.EVENT) {
@@ -196,7 +207,11 @@ export class OrderFinalizerService {
       where: { orderId: order.id, status: 'REGISTERED' },
       data: { status: 'PAID' },
     });
-    if (order.businessType === BusinessType.GAME && paidGameRegistration.count !== 1) throw new ConflictException('球局报名席位已变化');
+    if (
+      order.businessType === BusinessType.GAME &&
+      paidGameRegistration.count !== 1
+    )
+      throw new ConflictException('球局报名席位已变化');
     if (order.businessType === BusinessType.EVENT) {
       const paidTeam = await tx.eventTeam.updateMany({
         where: {
@@ -212,12 +227,29 @@ export class OrderFinalizerService {
     }
 
     if (order.membership) {
-      const entitlement = await activateMembership(tx, { parameterSnapshot: order.parameterSnapshot, membership: order.membership }, now);
-      await tx.auditLog.create({ data: {
-        actorId: paymentActorId, actorRole, action: 'MEMBERSHIP_ENTITLEMENT_ACTIVATED', objectType: 'MemberSubscription', objectId: order.membership.id,
-        reason: '会员付款激活，同等级续费顺延',
-        newValue: { startsAt: entitlement.startsAt.toISOString(), endsAt: entitlement.endsAt.toISOString(), level: entitlement.profile.level },
-      } });
+      const entitlement = await activateMembership(
+        tx,
+        {
+          parameterSnapshot: order.parameterSnapshot,
+          membership: order.membership,
+        },
+        now,
+      );
+      await tx.auditLog.create({
+        data: {
+          actorId: paymentActorId,
+          actorRole,
+          action: 'MEMBERSHIP_ENTITLEMENT_ACTIVATED',
+          objectType: 'MemberSubscription',
+          objectId: order.membership.id,
+          reason: '会员付款激活，同等级续费顺延',
+          newValue: {
+            startsAt: entitlement.startsAt.toISOString(),
+            endsAt: entitlement.endsAt.toISOString(),
+            level: entitlement.profile.level,
+          },
+        },
+      });
     }
 
     if (order.businessType === BusinessType.RECHARGE) {
@@ -492,7 +524,7 @@ export class OrderFinalizerService {
     actorId: string,
     actorRole: AppRole,
   ) {
-    return this.consignmentSettlements.recordSucceededGoodsRefund(
+    return this.consignmentSettlementsConsignmentLedger.recordSucceededGoodsRefund(
       tx,
       refundId,
       actorId,
@@ -544,7 +576,7 @@ export class OrderFinalizerService {
       },
     });
     if (order.businessType === BusinessType.GOODS) {
-      await this.consignmentSettlements.recordCompletedGoodsSale(
+      await this.consignmentSettlementsConsignmentLedger.recordCompletedGoodsSale(
         tx,
         order.id,
         actorId,

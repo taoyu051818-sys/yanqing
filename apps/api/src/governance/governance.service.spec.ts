@@ -13,7 +13,7 @@ import {
   RiskStatus,
   UserStatus,
 } from '../generated/prisma/enums.js';
-import { GovernanceService } from './governance.service.js';
+import { GovernanceService } from '../../test/support/governance-fixture.js';
 
 const superAdmin: AuthUser = {
   sub: 'super-1',

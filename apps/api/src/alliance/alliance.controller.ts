@@ -1,9 +1,14 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common'
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
+import { Inject } from '@nestjs/common';
+import { AllianceMerchantsService } from './merchants/alliance-merchants.service.js';
+import { AllianceTemplatesService } from './templates/alliance-templates.service.js';
+import { AllianceCouponsService } from './coupons/alliance-coupons.service.js';
+import { AllianceSettlementsService } from './settlements/alliance-settlements.service.js';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
-import { CurrentUser, Roles } from '../common/auth/auth.decorators.js'
-import type { AuthUser } from '../common/auth/auth-user.js'
-import { AppRole } from '../generated/prisma/enums.js'
+import { CurrentUser, Roles } from '../common/auth/auth.decorators.js';
+import type { AuthUser } from '../common/auth/auth-user.js';
+import { AppRole } from '../generated/prisma/enums.js';
 import {
   AllianceSettlementDto,
   CreateCouponTemplateDto,
@@ -13,24 +18,35 @@ import {
   SetCouponTemplateStatusDto,
   SetMerchantStatusDto,
   SettlementActionDto,
-} from './alliance.dto.js'
-import { AllianceService } from './alliance.service.js'
+} from './alliance.dto.js';
 
 @ApiTags('联盟商户与唯一券')
 @ApiBearerAuth()
 @Controller('alliance')
 export class AllianceController {
-  constructor(private readonly alliance: AllianceService) {}
+  constructor(
+    @Inject(AllianceMerchantsService)
+    private readonly allianceAllianceMerchants: AllianceMerchantsService,
+    @Inject(AllianceTemplatesService)
+    private readonly allianceAllianceTemplates: AllianceTemplatesService,
+    @Inject(AllianceCouponsService)
+    private readonly allianceAllianceCoupons: AllianceCouponsService,
+    @Inject(AllianceSettlementsService)
+    private readonly allianceAllianceSettlements: AllianceSettlementsService,
+  ) {}
 
   @Get('merchants')
   merchants(@CurrentUser() actor: AuthUser) {
-    return this.alliance.listMerchants(actor)
+    return this.allianceAllianceMerchants.listMerchants(actor);
   }
 
   @Post('merchants')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
-  createMerchant(@Body() dto: CreateMerchantDto, @CurrentUser() actor: AuthUser) {
-    return this.alliance.createMerchant(dto, actor)
+  createMerchant(
+    @Body() dto: CreateMerchantDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.allianceAllianceMerchants.createMerchant(dto, actor);
   }
 
   @Post('merchants/:id/status')
@@ -40,19 +56,22 @@ export class AllianceController {
     @Body() dto: SetMerchantStatusDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.alliance.setMerchantStatus(id, dto, actor)
+    return this.allianceAllianceMerchants.setMerchantStatus(id, dto, actor);
   }
 
   @Get('coupon-templates')
   @Roles(AppRole.MERCHANT, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   templates(@CurrentUser() actor: AuthUser) {
-    return this.alliance.listTemplates(actor)
+    return this.allianceAllianceTemplates.listTemplates(actor);
   }
 
   @Post('coupon-templates')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
-  createTemplate(@Body() dto: CreateCouponTemplateDto, @CurrentUser() actor: AuthUser) {
-    return this.alliance.createTemplate(dto, actor)
+  createTemplate(
+    @Body() dto: CreateCouponTemplateDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.allianceAllianceTemplates.createTemplate(dto, actor);
   }
 
   @Post('coupon-templates/:id/status')
@@ -62,7 +81,7 @@ export class AllianceController {
     @Body() dto: SetCouponTemplateStatusDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.alliance.setTemplateStatus(id, dto, actor)
+    return this.allianceAllianceTemplates.setTemplateStatus(id, dto, actor);
   }
 
   @Post('coupon-templates/:id/codes')
@@ -72,52 +91,60 @@ export class AllianceController {
     @Body() dto: GenerateCouponCodesDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.alliance.generateCodes(id, dto, actor)
+    return this.allianceAllianceCoupons.generateCodes(id, dto, actor);
   }
 
   @Post('coupons/:code/claim')
   claim(@Param('code') code: string, @CurrentUser() actor: AuthUser) {
-    return this.alliance.claim(code, actor)
+    return this.allianceAllianceCoupons.claim(code, actor);
   }
 
   @Get('coupons/me')
   myCoupons(@CurrentUser() actor: AuthUser) {
-    return this.alliance.listMyCoupons(actor)
+    return this.allianceAllianceCoupons.listMyCoupons(actor);
   }
 
   @Post('coupons/redeem')
-  @Roles(AppRole.MERCHANT, AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  @Roles(
+    AppRole.MERCHANT,
+    AppRole.FRONT_DESK,
+    AppRole.ADMIN,
+    AppRole.SUPER_ADMIN,
+  )
   redeem(@Body() dto: RedeemCouponDto, @CurrentUser() actor: AuthUser) {
-    return this.alliance.redeem(dto, actor)
+    return this.allianceAllianceCoupons.redeem(dto, actor);
   }
 
   @Get('coupons/:code/qr')
   qr(@Param('code') code: string, @CurrentUser() actor: AuthUser) {
-    return this.alliance.qr(code, actor)
+    return this.allianceAllianceCoupons.qr(code, actor);
   }
 
   @Post('settlements')
   @Roles(AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN)
-  settlement(@Body() dto: AllianceSettlementDto, @CurrentUser() actor: AuthUser) {
-    return this.alliance.createSettlement(dto, actor)
+  settlement(
+    @Body() dto: AllianceSettlementDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.allianceAllianceSettlements.createSettlement(dto, actor);
   }
 
   @Get('settlements')
   @Roles(AppRole.MERCHANT, AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   settlements(@CurrentUser() actor: AuthUser) {
-    return this.alliance.listSettlements(actor)
+    return this.allianceAllianceSettlements.listSettlements(actor);
   }
 
   @Post('settlements/:id/submit')
   @Roles(AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   submitSettlement(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.alliance.submitSettlement(id, actor)
+    return this.allianceAllianceSettlements.submitSettlement(id, actor);
   }
 
   @Post('settlements/:id/confirm')
   @Roles(AppRole.MERCHANT, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   confirmSettlement(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.alliance.confirmSettlement(id, actor)
+    return this.allianceAllianceSettlements.confirmSettlement(id, actor);
   }
 
   @Post('settlements/:id/dispute')
@@ -127,12 +154,12 @@ export class AllianceController {
     @Body() dto: SettlementActionDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.alliance.disputeSettlement(id, dto, actor)
+    return this.allianceAllianceSettlements.disputeSettlement(id, dto, actor);
   }
 
   @Post('settlements/:id/settle')
   @Roles(AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   settleSettlement(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.alliance.settleSettlement(id, actor)
+    return this.allianceAllianceSettlements.settleSettlement(id, actor);
   }
 }

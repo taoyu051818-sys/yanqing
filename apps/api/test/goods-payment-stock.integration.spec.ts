@@ -1,3 +1,4 @@
+import { createOrderFinalizerService } from './support/domain-consumer-fixtures.js';
 import { randomUUID } from 'node:crypto';
 
 import { ConfigService } from '@nestjs/config';
@@ -6,10 +7,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AuthUser } from '../src/common/auth/auth-user.js';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { GoodsService } from '../src/goods/goods.service.js';
-import { ConsignmentSettlementService } from '../src/inventory/consignment-settlement.service.js';
-import { InventoryOperationsService } from '../src/inventory/inventory-operations.service.js';
-import { InventoryService } from '../src/inventory/inventory.service.js';
-import { OrdersService } from '../src/orders/orders.service.js';
+import { ConsignmentSettlementService } from './support/consignment-settlement-fixture.js';
+import { InventoryOperationsService } from './support/inventory-operations-fixture.js';
+import { InventoryService } from './support/inventory-fixture.js';
+import { OrdersService } from './support/orders-fixture.js';
 import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';
 import { WechatPayService } from '../src/payments/wechat-pay.service.js';
 import type { AppRole } from '../src/generated/prisma/enums.js';
@@ -45,7 +46,9 @@ describe.skipIf(!url)('goods payment stock boundaries', () => {
     goods = new GoodsService(db);
     inventory = new InventoryService(db);
     ops = new InventoryOperationsService(db);
-    finalizer = new OrderFinalizerService(new ConsignmentSettlementService(db));
+    finalizer = createOrderFinalizerService(
+      new ConsignmentSettlementService(db),
+    );
     provider = {
       createJsapiPayment: vi
         .fn()

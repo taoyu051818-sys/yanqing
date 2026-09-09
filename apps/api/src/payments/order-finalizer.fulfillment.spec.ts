@@ -1,3 +1,4 @@
+import { createOrderFinalizerService } from '../../test/support/domain-consumer-fixtures.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -9,7 +10,6 @@ import {
   SourceChannel,
   SubjectAccount,
 } from '../generated/prisma/client.js';
-import { OrderFinalizerService } from './order-finalizer.service.js';
 
 const now = new Date('2026-08-30T08:00:00.000Z');
 const payment = {
@@ -91,10 +91,19 @@ function harness(order: ReturnType<typeof baseOrder>) {
     memberSubscription: {
       findFirst: vi.fn().mockResolvedValue(null),
       findUniqueOrThrow: vi.fn().mockResolvedValue({ status: 'FROZEN' }),
-      findMany: vi.fn().mockResolvedValue([{ startsAt: now, endsAt: new Date(+now + 365 * 86400000), product: { level: 'REGULAR', durationDays: 365 } }]),
+      findMany: vi.fn().mockResolvedValue([
+        {
+          startsAt: now,
+          endsAt: new Date(+now + 365 * 86400000),
+          product: { level: 'REGULAR', durationDays: 365 },
+        },
+      ]),
       update: vi.fn().mockResolvedValue({}),
     },
-    memberProfile: { findUnique: vi.fn().mockResolvedValue(null), update: vi.fn().mockResolvedValue({}) },
+    memberProfile: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn().mockResolvedValue({}),
+    },
     account: {
       findUniqueOrThrow: vi.fn().mockResolvedValue({
         id: 'account-1',
@@ -122,7 +131,14 @@ function harness(order: ReturnType<typeof baseOrder>) {
     },
     inventoryStockBalance: {
       findUnique: vi.fn().mockResolvedValue({ id: 'balance-1', quantity: 10 }),
-      findMany: vi.fn().mockResolvedValue([{ id: 'balance-1', locationId: 'location-1', batchCode: 'DEFAULT', quantity: 10 }]),
+      findMany: vi.fn().mockResolvedValue([
+        {
+          id: 'balance-1',
+          locationId: 'location-1',
+          batchCode: 'DEFAULT',
+          quantity: 10,
+        },
+      ]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     inventoryTransaction: {
@@ -134,7 +150,7 @@ function harness(order: ReturnType<typeof baseOrder>) {
   return {
     tx,
     consignment,
-    service: new OrderFinalizerService(consignment as never),
+    service: createOrderFinalizerService(consignment as never),
   };
 }
 
@@ -197,24 +213,30 @@ describe('instant order fulfillment after successful payment', () => {
         where: { id: order.id, status: OrderStatus.PAID, completedAt: null },
         data: { status: OrderStatus.COMPLETED, completedAt: now },
       });
-      expect(tx.auditLog.create).toHaveBeenNthCalledWith(businessType === BusinessType.MEMBERSHIP ? 2 : 1, {
-        data: expect.objectContaining({
-          actorId: payment.operatorId,
-          action: 'ORDER_PAID',
-        }),
-      });
-      expect(tx.auditLog.create).toHaveBeenNthCalledWith(businessType === BusinessType.MEMBERSHIP ? 3 : 2, {
-        data: expect.objectContaining({
-          actorId: payment.operatorId,
-          action: 'ORDER_COMPLETED',
-          newValue: expect.objectContaining({
-            accountingTreatment:
-              businessType === BusinessType.RECHARGE
-                ? 'PREPAID_LIABILITY'
-                : 'REALIZED_ON_FULFILLMENT',
+      expect(tx.auditLog.create).toHaveBeenNthCalledWith(
+        businessType === BusinessType.MEMBERSHIP ? 2 : 1,
+        {
+          data: expect.objectContaining({
+            actorId: payment.operatorId,
+            action: 'ORDER_PAID',
           }),
-        }),
-      });
+        },
+      );
+      expect(tx.auditLog.create).toHaveBeenNthCalledWith(
+        businessType === BusinessType.MEMBERSHIP ? 3 : 2,
+        {
+          data: expect.objectContaining({
+            actorId: payment.operatorId,
+            action: 'ORDER_COMPLETED',
+            newValue: expect.objectContaining({
+              accountingTreatment:
+                businessType === BusinessType.RECHARGE
+                  ? 'PREPAID_LIABILITY'
+                  : 'REALIZED_ON_FULFILLMENT',
+            }),
+          }),
+        },
+      );
       expect(consignment.recordCompletedGoodsSale).toHaveBeenCalledTimes(
         businessType === BusinessType.GOODS ? 1 : 0,
       );

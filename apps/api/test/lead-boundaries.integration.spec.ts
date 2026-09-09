@@ -1,13 +1,14 @@
+import { createOrderFinalizerService } from './support/domain-consumer-fixtures.js';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../src/database/prisma.service.js';
-import { MembersService } from '../src/members/members.service.js';
-import { AllianceService } from '../src/alliance/alliance.service.js';
+import { MembersService } from './support/members-fixture.js';
+import { AllianceService } from './support/alliance-fixture.js';
 import { TrainingService } from './support/training-service-fixture.js';
-import { TrainingTrialsService } from '../src/training/training-trials.service.js';
-import { OrdersService } from '../src/orders/orders.service.js';
-import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';
+import { TrainingTrialsService } from './support/training-trials-fixture.js';
+import { OrdersService } from './support/orders-fixture.js';
+
 import type { AuthUser } from '../src/common/auth/auth-user.js';
 import type { AppRole } from '../src/generated/prisma/client.js';
 
@@ -743,7 +744,7 @@ describe.skipIf(!url)(
         const orders = new OrdersService(
           db,
           new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
-          new OrderFinalizerService({} as never),
+          createOrderFinalizerService({} as never),
           {} as never,
         );
         await orders.pay(

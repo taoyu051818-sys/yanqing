@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   AccountType,
@@ -8,8 +8,8 @@ import {
   PaymentChannel,
   PaymentStatus,
   RefundStatus,
-} from '../generated/prisma/client.js'
-import { WechatPayService } from './wechat-pay.service.js'
+} from '../generated/prisma/client.js';
+import { finalizeRefund } from './wechat/refund-notification.js';
 
 describe('WechatPayService refund terminal handling', () => {
   it('never rewrites terminal venue fulfillment evidence after provider refund success', async () => {
@@ -27,13 +27,15 @@ describe('WechatPayService refund terminal handling', () => {
       items: [],
       gameRegistration: null,
       eventTeam: null,
-      payments: [{
-        id: 'payment-venue',
-        status: PaymentStatus.SUCCEEDED,
-        channel: PaymentChannel.WECHAT,
-        amountCents: 6_800,
-      }],
-    }
+      payments: [
+        {
+          id: 'payment-venue',
+          status: PaymentStatus.SUCCEEDED,
+          channel: PaymentChannel.WECHAT,
+          amountCents: 6_800,
+        },
+      ],
+    };
     const refund = {
       id: 'refund-venue-completed',
       refundNo: 'RF202608300099',
@@ -43,32 +45,37 @@ describe('WechatPayService refund terminal handling', () => {
       amountCents: 6_800,
       status: RefundStatus.PROCESSING,
       order,
-    }
+    };
     const tx = {
       refund: {
         findUnique: vi.fn().mockResolvedValue(refund),
-        update: vi.fn().mockResolvedValue({ ...refund, status: RefundStatus.SUCCEEDED }),
+        update: vi
+          .fn()
+          .mockResolvedValue({ ...refund, status: RefundStatus.SUCCEEDED }),
       },
       order: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       referralReward: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
-    }
-    const service = new WechatPayService(
-      { get: vi.fn() } as never,
-      {
-        refund: { findUnique: vi.fn().mockResolvedValue(refund) },
-        $transaction: vi.fn(async (work: (client: typeof tx) => unknown) => work(tx)),
-      } as never,
-      {} as never,
-    )
+    };
+    const refundPrisma = {
+      refund: { findUnique: vi.fn().mockResolvedValue(refund) },
+      $transaction: vi.fn(async (work: (client: typeof tx) => unknown) =>
+        work(tx),
+      ),
+    } as never;
+    const refundFinalizer = {} as never;
+    const applyRefund = (notice: Parameters<typeof finalizeRefund>[2]) =>
+      finalizeRefund(refundPrisma, refundFinalizer, notice);
 
-    await expect((service as any).finalizeRefund({
-      out_refund_no: refund.refundNo,
-      refund_id: 'wechat-refund-venue',
-      refund_status: 'SUCCESS',
-      amount: { refund: 6_800, total: 6_800 },
-    })).resolves.toEqual({ accepted: true, outstandingRecoveryCents: 0 })
+    await expect(
+      applyRefund({
+        out_refund_no: refund.refundNo,
+        refund_id: 'wechat-refund-venue',
+        refund_status: 'SUCCESS',
+        amount: { refund: 6_800, total: 6_800 },
+      }),
+    ).resolves.toEqual({ accepted: true, outstandingRecoveryCents: 0 });
 
     expect(tx.courtBooking.updateMany).toHaveBeenCalledWith({
       where: {
@@ -78,8 +85,8 @@ describe('WechatPayService refund terminal handling', () => {
         },
       },
       data: { status: BookingStatus.CANCELLED },
-    })
-  })
+    });
+  });
 
   it('persists provider success, recovers available recharge value and records one shortfall risk on retries', async () => {
     const order = {
@@ -96,13 +103,15 @@ describe('WechatPayService refund terminal handling', () => {
       items: [],
       gameRegistration: null,
       eventTeam: null,
-      payments: [{
-        id: 'payment-1',
-        status: PaymentStatus.SUCCEEDED,
-        channel: PaymentChannel.WECHAT,
-        amountCents: 10_000,
-      }],
-    }
+      payments: [
+        {
+          id: 'payment-1',
+          status: PaymentStatus.SUCCEEDED,
+          channel: PaymentChannel.WECHAT,
+          amountCents: 10_000,
+        },
+      ],
+    };
     const refund = {
       id: 'refund-recharge-1',
       refundNo: 'RF202608300001',
@@ -115,46 +124,55 @@ describe('WechatPayService refund terminal handling', () => {
       providerRefundNo: null,
       completedAt: null as Date | null,
       order,
-    }
+    };
     const accounts = new Map([
-      [AccountType.CASH_PRINCIPAL, {
-        id: 'account-principal',
-        userId: order.memberId,
-        type: AccountType.CASH_PRINCIPAL,
-        balance: 3_000,
-        frozenBalance: 0,
-        version: 2,
-      }],
-      [AccountType.GIFT_BALANCE, {
-        id: 'account-gift',
-        userId: order.memberId,
-        type: AccountType.GIFT_BALANCE,
-        balance: 0,
-        frozenBalance: 0,
-        version: 1,
-      }],
-    ])
-    const ledger = new Map<string, Record<string, any>>()
-    const risks: Array<Record<string, any>> = []
-    const auditCreate = vi.fn().mockResolvedValue({})
+      [
+        AccountType.CASH_PRINCIPAL,
+        {
+          id: 'account-principal',
+          userId: order.memberId,
+          type: AccountType.CASH_PRINCIPAL,
+          balance: 3_000,
+          frozenBalance: 0,
+          version: 2,
+        },
+      ],
+      [
+        AccountType.GIFT_BALANCE,
+        {
+          id: 'account-gift',
+          userId: order.memberId,
+          type: AccountType.GIFT_BALANCE,
+          balance: 0,
+          frozenBalance: 0,
+          version: 1,
+        },
+      ],
+    ]);
+    const ledger = new Map<string, Record<string, any>>();
+    const risks: Array<Record<string, any>> = [];
+    const auditCreate = vi.fn().mockResolvedValue({});
     const tx = {
       refund: {
         findUnique: vi.fn().mockImplementation(async () => refund),
         update: vi.fn().mockImplementation(async ({ data }) => {
-          Object.assign(refund, data)
-          return refund
+          Object.assign(refund, data);
+          return refund;
         }),
       },
       order: {
         updateMany: vi.fn().mockImplementation(async ({ where, data }) => {
-          if (order.status !== where.status) return { count: 0 }
-          Object.assign(order, data)
-          return { count: 1 }
+          if (order.status !== where.status) return { count: 0 };
+          Object.assign(order, data);
+          return { count: 1 };
         }),
       },
       account: {
-        findUnique: vi.fn().mockImplementation(async ({ where }) =>
-          accounts.get(where.userId_type.type) ?? null),
+        findUnique: vi
+          .fn()
+          .mockImplementation(
+            async ({ where }) => accounts.get(where.userId_type.type) ?? null,
+          ),
         upsert: vi.fn().mockImplementation(async ({ where, create }) => {
           const account = {
             id: `account-${where.userId_type.type}`,
@@ -162,95 +180,106 @@ describe('WechatPayService refund terminal handling', () => {
             frozenBalance: 0,
             version: 0,
             ...create,
-          }
-          accounts.set(where.userId_type.type, account as never)
-          return account
+          };
+          accounts.set(where.userId_type.type, account as never);
+          return account;
         }),
         updateMany: vi.fn().mockImplementation(async ({ where, data }) => {
-          const account = [...accounts.values()].find((item) => item.id === where.id)
+          const account = [...accounts.values()].find(
+            (item) => item.id === where.id,
+          );
           if (
             !account ||
             account.version !== where.version ||
             account.balance !== where.balance
-          ) return { count: 0 }
-          account.balance -= data.balance.decrement
-          account.version += data.version.increment
-          return { count: 1 }
+          )
+            return { count: 0 };
+          account.balance -= data.balance.decrement;
+          account.version += data.version.increment;
+          return { count: 1 };
         }),
       },
       accountTransaction: {
-        findUnique: vi.fn().mockImplementation(async ({ where }) =>
-          ledger.get(where.idempotencyKey) ?? null),
+        findUnique: vi
+          .fn()
+          .mockImplementation(
+            async ({ where }) => ledger.get(where.idempotencyKey) ?? null,
+          ),
         create: vi.fn().mockImplementation(async ({ data }) => {
-          const row = { id: `txn-${ledger.size + 1}`, ...data }
-          ledger.set(data.idempotencyKey, row)
-          return row
+          const row = { id: `txn-${ledger.size + 1}`, ...data };
+          ledger.set(data.idempotencyKey, row);
+          return row;
         }),
       },
       riskEvent: {
-        findFirst: vi.fn().mockImplementation(async ({ where }) =>
-          risks.find((item) =>
-            item.ruleCode === where.ruleCode &&
-            item.objectType === where.objectType &&
-            item.objectId === where.objectId,
-          ) ?? null),
+        findFirst: vi
+          .fn()
+          .mockImplementation(
+            async ({ where }) =>
+              risks.find(
+                (item) =>
+                  item.ruleCode === where.ruleCode &&
+                  item.objectType === where.objectType &&
+                  item.objectId === where.objectId,
+              ) ?? null,
+          ),
         create: vi.fn().mockImplementation(async ({ data }) => {
-          const row = { id: `risk-${risks.length + 1}`, ...data }
-          risks.push(row)
-          return row
+          const row = { id: `risk-${risks.length + 1}`, ...data };
+          risks.push(row);
+          return row;
         }),
       },
       courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       referralReward: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       auditLog: { create: auditCreate },
-    }
+    };
     const prisma = {
       refund: { findUnique: vi.fn().mockResolvedValue(refund) },
-      $transaction: vi.fn(async (work: (client: typeof tx) => unknown) => work(tx)),
-    }
-    const service = new WechatPayService(
-      { get: vi.fn() } as never,
-      prisma as never,
-      {} as never,
-    )
+      $transaction: vi.fn(async (work: (client: typeof tx) => unknown) =>
+        work(tx),
+      ),
+    };
+    const refundPrisma = prisma as never;
+    const refundFinalizer = {} as never;
+    const applyRefund = (notice: Parameters<typeof finalizeRefund>[2]) =>
+      finalizeRefund(refundPrisma, refundFinalizer, notice);
     const notice = {
       out_refund_no: refund.refundNo,
       refund_id: 'wechat-refund-1',
       refund_status: 'SUCCESS',
       amount: { refund: 10_000, total: 10_000 },
-    }
+    };
 
-    await expect((service as any).finalizeRefund(notice)).resolves.toEqual({
+    await expect(applyRefund(notice)).resolves.toEqual({
       accepted: true,
       outstandingRecoveryCents: 9_000,
-    })
-    await expect((service as any).finalizeRefund(notice)).resolves.toEqual({
+    });
+    await expect(applyRefund(notice)).resolves.toEqual({
       accepted: true,
       idempotent: true,
-    })
+    });
 
     expect(refund).toMatchObject({
       status: RefundStatus.SUCCEEDED,
       providerRefundNo: notice.refund_id,
       completedAt: expect.any(Date),
-    })
+    });
     expect(order).toMatchObject({
       refundedCents: 10_000,
       status: OrderStatus.REFUNDED,
-    })
-    expect(accounts.get(AccountType.CASH_PRINCIPAL)?.balance).toBe(0)
-    expect(accounts.get(AccountType.GIFT_BALANCE)?.balance).toBe(0)
+    });
+    expect(accounts.get(AccountType.CASH_PRINCIPAL)?.balance).toBe(0);
+    expect(accounts.get(AccountType.GIFT_BALANCE)?.balance).toBe(0);
     expect([...ledger.values()]).toEqual([
       expect.objectContaining({
         amount: -3_000,
         balanceBefore: 3_000,
         balanceAfter: 0,
         reasonCode: 'RECHARGE_REFUND',
-        idempotencyKey:
-          `RECHARGE-REFUND:${refund.id}:${AccountType.CASH_PRINCIPAL}`,
+        idempotencyKey: `RECHARGE-REFUND:${refund.id}:${AccountType.CASH_PRINCIPAL}`,
       }),
-    ])
-    expect(risks).toHaveLength(1)
+    ]);
+    expect(risks).toHaveLength(1);
     expect(risks[0]).toMatchObject({
       ruleCode: 'RECHARGE_REFUND_BALANCE_SHORTFALL',
       orderId: order.id,
@@ -260,12 +289,12 @@ describe('WechatPayService refund terminal handling', () => {
         outstandingRecoveryCents: 9_000,
         recoveryStatus: 'OUTSTANDING',
       },
-    })
-    expect(tx.refund.update).toHaveBeenCalledOnce()
-    expect(tx.order.updateMany).toHaveBeenCalledOnce()
-    expect(tx.accountTransaction.create).toHaveBeenCalledOnce()
-    expect(tx.riskEvent.create).toHaveBeenCalledOnce()
-    expect(auditCreate).toHaveBeenCalledOnce()
+    });
+    expect(tx.refund.update).toHaveBeenCalledOnce();
+    expect(tx.order.updateMany).toHaveBeenCalledOnce();
+    expect(tx.accountTransaction.create).toHaveBeenCalledOnce();
+    expect(tx.riskEvent.create).toHaveBeenCalledOnce();
+    expect(auditCreate).toHaveBeenCalledOnce();
     expect(auditCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         action: 'WECHAT_REFUND_SUCCEEDED',
@@ -273,6 +302,6 @@ describe('WechatPayService refund terminal handling', () => {
           outstandingRecoveryCents: 9_000,
         }),
       }),
-    })
-  })
-})
+    });
+  });
+});

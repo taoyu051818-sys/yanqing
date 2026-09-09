@@ -1,10 +1,17 @@
-import { GAME_MANAGEMENT_ROLES } from '../common/auth/operation-scopes.js'
-import { Body, Controller, Get, Param, Post } from '@nestjs/common'
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
+import { Inject } from '@nestjs/common';
+import { GameCatalogService } from './catalog/games-catalog.service.js';
+import { GameHostsService } from './hosts/games-hosts.service.js';
+import { GameCancellationService } from './cancellation/games-cancellation.service.js';
+import { GameRegistrationService } from './registration/games-registration.service.js';
+import { GameCompletionService } from './completion/games-completion.service.js';
+import { GameRewardsService } from './rewards/games-rewards.service.js';
+import { GAME_MANAGEMENT_ROLES } from '../common/auth/operation-scopes.js';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
-import { CurrentUser, Public, Roles } from '../common/auth/auth.decorators.js'
-import type { AuthUser } from '../common/auth/auth-user.js'
-import { AppRole } from '../generated/prisma/enums.js'
+import { CurrentUser, Public, Roles } from '../common/auth/auth.decorators.js';
+import type { AuthUser } from '../common/auth/auth-user.js';
+import { AppRole } from '../generated/prisma/enums.js';
 import {
   CancelGameDto,
   CreateGameDto,
@@ -13,36 +20,47 @@ import {
   RegisterGameDto,
   RejectHostDto,
   ReviewHostDto,
-} from './games.dto.js'
-import { GamesService } from './games.service.js'
+} from './games.dto.js';
 
 @ApiTags('球局与主理人')
 @ApiBearerAuth()
 @Controller('games')
 export class GamesController {
-  constructor(private readonly games: GamesService) {}
+  constructor(
+    @Inject(GameCatalogService)
+    private readonly gamesGameCatalog: GameCatalogService,
+    @Inject(GameHostsService) private readonly gamesGameHosts: GameHostsService,
+    @Inject(GameCancellationService)
+    private readonly gamesGameCancellation: GameCancellationService,
+    @Inject(GameRegistrationService)
+    private readonly gamesGameRegistration: GameRegistrationService,
+    @Inject(GameCompletionService)
+    private readonly gamesGameCompletion: GameCompletionService,
+    @Inject(GameRewardsService)
+    private readonly gamesGameRewards: GameRewardsService,
+  ) {}
 
   @Get()
   list(@CurrentUser() actor: AuthUser) {
-    return this.games.list(actor)
+    return this.gamesGameCatalog.list(actor);
   }
 
   @Get('managed')
   @Roles(...GAME_MANAGEMENT_ROLES)
   managed(@CurrentUser() actor: AuthUser) {
-    return this.games.managed(actor)
+    return this.gamesGameCatalog.managed(actor);
   }
 
   @Post('hosts/apply')
   @Roles(AppRole.MEMBER)
   apply(@CurrentUser() actor: AuthUser) {
-    return this.games.applyHost(actor)
+    return this.gamesGameHosts.applyHost(actor);
   }
 
   @Get('host-applications')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   hostApplications() {
-    return this.games.hostApplications()
+    return this.gamesGameHosts.hostApplications();
   }
 
   // A shared link is readable before login; the roster is a separate,
@@ -50,12 +68,12 @@ export class GamesController {
   @Public()
   @Get(':id')
   detail(@Param('id') id: string) {
-    return this.games.detail(id)
+    return this.gamesGameCatalog.detail(id);
   }
 
   @Get(':id/participants')
   participants(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.games.participants(id, actor)
+    return this.gamesGameCatalog.participants(id, actor);
   }
 
   @Post('hosts/:userId/approve')
@@ -65,7 +83,7 @@ export class GamesController {
     @Body() dto: ReviewHostDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.games.approveHost(userId, dto, actor)
+    return this.gamesGameHosts.approveHost(userId, dto, actor);
   }
 
   @Post('hosts/:userId/reject')
@@ -75,19 +93,19 @@ export class GamesController {
     @Body() dto: RejectHostDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.games.rejectHost(userId, dto, actor)
+    return this.gamesGameHosts.rejectHost(userId, dto, actor);
   }
 
   @Post('rewards/grant-matured')
   @Roles(AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   grantMaturedRewards(@CurrentUser() actor: AuthUser) {
-    return this.games.grantMatured(actor)
+    return this.gamesGameRewards.grantMatured(actor);
   }
 
   @Post()
   @Roles(AppRole.HOST, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   create(@Body() dto: CreateGameDto, @CurrentUser() actor: AuthUser) {
-    return this.games.create(dto, actor)
+    return this.gamesGameCatalog.create(dto, actor);
   }
 
   @Post(':id/publish')
@@ -97,7 +115,7 @@ export class GamesController {
     @Body() dto: PublishGameDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.games.publish(id, dto, actor)
+    return this.gamesGameCatalog.publish(id, dto, actor);
   }
 
   @Post(':id/cancel')
@@ -107,7 +125,7 @@ export class GamesController {
     @Body() dto: CancelGameDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.games.cancel(id, dto, actor)
+    return this.gamesGameCancellation.cancel(id, dto, actor);
   }
 
   @Post(':id/register')
@@ -116,13 +134,13 @@ export class GamesController {
     @Body() dto: RegisterGameDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.games.register(id, dto, actor)
+    return this.gamesGameRegistration.register(id, dto, actor);
   }
 
   @Post(':id/promote-waitlist')
   @Roles(AppRole.HOST, AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   promoteWaitlist(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.games.promoteWaitlist(id, actor)
+    return this.gamesGameRegistration.promoteWaitlist(id, actor);
   }
 
   @Post(':id/check-in/:userId')
@@ -133,12 +151,12 @@ export class GamesController {
     @Body() dto: GameCheckInDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.games.checkIn(id, registrationId, actor, dto)
+    return this.gamesGameRegistration.checkIn(id, registrationId, actor, dto);
   }
 
   @Post(':id/complete')
   @Roles(AppRole.HOST, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   complete(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.games.complete(id, actor)
+    return this.gamesGameCompletion.complete(id, actor);
   }
 }

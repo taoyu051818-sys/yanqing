@@ -9,7 +9,7 @@ import {
   PurchaseOrderStatus,
   SupplierType,
 } from '../generated/prisma/client.js';
-import { InventoryOperationsService } from './inventory-operations.service.js';
+import { InventoryOperationsService } from '../../test/support/inventory-operations-fixture.js';
 
 const admin: AuthUser = {
   sub: 'admin-1',

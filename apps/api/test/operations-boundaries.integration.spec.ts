@@ -1,14 +1,15 @@
+import { createOrderFinalizerService } from './support/domain-consumer-fixtures.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { TrainingService } from './support/training-service-fixture.js';
-import { MembersService } from '../src/members/members.service.js';
+import { MembersService } from './support/members-fixture.js';
 import { PrivacyService } from '../src/privacy/privacy.service.js';
-import { InventoryOperationsService } from '../src/inventory/inventory-operations.service.js';
-import { OrdersService } from '../src/orders/orders.service.js';
-import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';
+import { InventoryOperationsService } from './support/inventory-operations-fixture.js';
+import { OrdersService } from './support/orders-fixture.js';
+
 import { syncTrainingEnrollmentRoster } from '../src/training/training-roster.js';
 import type { AuthUser } from '../src/common/auth/auth-user.js';
 import type {
@@ -35,7 +36,7 @@ describe.skipIf(!url)('operations boundaries on PostgreSQL', () => {
     orders = new OrdersService(
       db,
       new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
-      new OrderFinalizerService({} as never),
+      createOrderFinalizerService({} as never),
       {} as never,
     );
     admin = await person('ADMIN');
@@ -658,7 +659,7 @@ describe.skipIf(!url)('operations boundaries on PostgreSQL', () => {
     const service = new OrdersService(
       instrumented as never,
       new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
-      new OrderFinalizerService({} as never),
+      createOrderFinalizerService({} as never),
       {} as never,
     );
     const payDto = {

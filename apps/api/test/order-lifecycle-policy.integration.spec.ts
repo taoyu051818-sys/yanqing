@@ -1,3 +1,4 @@
+import { createOrderFinalizerService } from './support/domain-consumer-fixtures.js';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -6,8 +7,8 @@ import {
   requireOrderTransition,
   type OrderTransition,
 } from '../src/orders/order-transition.js';
-import { OrdersService } from '../src/orders/orders.service.js';
-import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';
+import { OrdersService } from './support/orders-fixture.js';
+
 import { WechatPayService } from '../src/payments/wechat-pay.service.js';
 import type { AuthUser } from '../src/common/auth/auth-user.js';
 import type { OrderStatus } from '../src/generated/prisma/client.js';
@@ -47,7 +48,7 @@ describe.skipIf(!url)('central order lifecycle on PostgreSQL', () => {
       roles: ['FINANCE'],
     };
     const config = new ConfigService({ PAYMENT_PROVIDER: 'wechat' });
-    const finalizer = new OrderFinalizerService({} as never);
+    const finalizer = createOrderFinalizerService({} as never);
     orders = new OrdersService(db, config, finalizer, {
       createRefund: vi
         .fn()

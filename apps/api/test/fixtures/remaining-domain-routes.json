@@ -1,0 +1,1890 @@
+[
+  {
+    "controller": "AllianceController",
+    "method": "merchants",
+    "verb": "GET",
+    "path": "/api/v1/alliance/merchants",
+    "roles": [],
+    "isPublic": false,
+    "provider": "AllianceMerchantsService",
+    "serviceMethod": "listMerchants"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "createMerchant",
+    "verb": "POST",
+    "path": "/api/v1/alliance/merchants",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceMerchantsService",
+    "serviceMethod": "createMerchant"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "setMerchantStatus",
+    "verb": "POST",
+    "path": "/api/v1/alliance/merchants/:id/status",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceMerchantsService",
+    "serviceMethod": "setMerchantStatus"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "templates",
+    "verb": "GET",
+    "path": "/api/v1/alliance/coupon-templates",
+    "roles": [
+      "MERCHANT",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceTemplatesService",
+    "serviceMethod": "listTemplates"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "createTemplate",
+    "verb": "POST",
+    "path": "/api/v1/alliance/coupon-templates",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceTemplatesService",
+    "serviceMethod": "createTemplate"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "setTemplateStatus",
+    "verb": "POST",
+    "path": "/api/v1/alliance/coupon-templates/:id/status",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceTemplatesService",
+    "serviceMethod": "setTemplateStatus"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "generate",
+    "verb": "POST",
+    "path": "/api/v1/alliance/coupon-templates/:id/codes",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN",
+      "MERCHANT"
+    ],
+    "isPublic": false,
+    "provider": "AllianceCouponsService",
+    "serviceMethod": "generateCodes"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "claim",
+    "verb": "POST",
+    "path": "/api/v1/alliance/coupons/:code/claim",
+    "roles": [],
+    "isPublic": false,
+    "provider": "AllianceCouponsService",
+    "serviceMethod": "claim"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "myCoupons",
+    "verb": "GET",
+    "path": "/api/v1/alliance/coupons/me",
+    "roles": [],
+    "isPublic": false,
+    "provider": "AllianceCouponsService",
+    "serviceMethod": "listMyCoupons"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "redeem",
+    "verb": "POST",
+    "path": "/api/v1/alliance/coupons/redeem",
+    "roles": [
+      "MERCHANT",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceCouponsService",
+    "serviceMethod": "redeem"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "qr",
+    "verb": "GET",
+    "path": "/api/v1/alliance/coupons/:code/qr",
+    "roles": [],
+    "isPublic": false,
+    "provider": "AllianceCouponsService",
+    "serviceMethod": "qr"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "settlement",
+    "verb": "POST",
+    "path": "/api/v1/alliance/settlements",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceSettlementsService",
+    "serviceMethod": "createSettlement"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "settlements",
+    "verb": "GET",
+    "path": "/api/v1/alliance/settlements",
+    "roles": [
+      "MERCHANT",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceSettlementsService",
+    "serviceMethod": "listSettlements"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "submitSettlement",
+    "verb": "POST",
+    "path": "/api/v1/alliance/settlements/:id/submit",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceSettlementsService",
+    "serviceMethod": "submitSettlement"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "confirmSettlement",
+    "verb": "POST",
+    "path": "/api/v1/alliance/settlements/:id/confirm",
+    "roles": [
+      "MERCHANT",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceSettlementsService",
+    "serviceMethod": "confirmSettlement"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "disputeSettlement",
+    "verb": "POST",
+    "path": "/api/v1/alliance/settlements/:id/dispute",
+    "roles": [
+      "MERCHANT",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceSettlementsService",
+    "serviceMethod": "disputeSettlement"
+  },
+  {
+    "controller": "AllianceController",
+    "method": "settleSettlement",
+    "verb": "POST",
+    "path": "/api/v1/alliance/settlements/:id/settle",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceSettlementsService",
+    "serviceMethod": "settleSettlement"
+  },
+  {
+    "controller": "GamesController",
+    "method": "list",
+    "verb": "GET",
+    "path": "/api/v1/games",
+    "roles": [],
+    "isPublic": false,
+    "provider": "GameCatalogService",
+    "serviceMethod": "list"
+  },
+  {
+    "controller": "GamesController",
+    "method": "managed",
+    "verb": "GET",
+    "path": "/api/v1/games/managed",
+    "roles": [
+      "HOST",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GameCatalogService",
+    "serviceMethod": "managed"
+  },
+  {
+    "controller": "GamesController",
+    "method": "apply",
+    "verb": "POST",
+    "path": "/api/v1/games/hosts/apply",
+    "roles": [
+      "MEMBER"
+    ],
+    "isPublic": false,
+    "provider": "GameHostsService",
+    "serviceMethod": "applyHost"
+  },
+  {
+    "controller": "GamesController",
+    "method": "hostApplications",
+    "verb": "GET",
+    "path": "/api/v1/games/host-applications",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GameHostsService",
+    "serviceMethod": "hostApplications"
+  },
+  {
+    "controller": "GamesController",
+    "method": "detail",
+    "verb": "GET",
+    "path": "/api/v1/games/:id",
+    "roles": [],
+    "isPublic": true,
+    "provider": "GameCatalogService",
+    "serviceMethod": "detail"
+  },
+  {
+    "controller": "GamesController",
+    "method": "participants",
+    "verb": "GET",
+    "path": "/api/v1/games/:id/participants",
+    "roles": [],
+    "isPublic": false,
+    "provider": "GameCatalogService",
+    "serviceMethod": "participants"
+  },
+  {
+    "controller": "GamesController",
+    "method": "approve",
+    "verb": "POST",
+    "path": "/api/v1/games/hosts/:userId/approve",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GameHostsService",
+    "serviceMethod": "approveHost"
+  },
+  {
+    "controller": "GamesController",
+    "method": "reject",
+    "verb": "POST",
+    "path": "/api/v1/games/hosts/:userId/reject",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GameHostsService",
+    "serviceMethod": "rejectHost"
+  },
+  {
+    "controller": "GamesController",
+    "method": "grantMaturedRewards",
+    "verb": "POST",
+    "path": "/api/v1/games/rewards/grant-matured",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GameRewardsService",
+    "serviceMethod": "grantMatured"
+  },
+  {
+    "controller": "GamesController",
+    "method": "create",
+    "verb": "POST",
+    "path": "/api/v1/games",
+    "roles": [
+      "HOST",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GameCatalogService",
+    "serviceMethod": "create"
+  },
+  {
+    "controller": "GamesController",
+    "method": "publish",
+    "verb": "POST",
+    "path": "/api/v1/games/:id/publish",
+    "roles": [
+      "HOST",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GameCatalogService",
+    "serviceMethod": "publish"
+  },
+  {
+    "controller": "GamesController",
+    "method": "cancel",
+    "verb": "POST",
+    "path": "/api/v1/games/:id/cancel",
+    "roles": [
+      "HOST",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GameCancellationService",
+    "serviceMethod": "cancel"
+  },
+  {
+    "controller": "GamesController",
+    "method": "register",
+    "verb": "POST",
+    "path": "/api/v1/games/:id/register",
+    "roles": [],
+    "isPublic": false,
+    "provider": "GameRegistrationService",
+    "serviceMethod": "register"
+  },
+  {
+    "controller": "GamesController",
+    "method": "promoteWaitlist",
+    "verb": "POST",
+    "path": "/api/v1/games/:id/promote-waitlist",
+    "roles": [
+      "HOST",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GameRegistrationService",
+    "serviceMethod": "promoteWaitlist"
+  },
+  {
+    "controller": "GamesController",
+    "method": "checkIn",
+    "verb": "POST",
+    "path": "/api/v1/games/:id/check-in/:userId",
+    "roles": [
+      "HOST",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GameRegistrationService",
+    "serviceMethod": "checkIn"
+  },
+  {
+    "controller": "GamesController",
+    "method": "complete",
+    "verb": "POST",
+    "path": "/api/v1/games/:id/complete",
+    "roles": [
+      "HOST",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GameCompletionService",
+    "serviceMethod": "complete"
+  },
+  {
+    "controller": "GovernanceController",
+    "method": "users",
+    "verb": "GET",
+    "path": "/api/v1/governance/users",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GovernanceUsersService",
+    "serviceMethod": "users"
+  },
+  {
+    "controller": "GovernanceController",
+    "method": "setRoles",
+    "verb": "POST",
+    "path": "/api/v1/governance/users/:id/roles",
+    "roles": [
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GovernanceUsersService",
+    "serviceMethod": "setUserRoles"
+  },
+  {
+    "controller": "GovernanceController",
+    "method": "setStatus",
+    "verb": "POST",
+    "path": "/api/v1/governance/users/:id/status",
+    "roles": [
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GovernanceUsersService",
+    "serviceMethod": "setUserStatus"
+  },
+  {
+    "controller": "GovernanceController",
+    "method": "risks",
+    "verb": "GET",
+    "path": "/api/v1/governance/risk-events",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GovernanceRisksService",
+    "serviceMethod": "riskEvents"
+  },
+  {
+    "controller": "GovernanceController",
+    "method": "reviewRisk",
+    "verb": "POST",
+    "path": "/api/v1/governance/risk-events/:id/review",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GovernanceRisksService",
+    "serviceMethod": "transitionRisk"
+  },
+  {
+    "controller": "GovernanceController",
+    "method": "resolveRisk",
+    "verb": "POST",
+    "path": "/api/v1/governance/risk-events/:id/resolve",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GovernanceRisksService",
+    "serviceMethod": "transitionRisk"
+  },
+  {
+    "controller": "GovernanceController",
+    "method": "dismissRisk",
+    "verb": "POST",
+    "path": "/api/v1/governance/risk-events/:id/dismiss",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "GovernanceRisksService",
+    "serviceMethod": "transitionRisk"
+  },
+  {
+    "controller": "ConsignmentSettlementController",
+    "method": "supplierOptions",
+    "verb": "GET",
+    "path": "/api/v1/inventory/consignment/supplier-options",
+    "roles": [],
+    "isPublic": false,
+    "provider": "ConsignmentQueriesService",
+    "serviceMethod": "supplierOptions"
+  },
+  {
+    "controller": "ConsignmentSettlementController",
+    "method": "payables",
+    "verb": "GET",
+    "path": "/api/v1/inventory/consignment/payables",
+    "roles": [],
+    "isPublic": false,
+    "provider": "ConsignmentQueriesService",
+    "serviceMethod": "listPayables"
+  },
+  {
+    "controller": "ConsignmentSettlementController",
+    "method": "list",
+    "verb": "GET",
+    "path": "/api/v1/inventory/consignment/settlements",
+    "roles": [],
+    "isPublic": false,
+    "provider": "ConsignmentQueriesService",
+    "serviceMethod": "listSettlements"
+  },
+  {
+    "controller": "ConsignmentSettlementController",
+    "method": "detail",
+    "verb": "GET",
+    "path": "/api/v1/inventory/consignment/settlements/:id",
+    "roles": [],
+    "isPublic": false,
+    "provider": "ConsignmentQueriesService",
+    "serviceMethod": "detail"
+  },
+  {
+    "controller": "ConsignmentSettlementController",
+    "method": "create",
+    "verb": "POST",
+    "path": "/api/v1/inventory/consignment/settlements",
+    "roles": [],
+    "isPublic": false,
+    "provider": "ConsignmentStatementsService",
+    "serviceMethod": "createSettlement"
+  },
+  {
+    "controller": "ConsignmentSettlementController",
+    "method": "submit",
+    "verb": "POST",
+    "path": "/api/v1/inventory/consignment/settlements/:id/submit",
+    "roles": [],
+    "isPublic": false,
+    "provider": "ConsignmentWorkflowService",
+    "serviceMethod": "submitSettlement"
+  },
+  {
+    "controller": "ConsignmentSettlementController",
+    "method": "confirm",
+    "verb": "POST",
+    "path": "/api/v1/inventory/consignment/settlements/:id/confirm",
+    "roles": [],
+    "isPublic": false,
+    "provider": "ConsignmentWorkflowService",
+    "serviceMethod": "confirmSettlement"
+  },
+  {
+    "controller": "ConsignmentSettlementController",
+    "method": "dispute",
+    "verb": "POST",
+    "path": "/api/v1/inventory/consignment/settlements/:id/dispute",
+    "roles": [],
+    "isPublic": false,
+    "provider": "ConsignmentWorkflowService",
+    "serviceMethod": "disputeSettlement"
+  },
+  {
+    "controller": "ConsignmentSettlementController",
+    "method": "returnToDraft",
+    "verb": "POST",
+    "path": "/api/v1/inventory/consignment/settlements/:id/return",
+    "roles": [],
+    "isPublic": false,
+    "provider": "ConsignmentWorkflowService",
+    "serviceMethod": "returnSettlement"
+  },
+  {
+    "controller": "ConsignmentSettlementController",
+    "method": "settle",
+    "verb": "POST",
+    "path": "/api/v1/inventory/consignment/settlements/:id/settle",
+    "roles": [],
+    "isPublic": false,
+    "provider": "ConsignmentWorkflowService",
+    "serviceMethod": "settleSettlement"
+  },
+  {
+    "controller": "ConsignmentSettlementController",
+    "method": "void",
+    "verb": "POST",
+    "path": "/api/v1/inventory/consignment/settlements/:id/void",
+    "roles": [],
+    "isPublic": false,
+    "provider": "ConsignmentWorkflowService",
+    "serviceMethod": "voidSettlement"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "list",
+    "verb": "GET",
+    "path": "/api/v1/inventory",
+    "roles": [],
+    "isPublic": false,
+    "provider": "InventoryCatalogService",
+    "serviceMethod": "list"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "lowStock",
+    "verb": "GET",
+    "path": "/api/v1/inventory/low-stock",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryCatalogService",
+    "serviceMethod": "lowStock"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "awardOptions",
+    "verb": "GET",
+    "path": "/api/v1/inventory/award-options",
+    "roles": [
+      "FRONT_DESK",
+      "EVENT_MANAGER",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryCatalogService",
+    "serviceMethod": "awardOptions"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "itemDetail",
+    "verb": "GET",
+    "path": "/api/v1/inventory/items/:id",
+    "roles": [],
+    "isPublic": false,
+    "provider": "InventoryCatalogService",
+    "serviceMethod": "detail"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "suppliers",
+    "verb": "GET",
+    "path": "/api/v1/inventory/suppliers",
+    "roles": [],
+    "isPublic": false,
+    "provider": "InventorySuppliersService",
+    "serviceMethod": "suppliers"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "supplierDetail",
+    "verb": "GET",
+    "path": "/api/v1/inventory/suppliers/:id",
+    "roles": [],
+    "isPublic": false,
+    "provider": "InventorySuppliersService",
+    "serviceMethod": "supplierDetail"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "createSupplier",
+    "verb": "POST",
+    "path": "/api/v1/inventory/suppliers",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventorySuppliersService",
+    "serviceMethod": "createSupplier"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "updateSupplier",
+    "verb": "POST",
+    "path": "/api/v1/inventory/suppliers/:id/update",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventorySuppliersService",
+    "serviceMethod": "updateSupplier"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "setSupplierStatus",
+    "verb": "POST",
+    "path": "/api/v1/inventory/suppliers/:id/status",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventorySuppliersService",
+    "serviceMethod": "setSupplierStatus"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "locations",
+    "verb": "GET",
+    "path": "/api/v1/inventory/locations",
+    "roles": [],
+    "isPublic": false,
+    "provider": "InventoryLocationsService",
+    "serviceMethod": "locations"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "locationDetail",
+    "verb": "GET",
+    "path": "/api/v1/inventory/locations/:id",
+    "roles": [],
+    "isPublic": false,
+    "provider": "InventoryLocationsService",
+    "serviceMethod": "locationDetail"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "createLocation",
+    "verb": "POST",
+    "path": "/api/v1/inventory/locations",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryLocationsService",
+    "serviceMethod": "createLocation"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "updateLocation",
+    "verb": "POST",
+    "path": "/api/v1/inventory/locations/:id/update",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryLocationsService",
+    "serviceMethod": "updateLocation"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "setLocationStatus",
+    "verb": "POST",
+    "path": "/api/v1/inventory/locations/:id/status",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryLocationsService",
+    "serviceMethod": "setLocationStatus"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "purchaseOrders",
+    "verb": "GET",
+    "path": "/api/v1/inventory/purchase-orders",
+    "roles": [],
+    "isPublic": false,
+    "provider": "InventoryPurchasingService",
+    "serviceMethod": "purchaseOrders"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "createPurchaseOrder",
+    "verb": "POST",
+    "path": "/api/v1/inventory/purchase-orders",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryPurchasingService",
+    "serviceMethod": "createPurchaseOrder"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "submitPurchaseOrder",
+    "verb": "POST",
+    "path": "/api/v1/inventory/purchase-orders/:id/submit",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryPurchasingService",
+    "serviceMethod": "submitPurchaseOrder"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "approvePurchaseOrder",
+    "verb": "POST",
+    "path": "/api/v1/inventory/purchase-orders/:id/approve",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryPurchasingService",
+    "serviceMethod": "approvePurchaseOrder"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "receivePurchaseOrder",
+    "verb": "POST",
+    "path": "/api/v1/inventory/purchase-orders/:id/receive",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryPurchasingService",
+    "serviceMethod": "receivePurchaseOrder"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "cancelPurchaseOrder",
+    "verb": "POST",
+    "path": "/api/v1/inventory/purchase-orders/:id/cancel",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryPurchasingService",
+    "serviceMethod": "cancelPurchaseOrder"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "stocktakes",
+    "verb": "GET",
+    "path": "/api/v1/inventory/stocktakes",
+    "roles": [],
+    "isPublic": false,
+    "provider": "InventoryStocktakingService",
+    "serviceMethod": "stocktakes"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "createStocktake",
+    "verb": "POST",
+    "path": "/api/v1/inventory/stocktakes",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryStocktakingService",
+    "serviceMethod": "createStocktake"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "startStocktake",
+    "verb": "POST",
+    "path": "/api/v1/inventory/stocktakes/:id/start",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryStocktakingService",
+    "serviceMethod": "startStocktake"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "countStocktakeLine",
+    "verb": "POST",
+    "path": "/api/v1/inventory/stocktakes/:id/lines/:lineId/count",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryStocktakingService",
+    "serviceMethod": "countStocktakeLine"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "submitStocktake",
+    "verb": "POST",
+    "path": "/api/v1/inventory/stocktakes/:id/submit",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryStocktakingService",
+    "serviceMethod": "submitStocktake"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "postStocktake",
+    "verb": "POST",
+    "path": "/api/v1/inventory/stocktakes/:id/post",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryStocktakingService",
+    "serviceMethod": "postStocktake"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "operationDocuments",
+    "verb": "GET",
+    "path": "/api/v1/inventory/operations",
+    "roles": [],
+    "isPublic": false,
+    "provider": "InventoryMovementsService",
+    "serviceMethod": "operations"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "createOperation",
+    "verb": "POST",
+    "path": "/api/v1/inventory/operations",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryMovementsService",
+    "serviceMethod": "createOperation"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "submitOperation",
+    "verb": "POST",
+    "path": "/api/v1/inventory/operations/:id/submit",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryMovementsService",
+    "serviceMethod": "submitOperation"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "approveOperation",
+    "verb": "POST",
+    "path": "/api/v1/inventory/operations/:id/approve",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryMovementsService",
+    "serviceMethod": "approveOperation"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "postOperation",
+    "verb": "POST",
+    "path": "/api/v1/inventory/operations/:id/post",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryMovementsService",
+    "serviceMethod": "postOperation"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "cancelOperation",
+    "verb": "POST",
+    "path": "/api/v1/inventory/operations/:id/cancel",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryMovementsService",
+    "serviceMethod": "cancelOperation"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "create",
+    "verb": "POST",
+    "path": "/api/v1/inventory",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryCatalogService",
+    "serviceMethod": "create"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "updateItem",
+    "verb": "POST",
+    "path": "/api/v1/inventory/items/:id/update",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryCatalogService",
+    "serviceMethod": "update"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "setItemStatus",
+    "verb": "POST",
+    "path": "/api/v1/inventory/items/:id/status",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryCatalogService",
+    "serviceMethod": "setStatus"
+  },
+  {
+    "controller": "InventoryController",
+    "method": "transact",
+    "verb": "POST",
+    "path": "/api/v1/inventory/:id/transactions",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "InventoryTransactionsService",
+    "serviceMethod": "transact"
+  },
+  {
+    "controller": "MembersController",
+    "method": "list",
+    "verb": "GET",
+    "path": "/api/v1/members",
+    "roles": [
+      "FRONT_DESK",
+      "COACH",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberDirectoryService",
+    "serviceMethod": "list"
+  },
+  {
+    "controller": "MembersController",
+    "method": "myTransactions",
+    "verb": "GET",
+    "path": "/api/v1/members/me/accounts/transactions",
+    "roles": [],
+    "isPublic": false,
+    "provider": "MemberAccountsService",
+    "serviceMethod": "accountTransactions"
+  },
+  {
+    "controller": "MembersController",
+    "method": "leads",
+    "verb": "GET",
+    "path": "/api/v1/members/leads",
+    "roles": [
+      "FRONT_DESK",
+      "COACH",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberLeadsService",
+    "serviceMethod": "listLeads"
+  },
+  {
+    "controller": "MembersController",
+    "method": "leadOwners",
+    "verb": "GET",
+    "path": "/api/v1/members/leads/owners",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberLeadsService",
+    "serviceMethod": "leadOwners"
+  },
+  {
+    "controller": "MembersController",
+    "method": "leadFunnel",
+    "verb": "GET",
+    "path": "/api/v1/members/leads/funnel",
+    "roles": [
+      "FRONT_DESK",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberLeadReportingService",
+    "serviceMethod": "leadFunnel"
+  },
+  {
+    "controller": "MembersController",
+    "method": "accountAdjustments",
+    "verb": "GET",
+    "path": "/api/v1/members/account-adjustments",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberAccountsService",
+    "serviceMethod": "accountAdjustmentRequests"
+  },
+  {
+    "controller": "MembersController",
+    "method": "approveAccountAdjustment",
+    "verb": "POST",
+    "path": "/api/v1/members/account-adjustments/:requestId/approve",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberAccountsService",
+    "serviceMethod": "approveAccountAdjustment"
+  },
+  {
+    "controller": "MembersController",
+    "method": "rejectAccountAdjustment",
+    "verb": "POST",
+    "path": "/api/v1/members/account-adjustments/:requestId/reject",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberAccountsService",
+    "serviceMethod": "rejectAccountAdjustment"
+  },
+  {
+    "controller": "MembersController",
+    "method": "createLead",
+    "verb": "POST",
+    "path": "/api/v1/members/leads",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberLeadsService",
+    "serviceMethod": "createLead"
+  },
+  {
+    "controller": "MembersController",
+    "method": "claimLead",
+    "verb": "POST",
+    "path": "/api/v1/members/leads/:id/claim",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberLeadsService",
+    "serviceMethod": "claimLead"
+  },
+  {
+    "controller": "MembersController",
+    "method": "assignLead",
+    "verb": "POST",
+    "path": "/api/v1/members/leads/:id/assign",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberLeadsService",
+    "serviceMethod": "assignLead"
+  },
+  {
+    "controller": "MembersController",
+    "method": "followUpLead",
+    "verb": "POST",
+    "path": "/api/v1/members/leads/:id/follow-ups",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberLeadsService",
+    "serviceMethod": "addLeadFollowUp"
+  },
+  {
+    "controller": "MembersController",
+    "method": "convertLead",
+    "verb": "POST",
+    "path": "/api/v1/members/leads/:id/convert",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberLeadsService",
+    "serviceMethod": "convertLead"
+  },
+  {
+    "controller": "MembersController",
+    "method": "loseLead",
+    "verb": "POST",
+    "path": "/api/v1/members/leads/:id/lost",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberLeadsService",
+    "serviceMethod": "loseLead"
+  },
+  {
+    "controller": "MembersController",
+    "method": "archiveLead",
+    "verb": "POST",
+    "path": "/api/v1/members/leads/:id/archive",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberLeadsService",
+    "serviceMethod": "archiveLead"
+  },
+  {
+    "controller": "MembersController",
+    "method": "customer360",
+    "verb": "GET",
+    "path": "/api/v1/members/:id/360",
+    "roles": [
+      "FRONT_DESK",
+      "COACH",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberDirectoryService",
+    "serviceMethod": "customer360"
+  },
+  {
+    "controller": "MembersController",
+    "method": "profile",
+    "verb": "GET",
+    "path": "/api/v1/members/:id",
+    "roles": [
+      "FRONT_DESK",
+      "COACH",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberDirectoryService",
+    "serviceMethod": "profile"
+  },
+  {
+    "controller": "MembersController",
+    "method": "transactions",
+    "verb": "GET",
+    "path": "/api/v1/members/:id/accounts/transactions",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberAccountsService",
+    "serviceMethod": "accountTransactions"
+  },
+  {
+    "controller": "MembersController",
+    "method": "adjust",
+    "verb": "POST",
+    "path": "/api/v1/members/:id/accounts/adjust",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MemberAccountsService",
+    "serviceMethod": "adjustAccount"
+  },
+  {
+    "controller": "MembersController",
+    "method": "bindReferral",
+    "verb": "POST",
+    "path": "/api/v1/members/me/referrer",
+    "roles": [],
+    "isPublic": false,
+    "provider": "MemberReferralsService",
+    "serviceMethod": "bindReferral"
+  },
+  {
+    "controller": "MembershipsController",
+    "method": "products",
+    "verb": "GET",
+    "path": "/api/v1/memberships/products",
+    "roles": [],
+    "isPublic": false,
+    "provider": "MembershipProductsService",
+    "serviceMethod": "products"
+  },
+  {
+    "controller": "MembershipsController",
+    "method": "manageProducts",
+    "verb": "GET",
+    "path": "/api/v1/memberships/products/manage",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MembershipProductsService",
+    "serviceMethod": "manageProducts"
+  },
+  {
+    "controller": "MembershipsController",
+    "method": "createProduct",
+    "verb": "POST",
+    "path": "/api/v1/memberships/products",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MembershipProductsService",
+    "serviceMethod": "createProduct"
+  },
+  {
+    "controller": "MembershipsController",
+    "method": "createProductVersion",
+    "verb": "POST",
+    "path": "/api/v1/memberships/products/:id/versions",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MembershipProductsService",
+    "serviceMethod": "createProductVersion"
+  },
+  {
+    "controller": "MembershipsController",
+    "method": "setProductStatus",
+    "verb": "POST",
+    "path": "/api/v1/memberships/products/:id/status",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MembershipProductsService",
+    "serviceMethod": "setProductStatus"
+  },
+  {
+    "controller": "MembershipsController",
+    "method": "rechargePlans",
+    "verb": "GET",
+    "path": "/api/v1/memberships/recharge-plans",
+    "roles": [],
+    "isPublic": false,
+    "provider": "MembershipRechargePlansService",
+    "serviceMethod": "rechargePlans"
+  },
+  {
+    "controller": "MembershipsController",
+    "method": "manageRechargePlans",
+    "verb": "GET",
+    "path": "/api/v1/memberships/recharge-plans/manage",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MembershipRechargePlansService",
+    "serviceMethod": "manageRechargePlans"
+  },
+  {
+    "controller": "MembershipsController",
+    "method": "createRechargePlan",
+    "verb": "POST",
+    "path": "/api/v1/memberships/recharge-plans",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MembershipRechargePlansService",
+    "serviceMethod": "createRechargePlan"
+  },
+  {
+    "controller": "MembershipsController",
+    "method": "setRechargePlanStatus",
+    "verb": "POST",
+    "path": "/api/v1/memberships/recharge-plans/:id/status",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "MembershipRechargePlansService",
+    "serviceMethod": "setRechargePlanStatus"
+  },
+  {
+    "controller": "MembershipsController",
+    "method": "purchase",
+    "verb": "POST",
+    "path": "/api/v1/memberships/purchase",
+    "roles": [],
+    "isPublic": false,
+    "provider": "MembershipPurchasesService",
+    "serviceMethod": "purchase"
+  },
+  {
+    "controller": "MembershipsController",
+    "method": "recharge",
+    "verb": "POST",
+    "path": "/api/v1/memberships/recharge",
+    "roles": [],
+    "isPublic": false,
+    "provider": "MembershipPurchasesService",
+    "serviceMethod": "recharge"
+  },
+  {
+    "controller": "OrdersController",
+    "method": "myOrders",
+    "verb": "GET",
+    "path": "/api/v1/orders",
+    "roles": [],
+    "isPublic": false,
+    "provider": "OrderQueriesService",
+    "serviceMethod": "list"
+  },
+  {
+    "controller": "OrdersController",
+    "method": "all",
+    "verb": "GET",
+    "path": "/api/v1/orders/admin/all",
+    "roles": [
+      "FRONT_DESK",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "OrderQueriesService",
+    "serviceMethod": "list"
+  },
+  {
+    "controller": "OrdersController",
+    "method": "detail",
+    "verb": "GET",
+    "path": "/api/v1/orders/:id",
+    "roles": [],
+    "isPublic": false,
+    "provider": "OrderQueriesService",
+    "serviceMethod": "detail"
+  },
+  {
+    "controller": "OrdersController",
+    "method": "paymentOptions",
+    "verb": "GET",
+    "path": "/api/v1/orders/:id/payment-options",
+    "roles": [],
+    "isPublic": false,
+    "provider": "OrderPaymentsService",
+    "serviceMethod": "paymentOptions"
+  },
+  {
+    "controller": "OrdersController",
+    "method": "pay",
+    "verb": "POST",
+    "path": "/api/v1/orders/:id/pay",
+    "roles": [],
+    "isPublic": false,
+    "provider": "OrderPaymentsService",
+    "serviceMethod": "pay"
+  },
+  {
+    "controller": "OrdersController",
+    "method": "cancelPending",
+    "verb": "POST",
+    "path": "/api/v1/orders/:id/cancel",
+    "roles": [],
+    "isPublic": false,
+    "provider": "PendingOrdersService",
+    "serviceMethod": "cancelPending"
+  },
+  {
+    "controller": "OrdersController",
+    "method": "requestRefund",
+    "verb": "POST",
+    "path": "/api/v1/orders/:id/refunds",
+    "roles": [],
+    "isPublic": false,
+    "provider": "OrderRefundRequestsService",
+    "serviceMethod": "requestRefund"
+  },
+  {
+    "controller": "OrdersController",
+    "method": "approveRefund",
+    "verb": "POST",
+    "path": "/api/v1/orders/refunds/:refundId/approve",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "OrderRefundReviewService",
+    "serviceMethod": "approveRefund"
+  },
+  {
+    "controller": "OrdersController",
+    "method": "rejectRefund",
+    "verb": "POST",
+    "path": "/api/v1/orders/refunds/:refundId/reject",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "OrderRefundReviewService",
+    "serviceMethod": "rejectRefund"
+  },
+  {
+    "controller": "TrainingTrialsController",
+    "method": "mine",
+    "verb": "GET",
+    "path": "/api/v1/training/trials/mine",
+    "roles": [],
+    "isPublic": false,
+    "provider": "TrainingTrialBookingService",
+    "serviceMethod": "list"
+  },
+  {
+    "controller": "TrainingTrialsController",
+    "method": "list",
+    "verb": "GET",
+    "path": "/api/v1/training/trials",
+    "roles": [
+      "COACH",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingTrialBookingService",
+    "serviceMethod": "list"
+  },
+  {
+    "controller": "TrainingTrialsController",
+    "method": "create",
+    "verb": "POST",
+    "path": "/api/v1/training/trials",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingTrialBookingService",
+    "serviceMethod": "create"
+  },
+  {
+    "controller": "TrainingTrialsController",
+    "method": "checkIn",
+    "verb": "POST",
+    "path": "/api/v1/training/trials/:id/check-in",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingTrialFollowUpService",
+    "serviceMethod": "checkIn"
+  },
+  {
+    "controller": "TrainingTrialsController",
+    "method": "noShow",
+    "verb": "POST",
+    "path": "/api/v1/training/trials/:id/no-show",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingTrialFollowUpService",
+    "serviceMethod": "noShow"
+  },
+  {
+    "controller": "TrainingTrialsController",
+    "method": "assess",
+    "verb": "POST",
+    "path": "/api/v1/training/trials/:id/assess",
+    "roles": [
+      "COACH",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingTrialFollowUpService",
+    "serviceMethod": "assess"
+  },
+  {
+    "controller": "TrainingTrialsController",
+    "method": "convert",
+    "verb": "POST",
+    "path": "/api/v1/training/trials/:id/convert",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingTrialFollowUpService",
+    "serviceMethod": "convert"
+  },
+  {
+    "controller": "TrainingTrialsController",
+    "method": "lost",
+    "verb": "POST",
+    "path": "/api/v1/training/trials/:id/lost",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingTrialFollowUpService",
+    "serviceMethod": "lost"
+  },
+  {
+    "controller": "TrainingTrialsController",
+    "method": "cancel",
+    "verb": "POST",
+    "path": "/api/v1/training/trials/:id/cancel",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingTrialFollowUpService",
+    "serviceMethod": "cancel"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "availability",
+    "verb": "GET",
+    "path": "/api/v1/venues/availability",
+    "roles": [],
+    "isPublic": false,
+    "provider": "VenueAvailabilityService",
+    "serviceMethod": "availability"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "assistedAvailability",
+    "verb": "GET",
+    "path": "/api/v1/venues/availability/assisted",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenueAvailabilityService",
+    "serviceMethod": "availability"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "book",
+    "verb": "POST",
+    "path": "/api/v1/venues/bookings",
+    "roles": [],
+    "isPublic": false,
+    "provider": "VenueBookingService",
+    "serviceMethod": "createBooking"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "closures",
+    "verb": "GET",
+    "path": "/api/v1/venues/closures",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenueClosuresService",
+    "serviceMethod": "listClosures"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "createClosure",
+    "verb": "POST",
+    "path": "/api/v1/venues/closures",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenueClosuresService",
+    "serviceMethod": "createClosure"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "cancelClosure",
+    "verb": "POST",
+    "path": "/api/v1/venues/closures/:id/cancel",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenueClosuresService",
+    "serviceMethod": "cancelClosure"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "checkIn",
+    "verb": "POST",
+    "path": "/api/v1/venues/orders/:orderId/check-in",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenueFulfillmentService",
+    "serviceMethod": "checkIn"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "fulfill",
+    "verb": "POST",
+    "path": "/api/v1/venues/orders/:orderId/fulfillment",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenueFulfillmentService",
+    "serviceMethod": "completeBooking"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "updateCourt",
+    "verb": "PATCH",
+    "path": "/api/v1/venues/courts/:id",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenuePricingService",
+    "serviceMethod": "updateCourt"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "timeSlots",
+    "verb": "GET",
+    "path": "/api/v1/venues/time-slots/manage",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenuePricingService",
+    "serviceMethod": "listTimeSlots"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "priceRules",
+    "verb": "GET",
+    "path": "/api/v1/venues/price-rules/manage",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenuePricingService",
+    "serviceMethod": "listPriceRules"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "createPriceRule",
+    "verb": "POST",
+    "path": "/api/v1/venues/price-rules",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenuePricingService",
+    "serviceMethod": "createPriceRule"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "createPriceRuleVersion",
+    "verb": "POST",
+    "path": "/api/v1/venues/price-rules/:id/versions",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenuePricingService",
+    "serviceMethod": "createPriceRuleVersion"
+  },
+  {
+    "controller": "VenuesController",
+    "method": "setPriceRuleStatus",
+    "verb": "POST",
+    "path": "/api/v1/venues/price-rules/:id/status",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenuePricingService",
+    "serviceMethod": "setPriceRuleStatus"
+  }
+]

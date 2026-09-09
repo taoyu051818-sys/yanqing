@@ -29,6 +29,44 @@ function access(
     return { owner: node.expression, name: node.argumentExpression.text };
 }
 describe('core architecture regression boundaries', () => {
+  it('keeps the remaining retired services out of production', () => {
+    expect(
+      existsSync(
+        resolve(root, 'src/inventory/inventory-operations.service.ts'),
+      ),
+    ).toBe(false);
+    expect(
+      existsSync(resolve(root, 'src/inventory/inventory.service.ts')),
+    ).toBe(false);
+    expect(
+      existsSync(
+        resolve(root, 'src/inventory/consignment-settlement.service.ts'),
+      ),
+    ).toBe(false);
+    expect(existsSync(resolve(root, 'src/games/games.service.ts'))).toBe(false);
+    expect(existsSync(resolve(root, 'src/members/members.service.ts'))).toBe(
+      false,
+    );
+    expect(existsSync(resolve(root, 'src/venues/venues.service.ts'))).toBe(
+      false,
+    );
+    expect(
+      existsSync(resolve(root, 'src/governance/governance.service.ts')),
+    ).toBe(false);
+    expect(
+      existsSync(resolve(root, 'src/memberships/memberships.service.ts')),
+    ).toBe(false);
+    expect(existsSync(resolve(root, 'src/alliance/alliance.service.ts'))).toBe(
+      false,
+    );
+    expect(
+      existsSync(resolve(root, 'src/training/training-trials.service.ts')),
+    ).toBe(false);
+    expect(existsSync(resolve(root, 'src/orders/orders.service.ts'))).toBe(
+      false,
+    );
+  });
+
   it('keeps retired aggregate services and controllers out of production', () => {
     for (const domain of ['events', 'training']) {
       for (const layer of ['service', 'controller']) {
@@ -71,6 +109,49 @@ describe('core architecture regression boundaries', () => {
       ].map((name) => resolve(root, 'src', name)),
     );
     const entries = [
+      'inventory/suppliers/inventory-operations-suppliers.service.ts',
+      'inventory/locations/inventory-operations-locations.service.ts',
+      'inventory/purchasing/inventory-operations-purchasing.service.ts',
+      'inventory/stocktaking/inventory-operations-stocktaking.service.ts',
+      'inventory/movements/inventory-operations-movements.service.ts',
+      'inventory/catalog/inventory-catalog.service.ts',
+      'inventory/transactions/inventory-transactions.service.ts',
+      'inventory/consignment/ledger/consignment-settlement-ledger.service.ts',
+      'inventory/consignment/queries/consignment-settlement-queries.service.ts',
+      'inventory/consignment/statements/consignment-settlement-statements.service.ts',
+      'inventory/consignment/workflow/consignment-settlement-workflow.service.ts',
+      'games/catalog/games-catalog.service.ts',
+      'games/hosts/games-hosts.service.ts',
+      'games/cancellation/games-cancellation.service.ts',
+      'games/registration/games-registration.service.ts',
+      'games/completion/games-completion.service.ts',
+      'games/rewards/games-rewards.service.ts',
+      'members/directory/members-directory.service.ts',
+      'members/leads/members-leads.service.ts',
+      'members/lead-reporting/members-lead-reporting.service.ts',
+      'members/accounts/members-accounts.service.ts',
+      'members/referrals/members-referrals.service.ts',
+      'venues/availability/venues-availability.service.ts',
+      'venues/closures/venues-closures.service.ts',
+      'venues/booking/venues-booking.service.ts',
+      'venues/fulfillment/venues-fulfillment.service.ts',
+      'venues/pricing/venues-pricing.service.ts',
+      'governance/users/governance-users.service.ts',
+      'governance/risks/governance-risks.service.ts',
+      'memberships/products/memberships-products.service.ts',
+      'memberships/recharge-plans/memberships-recharge-plans.service.ts',
+      'memberships/purchases/memberships-purchases.service.ts',
+      'alliance/merchants/alliance-merchants.service.ts',
+      'alliance/templates/alliance-templates.service.ts',
+      'alliance/coupons/alliance-coupons.service.ts',
+      'alliance/settlements/alliance-settlements.service.ts',
+      'training/trials/booking/training-trials-booking.service.ts',
+      'training/trials/follow-up/training-trials-follow-up.service.ts',
+      'orders/queries/orders-queries.service.ts',
+      'orders/payments/orders-payments.service.ts',
+      'orders/refund-requests/orders-refund-requests.service.ts',
+      'orders/refund-review/orders-refund-review.service.ts',
+      'orders/pending/orders-pending.service.ts',
       'events/catalog/event-catalog.service.ts',
       'events/catalog/event-cancellation.service.ts',
       'events/invitations/event-invitations.service.ts',
@@ -88,7 +169,10 @@ describe('core architecture regression boundaries', () => {
       'training/corrections/training-corrections.service.ts',
       'training/settlements/training-settlements.service.ts',
 
-      'orders/orders.service.ts',
+      'orders/pending/orders-pending.service.ts',
+      'orders/payments/orders-payments.commands.ts',
+      'orders/refund-requests/orders-refund-requests.commands.ts',
+      'orders/refund-review/orders-refund-review.commands.ts',
       'orders/pending-order-resources.ts',
       'orders/refund-resources.ts',
       'payments/wechat-pay.service.ts',

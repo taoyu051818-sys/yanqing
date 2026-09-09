@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { EventsModule } from '../src/events/events.module.js';
 import { TrainingModule } from '../src/training/training.module.js';
-import { TrainingTrialsService } from '../src/training/training-trials.service.js';
+import { TrainingTrialsService } from './support/training-trials-fixture.js';
 import { YouthTrainingRulesService } from '../src/training/youth-training-rules.service.js';
 import { RolesGuard } from '../src/common/auth/roles.guard.js';
 import {

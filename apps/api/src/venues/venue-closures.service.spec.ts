@@ -13,7 +13,7 @@ import {
   CourtUsage,
   SourceChannel,
 } from '../generated/prisma/enums.js';
-import { VenuesService } from './venues.service.js';
+import { VenuesService } from '../../test/support/venues-fixture.js';
 
 const admin: AuthUser = {
   sub: 'admin-1',
@@ -235,7 +235,11 @@ describe('VenuesService court closure cancellation', () => {
     };
     const service = new VenuesService({ $transaction: runner(tx) } as never);
 
-    const result = await service.cancelClosure('closure-1', { reason: '维修计划取消' }, admin);
+    const result = await service.cancelClosure(
+      'closure-1',
+      { reason: '维修计划取消' },
+      admin,
+    );
     expect(result).toMatchObject({ id: after.id, status: after.status });
     expect(result).not.toHaveProperty('creationIdempotencyKey');
     expect(tx.courtClosure.updateMany).toHaveBeenCalledWith(
@@ -262,8 +266,15 @@ describe('VenuesService court closure cancellation', () => {
     };
     const service = new VenuesService({ $transaction: runner(tx) } as never);
 
-    const result = await service.cancelClosure('closure-1', { reason: '重复请求' }, admin);
-    expect(result).toMatchObject({ id: cancelled.id, status: cancelled.status });
+    const result = await service.cancelClosure(
+      'closure-1',
+      { reason: '重复请求' },
+      admin,
+    );
+    expect(result).toMatchObject({
+      id: cancelled.id,
+      status: cancelled.status,
+    });
     expect(result).not.toHaveProperty('creationIdempotencyKey');
     expect(tx.courtClosure.updateMany).not.toHaveBeenCalled();
     expect(tx.auditLog.create).not.toHaveBeenCalled();
@@ -311,46 +322,46 @@ describe('VenuesService closure integration with availability and booking', () =
     };
     const prisma = {
       court: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'court-1',
-            code: 'C01',
-            name: '1号场',
-            enabled: true,
-            usage: CourtUsage.RETAIL,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'court-1',
+          code: 'C01',
+          name: '1号场',
+          enabled: true,
+          usage: CourtUsage.RETAIL,
+        }),
       },
       timeSlot: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'slot-1',
-            code: 'S01',
-            label: '上午一',
-            enabled: true,
-            startMinutes: 540,
-            endMinutes: 660,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'slot-1',
+          code: 'S01',
+          label: '上午一',
+          enabled: true,
+          startMinutes: 540,
+          endMinutes: 660,
+        }),
       },
       memberProfile: {
         findUnique: vi.fn().mockResolvedValue({ level: 'GOLD' }),
       },
       priceRule: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([
-            {
-              id: 'price-1',
-              weekdayMask: 127,
-              priceCents: 6800,
-              newcomerPriceCents: null,
-            },
-          ]),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'price-1',
+            weekdayMask: 127,
+            priceCents: 6800,
+            newcomerPriceCents: null,
+          },
+        ]),
       },
       $transaction: runner(tx),
     };
-    Object.assign(tx, { court: prisma.court, timeSlot: prisma.timeSlot, memberProfile: prisma.memberProfile, priceRule: prisma.priceRule, $queryRaw: vi.fn().mockResolvedValue([]) });
+    Object.assign(tx, {
+      court: prisma.court,
+      timeSlot: prisma.timeSlot,
+      memberProfile: prisma.memberProfile,
+      priceRule: prisma.priceRule,
+      $queryRaw: vi.fn().mockResolvedValue([]),
+    });
     const service = new VenuesService(prisma as never);
 
     await expect(

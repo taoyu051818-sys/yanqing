@@ -1,3 +1,4 @@
+import { createGovernanceController } from '../../test/support/domain-consumer-fixtures.js';
 import 'reflect-metadata';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -54,7 +55,7 @@ describe('GovernanceController delegation', () => {
       riskEvents: vi.fn().mockResolvedValue({ items: [] }),
       transitionRisk: vi.fn().mockResolvedValue({ id: 'risk-1' }),
     };
-    const controller = new GovernanceController(governance as never);
+    const controller = createGovernanceController(governance as never);
     const userQuery = { page: 1, pageSize: 20 };
     const roles = {
       roles: [AppRole.MEMBER, AppRole.FRONT_DESK],

@@ -4,115 +4,27 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-
 import type { AuthUser } from '../common/auth/auth-user.js';
 import { PrismaService } from '../database/prisma.service.js';
 import {
   AppRole,
-  AttendanceStatus,
   AuditResult,
-  BookingStatus,
-  BusinessType,
-  FrontDeskShiftStatus,
-  OrderStatus,
-  PaymentStatus,
   Prisma,
   ReconciliationPeriodStatus,
-  RefundStatus,
-  RegistrationStatus,
-  SettlementStatus,
-  TrainingRecognitionType,
-  TrainingSessionStatus,
 } from '../generated/prisma/client.js';
 import type { CloseReconciliationPeriodDto } from './reconciliation.dto.js';
+import {
+  CLOSE_ROLES,
+  ReconciliationTotals,
+  ReconciliationBlocker,
+  ReconciliationView,
+  BusinessDay,
+  Snapshot,
+  parseBusinessDay,
+  isUniqueConstraintError,
+} from './reconciliation-policy.js';
+import { snapshot as loadReconciliationSnapshot } from './reconciliation-snapshot.js';
 
-const CLOSE_ROLES = [
-  AppRole.FINANCE,
-  AppRole.ADMIN,
-  AppRole.SUPER_ADMIN,
-] as const;
-const PENDING_REFUNDS = [
-  RefundStatus.REQUESTED,
-  RefundStatus.APPROVED,
-  RefundStatus.PROCESSING,
-] as const;
-const PENDING_PAYMENTS = [
-  PaymentStatus.CREATED,
-  PaymentStatus.PROCESSING,
-] as const;
-const FINAL_ORDER_STATUSES = [
-  OrderStatus.PAID,
-  OrderStatus.CHECKED_IN,
-  OrderStatus.COMPLETED,
-  OrderStatus.REFUND_PENDING,
-  OrderStatus.PARTIALLY_REFUNDED,
-  OrderStatus.REFUNDED,
-] as const;
-
-const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-export interface ReconciliationTotals {
-  orderPaidCents: number;
-  orderRefundedCents: number;
-  successfulPaymentCents: number;
-  completedRefundCents: number;
-  trainingEffectiveRevenueCents: number;
-  trainingVenueContributionCents: number;
-  trainingSettlementVenueContributionCents: number;
-  allianceAttributedGmvCents: number;
-  allianceCooperationFeeCents: number;
-  consignmentPayableCents: number;
-  consignmentSettledPayableCents: number;
-  inventoryTransactionCount: number;
-  inventoryCostCents: number;
-}
-
-export type ReconciliationBlockerKind =
-  | 'PENDING_REFUNDS'
-  | 'PENDING_PAYMENTS'
-  | 'OPEN_FRONT_DESK_SHIFTS'
-  | 'UNREVIEWED_CASH_VARIANCES'
-  | 'UNFULFILLED_ORDERS'
-  | 'UNFULFILLED_TRAINING_SESSIONS';
-
-export interface ReconciliationBlocker {
-  kind: ReconciliationBlockerKind;
-  count: number;
-  message: string;
-}
-
-export interface ReconciliationView {
-  id?: string;
-  businessDate: Date;
-  status: ReconciliationPeriodStatus;
-  totals: ReconciliationTotals | Record<string, unknown>;
-  exceptionCount: number;
-  closedById: string | null;
-  closedAt: Date | null;
-  detail: Record<string, unknown>;
-  createdAt?: Date;
-  updatedAt?: Date;
-  blocked?: boolean;
-  blockers?: ReconciliationBlocker[];
-}
-
-interface BusinessDay {
-  label: string;
-  start: Date;
-  end: Date;
-}
-
-interface Snapshot {
-  totals: ReconciliationTotals;
-  blockers: ReconciliationBlocker[];
-}
-
-/**
- * Finance-facing business-day close.  A close is deliberately a snapshot and
- * state transition in one serializable transaction: pending money or
- * settlement work leaves the period in REVIEW, while a clean retry moves it
- * to LOCKED.  A LOCKED period is never recalculated or audited twice.
- */
 @Injectable()
 export class ReconciliationService {
   constructor(private readonly prisma: PrismaService) {}
@@ -131,7 +43,7 @@ export class ReconciliationService {
     // settlement that was resolved after the last close attempt. The row is
     // not mutated here; only an explicit close command can lock the period.
     if (existing) {
-      const snapshot = await this.snapshot(this.prisma, day);
+      const snapshot = await loadReconciliationSnapshot(this.prisma, day);
       const blocked = snapshot.blockers.length > 0;
       return this.toView(
         {
@@ -150,7 +62,7 @@ export class ReconciliationService {
 
     // A read of an uninitialised day is useful to the B-end review screen, but
     // does not create a row (and therefore does not produce audit noise).
-    const snapshot = await this.snapshot(this.prisma, day);
+    const snapshot = await loadReconciliationSnapshot(this.prisma, day);
     return {
       businessDate: day.start,
       status: snapshot.blockers.length
@@ -197,7 +109,7 @@ export class ReconciliationService {
             return this.toView(existing, false, []);
           }
 
-          const snapshot = await this.snapshot(tx, day);
+          const snapshot = await loadReconciliationSnapshot(tx, day);
           const detail = this.detail(day, snapshot, reason);
 
           if (snapshot.blockers.length > 0) {
@@ -367,282 +279,6 @@ export class ReconciliationService {
     }
   }
 
-  private async snapshot(
-    client: Pick<
-      Prisma.TransactionClient,
-      | 'refund'
-      | 'payment'
-      | 'allianceSettlement'
-      | 'trainingSettlement'
-      | 'consignmentSettlement'
-      | 'consignmentPayableEntry'
-      | 'order'
-      | 'trainingSession'
-      | 'trainingRevenueRecognition'
-      | 'inventoryTransaction'
-      | 'frontDeskShift'
-    >,
-    day: BusinessDay,
-  ): Promise<Snapshot> {
-    const [
-      pendingRefunds,
-      pendingPayments,
-      openFrontDeskShifts,
-      unreviewedCashVariances,
-      unfulfilledOrders,
-      unfulfilledTrainingSessions,
-      orders,
-      payments,
-      refunds,
-      recognitions,
-      alliance,
-      trainingSettlement,
-      consignmentPayables,
-      consignmentSettlements,
-      inventory,
-    ] = await Promise.all([
-      // Daily close locks source-business evidence. Periodic settlements are
-      // downstream finance work and remain visible in their workbench rather
-      // than blocking every business day in a weekly/monthly cycle.
-      client.refund.count({
-        where: {
-          requestedAt: { lt: day.end },
-          status: { in: [...PENDING_REFUNDS] },
-        },
-      }),
-      client.payment.count({
-        where: {
-          createdAt: { lt: day.end },
-          status: { in: [...PENDING_PAYMENTS] },
-        },
-      }),
-      client.frontDeskShift.count({
-        where: {
-          businessDate: day.start,
-          status: FrontDeskShiftStatus.OPEN,
-        },
-      }),
-      client.frontDeskShift.count({
-        where: {
-          businessDate: day.start,
-          status: FrontDeskShiftStatus.CLOSED,
-          cashVarianceCents: { not: 0 },
-          varianceReviewedAt: null,
-        },
-      }),
-      client.order.count({
-        where: {
-          businessType: {
-            in: [BusinessType.VENUE, BusinessType.GAME, BusinessType.EVENT],
-          },
-          completedAt: null,
-          status: {
-            in: [
-              OrderStatus.PAID,
-              OrderStatus.CHECKED_IN,
-              OrderStatus.COMPLETED,
-              OrderStatus.REFUND_PENDING,
-              OrderStatus.PARTIALLY_REFUNDED,
-            ],
-          },
-          OR: [
-            {
-              businessType: BusinessType.VENUE,
-              bookings: {
-                some: {
-                  endsAt: { lt: day.end },
-                  status: {
-                    in: [BookingStatus.CONFIRMED, BookingStatus.CHECKED_IN],
-                  },
-                },
-              },
-            },
-            {
-              businessType: BusinessType.GAME,
-              gameRegistration: {
-                is: {
-                  status: {
-                    in: [
-                      RegistrationStatus.PAID,
-                      RegistrationStatus.CHECKED_IN,
-                    ],
-                  },
-                  game: { endsAt: { lt: day.end } },
-                },
-              },
-            },
-            {
-              businessType: BusinessType.EVENT,
-              eventTeam: {
-                is: {
-                  status: {
-                    in: [
-                      RegistrationStatus.PAID,
-                      RegistrationStatus.CHECKED_IN,
-                    ],
-                  },
-                  event: { startsAt: { lt: day.end } },
-                },
-              },
-            },
-          ],
-        },
-      }),
-      client.trainingSession.count({
-        where: {
-          status: { not: TrainingSessionStatus.CANCELLED },
-          endsAt: { lt: day.end },
-          attendances: {
-            some: {
-              OR: [
-                { status: AttendanceStatus.PENDING },
-                {
-                  status: AttendanceStatus.ATTENDED,
-                  OR: [
-                    { consumedSessions: 0 },
-                    {
-                      revenueRecognitions: {
-                        none: {
-                          type: TrainingRecognitionType.CONSUME,
-                          reversedBy: { is: null },
-                        },
-                      },
-                    },
-                  ],
-                },
-              ],
-            },
-          },
-        },
-      }),
-      client.order.aggregate({
-        where: {
-          paidAt: { gte: day.start, lt: day.end },
-          status: { in: [...FINAL_ORDER_STATUSES] },
-        },
-        _sum: { paidCents: true, refundedCents: true },
-      }),
-      client.payment.aggregate({
-        where: {
-          paidAt: { gte: day.start, lt: day.end },
-          status: { in: [PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED] },
-        },
-        _sum: { amountCents: true },
-      }),
-      client.refund.aggregate({
-        where: {
-          completedAt: { gte: day.start, lt: day.end },
-          status: RefundStatus.SUCCEEDED,
-        },
-        _sum: { amountCents: true },
-      }),
-      client.trainingRevenueRecognition.aggregate({
-        where: { createdAt: { gte: day.start, lt: day.end } },
-        _sum: { effectiveRevenueCents: true, venueContributionCents: true },
-      }),
-      client.allianceSettlement.aggregate({
-        where: {
-          status: SettlementStatus.SETTLED,
-          settledAt: { gte: day.start, lt: day.end },
-        },
-        _sum: { attributedGmvCents: true, cooperationFeeCents: true },
-      }),
-      client.trainingSettlement.aggregate({
-        where: {
-          status: SettlementStatus.SETTLED,
-          settledAt: { gte: day.start, lt: day.end },
-        },
-        _sum: { venueContributionCents: true },
-      }),
-      client.consignmentPayableEntry.aggregate({
-        where: { occurredAt: { gte: day.start, lt: day.end } },
-        _sum: { payableCents: true },
-      }),
-      client.consignmentSettlement.aggregate({
-        where: {
-          status: SettlementStatus.SETTLED,
-          settledAt: { gte: day.start, lt: day.end },
-        },
-        _sum: { payableCents: true },
-      }),
-      client.inventoryTransaction.findMany({
-        where: { createdAt: { gte: day.start, lt: day.end } },
-        select: { quantity: true, unitCostCents: true },
-      }),
-    ]);
-
-    const blockers: ReconciliationBlocker[] = [];
-    if (pendingRefunds > 0)
-      blockers.push({
-        kind: 'PENDING_REFUNDS',
-        count: pendingRefunds,
-        message: `有 ${pendingRefunds} 笔退款待处理`,
-      });
-    if (pendingPayments > 0)
-      blockers.push({
-        kind: 'PENDING_PAYMENTS',
-        count: pendingPayments,
-        message: `有 ${pendingPayments} 笔支付待处理`,
-      });
-    if (openFrontDeskShifts > 0)
-      blockers.push({
-        kind: 'OPEN_FRONT_DESK_SHIFTS',
-        count: openFrontDeskShifts,
-        message: `有 ${openFrontDeskShifts} 个前台班次尚未关班`,
-      });
-    if (unreviewedCashVariances > 0)
-      blockers.push({
-        kind: 'UNREVIEWED_CASH_VARIANCES',
-        count: unreviewedCashVariances,
-        message: `有 ${unreviewedCashVariances} 个现金差异尚未由财务复核`,
-      });
-    if (unfulfilledOrders > 0)
-      blockers.push({
-        kind: 'UNFULFILLED_ORDERS',
-        count: unfulfilledOrders,
-        message: `有 ${unfulfilledOrders} 笔已到期场地/球局/赛事订单尚未确认履约`,
-      });
-    if (unfulfilledTrainingSessions > 0)
-      blockers.push({
-        kind: 'UNFULFILLED_TRAINING_SESSIONS',
-        count: unfulfilledTrainingSessions,
-        message: `有 ${unfulfilledTrainingSessions} 节已结束培训课次尚未完成点名或消课`,
-      });
-
-    return {
-      totals: {
-        orderPaidCents: orders._sum.paidCents ?? 0,
-        orderRefundedCents: orders._sum.refundedCents ?? 0,
-        successfulPaymentCents: payments._sum.amountCents ?? 0,
-        completedRefundCents: refunds._sum.amountCents ?? 0,
-        trainingEffectiveRevenueCents:
-          recognitions._sum.effectiveRevenueCents ?? 0,
-        trainingVenueContributionCents:
-          recognitions._sum.venueContributionCents ?? 0,
-        trainingSettlementVenueContributionCents:
-          trainingSettlement._sum.venueContributionCents ?? 0,
-        allianceAttributedGmvCents: alliance._sum.attributedGmvCents ?? 0,
-        allianceCooperationFeeCents: alliance._sum.cooperationFeeCents ?? 0,
-        consignmentPayableCents: consignmentPayables._sum.payableCents ?? 0,
-        consignmentSettledPayableCents:
-          consignmentSettlements._sum.payableCents ?? 0,
-        inventoryTransactionCount: inventory.length,
-        // Inventory transactions carry a unit cost and a signed quantity.
-        // Summing only unitCostCents under-reported multi-item movements and
-        // made the close snapshot impossible to reconcile with the stock
-        // ledger.  Use absolute quantity so both in/out movements contribute
-        // their auditable cost value; the transaction type remains available
-        // in the detailed inventory ledger for a net-cost interpretation.
-        inventoryCostCents: inventory.reduce(
-          (sum, item) =>
-            sum + Math.abs(item.quantity) * (item.unitCostCents ?? 0),
-          0,
-        ),
-      },
-      blockers,
-    };
-  }
-
   private detail(
     day: BusinessDay,
     snapshot: Snapshot,
@@ -692,34 +328,9 @@ export class ReconciliationService {
     };
   }
 }
-
-function parseBusinessDay(input: string): BusinessDay {
-  const match = DATE_PATTERN.exec(input);
-  if (!match) throw new BadRequestException('业务日期必须为 YYYY-MM-DD');
-  const start = new Date(`${input}T00:00:00+08:00`);
-  const end = new Date(`${input}T24:00:00+08:00`);
-  if (Number.isNaN(start.getTime()) || formatShanghaiDate(start) !== input) {
-    throw new BadRequestException('业务日期无效');
-  }
-  return { label: input, start, end };
-}
-
-function formatShanghaiDate(date: Date): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const values = Object.fromEntries(
-    parts.map((part) => [part.type, part.value]),
-  );
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2002'
-  );
-}
+export type {
+  ReconciliationTotals,
+  ReconciliationBlockerKind,
+  ReconciliationBlocker,
+  ReconciliationView,
+} from './reconciliation-policy.js';

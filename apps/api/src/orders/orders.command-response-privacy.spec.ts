@@ -1,28 +1,28 @@
-import { ConfigService } from '@nestjs/config'
-import { describe, expect, it, vi } from 'vitest'
+import { ConfigService } from '@nestjs/config';
+import { describe, expect, it, vi } from 'vitest';
 
-import type { AuthUser } from '../common/auth/auth-user.js'
+import type { AuthUser } from '../common/auth/auth-user.js';
 import {
   AppRole,
   PaymentChannel,
   PaymentStatus,
   RefundStatus,
-} from '../generated/prisma/enums.js'
-import { OrdersService } from './orders.service.js'
+} from '../generated/prisma/enums.js';
+import { OrdersService } from '../../test/support/orders-fixture.js';
 
 const member: AuthUser = {
   sub: 'member-1',
   displayName: '会员',
   roles: [AppRole.MEMBER],
-}
+};
 const finance: AuthUser = {
   sub: 'finance-1',
   displayName: '财务',
   roles: [AppRole.FINANCE],
-}
-const requestedAt = new Date('2026-09-01T01:00:00.000Z')
-const approvedAt = new Date('2026-09-01T02:00:00.000Z')
-const completedAt = new Date('2026-09-01T03:00:00.000Z')
+};
+const requestedAt = new Date('2026-09-01T01:00:00.000Z');
+const approvedAt = new Date('2026-09-01T02:00:00.000Z');
+const completedAt = new Date('2026-09-01T03:00:00.000Z');
 
 const sensitiveKeys = [
   'orderId',
@@ -37,10 +37,10 @@ const sensitiveKeys = [
   'providerTradeNo',
   'providerRefundNo',
   'originalOrderStatus',
-]
+];
 
 function expectNoSensitiveFields(result: Record<string, unknown>) {
-  for (const key of sensitiveKeys) expect(result).not.toHaveProperty(key)
+  for (const key of sensitiveKeys) expect(result).not.toHaveProperty(key);
 }
 
 function service(prisma: Record<string, unknown>) {
@@ -49,7 +49,7 @@ function service(prisma: Record<string, unknown>) {
     new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
     {} as never,
     {} as never,
-  )
+  );
 }
 
 describe('OrdersService command response privacy', () => {
@@ -60,7 +60,7 @@ describe('OrdersService command response privacy', () => {
       package: 'prepay_id=client-required',
       signType: 'RSA',
       paySign: 'signature',
-    }
+    };
     const payment = {
       id: 'payment-secret',
       paymentNo: 'PAY-SECRET',
@@ -75,19 +75,38 @@ describe('OrdersService command response privacy', () => {
       providerPayload: { provider: 'wechat', wechatPay },
       createdAt: requestedAt,
       paidAt: null,
-    }
+    };
     const orders = service({
       eventTeam: { findUnique: vi.fn().mockResolvedValue(null) },
       payment: { findUnique: vi.fn().mockResolvedValue(payment) },
-      order: { findUnique: vi.fn().mockResolvedValue({ id: 'order-1', businessType: 'VENUE', status: 'PENDING' }) },
-      $transaction: vi.fn(async (run) => run({ order: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: 'order-1', businessType: 'VENUE', status: 'PENDING' }) } })),
-    })
+      order: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'order-1',
+          businessType: 'VENUE',
+          status: 'PENDING',
+        }),
+      },
+      $transaction: vi.fn(async (run) =>
+        run({
+          order: {
+            findUniqueOrThrow: vi.fn().mockResolvedValue({
+              id: 'order-1',
+              businessType: 'VENUE',
+              status: 'PENDING',
+            }),
+          },
+        }),
+      ),
+    });
 
     const result = await orders.pay(
       payment.orderId,
-      { channel: PaymentChannel.WECHAT, idempotencyKey: payment.idempotencyKey },
+      {
+        channel: PaymentChannel.WECHAT,
+        idempotencyKey: payment.idempotencyKey,
+      },
       member,
-    )
+    );
 
     expect(result).toEqual({
       status: PaymentStatus.PROCESSING,
@@ -96,10 +115,10 @@ describe('OrdersService command response privacy', () => {
       createdAt: requestedAt,
       paidAt: null,
       wechatPay,
-    })
-    expectNoSensitiveFields(result)
-    expect(JSON.stringify(result)).not.toContain('provider-secret')
-  })
+    });
+    expectNoSensitiveFields(result);
+    expect(JSON.stringify(result)).not.toContain('provider-secret');
+  });
 
   it('projects request, approval and rejection refunds without persistence metadata', async () => {
     const baseRefund = {
@@ -116,7 +135,7 @@ describe('OrdersService command response privacy', () => {
       requestedAt,
       approvedAt,
       completedAt,
-    }
+    };
     const requestService = service({
       order: {
         findUnique: vi.fn().mockResolvedValue({
@@ -132,7 +151,7 @@ describe('OrdersService command response privacy', () => {
           completedAt: null,
         }),
       },
-    })
+    });
     const requested = await requestService.requestRefund(
       baseRefund.orderId,
       {
@@ -141,7 +160,7 @@ describe('OrdersService command response privacy', () => {
         idempotencyKey: baseRefund.idempotencyKey,
       },
       member,
-    )
+    );
 
     const approveService = service({
       $transaction: vi.fn(async (work: (tx: any) => unknown) =>
@@ -154,12 +173,12 @@ describe('OrdersService command response privacy', () => {
           },
         }),
       ),
-    })
+    });
     const approved = await approveService.approveRefund(
       baseRefund.id,
       { reason: '审批通过' },
       finance,
-    )
+    );
 
     const rejectService = service({
       $transaction: vi.fn(async (work: (tx: any) => unknown) =>
@@ -172,12 +191,12 @@ describe('OrdersService command response privacy', () => {
           },
         }),
       ),
-    })
+    });
     const rejected = await rejectService.rejectRefund(
       baseRefund.id,
       { reason: '证据不足' },
       finance,
-    )
+    );
 
     expect(requested).toEqual({
       id: 'refund-secret',
@@ -187,13 +206,13 @@ describe('OrdersService command response privacy', () => {
       requestedAt,
       approvedAt: null,
       completedAt: null,
-    })
-    expect(approved.status).toBe(RefundStatus.SUCCEEDED)
-    expect(rejected.status).toBe(RefundStatus.REJECTED)
+    });
+    expect(approved.status).toBe(RefundStatus.SUCCEEDED);
+    expect(rejected.status).toBe(RefundStatus.REJECTED);
     for (const result of [requested, approved, rejected]) {
-      expectNoSensitiveFields(result)
-      expect(JSON.stringify(result)).not.toContain('provider-refund-secret')
-      expect(JSON.stringify(result)).not.toContain('refund-secret-key')
+      expectNoSensitiveFields(result);
+      expect(JSON.stringify(result)).not.toContain('provider-refund-secret');
+      expect(JSON.stringify(result)).not.toContain('refund-secret-key');
     }
-  })
-})
+  });
+});

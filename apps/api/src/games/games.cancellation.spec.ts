@@ -1,28 +1,28 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest';
 
-import { ConflictException, ForbiddenException } from '@nestjs/common'
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 
-import type { AuthUser } from '../common/auth/auth-user.js'
+import type { AuthUser } from '../common/auth/auth-user.js';
 import {
   AppRole,
   GameStatus,
   OrderStatus,
   RegistrationStatus,
   RefundStatus,
-} from '../generated/prisma/client.js'
-import { orderCreationCommandHash } from '../orders/order-creation-idempotency.js'
-import { GamesService } from './games.service.js'
+} from '../generated/prisma/client.js';
+import { orderCreationCommandHash } from '../orders/order-creation-idempotency.js';
+import { GamesService } from '../../test/support/games-fixture.js';
 
 const hostActor: AuthUser = {
   sub: 'host-1',
   displayName: '主理人',
   roles: [AppRole.HOST],
-}
+};
 
 const cancelDto = {
   reason: '场馆临时停电',
   idempotencyKey: 'game-cancel-key-1',
-}
+};
 
 const activeGame = (overrides: Record<string, unknown> = {}) => ({
   id: 'game-1',
@@ -39,11 +39,11 @@ const activeGame = (overrides: Record<string, unknown> = {}) => ({
   cancelledById: null,
   cancelledAt: null,
   ...overrides,
-})
+});
 
 describe('GamesService cancellation', () => {
   it('atomically cancels the game and courts, closes unpaid orders and requests paid refunds', async () => {
-    const current = activeGame()
+    const current = activeGame();
     const registrations = [
       {
         id: 'registration-waitlist',
@@ -81,7 +81,7 @@ describe('GamesService cancellation', () => {
           refunds: [],
         },
       },
-    ]
+    ];
     const refund = {
       id: 'refund-1',
       orderId: 'order-paid',
@@ -89,7 +89,7 @@ describe('GamesService cancellation', () => {
       amountCents: 6_000,
       reason: `球局取消：${cancelDto.reason}`,
       status: RefundStatus.REQUESTED,
-    }
+    };
     const tx = {
       game: {
         findUnique: vi.fn().mockResolvedValue(current),
@@ -111,14 +111,14 @@ describe('GamesService cancellation', () => {
         create: vi.fn().mockResolvedValue(refund),
       },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
-    }
+    };
     const prisma = {
       game: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn(async (work) => work(tx)),
-    }
-    const service = new GamesService(prisma as never)
+    };
+    const service = new GamesService(prisma as never);
 
-    const result = await service.cancel(current.id, cancelDto, hostActor)
+    const result = await service.cancel(current.id, cancelDto, hostActor);
 
     expect(result).toMatchObject({
       cancelledBookingCount: 2,
@@ -126,10 +126,10 @@ describe('GamesService cancellation', () => {
       cancelledRegistrationCount: registrations.length,
       refundRequestCount: 1,
       refundRequestedCents: 6_000,
-    })
+    });
     expect(JSON.stringify(result)).not.toMatch(
       /cancelIdempotencyKey|cancelCommandHash|cancelPolicySnapshot|requestedById|orderId/,
-    )
+    );
     expect(tx.game.updateMany).toHaveBeenCalledWith({
       where: {
         id: current.id,
@@ -143,11 +143,11 @@ describe('GamesService cancellation', () => {
         cancelledById: hostActor.sub,
         cancelledAt: expect.any(Date),
       }),
-    })
+    });
     expect(tx.courtBooking.updateMany).toHaveBeenCalledWith({
       where: { gameId: current.id, status: { not: 'CANCELLED' } },
       data: { status: 'CANCELLED' },
-    })
+    });
     expect(tx.refund.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         idempotencyKey: `GAME_CANCEL:${current.id}:order-paid`,
@@ -157,7 +157,7 @@ describe('GamesService cancellation', () => {
         status: RefundStatus.REQUESTED,
         originalOrderStatus: OrderStatus.PARTIALLY_REFUNDED,
       }),
-    })
+    });
     expect(tx.order.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'order-paid',
@@ -171,14 +171,14 @@ describe('GamesService cancellation', () => {
         },
       },
       data: { status: OrderStatus.REFUND_PENDING },
-    })
+    });
     expect(tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ action: 'GAME_CANCELLED' }),
-    })
-  })
+    });
+  });
 
   it('uses the active refund evidence when a paid order is already refund-pending', async () => {
-    const current = activeGame()
+    const current = activeGame();
     const registration = {
       id: 'registration-refund-pending',
       gameId: current.id,
@@ -199,13 +199,13 @@ describe('GamesService cancellation', () => {
           },
         ],
       },
-    }
+    };
     const createdRefund = {
       id: 'refund-game-cancel',
       orderId: registration.order.id,
       amountCents: 5_800,
       status: RefundStatus.REQUESTED,
-    }
+    };
     const tx = {
       game: {
         findUnique: vi.fn().mockResolvedValue(current),
@@ -227,26 +227,26 @@ describe('GamesService cancellation', () => {
         create: vi.fn().mockResolvedValue(createdRefund),
       },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
-    }
+    };
     const service = new GamesService({
       game: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn(async (work) => work(tx)),
-    } as never)
+    } as never);
 
     await expect(
       service.cancel(current.id, cancelDto, hostActor),
     ).resolves.toMatchObject({
       refundRequestCount: 1,
       refundRequestedCents: createdRefund.amountCents,
-    })
+    });
     expect(tx.refund.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         orderId: registration.order.id,
         amountCents: 5_800,
         originalOrderStatus: OrderStatus.CHECKED_IN,
       }),
-    })
-  })
+    });
+  });
 
   it('replays the exact command without a second transaction', async () => {
     const commandHash = orderCreationCommandHash({
@@ -254,7 +254,7 @@ describe('GamesService cancellation', () => {
       gameId: 'game-1',
       reason: cancelDto.reason,
       actorId: hostActor.sub,
-    })
+    });
     const existing = activeGame({
       status: GameStatus.CANCELLED,
       cancelReason: cancelDto.reason,
@@ -262,46 +262,46 @@ describe('GamesService cancellation', () => {
       cancelCommandHash: commandHash,
       cancelledById: hostActor.sub,
       cancelledAt: new Date(),
-    })
-    const transaction = vi.fn()
+    });
+    const transaction = vi.fn();
     const service = new GamesService({
       game: { findUnique: vi.fn().mockResolvedValue(existing) },
       $transaction: transaction,
-    } as never)
+    } as never);
 
-    const result = await service.cancel(existing.id, cancelDto, hostActor)
+    const result = await service.cancel(existing.id, cancelDto, hostActor);
     expect(result).toMatchObject({
       game: { id: existing.id, status: GameStatus.CANCELLED },
       idempotent: true,
-    })
+    });
     expect(JSON.stringify(result)).not.toMatch(
       /cancelIdempotencyKey|cancelCommandHash|cancelPolicySnapshot|cancelledById/,
-    )
-    expect(transaction).not.toHaveBeenCalled()
-  })
+    );
+    expect(transaction).not.toHaveBeenCalled();
+  });
 
   it('rejects a different host and refuses cancellation after the start time', async () => {
     const tx = {
       game: { findUnique: vi.fn().mockResolvedValue(activeGame()) },
-    }
+    };
     const service = new GamesService({
       game: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn(async (work) => work(tx)),
-    } as never)
+    } as never);
     const otherHost = {
       ...hostActor,
       sub: 'host-2',
-    }
+    };
 
     await expect(
       service.cancel('game-1', cancelDto, otherHost),
-    ).rejects.toBeInstanceOf(ForbiddenException)
+    ).rejects.toBeInstanceOf(ForbiddenException);
 
     tx.game.findUnique.mockResolvedValue(
       activeGame({ startsAt: new Date(Date.now() - 1_000) }),
-    )
+    );
     await expect(
       service.cancel('game-1', cancelDto, hostActor),
-    ).rejects.toBeInstanceOf(ConflictException)
-  })
-})
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+});

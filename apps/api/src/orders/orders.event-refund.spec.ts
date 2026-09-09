@@ -10,7 +10,7 @@ import {
   RefundStatus,
   RegistrationStatus,
 } from '../generated/prisma/client.js';
-import { OrdersService } from './orders.service.js';
+import { OrdersService } from '../../test/support/orders-fixture.js';
 
 const finance: AuthUser = {
   sub: 'finance-1',

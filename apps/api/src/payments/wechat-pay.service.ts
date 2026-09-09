@@ -1,9 +1,3 @@
-import { releasePendingOrderResources } from '../orders/pending-order-resources.js';
-import { releaseRefundedResources } from '../orders/refund-resources.js';
-import { requireOrderTransition } from '../orders/order-transition.js';
-import { reserveBookingCoupon } from '../orders/booking-coupon.js';
-import { membershipPurchaseUnavailable } from '../memberships/membership-entitlements.js';
-import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import {
   createDecipheriv,
   createSign,
@@ -11,7 +5,6 @@ import {
   randomBytes,
 } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-
 import {
   BadGatewayException,
   BadRequestException,
@@ -20,64 +13,16 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-
 import { PrismaService } from '../database/prisma.service.js';
-import {
-  AccountTxnKind,
-  AccountType,
-  AppRole,
-  BusinessType,
-  EventStatus,
-  OrderStatus,
-  PaymentChannel,
-  PaymentStatus,
-  Prisma,
-  RefundStatus,
-  RegistrationStatus,
-} from '../generated/prisma/client.js';
-import { assertGoodsStockAvailable } from '../inventory/goods-stock.js';
 import { OrderFinalizerService } from './order-finalizer.service.js';
-import { promoteNextEventWaitlist } from '../events/registration/event-waitlist.js';
-import { captureCancelledOrderPayment } from './late-payment.js';
-
-interface NotificationResource {
-  ciphertext: string;
-  nonce: string;
-  associated_data?: string;
-}
-interface WechatNotification {
-  event_type: string;
-  resource: NotificationResource;
-}
-interface TransactionNotice {
-  out_trade_no: string;
-  transaction_id: string;
-  trade_state: string;
-  amount: { total: number };
-}
-interface RefundNotice {
-  out_refund_no: string;
-  refund_id: string;
-  refund_status: string;
-  amount: { refund: number; total: number };
-}
-
-interface RechargeRefundRecovery {
-  accountType: AccountType;
-  requestedCents: number;
-  recoveredCents: number;
-  shortfallCents: number;
-  reason?: 'INSUFFICIENT_AVAILABLE_BALANCE' | 'CONCURRENT_ACCOUNT_CHANGE';
-}
-
-const businessSerial = (prefix: string) =>
-  `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`;
-
-const isPrismaErrorCode = (error: unknown, code: string): boolean =>
-  typeof error === 'object' &&
-  error !== null &&
-  'code' in error &&
-  (error as { code?: unknown }).code === code;
+import {
+  NotificationResource,
+  WechatNotification,
+  TransactionNotice,
+  RefundNotice,
+} from './wechat/wechat-notice-types.js';
+import { finalizeWechatPayment } from './wechat/payment-notification.js';
+import { finalizeRefund } from './wechat/refund-notification.js';
 
 @Injectable()
 export class WechatPayService {
@@ -188,10 +133,15 @@ export class WechatPayService {
     const path = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderNo)}/close`;
     const body = JSON.stringify({ mchid: this.required('WECHAT_PAY_MCH_ID') });
     const response = await this.signedRequest('POST', path, body);
-    const result = await this.readWechatJson<{ code?: string; message?: string }>(response);
+    const result = await this.readWechatJson<{
+      code?: string;
+      message?: string;
+    }>(response);
     if (!response.ok) {
       if (result.code === 'ORDERPAID') {
-        throw new ConflictException('微信支付已经完成，正在同步支付结果，请稍后刷新');
+        throw new ConflictException(
+          '微信支付已经完成，正在同步支付结果，请稍后刷新',
+        );
       }
       throw new BadGatewayException(result.message || '微信支付订单关闭失败');
     }
@@ -227,7 +177,7 @@ export class WechatPayService {
       const notice = this.decrypt<RefundNotice>(notification.resource);
       if (notice.refund_status !== 'SUCCESS')
         return { accepted: true, ignored: true };
-      return this.finalizeRefund(notice);
+      return finalizeRefund(this.prisma, this.finalizer, notice);
     }
     const notice = this.decrypt<TransactionNotice>(notification.resource);
     if (
@@ -235,388 +185,7 @@ export class WechatPayService {
       notice.trade_state !== 'SUCCESS'
     )
       return { accepted: true, ignored: true };
-    return this.prisma.$transaction(
-      async (tx) => {
-        const order = await tx.order.findUnique({
-          where: { orderNo: notice.out_trade_no },
-          include: {
-            items: true,
-            membership: { include: { product: true } },
-            member: { select: { openId: true } },
-            eventTeam: { include: { event: true } },
-            gameRegistration: { include: { game: true } },
-            payments: {
-              where: { channel: PaymentChannel.WECHAT },
-              orderBy: { createdAt: 'desc' },
-            },
-          },
-        });
-        if (!order) throw new BadRequestException('微信支付订单不存在');
-        if (notice.amount.total !== order.payableCents)
-          throw new BadRequestException('微信支付通知金额不一致');
-        const payment = order.payments[0];
-        if (!payment) throw new BadRequestException('微信支付记录不存在');
-        if (
-          payment.status === PaymentStatus.SUCCEEDED &&
-          order.status !== OrderStatus.PENDING
-        )
-          return { accepted: true, idempotent: true };
-        const now = new Date();
-        if (order.status === OrderStatus.CANCELLED && order.paidCents === 0) {
-          return captureCancelledOrderPayment(tx, order, payment.id, notice.transaction_id, now);
-        }
-        if (order.membership && order.status === OrderStatus.PENDING) {
-          const reason = await membershipPurchaseUnavailable(tx, order.membership.memberId, order.membership.product.level, order.membership.id, now);
-          if (reason) {
-            await requireOrderTransition(tx, 'CANCEL_UNPAID', { where: { id: order.id, status: OrderStatus.PENDING }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
-            await releasePendingOrderResources(tx, order, { cause: 'PAYMENT_UNAVAILABLE', now });
-            return captureCancelledOrderPayment(tx, { ...order, status: OrderStatus.CANCELLED }, payment.id, notice.transaction_id, now, `会员权益冲突，未授予新权益：${reason}`);
-          }
-        }
-        if (order.businessType === BusinessType.GAME && order.status === OrderStatus.PENDING && gamePaymentUnavailable(order.gameRegistration, order.createdAt, now)) {
-          // The external payment succeeded, but the seat is no longer payable.
-          // Close this reservation before recording a compensation-only refund.
-          await requireOrderTransition(tx, 'CANCEL_UNPAID', { where: { id: order.id, status: OrderStatus.PENDING }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
-          await releasePendingOrderResources(tx, order, { cause: 'PAYMENT_UNAVAILABLE', now });
-          const captured = await captureCancelledOrderPayment(tx, { ...order, status: OrderStatus.CANCELLED }, payment.id, notice.transaction_id, now);
-          return captured;
-        }
-        const invalidEventReservation =
-          order.businessType === BusinessType.EVENT &&
-          order.eventTeam &&
-          (order.eventTeam.status !== RegistrationStatus.REGISTERED ||
-            !order.eventTeam.paymentDueAt ||
-            order.eventTeam.paymentDueAt <= now ||
-            (order.eventTeam.event.status !== EventStatus.OPEN &&
-              order.eventTeam.event.status !== EventStatus.FULL) ||
-            order.eventTeam.event.startsAt <= now);
-        if (invalidEventReservation && order.eventTeam) {
-          await tx.payment.update({
-            where: { id: payment.id },
-            data: {
-              status: PaymentStatus.SUCCEEDED,
-              providerTradeNo: notice.transaction_id,
-              paidAt: now,
-              providerPayload: {
-                provider: 'wechat',
-                transactionId: notice.transaction_id,
-                lateEventPayment: true,
-              },
-            },
-          });
-          await requireOrderTransition(tx, 'CANCEL_UNPAID', {
-            where: { id: order.id, status: OrderStatus.PENDING },
-            data: { status: OrderStatus.CANCELLED, cancelledAt: now },
-          });
-          await requireOrderTransition(tx, 'CAPTURE_COMPENSATION', {
-            where: { id: order.id, status: OrderStatus.CANCELLED },
-            data: {
-              status:
-                order.payableCents > 0
-                  ? OrderStatus.REFUND_PENDING
-                  : OrderStatus.CANCELLED,
-              paymentChannel: PaymentChannel.WECHAT,
-              paidCents: order.payableCents,
-              paidAt: now,
-              cancelledAt: order.payableCents > 0 ? undefined : now,
-            },
-          });
-          await tx.eventTeam.updateMany({
-            where: {
-              id: order.eventTeam.id,
-              status: { not: RegistrationStatus.REFUNDED },
-            },
-            data: {
-              status: RegistrationStatus.CANCELLED,
-              paymentDueAt: null,
-              cancelledAt: now,
-            },
-          });
-          let refund = null;
-          if (order.payableCents > 0) {
-            refund = await tx.refund.upsert({
-              where: { idempotencyKey: `EVENT_LATE_PAYMENT:${order.id}` },
-              update: {},
-              create: {
-                refundNo: businessSerial('RF'),
-                idempotencyKey: `EVENT_LATE_PAYMENT:${order.id}`,
-                orderId: order.id,
-                requestedById: order.memberId,
-                amountCents: order.payableCents,
-                reason: '赛事报名支付回调晚于席位保留截止，原路退款待财务审批',
-                status: RefundStatus.REQUESTED,
-                originalOrderStatus: OrderStatus.PAID,
-              },
-            });
-          }
-          await promoteNextEventWaitlist(
-            tx,
-            order.eventTeam.eventId,
-            order.memberId,
-            AppRole.MEMBER,
-            now,
-          );
-          await tx.auditLog.create({
-            data: {
-              actorId: order.memberId,
-              actorRole: AppRole.MEMBER,
-              action: 'EVENT_LATE_PAYMENT_REFUND_REQUESTED',
-              objectType: 'Order',
-              objectId: order.id,
-              reason: '支付成功回调到达时赛事席位保留已失效',
-              newValue: {
-                paymentId: payment.id,
-                providerTradeNo: notice.transaction_id,
-                amountCents: order.payableCents,
-                refundId: refund?.id ?? null,
-                financeApprovalRequired: order.payableCents > 0,
-              } as never,
-            },
-          });
-          return {
-            accepted: true,
-            latePayment: true,
-            refundReviewRequired: order.payableCents > 0,
-          };
-        }
-        if (
-          order.businessType === BusinessType.GOODS &&
-          order.status === OrderStatus.PENDING
-        ) {
-          // Validate every line before any fulfillment writes. Never swallow a
-          // failed finalizer after it may already have changed stock or benefits.
-          let unavailable: string | undefined;
-          try {
-            await assertGoodsStockAvailable(tx, order.items);
-          } catch (error) {
-            if (
-              !(error instanceof BadRequestException) &&
-              !(error instanceof ConflictException)
-            ) throw error;
-            unavailable = error.message;
-          }
-          if (unavailable) {
-            await requireOrderTransition(tx, 'CANCEL_UNPAID', {
-              where: { id: order.id, status: OrderStatus.PENDING },
-              data: { status: OrderStatus.CANCELLED, cancelledAt: now },
-            });
-            return captureCancelledOrderPayment(
-              tx,
-              { ...order, status: OrderStatus.CANCELLED },
-              payment.id,
-              notice.transaction_id,
-              now,
-              `商品无法出库，未交付商品：${unavailable}`,
-            );
-          }
-        }
-        if (order.businessType === BusinessType.VENUE && order.status === OrderStatus.PENDING) {
-          let unavailable: string | undefined;
-          try { await reserveBookingCoupon(tx, order, now); }
-          catch (error) {
-            if (!(error instanceof ConflictException)) throw error;
-            unavailable = error.message;
-          }
-          if (unavailable) {
-            // External money already exists. Preserve it and request compensation;
-            // never roll it back merely because its discounted booking cannot be delivered.
-            await requireOrderTransition(tx, 'CANCEL_UNPAID', { where: { id: order.id, status: OrderStatus.PENDING }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
-            await releasePendingOrderResources(tx, order, { cause: 'PAYMENT_UNAVAILABLE', now });
-            return captureCancelledOrderPayment(tx, { ...order, status: OrderStatus.CANCELLED }, payment.id, notice.transaction_id, now,
-              `优惠券订场无法履约，未交付场地：${unavailable}`);
-          }
-        }
-        const succeeded = await tx.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: PaymentStatus.SUCCEEDED,
-            providerTradeNo: notice.transaction_id,
-            paidAt: now,
-            providerPayload: {
-              provider: 'wechat',
-              transactionId: notice.transaction_id,
-            },
-          },
-        });
-        await this.finalizer.finalize(
-          tx,
-          order,
-          { ...succeeded, amountCents: succeeded.amountCents },
-          succeeded.operatorId,
-          AppRole.MEMBER,
-          now,
-        );
-        return { accepted: true };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
-  }
-
-  private async finalizeRefund(notice: RefundNotice) {
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      try {
-        return await this.prisma.$transaction(
-          async (tx) => {
-            const refund = await tx.refund.findUnique({
-              where: { refundNo: notice.out_refund_no },
-              include: {
-                order: {
-                  include: {
-                    trainingEnrollment: true,
-                    membership: { include: { product: true } },
-                    items: true,
-                    gameRegistration: true,
-                    eventTeam: true,
-                    payments: {
-                      where: { status: PaymentStatus.SUCCEEDED },
-                      orderBy: { createdAt: 'asc' },
-                    },
-                  },
-                },
-              },
-            });
-            if (!refund) throw new BadRequestException('微信退款记录不存在');
-            if (
-              refund.amountCents !== notice.amount.refund ||
-              refund.order.paidCents !== notice.amount.total
-            ) {
-              throw new BadRequestException('微信退款通知金额不一致');
-            }
-            if (refund.status === RefundStatus.SUCCEEDED)
-              return { accepted: true, idempotent: true };
-            const refundedCents =
-              refund.order.refundedCents + refund.amountCents;
-            const fullyRefunded = refundedCents >= refund.order.paidCents;
-            const now = new Date();
-            let rechargeRecovery: RechargeRefundRecovery[] = [];
-            await tx.refund.update({
-              where: { id: refund.id },
-              data: {
-                status: RefundStatus.SUCCEEDED,
-                providerRefundNo: notice.refund_id,
-                completedAt: now,
-              },
-            });
-            await requireOrderTransition(tx, 'REFUND_SUCCEEDED', {
-              where: { id: refund.orderId, status: refund.order.status },
-              data: {
-                refundedCents,
-                status: fullyRefunded
-                  ? OrderStatus.REFUNDED
-                  : OrderStatus.PARTIALLY_REFUNDED,
-              },
-            });
-            if (refund.compensationOnly) {
-              // No fulfilment happened: do not debit a recharge balance, restore
-              // unsold stock, change membership, or release an unrelated seat.
-              await tx.auditLog.create({ data: {
-                actorId: refund.approvedById || refund.requestedById,
-                actorRole: AppRole.FINANCE, action: 'WECHAT_COMPENSATION_REFUND_SUCCEEDED',
-                objectType: 'Refund', objectId: refund.id, reason: refund.reason,
-                newValue: { refundId: notice.refund_id, amountCents: refund.amountCents, compensationOnly: true },
-              } });
-              return { accepted: true, outstandingRecoveryCents: 0 };
-            }
-            if (refund.order.businessType === BusinessType.RECHARGE) {
-              const payment = refund.order.payments[0];
-              // The provider SUCCESS notice is the external money boundary.
-              // Even a damaged local payment relation must not turn that
-              // external success back into a retrying/non-terminal refund.
-              rechargeRecovery = await this.reverseRechargeBalance(
-                tx,
-                refund,
-                payment?.amountCents || notice.amount.total,
-              );
-              const outstandingRecoveryCents = rechargeRecovery.reduce(
-                (sum, item) => sum + item.shortfallCents,
-                0,
-              );
-              if (outstandingRecoveryCents > 0) {
-                const existingRisk = await tx.riskEvent.findFirst({
-                  where: {
-                    ruleCode: 'RECHARGE_REFUND_BALANCE_SHORTFALL',
-                    objectType: 'Refund',
-                    objectId: refund.id,
-                  },
-                });
-                if (!existingRisk) {
-                  await tx.riskEvent.create({
-                    data: {
-                      ruleCode: 'RECHARGE_REFUND_BALANCE_SHORTFALL',
-                      severity: 'HIGH',
-                      userId: refund.order.memberId,
-                      orderId: refund.orderId,
-                      objectType: 'Refund',
-                      objectId: refund.id,
-                      summary: '微信退款已成功，充值账户余额不足，差额待追缴',
-                      evidence: {
-                        recoveryKey: `RECHARGE-REFUND-RECOVERY:${refund.id}`,
-                        externalRefundTerminal: true,
-                        providerRefundNo: notice.refund_id,
-                        refundNo: refund.refundNo,
-                        refundAmountCents: refund.amountCents,
-                        outstandingRecoveryCents,
-                        recovery: rechargeRecovery,
-                        recoveryStatus: 'OUTSTANDING',
-                      } as never,
-                    },
-                  });
-                }
-              }
-            }
-            await releaseRefundedResources(tx, refund, fullyRefunded,
-              { sub: refund.approvedById || refund.requestedById, roles: [AppRole.FINANCE] },
-              (...args) => this.finalizer.recordSucceededGoodsRefund(...args), now);
-            await tx.auditLog.create({
-              data: {
-                actorId: refund.approvedById || refund.requestedById,
-                actorRole: AppRole.FINANCE,
-                action: 'WECHAT_REFUND_SUCCEEDED',
-                objectType: 'Refund',
-                objectId: refund.id,
-                reason: refund.reason,
-                newValue: {
-                  refundId: notice.refund_id,
-                  amountCents: refund.amountCents,
-                  fullyRefunded,
-                  rechargeRecovery,
-                  outstandingRecoveryCents: rechargeRecovery.reduce(
-                    (sum, item) => sum + item.shortfallCents,
-                    0,
-                  ),
-                } as never,
-              },
-            });
-            return {
-              accepted: true,
-              outstandingRecoveryCents: rechargeRecovery.reduce(
-                (sum, item) => sum + item.shortfallCents,
-                0,
-              ),
-            };
-          },
-          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-        );
-      } catch (error) {
-        if (
-          isPrismaErrorCode(error, 'P2002') ||
-          isPrismaErrorCode(error, 'P2034')
-        ) {
-          const completed = await this.prisma.refund.findUnique({
-            where: { refundNo: notice.out_refund_no },
-          });
-          if (completed?.status === RefundStatus.SUCCEEDED) {
-            return { accepted: true, idempotent: true };
-          }
-          if (attempt < 3) continue;
-          throw new ConflictException(
-            '微信退款终态发生并发冲突，请等待通知重试',
-          );
-        }
-        throw error;
-      }
-    }
-    throw new ConflictException('微信退款终态发生并发冲突，请等待通知重试');
+    return finalizeWechatPayment(this.prisma, this.finalizer, notice);
   }
 
   /**
@@ -626,140 +195,6 @@ export class WechatPayService {
    * recovery shortfall instead of rolling the external refund terminal state
    * back. Each actual debit has a refund-scoped idempotency key.
    */
-  private async reverseRechargeBalance(
-    tx: Prisma.TransactionClient,
-    refund: {
-      id: string;
-      refundNo: string;
-      amountCents: number;
-      orderId: string;
-      approvedById: string | null;
-      requestedById: string;
-      order: { memberId: string; parameterSnapshot: Prisma.JsonValue };
-    },
-    paidCents: number,
-  ): Promise<RechargeRefundRecovery[]> {
-    const snapshot = refund.order.parameterSnapshot as {
-      principalCents?: number;
-      giftCents?: number;
-    };
-    const debits: Array<[AccountType, number]> = [
-      [
-        AccountType.CASH_PRINCIPAL,
-        Math.round(
-          (Math.max(0, Number(snapshot.principalCents) || 0) *
-            refund.amountCents) /
-            paidCents,
-        ),
-      ],
-      [
-        AccountType.GIFT_BALANCE,
-        Math.round(
-          (Math.max(0, Number(snapshot.giftCents) || 0) * refund.amountCents) /
-            paidCents,
-        ),
-      ],
-    ];
-    const recovery: RechargeRefundRecovery[] = [];
-    for (const [type, amount] of debits) {
-      if (!amount) continue;
-      const idempotencyKey = `RECHARGE-REFUND:${refund.id}:${type}`;
-      const existing = await tx.accountTransaction.findUnique({
-        where: { idempotencyKey },
-      });
-      if (existing) {
-        const recoveredCents = Math.min(amount, Math.max(0, -existing.amount));
-        recovery.push({
-          accountType: type,
-          requestedCents: amount,
-          recoveredCents,
-          shortfallCents: amount - recoveredCents,
-          reason:
-            recoveredCents < amount
-              ? 'INSUFFICIENT_AVAILABLE_BALANCE'
-              : undefined,
-        });
-        continue;
-      }
-
-      let account =
-        (await tx.account.findUnique({
-          where: { userId_type: { userId: refund.order.memberId, type } },
-        })) ??
-        (await tx.account.upsert({
-          where: { userId_type: { userId: refund.order.memberId, type } },
-          update: {},
-          create: { userId: refund.order.memberId, type },
-        }));
-      let recoveredCents = 0;
-      let concurrentFailure = false;
-      for (let accountAttempt = 1; accountAttempt <= 3; accountAttempt += 1) {
-        const frozenBalance = Math.max(0, Number(account.frozenBalance) || 0);
-        const availableBalance = Math.max(0, account.balance - frozenBalance);
-        recoveredCents = Math.min(amount, availableBalance);
-        if (recoveredCents <= 0) break;
-        const balanceBefore = account.balance;
-        const balanceAfter = balanceBefore - recoveredCents;
-        const changed = await tx.account.updateMany({
-          where: {
-            id: account.id,
-            version: account.version,
-            balance: balanceBefore,
-            frozenBalance: { lte: balanceAfter },
-          },
-          data: {
-            balance: { decrement: recoveredCents },
-            version: { increment: 1 },
-          },
-        });
-        if (changed.count === 1) {
-          await tx.accountTransaction.create({
-            data: {
-              accountId: account.id,
-              kind: AccountTxnKind.REVERSAL,
-              amount: -recoveredCents,
-              balanceBefore,
-              balanceAfter,
-              reasonCode: 'RECHARGE_REFUND',
-              reason: refund.refundNo,
-              orderId: refund.orderId,
-              operatorId: refund.approvedById || refund.requestedById,
-              idempotencyKey,
-              metadata: {
-                requestedRecoveryCents: amount,
-                recoveredCents,
-                shortfallCents: amount - recoveredCents,
-                externalRefundTerminal: true,
-              },
-            },
-          });
-          concurrentFailure = false;
-          break;
-        }
-        concurrentFailure = true;
-        const latest = await tx.account.findUnique({
-          where: { userId_type: { userId: refund.order.memberId, type } },
-        });
-        if (!latest) break;
-        account = latest;
-        recoveredCents = 0;
-      }
-      if (concurrentFailure) recoveredCents = 0;
-      recovery.push({
-        accountType: type,
-        requestedCents: amount,
-        recoveredCents,
-        shortfallCents: amount - recoveredCents,
-        reason:
-          recoveredCents < amount
-            ? concurrentFailure
-              ? 'CONCURRENT_ACCOUNT_CHANGE'
-              : 'INSUFFICIENT_AVAILABLE_BALANCE'
-            : undefined,
-      });
-    }
-    return recovery;
-  }
 
   private decrypt<T>(resource: NotificationResource): T {
     const key = Buffer.from(this.required('WECHAT_PAY_API_V3_KEY'), 'utf8');

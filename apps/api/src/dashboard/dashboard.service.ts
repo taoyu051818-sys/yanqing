@@ -1,138 +1,63 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-
-import { Prisma } from '../generated/prisma/client.js';
-import { venueCapacityRows } from '../common/venue/venue-capacity.js';
 import { PrismaService } from '../database/prisma.service.js';
 import {
-  AccountTxnKind,
-  AccountType,
-  BookingStatus,
   BusinessType,
-  CouponStatus,
   InventoryTxnType,
-  OrderStatus,
-  PaymentChannel,
-  PaymentStatus,
-  RefundStatus,
-  RewardStatus,
   SlotPeriod,
-  TrainingEnrollmentStatus,
-  TrainingSessionStatus,
-  UserStatus,
 } from '../generated/prisma/enums.js';
 import {
   DEFAULT_OPERATING_SHARE_RATE_BPS,
   operatingShareCents,
   operatingShareSnapshotFromOrder,
 } from '../common/finance/operating-share.js';
-
-const DAY_MS = 86_400_000;
-const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
-
-const shanghaiDay = () => {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const day = formatter.format(new Date());
-  return {
-    start: new Date(`${day}T00:00:00+08:00`),
-    end: new Date(`${day}T24:00:00+08:00`),
-  };
-};
-
-const collectionOrderStatuses = [
-  OrderStatus.PAID,
-  OrderStatus.CHECKED_IN,
-  OrderStatus.COMPLETED,
-  OrderStatus.REFUND_PENDING,
-  OrderStatus.PARTIALLY_REFUNDED,
-  OrderStatus.REFUNDED,
-];
-
-const repeatEligibleStatuses = [
-  OrderStatus.PAID,
-  OrderStatus.CHECKED_IN,
-  OrderStatus.COMPLETED,
-  OrderStatus.PARTIALLY_REFUNDED,
-];
-
-const venueBusinessTypes: BusinessType[] = [
-  BusinessType.VENUE,
-  BusinessType.GAME,
-  BusinessType.EVENT,
-  BusinessType.GOODS,
-  BusinessType.MEMBERSHIP,
-];
-
-const cashPaymentChannels: PaymentChannel[] = [
-  PaymentChannel.WECHAT,
-  PaymentChannel.OFFLINE_CASH,
-];
-
-const emptyPeriodHours = () => ({
-  [SlotPeriod.EARLY]: 0,
-  [SlotPeriod.DAYTIME]: 0,
-  [SlotPeriod.PRIME]: 0,
-});
-
-const percentage = (numerator: number, denominator: number) =>
-  denominator <= 0 ? 0 : Math.round((numerator / denominator) * 10_000) / 100;
-
-const sum = (values: number[]) =>
-  values.reduce((total, value) => total + value, 0);
-
-const countShanghaiDays = (start: Date, end: Date): number => {
-  const shiftedStart = new Date(start.getTime() + SHANGHAI_OFFSET_MS);
-  const shiftedEnd = new Date(end.getTime() - 1 + SHANGHAI_OFFSET_MS);
-  const first = Date.UTC(
-    shiftedStart.getUTCFullYear(),
-    shiftedStart.getUTCMonth(),
-    shiftedStart.getUTCDate(),
-  );
-  const last = Date.UTC(
-    shiftedEnd.getUTCFullYear(),
-    shiftedEnd.getUTCMonth(),
-    shiftedEnd.getUTCDate(),
-  );
-  return Math.max(1, Math.round((last - first) / DAY_MS) + 1);
-};
-
-const byBusinessType = <
-  T extends { businessType: BusinessType; amountCents: number },
->(
-  rows: T[],
-) => {
-  const result = Object.fromEntries(
-    Object.values(BusinessType).map((type) => [type, 0]),
-  ) as Record<BusinessType, number>;
-  for (const row of rows) result[row.businessType] += row.amountCents;
-  return result;
-};
-
-const repurchaseWindow = (
-  orders: Array<{ memberId: string; paidAt: Date | null }>,
-  startsAt: Date,
-  endsAt: Date,
-) => {
-  const counts = new Map<string, number>();
-  for (const order of orders) {
-    if (!order.paidAt || order.paidAt < startsAt || order.paidAt >= endsAt)
-      continue;
-    counts.set(order.memberId, (counts.get(order.memberId) ?? 0) + 1);
-  }
-  const purchaserCount = counts.size;
-  const repeatCustomerCount = [...counts.values()].filter(
-    (count) => count >= 2,
-  ).length;
-  return {
-    purchaserCount,
-    repeatCustomerCount,
-    rate: percentage(repeatCustomerCount, purchaserCount),
-  };
-};
+import {
+  DAY_MS,
+  shanghaiDay,
+  venueBusinessTypes,
+  cashPaymentChannels,
+  emptyPeriodHours,
+  percentage,
+  sum,
+  countShanghaiDays,
+  byBusinessType,
+  repurchaseWindow,
+} from './dashboard-policy.js';
+import { loadCapacity } from './domains/venue-queries.js';
+import {
+  loadPaidOrders,
+  loadCompletedOrders,
+  loadCompletedRefunds,
+  loadPeriodPayments,
+} from './domains/finance-queries.js';
+import {
+  loadRepeatOrders,
+  loadNewMembers,
+  loadActiveMembers,
+  loadExpiringMembers,
+  loadInactiveMembers,
+} from './domains/members-queries.js';
+import { loadEventTeams } from './domains/events-queries.js';
+import {
+  loadTrainingRecognitions,
+  loadTrainingSessions,
+  loadTrainingBalances,
+  loadTrainingNewSignups,
+  loadTrainingSettlements,
+  loadOperatingShareParameter,
+} from './domains/training-queries.js';
+import {
+  loadDirectReferralBindings,
+  loadReferralNewCustomers,
+  loadBadmintonCoinIssued,
+  loadCouponIssued,
+  loadCouponClaimed,
+  loadCouponRedeemed,
+  loadAllianceSettlements,
+} from './domains/marketing-queries.js';
+import {
+  loadInventoryItems,
+  loadGoodsCostTransactions,
+} from './domains/inventory-queries.js';
 
 @Injectable()
 export class DashboardService {
@@ -182,321 +107,32 @@ export class DashboardService {
       trainingSettlements,
       operatingShareParameter,
     ] = await Promise.all([
-      this.prisma.$transaction(
-        async (tx) => {
-          const [courts, slots, bookings, closures] = await Promise.all([
-            tx.court.findMany({
-              where: { enabled: true },
-              select: { id: true, createdAt: true },
-            }),
-            tx.timeSlot.findMany({
-              where: { enabled: true },
-              select: {
-                id: true,
-                label: true,
-                startMinutes: true,
-                endMinutes: true,
-                period: true,
-              },
-              orderBy: { startMinutes: 'asc' },
-            }),
-            tx.courtBooking.findMany({
-              where: {
-                startsAt: { lt: end },
-                endsAt: { gt: start },
-                status: {
-                  in: [
-                    BookingStatus.CONFIRMED,
-                    BookingStatus.CHECKED_IN,
-                    BookingStatus.COMPLETED,
-                  ],
-                },
-              },
-              select: {
-                courtId: true,
-                status: true,
-                startsAt: true,
-                endsAt: true,
-              },
-            }),
-            tx.courtClosure.findMany({
-              where: {
-                status: 'ACTIVE',
-                startsAt: { lt: end },
-                endsAt: { gt: start },
-              },
-              select: { courtId: true, startsAt: true, endsAt: true },
-            }),
-          ]);
-          const ids = new Set(courts.map((c) => c.id));
-          return {
-            courtCount: courts.length,
-            bookingCount: bookings.filter((b) => ids.has(b.courtId)).length,
-            rows: venueCapacityRows(
-              courts,
-              slots,
-              bookings,
-              closures,
-              start,
-              end,
-            ),
-          };
-        },
-        {
-          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-          timeout: 30000,
-        },
-      ),
-      this.prisma.order.findMany({
-        where: {
-          status: { in: collectionOrderStatuses },
-          paidAt: { gte: start, lt: end },
-        },
-        select: {
-          businessType: true,
-          memberId: true,
-          paidCents: true,
-          paidAt: true,
-        },
-      }),
-      this.prisma.order.findMany({
-        where: {
-          businessType: { in: venueBusinessTypes },
-          completedAt: { gte: start, lt: end },
-        },
-        select: {
-          businessType: true,
-          paidCents: true,
-          completedAt: true,
-          parameterSnapshot: true,
-          refunds: {
-            where: { status: RefundStatus.SUCCEEDED },
-            select: { amountCents: true, completedAt: true },
-          },
-        },
-      }),
-      this.prisma.refund.findMany({
-        where: {
-          status: RefundStatus.SUCCEEDED,
-          completedAt: { gte: start, lt: end },
-        },
-        select: {
-          amountCents: true,
-          completedAt: true,
-          order: {
-            select: {
-              businessType: true,
-              completedAt: true,
-              parameterSnapshot: true,
-              payments: {
-                where: {
-                  status: {
-                    in: [PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED],
-                  },
-                },
-                orderBy: { paidAt: 'asc' },
-                take: 1,
-                select: { channel: true },
-              },
-            },
-          },
-        },
-      }),
-      this.prisma.payment.findMany({
-        where: {
-          status: { in: [PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED] },
-          paidAt: { gte: start, lt: end },
-        },
-        select: { amountCents: true, channel: true },
-      }),
-      this.prisma.order.findMany({
-        where: {
-          status: { in: repeatEligibleStatuses },
-          paidAt: { gte: lookback30Start, lt: end },
-          businessType: { not: BusinessType.RECHARGE },
-        },
-        select: { memberId: true, paidAt: true },
-      }),
-      this.prisma.memberProfile.count({
-        where: { createdAt: { gte: start, lt: end } },
-      }),
-      this.prisma.memberProfile.count({
-        where: { user: { status: UserStatus.ACTIVE, deletedAt: null } },
-      }),
-      this.prisma.memberProfile.count({
-        where: {
-          user: { status: UserStatus.ACTIVE, deletedAt: null },
-          membershipExpiresAt: { gte: end, lt: expiringEnd },
-        },
-      }),
-      this.prisma.memberProfile.count({
-        where: {
-          user: { status: UserStatus.ACTIVE, deletedAt: null },
-          OR: [
-            { lastVisitAt: { lt: lookback30Start } },
-            { lastVisitAt: null, createdAt: { lt: lookback30Start } },
-          ],
-        },
-      }),
-      this.prisma.eventTeam.findMany({
-        where: { createdAt: { gte: start, lt: end } },
-        select: {
-          eventId: true,
-          captainId: true,
-          playerAUserId: true,
-          playerBUserId: true,
-        },
-      }),
-      this.prisma.trainingRevenueRecognition.findMany({
-        where: { createdAt: { gte: start, lt: end } },
-        select: {
-          effectiveRevenueCents: true,
-          venueContributionCents: true,
-          enrollment: {
-            select: {
-              order: { select: { parameterSnapshot: true } },
-            },
-          },
-          attendance: {
-            select: {
-              session: {
-                select: {
-                  class: { select: { coachId: true, name: true } },
-                },
-              },
-            },
-          },
-        },
-      }),
-      this.prisma.trainingSession.findMany({
-        where: {
-          status: TrainingSessionStatus.COMPLETED,
-          startsAt: { gte: start, lt: end },
-        },
-        select: {
-          coachCostCents: true,
-          assistantCostCents: true,
-          materialCostCents: true,
-          occupiedCourtHours: true,
-          class: { select: { coachId: true, name: true } },
-        },
-      }),
-      this.prisma.trainingEnrollment.aggregate({
-        where: {
-          status: {
-            in: [
-              TrainingEnrollmentStatus.ACTIVE,
-              TrainingEnrollmentStatus.COMPLETED,
-              TrainingEnrollmentStatus.PARTIALLY_REFUNDED,
-              TrainingEnrollmentStatus.REFUNDED,
-            ],
-          },
-        },
-        _sum: {
-          prepaidBalanceCents: true,
-          confirmedRevenueCents: true,
-          refundedCents: true,
-        },
-      }),
-      this.prisma.trainingEnrollment.count({
-        where: {
-          startsAt: { gte: start, lt: end },
-          status: {
-            in: [
-              TrainingEnrollmentStatus.ACTIVE,
-              TrainingEnrollmentStatus.COMPLETED,
-              TrainingEnrollmentStatus.PARTIALLY_REFUNDED,
-            ],
-          },
-        },
-      }),
-      this.prisma.auditLog.count({
-        where: {
-          action: 'DIRECT_REFERRAL_BOUND',
-          createdAt: { gte: start, lt: end },
-        },
-      }),
-      this.prisma.referralReward.count({
-        where: {
-          createdAt: { gte: start, lt: end },
-          status: { in: [RewardStatus.AVAILABLE, RewardStatus.GRANTED] },
-        },
-      }),
-      this.prisma.accountTransaction.aggregate({
-        where: {
-          account: { type: AccountType.BADMINTON_COIN },
-          kind: AccountTxnKind.CREDIT,
-          createdAt: { gte: start, lt: end },
-        },
-        _sum: { amount: true },
-      }),
-      this.prisma.couponCode.count({
-        where: { createdAt: { gte: start, lt: end } },
-      }),
-      this.prisma.couponCode.count({
-        where: { claimedAt: { gte: start, lt: end } },
-      }),
-      this.prisma.couponCode.count({
-        where: {
-          status: CouponStatus.REDEEMED,
-          redeemedAt: { gte: start, lt: end },
-        },
-      }),
-      this.prisma.allianceSettlement.aggregate({
-        where: { periodStart: { lt: end }, periodEnd: { gt: start } },
-        _sum: {
-          attributedGmvCents: true,
-          attributedGrossProfitCents: true,
-          cooperationFeeCents: true,
-          issuedCount: true,
-          claimedCount: true,
-          redeemedCount: true,
-          effectiveNewCustomers: true,
-        },
-      }),
-      this.prisma.inventoryItem.findMany({
-        where: { enabled: true },
-        select: {
-          stock: true,
-          safeStock: true,
-          purchasePriceCents: true,
-        },
-      }),
-      this.prisma.inventoryTransaction.findMany({
-        where: {
-          OR: [
-            {
-              type: InventoryTxnType.SALE_OUT,
-              orderItem: {
-                order: {
-                  businessType: BusinessType.GOODS,
-                  completedAt: { gte: start, lt: end },
-                },
-              },
-            },
-            {
-              type: InventoryTxnType.ADJUSTMENT,
-              quantity: { gt: 0 },
-              createdAt: { gte: start, lt: end },
-              idempotencyKey: { startsWith: 'GOODS-REFUND:' },
-              orderItem: { order: { businessType: BusinessType.GOODS } },
-            },
-          ],
-        },
-        select: { type: true, quantity: true, unitCostCents: true },
-      }),
-      this.prisma.trainingSettlement.findMany({
-        where: { periodStart: { lt: end }, periodEnd: { gt: start } },
-        orderBy: { periodEnd: 'desc' },
-      }),
-      this.prisma.systemParameter.findFirst({
-        where: {
-          key: 'finance.operating_share_rate_bps',
-          effectiveFrom: { lt: end },
-          OR: [{ effectiveTo: null }, { effectiveTo: { gte: end } }],
-        },
-        orderBy: { effectiveFrom: 'desc' },
-      }),
+      loadCapacity(this.prisma, start, end),
+      loadPaidOrders(this.prisma, start, end),
+      loadCompletedOrders(this.prisma, start, end),
+      loadCompletedRefunds(this.prisma, start, end),
+      loadPeriodPayments(this.prisma, start, end),
+      loadRepeatOrders(this.prisma, end, lookback30Start),
+      loadNewMembers(this.prisma, start, end),
+      loadActiveMembers(this.prisma),
+      loadExpiringMembers(this.prisma, end, expiringEnd),
+      loadInactiveMembers(this.prisma, lookback30Start),
+      loadEventTeams(this.prisma, start, end),
+      loadTrainingRecognitions(this.prisma, start, end),
+      loadTrainingSessions(this.prisma, start, end),
+      loadTrainingBalances(this.prisma),
+      loadTrainingNewSignups(this.prisma, start, end),
+      loadDirectReferralBindings(this.prisma, start, end),
+      loadReferralNewCustomers(this.prisma, start, end),
+      loadBadmintonCoinIssued(this.prisma, start, end),
+      loadCouponIssued(this.prisma, start, end),
+      loadCouponClaimed(this.prisma, start, end),
+      loadCouponRedeemed(this.prisma, start, end),
+      loadAllianceSettlements(this.prisma, start, end),
+      loadInventoryItems(this.prisma),
+      loadGoodsCostTransactions(this.prisma, start, end),
+      loadTrainingSettlements(this.prisma, start, end),
+      loadOperatingShareParameter(this.prisma, end),
     ]);
 
     const collectedOrdersByBusiness = byBusinessType(

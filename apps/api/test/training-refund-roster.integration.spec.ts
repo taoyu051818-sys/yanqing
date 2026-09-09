@@ -1,3 +1,4 @@
+import { createOrderFinalizerService } from './support/domain-consumer-fixtures.js';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -11,9 +12,9 @@ import {
 } from 'vitest';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { TrainingService } from './support/training-service-fixture.js';
-import { OrdersService } from '../src/orders/orders.service.js';
+import { OrdersService } from './support/orders-fixture.js';
 import { WechatPayService } from '../src/payments/wechat-pay.service.js';
-import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';
+
 import type { AuthUser } from '../src/common/auth/auth-user.js';
 import type { AppRole } from '../src/generated/prisma/enums.js';
 
@@ -45,13 +46,13 @@ describe.skipIf(!url)('training refund operational closeout', () => {
     orders = new OrdersService(
       db,
       new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
-      new OrderFinalizerService({} as never),
+      createOrderFinalizerService({} as never),
       provider as never,
     );
     wechat = new WechatPayService(
       new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
       db,
-      new OrderFinalizerService({} as never),
+      createOrderFinalizerService({} as never),
     );
     vi.spyOn(
       wechat as unknown as { verifyWechatSignature: () => void },
@@ -496,7 +497,7 @@ describe.skipIf(!url)('training refund operational closeout', () => {
           ),
       } as never,
       new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
-      new OrderFinalizerService({} as never),
+      createOrderFinalizerService({} as never),
       provider as never,
     );
     await expect(

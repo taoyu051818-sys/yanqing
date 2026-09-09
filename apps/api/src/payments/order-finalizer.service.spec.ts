@@ -1,3 +1,4 @@
+import { createOrderFinalizerService } from '../../test/support/domain-consumer-fixtures.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ConflictException } from '@nestjs/common';
@@ -8,7 +9,6 @@ import {
   PaymentStatus,
   SubjectAccount,
 } from '../generated/prisma/enums.js';
-import { OrderFinalizerService } from './order-finalizer.service.js';
 
 const consignmentHooks = () => ({
   recordCompletedGoodsSale: vi.fn().mockResolvedValue([]),
@@ -69,7 +69,7 @@ function setup(coupon: Record<string, unknown>) {
   };
   return {
     tx,
-    service: new OrderFinalizerService(consignmentHooks() as never),
+    service: createOrderFinalizerService(consignmentHooks() as never),
   };
 }
 
@@ -184,7 +184,7 @@ describe('OrderFinalizerService referral reward invariants', () => {
     };
     return {
       tx,
-      service: new OrderFinalizerService(consignmentHooks() as never),
+      service: createOrderFinalizerService(consignmentHooks() as never),
     };
   }
 
@@ -272,7 +272,8 @@ describe('OrderFinalizerService training seat activation', () => {
       totalAmountCents: 4_800,
       startsAt: new Date('2026-08-01'),
       expiresAt: new Date('2026-12-01'),
-      totalSessions: 10, consumedSessions: 0,
+      totalSessions: 10,
+      consumedSessions: 0,
       prepaidBalanceCents: 0,
       seatReservedUntil,
       class: { id: 'class-1', active: true, capacity: 4 },
@@ -300,7 +301,7 @@ describe('OrderFinalizerService training seat activation', () => {
     };
     return {
       tx,
-      service: new OrderFinalizerService(consignmentHooks() as never),
+      service: createOrderFinalizerService(consignmentHooks() as never),
     };
   }
 

@@ -1,3 +1,5 @@
+import { TrainingTrialBookingService } from './trials/booking/training-trials-booking.service.js';
+import { TrainingTrialFollowUpService } from './trials/follow-up/training-trials-follow-up.service.js';
 import { Module } from '@nestjs/common';
 import { TrainingCatalogService } from './catalog/training-catalog.service.js';
 import { TrainingStudentsService } from './students/training-students.service.js';
@@ -19,7 +21,7 @@ import {
   TrainingTrialsController,
   YouthTrainingRulesController,
 } from './training-operations.controller.js';
-import { TrainingTrialsService } from './training-trials.service.js';
+
 import { YouthTrainingRulesService } from './youth-training-rules.service.js';
 
 @Module({
@@ -44,7 +46,8 @@ import { YouthTrainingRulesService } from './youth-training-rules.service.js';
     TrainingConsumptionService,
     TrainingCorrectionsService,
     TrainingSettlementsService,
-    TrainingTrialsService,
+    TrainingTrialBookingService,
+    TrainingTrialFollowUpService,
     YouthTrainingRulesService,
   ],
   exports: [
@@ -56,7 +59,8 @@ import { YouthTrainingRulesService } from './youth-training-rules.service.js';
     TrainingConsumptionService,
     TrainingCorrectionsService,
     TrainingSettlementsService,
-    TrainingTrialsService,
+    TrainingTrialBookingService,
+    TrainingTrialFollowUpService,
     YouthTrainingRulesService,
   ],
 })

@@ -1,28 +1,38 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
+import { Inject } from '@nestjs/common';
+import { GovernanceUsersService } from './users/governance-users.service.js';
+import { GovernanceRisksService } from './risks/governance-risks.service.js';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
-import { CurrentUser, Roles } from '../common/auth/auth.decorators.js'
-import type { AuthUser } from '../common/auth/auth-user.js'
-import { AppRole } from '../generated/prisma/enums.js'
+import { CurrentUser, Roles } from '../common/auth/auth.decorators.js';
+import type { AuthUser } from '../common/auth/auth-user.js';
+import { AppRole } from '../generated/prisma/enums.js';
 import {
   GovernanceUserQueryDto,
   ReviewRiskEventDto,
   RiskEventQueryDto,
   SetUserRolesDto,
   SetUserStatusDto,
-} from './governance.dto.js'
-import { GovernanceService } from './governance.service.js'
+} from './governance.dto.js';
 
 @ApiTags('组织权限与风险治理')
 @ApiBearerAuth()
 @Controller('governance')
 export class GovernanceController {
-  constructor(private readonly governance: GovernanceService) {}
+  constructor(
+    @Inject(GovernanceUsersService)
+    private readonly governanceGovernanceUsers: GovernanceUsersService,
+    @Inject(GovernanceRisksService)
+    private readonly governanceGovernanceRisks: GovernanceRisksService,
+  ) {}
 
   @Get('users')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
-  users(@Query() query: GovernanceUserQueryDto, @CurrentUser() actor: AuthUser) {
-    return this.governance.users(query, actor)
+  users(
+    @Query() query: GovernanceUserQueryDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.governanceGovernanceUsers.users(query, actor);
   }
 
   @Post('users/:id/roles')
@@ -32,7 +42,7 @@ export class GovernanceController {
     @Body() dto: SetUserRolesDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.governance.setUserRoles(id, dto, actor)
+    return this.governanceGovernanceUsers.setUserRoles(id, dto, actor);
   }
 
   @Post('users/:id/status')
@@ -42,13 +52,13 @@ export class GovernanceController {
     @Body() dto: SetUserStatusDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.governance.setUserStatus(id, dto, actor)
+    return this.governanceGovernanceUsers.setUserStatus(id, dto, actor);
   }
 
   @Get('risk-events')
   @Roles(AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   risks(@Query() query: RiskEventQueryDto, @CurrentUser() actor: AuthUser) {
-    return this.governance.riskEvents(query, actor)
+    return this.governanceGovernanceRisks.riskEvents(query, actor);
   }
 
   @Post('risk-events/:id/review')
@@ -58,7 +68,12 @@ export class GovernanceController {
     @Body() dto: ReviewRiskEventDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.governance.transitionRisk(id, 'REVIEW', dto, actor)
+    return this.governanceGovernanceRisks.transitionRisk(
+      id,
+      'REVIEW',
+      dto,
+      actor,
+    );
   }
 
   @Post('risk-events/:id/resolve')
@@ -68,7 +83,12 @@ export class GovernanceController {
     @Body() dto: ReviewRiskEventDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.governance.transitionRisk(id, 'RESOLVE', dto, actor)
+    return this.governanceGovernanceRisks.transitionRisk(
+      id,
+      'RESOLVE',
+      dto,
+      actor,
+    );
   }
 
   @Post('risk-events/:id/dismiss')
@@ -78,6 +98,11 @@ export class GovernanceController {
     @Body() dto: ReviewRiskEventDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.governance.transitionRisk(id, 'DISMISS', dto, actor)
+    return this.governanceGovernanceRisks.transitionRisk(
+      id,
+      'DISMISS',
+      dto,
+      actor,
+    );
   }
 }

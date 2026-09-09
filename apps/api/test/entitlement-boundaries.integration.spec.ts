@@ -1,13 +1,14 @@
+import { createOrderFinalizerService } from './support/domain-consumer-fixtures.js';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { TrainingService } from './support/training-service-fixture.js';
-import { MembershipsService } from '../src/memberships/memberships.service.js';
+import { MembershipsService } from './support/memberships-fixture.js';
 import { membershipEligibility } from '../src/memberships/membership-eligibility.js';
-import { OrdersService } from '../src/orders/orders.service.js';
+import { OrdersService } from './support/orders-fixture.js';
 import { WechatPayService } from '../src/payments/wechat-pay.service.js';
-import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';
+
 import type { AuthUser } from '../src/common/auth/auth-user.js';
 import type { AppRole, MemberLevel } from '../src/generated/prisma/enums.js';
 
@@ -39,7 +40,7 @@ describe.skipIf(!url)(
       orders = new OrdersService(
         db,
         new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
-        new OrderFinalizerService({} as never),
+        createOrderFinalizerService({} as never),
         {} as never,
       );
       admin = await person('ADMIN');
@@ -752,7 +753,7 @@ describe.skipIf(!url)(
       const service = new OrdersService(
         db,
         new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
-        new OrderFinalizerService({} as never),
+        createOrderFinalizerService({} as never),
         provider as never,
       );
       for (const channel of ['CASH_PRINCIPAL', 'WECHAT'] as const)
@@ -787,7 +788,7 @@ describe.skipIf(!url)(
       const service = new WechatPayService(
         new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
         db,
-        new OrderFinalizerService({} as never),
+        createOrderFinalizerService({} as never),
       );
       vi.spyOn(
         service as unknown as { verifyWechatSignature: () => void },

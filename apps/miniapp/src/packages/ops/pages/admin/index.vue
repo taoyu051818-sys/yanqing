@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import type { DisplayWorkGroup, ManagementView } from "./page-types";
+
+import OperatingAnalytics from "./sections/OperatingAnalytics.vue";
+import WorkItemQueues from "./sections/WorkItemQueues.vue";
+
 import { computed, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../components/OperationsFrame.vue";
@@ -16,9 +21,6 @@ import { useSessionStore } from "../../../../stores/session";
 import type { AppRole } from "../../../../types/domain";
 import { money, shortDate } from "../../../../utils/format";
 import { resolveWorkItemDestination } from "../../../../utils/work-item-deep-link";
-
-type DisplayWorkGroup = WorkGroupDefinition & { items: WorkItem[] };
-type ManagementView = "work" | "analytics";
 
 const session = useSessionStore();
 const dashboard = ref<Record<string, any> | null>(null);
@@ -63,10 +65,12 @@ const showAnalytics = computed(
 );
 
 const groupedWorkItems = computed<DisplayWorkGroup[]>(() =>
-  workGroupDefinitions.filter((group) => canSee(group.roles)).map((group) => ({
-    ...group,
-    items: workItems.value.filter((item) => workGroupKey(item) === group.key),
-  })),
+  workGroupDefinitions
+    .filter((group) => canSee(group.roles))
+    .map((group) => ({
+      ...group,
+      items: workItems.value.filter((item) => workGroupKey(item) === group.key),
+    })),
 );
 
 const unmappedItems = computed(() =>
@@ -102,9 +106,21 @@ const metrics = computed(() => [
     "晚高峰与夜场",
   ],
   ["RevPAH", money(dashboard.value?.venue?.revpahCents), "每可售场地小时收入"],
-  ["已实现收入", money(dashboard.value?.revenue?.realizedRevenueCents), "排除充值与培训预收"],
-  ["30日复购", percent(dashboard.value?.members?.thirtyDayRepurchase?.rate), "真实付费订单口径"],
-  ["培训现金毛利", money(dashboard.value?.training?.cashContributionMarginCents), "确认收入减直接成本"],
+  [
+    "已实现收入",
+    money(dashboard.value?.revenue?.realizedRevenueCents),
+    "排除充值与培训预收",
+  ],
+  [
+    "30日复购",
+    percent(dashboard.value?.members?.thirtyDayRepurchase?.rate),
+    "真实付费订单口径",
+  ],
+  [
+    "培训现金毛利",
+    money(dashboard.value?.training?.cashContributionMarginCents),
+    "确认收入减直接成本",
+  ],
   ["统一待办", String(todoCount.value), "按当前角色分组"],
 ]);
 
@@ -129,10 +145,28 @@ const decisionPanels = computed(() => [
     title: "收款、预收与收入",
     note: "资金流入不等于当期收入",
     items: [
-      ["现金收款", money(dashboard.value?.collections?.cashCollectedCents ?? dashboard.value?.collections?.grossPaymentCents)],
-      ["现金净流入", money(dashboard.value?.collections?.netCashCents ?? dashboard.value?.collections?.netPaymentCents)],
-      ["充值新增预收", money(dashboard.value?.collections?.rechargePrepaidCents)],
-      ["培训新增预收", money(dashboard.value?.collections?.trainingPrepaidCollectedCents)],
+      [
+        "现金收款",
+        money(
+          dashboard.value?.collections?.cashCollectedCents ??
+            dashboard.value?.collections?.grossPaymentCents,
+        ),
+      ],
+      [
+        "现金净流入",
+        money(
+          dashboard.value?.collections?.netCashCents ??
+            dashboard.value?.collections?.netPaymentCents,
+        ),
+      ],
+      [
+        "充值新增预收",
+        money(dashboard.value?.collections?.rechargePrepaidCents),
+      ],
+      [
+        "培训新增预收",
+        money(dashboard.value?.collections?.trainingPrepaidCollectedCents),
+      ],
       ["当期已实现收入", money(dashboard.value?.revenue?.realizedRevenueCents)],
     ],
   },
@@ -143,19 +177,40 @@ const decisionPanels = computed(() => [
       ["消课确认收入", money(dashboard.value?.training?.confirmedRevenueCents)],
       ["未消课预收余额", money(dashboard.value?.training?.unusedBalanceCents)],
       ["本期培训退费", money(dashboard.value?.training?.refundedCents)],
-      ["20%场馆合同流水", money(dashboard.value?.training?.venueContributionCents)],
-      ["现金贡献毛利", money(dashboard.value?.training?.cashContributionMarginCents)],
-      ["每占场小时贡献", money(dashboard.value?.training?.resourceEfficiencyCentsPerCourtHour)],
+      [
+        "20%场馆合同流水",
+        money(dashboard.value?.training?.venueContributionCents),
+      ],
+      [
+        "现金贡献毛利",
+        money(dashboard.value?.training?.cashContributionMarginCents),
+      ],
+      [
+        "每占场小时贡献",
+        money(dashboard.value?.training?.resourceEfficiencyCentsPerCourtHour),
+      ],
     ],
   },
   {
     title: "会员与营销健康度",
     note: "复购与有效转化优先于注册量",
     items: [
-      ["新增 / 有效会员", `${dashboard.value?.members?.newMembers || 0} / ${dashboard.value?.members?.activeMembers || 0}`],
-      ["7日 / 30日复购", `${percent(dashboard.value?.members?.sevenDayRepurchase?.rate)} / ${percent(dashboard.value?.members?.thirtyDayRepurchase?.rate)}`],
-      ["30天内到期 / 流失预警", `${dashboard.value?.members?.expiringWithin30Days || 0} / ${dashboard.value?.members?.inactiveOver30Days || 0}`],
-      ["本期推荐绑定 / 有效首单", `${dashboard.value?.marketing?.directReferralBindings || 0} / ${dashboard.value?.marketing?.directReferralConversions || 0}`],
+      [
+        "新增 / 有效会员",
+        `${dashboard.value?.members?.newMembers || 0} / ${dashboard.value?.members?.activeMembers || 0}`,
+      ],
+      [
+        "7日 / 30日复购",
+        `${percent(dashboard.value?.members?.sevenDayRepurchase?.rate)} / ${percent(dashboard.value?.members?.thirtyDayRepurchase?.rate)}`,
+      ],
+      [
+        "30天内到期 / 流失预警",
+        `${dashboard.value?.members?.expiringWithin30Days || 0} / ${dashboard.value?.members?.inactiveOver30Days || 0}`,
+      ],
+      [
+        "本期推荐绑定 / 有效首单",
+        `${dashboard.value?.marketing?.directReferralBindings || 0} / ${dashboard.value?.marketing?.directReferralConversions || 0}`,
+      ],
       ["券核销率", percent(dashboard.value?.marketing?.couponRedemptionRate)],
     ],
   },
@@ -163,11 +218,22 @@ const decisionPanels = computed(() => [
     title: "商品与联盟回报",
     note: "毛利和真实核销共同约束投放",
     items: [
-      ["商品销售 / 毛利", `${money(dashboard.value?.goods?.revenueCents)} / ${money(dashboard.value?.goods?.grossProfitCents)}`],
+      [
+        "商品销售 / 毛利",
+        `${money(dashboard.value?.goods?.revenueCents)} / ${money(dashboard.value?.goods?.grossProfitCents)}`,
+      ],
       ["商品毛利率", percent(dashboard.value?.goods?.grossMarginRate)],
       ["低库存预警", String(dashboard.value?.goods?.lowStockCount || 0)],
-      ["联盟归因毛利 / 合作费", `${money(dashboard.value?.alliance?.attributedGrossProfitCents)} / ${money(dashboard.value?.alliance?.cooperationFeeCents)}`],
-      ["联盟 ROI", dashboard.value?.alliance?.roi == null ? "—" : Number(dashboard.value.alliance.roi).toFixed(2)],
+      [
+        "联盟归因毛利 / 合作费",
+        `${money(dashboard.value?.alliance?.attributedGrossProfitCents)} / ${money(dashboard.value?.alliance?.cooperationFeeCents)}`,
+      ],
+      [
+        "联盟 ROI",
+        dashboard.value?.alliance?.roi == null
+          ? "—"
+          : Number(dashboard.value.alliance.roi).toFixed(2),
+      ],
     ],
   },
 ]);
@@ -393,120 +459,33 @@ onShow(load);
         class="view-option"
         :class="{ active: activeView === view.key }"
         @tap="activeView = view.key"
-      >{{ view.title }}</view>
+        >{{ view.title }}</view
+      >
     </view>
 
-    <template v-if="showAnalytics">
-      <view v-if="dashboardError" class="error card">
-        <text class="error-title">经营指标同步失败</text>
-        <text class="muted">{{ dashboardError }}</text>
-        <button class="secondary retry" @tap="load">重试同步</button>
-      </view>
+    <OperatingAnalytics
+      v-if="showAnalytics"
+      :showAnalytics="showAnalytics"
+      :dashboardError="dashboardError"
+      :load="load"
+      :metrics="metrics"
+      :decisionPanels="decisionPanels"
+    />
 
-      <view class="metric-grid">
-        <MetricCard
-          v-for="item in metrics"
-          :key="item[0]"
-          :label="item[0]"
-          :value="item[1]"
-          :note="item[2]"
-        />
-      </view>
-
-      <view class="section-title">老板驾驶舱 <text class="section-note">决策口径</text></view>
-      <view class="decision-grid">
-        <view v-for="panel in decisionPanels" :key="panel.title" class="card decision-panel">
-          <text class="decision-title">{{ panel.title }}</text>
-          <text class="muted decision-note">{{ panel.note }}</text>
-          <view class="decision-rows">
-            <view v-for="item in panel.items" :key="item[0]" class="decision-row">
-              <text>{{ item[0] }}</text><text class="decision-value">{{ item[1] }}</text>
-            </view>
-          </view>
-        </view>
-      </view>
-    </template>
-
-    <template v-else>
-      <view class="section-title"
-        >统一待办
-        <text class="section-note">{{
-          loading ? "同步中" : `${todoCount} 项`
-        }}</text></view
-      >
-      <view v-if="workItemsNotice" class="notice card">{{
-        workItemsNotice
-      }}</view>
-
-      <view v-if="loading" class="loading-stack">
-        <view v-for="index in 3" :key="index" class="card loading-row"
-          ><view class="loading-line wide"></view
-          ><view class="loading-line"></view
-        ></view>
-      </view>
-      <view v-else-if="workItemsError" class="error card">
-        <text class="error-title">统一待办加载失败</text>
-        <text class="muted">{{ workItemsError }}</text>
-        <button class="secondary retry" @tap="load">重试待办</button>
-      </view>
-      <view v-else class="todo-list">
-        <view
-          v-for="group in groupedWorkItems"
-          :key="group.key"
-          class="card todo-group"
-        >
-          <view class="group-head">
-            <view>
-              <text class="group-title">{{ group.title }}</text>
-              <text class="muted">{{ group.description }}</text>
-            </view>
-            <text class="group-count" :class="{ active: group.items.length }">{{
-              group.items.length
-            }}</text>
-          </view>
-          <view v-if="group.items.length" class="item-list">
-            <view
-              v-for="item in previewItems(group.items)"
-              :key="item.id"
-              class="todo-item"
-              @tap="openWorkItem(item)"
-            >
-              <view class="item-copy"
-                ><text class="item-title">{{ item.title || "待处理事项" }}</text
-                ><text class="muted item-meta">{{
-                  workItemMeta(item)
-                }}</text></view
-              >
-              <view class="item-status">
-                <StatusBadge :value="item.status" />
-              </view>
-            </view>
-            <text v-if="group.items.length > 3" class="more-hint"
-              >还有 {{ group.items.length - 3 }} 项，进入业务中心查看全部</text
-            >
-          </view>
-          <view v-else class="group-empty">{{ group.emptyText }}</view>
-          <button class="secondary group-action" @tap="openGroup(group)">
-            {{ group.items.length ? "进入处理" : "打开业务中心" }}
-          </button>
-        </view>
-        <view v-if="unmappedItems.length" class="card unmapped">
-          <text class="error-title"
-            >待识别待办 {{ unmappedItems.length }} 项</text
-          >
-          <text class="muted"
-            >接口返回了暂未配置分组的事项，已保留在队列中；请补充 kind/group
-            映射后再分派。</text
-          >
-        </view>
-        <view v-if="!todoCount" class="card all-clear"
-          ><text class="all-clear-title">当前没有待处理事项</text
-          ><text class="muted"
-            >全部经营队列均已清空，可返回工作台进入业务中心。</text
-          ></view
-        >
-      </view>
-    </template>
+    <WorkItemQueues
+      v-else
+      :loading="loading"
+      :todoCount="todoCount"
+      :workItemsNotice="workItemsNotice"
+      :workItemsError="workItemsError"
+      :load="load"
+      :groupedWorkItems="groupedWorkItems"
+      :previewItems="previewItems"
+      :openWorkItem="openWorkItem"
+      :workItemMeta="workItemMeta"
+      :openGroup="openGroup"
+      :unmappedItems="unmappedItems"
+    />
 
     <view class="card boundary"
       ><text class="muted"
@@ -516,284 +495,4 @@ onShow(load);
   </OperationsFrame>
 </template>
 
-<style scoped>
-.operator-context {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18rpx;
-  margin-top: 22rpx;
-  padding: 22rpx 24rpx;
-}
-.operator-context > view {
-  flex: 1;
-  min-width: 0;
-}
-.operator-name {
-  display: block;
-  margin-bottom: 8rpx;
-  font-size: 28rpx;
-  font-weight: 800;
-}
-.sync-time {
-  flex: 0 0 auto;
-  color: #17653d;
-  font-size: 21rpx;
-}
-.view-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8rpx;
-  padding: 8rpx;
-  margin-top: 18rpx;
-  background: #e6ece8;
-  border-radius: 20rpx;
-}
-.view-option {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  min-height: 44px;
-  padding: 12rpx 18rpx;
-  color: #66736b;
-  border-radius: 15rpx;
-  font-size: 24rpx;
-  text-align: center;
-}
-.view-option.active {
-  color: #17492f;
-  background: #fff;
-  font-weight: 800;
-}
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14rpx;
-  margin-top: 18rpx;
-}
-.decision-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 14rpx;
-}
-.decision-panel {
-  margin: 0;
-  padding: 24rpx;
-}
-.decision-title {
-  display: block;
-  font-size: 27rpx;
-  font-weight: 800;
-}
-.decision-note {
-  display: block;
-  margin-top: 8rpx;
-  font-size: 20rpx;
-  line-height: 1.5;
-}
-.decision-rows {
-  margin-top: 16rpx;
-  border-top: 1rpx solid #edf0ed;
-}
-.decision-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 14rpx;
-  padding: 14rpx 0;
-  color: #65736b;
-  border-bottom: 1rpx solid #edf0ed;
-  font-size: 21rpx;
-}
-.decision-row > text:first-child {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.decision-value {
-  flex: none;
-  max-width: 52%;
-  color: #1c4c33;
-  font-weight: 800;
-  text-align: right;
-  overflow-wrap: anywhere;
-}
-.section-note {
-  color: #758079;
-  font-size: 22rpx;
-  font-weight: 400;
-}
-.notice {
-  margin-top: 16rpx;
-  color: #6d5a24;
-  background: #fff4d8;
-  line-height: 1.6;
-}
-.error {
-  margin-top: 16rpx;
-  color: #8a3636;
-  background: #fbeaea;
-  line-height: 1.6;
-}
-.error-title {
-  display: block;
-  margin-bottom: 8rpx;
-  font-size: 26rpx;
-  font-weight: 800;
-}
-.retry {
-  min-height: 44px;
-  width: 100%;
-  margin: 18rpx 0 0;
-}
-.loading-stack {
-  display: grid;
-  gap: 14rpx;
-}
-.loading-row {
-  padding: 24rpx;
-}
-.loading-line {
-  width: 55%;
-  height: 22rpx;
-  margin-top: 12rpx;
-  background: #edf1ee;
-  border-radius: 999rpx;
-}
-.loading-line.wide {
-  width: 78%;
-  margin-top: 0;
-}
-.todo-list {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 14rpx;
-}
-.todo-group {
-  box-sizing: border-box;
-  min-width: 0;
-  padding: 24rpx;
-}
-.group-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16rpx;
-}
-.group-head > view {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.group-title {
-  display: block;
-  margin-bottom: 8rpx;
-  font-size: 29rpx;
-  font-weight: 800;
-}
-.group-count {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 48rpx;
-  height: 48rpx;
-  color: #758079;
-  background: #eef2ef;
-  border-radius: 999rpx;
-  font-size: 24rpx;
-  font-weight: 800;
-}
-.group-count.active {
-  color: #9b6300;
-  background: #fff2d6;
-}
-.item-list {
-  margin-top: 18rpx;
-  border-top: 1rpx solid #edf0ed;
-}
-.todo-item {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14rpx;
-  padding: 18rpx 0;
-  border-bottom: 1rpx solid #edf0ed;
-}
-.item-copy {
-  min-width: 0;
-  flex: 1;
-}
-.item-title {
-  display: block;
-  margin-bottom: 6rpx;
-  font-size: 25rpx;
-  font-weight: 700;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-.item-meta {
-  display: block;
-  font-size: 21rpx;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-.item-status {
-  flex: 0 0 auto;
-  max-width: 42%;
-}
-.more-hint {
-  display: block;
-  padding-top: 14rpx;
-  color: #758079;
-  font-size: 21rpx;
-}
-.group-empty,
-.all-clear {
-  color: #758079;
-}
-.group-empty {
-  padding: 20rpx 0 4rpx;
-  font-size: 23rpx;
-}
-.group-action {
-  width: 100%;
-  min-height: 44px;
-  margin: 18rpx 0 0;
-}
-.unmapped {
-  color: #6d5a24;
-  background: #fff8e8;
-  line-height: 1.6;
-}
-.all-clear {
-  padding: 28rpx 24rpx;
-  text-align: center;
-}
-.all-clear-title {
-  display: block;
-  margin-bottom: 8rpx;
-  color: #17653d;
-  font-size: 29rpx;
-  font-weight: 800;
-}
-.boundary {
-  margin-top: 22rpx;
-  line-height: 1.7;
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 360px) {
-  .operator-context {
-    flex-direction: column;
-  }
-
-  .sync-time {
-    align-self: flex-end;
-  }
-
-  .todo-group {
-    padding: 20rpx;
-  }
-}
-</style>
+<style scoped src="./page.css"></style>

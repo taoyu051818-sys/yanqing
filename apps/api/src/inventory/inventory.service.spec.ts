@@ -14,7 +14,7 @@ import {
   InventoryTxnType,
 } from '../generated/prisma/enums.js';
 import type { InventoryTransactionDto } from './inventory.dto.js';
-import { InventoryService } from './inventory.service.js';
+import { InventoryService } from '../../test/support/inventory-fixture.js';
 
 const frontDesk: AuthUser = {
   sub: 'front-desk-1',

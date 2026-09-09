@@ -1,0 +1,354 @@
+.journey-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12rpx;
+  margin-bottom: 22rpx;
+}
+.journey-tabs button {
+  width: 100%;
+  margin: 0;
+  padding: 16rpx;
+  color: var(--color-muted);
+  background: transparent;
+  font-size: 30rpx;
+}
+.journey-tabs .active {
+  color: var(--color-primary);
+  background: var(--color-surface);
+  font-weight: 800;
+}
+.activity-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  margin-top: 22rpx;
+}
+.activity-summary button {
+  margin: 0;
+  font-size: 26rpx;
+}
+.quiet-entry {
+  width: 100%;
+  margin: 12rpx 0;
+  color: var(--color-muted);
+  background: transparent;
+  font-size: 25rpx;
+}
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 8rpx;
+  margin-bottom: 26rpx;
+  background: #e7ece8;
+  border-radius: 22rpx;
+  text-align: center;
+}
+.tab-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  min-height: 44px;
+  padding: 20rpx;
+  color: #788079;
+  border-radius: 17rpx;
+  box-sizing: border-box;
+}
+.tabs .active {
+  color: #174b30;
+  background: #fff;
+  box-shadow: 0 6rpx 18rpx rgba(29, 67, 44, 0.08);
+  font-weight: 700;
+}
+.error-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  color: #8a3636;
+  background: #fff4f2;
+}
+.error-card > view {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.error-card > .error-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 54rpx;
+  height: 54rpx;
+  background: #fff0ef;
+  border-radius: 16rpx;
+}
+.error-title,
+.error-copy {
+  display: block;
+}
+.error-title {
+  font-weight: 800;
+}
+.error-copy {
+  margin-top: 8rpx;
+  font-size: 23rpx;
+  line-height: 1.5;
+}
+.retry {
+  flex: 0 0 auto;
+  min-height: 58rpx;
+  margin: 0;
+  line-height: 58rpx;
+  font-size: 22rpx;
+}
+.host-entry {
+  display: grid;
+  gap: 20rpx;
+  background: #f8fbf8;
+}
+.host-copy {
+  min-width: 0;
+}
+.host-heading {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 10rpx;
+}
+.host-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 52rpx;
+  height: 52rpx;
+  background: #e7f4eb;
+  border-radius: 16rpx;
+}
+.host-title {
+  display: block;
+  font-size: 29rpx;
+  font-weight: 800;
+}
+.host-entry .muted {
+  display: block;
+  line-height: 1.6;
+}
+.application-state {
+  display: block;
+  margin-top: 12rpx;
+  color: #9b6300;
+  font-size: 23rpx;
+}
+.host-button {
+  width: 100%;
+  margin: 0;
+}
+.loading-stack {
+  display: grid;
+  gap: 14rpx;
+}
+.activity-skeleton {
+  min-height: 310rpx;
+}
+.activity-title-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12rpx;
+  margin: 26rpx 0 12rpx;
+}
+.activity-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 54rpx;
+  height: 54rpx;
+  background: #e7f4eb;
+  border-radius: 16rpx;
+}
+.activity .title {
+  display: block;
+  min-width: 0;
+  margin: 0;
+  font-size: 34rpx;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+.footer {
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-top: 26rpx;
+}
+.join {
+  min-width: 170rpx;
+  min-height: 88rpx;
+  padding: 18rpx 20rpx;
+  margin: 0;
+  line-height: 1.35;
+  font-size: 24rpx;
+  white-space: normal;
+}
+.game-list-status {
+  display: block;
+  margin-top: 16rpx;
+  color: var(--color-primary);
+  font-size: 25rpx;
+}
+.invited-event {
+  border-color: rgba(23, 101, 61, 0.45);
+  box-shadow: 0 12rpx 36rpx rgba(23, 101, 61, 0.14);
+}
+.invite-context {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 8rpx 14rpx;
+  margin-bottom: 12rpx;
+  color: #765e1e;
+  background: #fff5d6;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.rules {
+  background: linear-gradient(135deg, #153f2a, #23714a);
+}
+.rules-heading {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 12rpx;
+}
+.rules-title {
+  display: block;
+  min-width: 0;
+  color: #fff;
+  font-size: 31rpx;
+  font-weight: 700;
+}
+.rules .muted {
+  color: rgba(255, 255, 255, 0.76);
+  line-height: 1.7;
+}
+.sponsor {
+  display: block;
+  margin-top: 10rpx;
+  color: #846b25;
+  font-size: 22rpx;
+}
+.event-signup-guide {
+  margin-top: 18rpx;
+  padding: 18rpx;
+  color: #345846;
+  background: #edf5ef;
+  border-radius: 16rpx;
+}
+.event-signup-title,
+.event-signup-copy {
+  display: block;
+}
+.event-signup-title {
+  font-size: 23rpx;
+  font-weight: 800;
+}
+.event-signup-copy {
+  margin-top: 8rpx;
+  font-size: 21rpx;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.ranking-card {
+  margin-top: 18rpx;
+  padding: 18rpx;
+  background: #f4f8f5;
+  border-radius: 16rpx;
+}
+.ranking-title {
+  display: block;
+  margin-bottom: 10rpx;
+  color: #17653d;
+  font-weight: 800;
+}
+.ranking-line {
+  display: block;
+  margin-top: 7rpx;
+  color: #456052;
+  font-size: 22rpx;
+}
+.my-result {
+  display: block;
+  margin-top: 12rpx;
+  padding-top: 12rpx;
+  color: #765e1e;
+  border-top: 1rpx solid #dce7df;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+.registration-card,
+.cancel-card {
+  margin-top: 18rpx;
+  padding: 18rpx;
+  background: #f4f8f5;
+  border-radius: 16rpx;
+}
+.cancel-card {
+  background: #fff3ef;
+}
+.registration-title {
+  display: block;
+  margin-bottom: 8rpx;
+  color: #17653d;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+.cancel-card .registration-title {
+  color: #9a493d;
+}
+.refund-state {
+  display: block;
+  margin-top: 10rpx;
+  color: #9b6300;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+.event-actions {
+  display: flex;
+  flex: 1 1 360rpx;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12rpx;
+}
+.event-actions .join {
+  flex: 1 1 210rpx;
+  min-width: 0;
+}
+.event-actions .danger {
+  color: #9a493d;
+  border-color: #d8aaa2;
+}
+
+@media (max-width: 420px) {
+  .error-card {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .retry {
+    width: 100%;
+  }
+  .footer {
+    align-items: stretch;
+  }
+  .footer > .money {
+    width: 100%;
+  }
+  .event-actions {
+    flex-basis: 100%;
+    justify-content: stretch;
+  }
+  .event-actions .join {
+    flex: 1 1 220rpx;
+    min-width: 0;
+  }
+}

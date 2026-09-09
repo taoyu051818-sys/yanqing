@@ -15,7 +15,7 @@ import {
   SettlementStatus,
   UserStatus,
 } from '../generated/prisma/enums.js';
-import { AllianceService } from './alliance.service.js';
+import { AllianceService } from '../../test/support/alliance-fixture.js';
 
 const finance: AuthUser = {
   sub: 'finance-1',
@@ -188,17 +188,17 @@ const makeRedemptionPrisma = (shiftId: string | null = 'shift-1') => {
     .mockResolvedValue(shiftId ? { id: shiftId } : null);
   const tx = {
     $queryRaw: vi.fn().mockResolvedValue([{ id: 'merchant-1' }]),
-    merchant: { findUnique: vi.fn().mockResolvedValue({ status: UserStatus.ACTIVE }) },
+    merchant: {
+      findUnique: vi.fn().mockResolvedValue({ status: UserStatus.ACTIVE }),
+    },
     couponCode: {
       findUnique: vi.fn().mockResolvedValue(coupon),
       updateMany,
-      findUniqueOrThrow: vi
-        .fn()
-        .mockResolvedValue({
-          ...coupon,
-          status: CouponStatus.REDEEMED,
-          idempotencyKey: 'private-redeem-key',
-        }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({
+        ...coupon,
+        status: CouponStatus.REDEEMED,
+        idempotencyKey: 'private-redeem-key',
+      }),
     },
     couponTemplate: { update: vi.fn().mockResolvedValue({}) },
     frontDeskShift: { findFirst: shiftLookup },
@@ -227,58 +227,88 @@ const makeRedemptionPrisma = (shiftId: string | null = 'shift-1') => {
 describe('AllianceService redemption response privacy', () => {
   it('redacts the persisted key from an exact replay', async () => {
     const command = {
-      code: 'YQ-COFFEE-1', merchantId: 'merchant-1',
-      attributedAmountCents: 2_800, idempotencyKey: 'redeem-replay-key-1',
+      code: 'YQ-COFFEE-1',
+      merchantId: 'merchant-1',
+      attributedAmountCents: 2_800,
+      idempotencyKey: 'redeem-replay-key-1',
     };
     const replay = {
-      id: 'coupon-1', code: command.code, status: CouponStatus.REDEEMED,
+      id: 'coupon-1',
+      code: command.code,
+      status: CouponStatus.REDEEMED,
       redeemedMerchantId: command.merchantId,
       attributedAmountCents: command.attributedAmountCents,
       idempotencyKey: command.idempotencyKey,
     };
     const service = new AllianceService({
-      userRole: { findFirst: vi.fn().mockResolvedValue({ merchantId: command.merchantId }) },
+      userRole: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ merchantId: command.merchantId }),
+      },
       couponCode: { findUnique: vi.fn().mockResolvedValue(replay) },
     } as never);
 
     const result = await service.redeem(command, merchant);
-    expect(result).toMatchObject({ id: replay.id, status: CouponStatus.REDEEMED });
+    expect(result).toMatchObject({
+      id: replay.id,
+      status: CouponStatus.REDEEMED,
+    });
     expect(result).not.toHaveProperty('idempotencyKey');
   });
 
   it('redacts the persisted key from concurrent unique-key recovery', async () => {
     const command = {
-      code: 'YQ-COFFEE-1', merchantId: 'merchant-1',
-      attributedAmountCents: 2_800, idempotencyKey: 'redeem-concurrent-key-1',
+      code: 'YQ-COFFEE-1',
+      merchantId: 'merchant-1',
+      attributedAmountCents: 2_800,
+      idempotencyKey: 'redeem-concurrent-key-1',
     };
     const claimed = {
-      id: 'coupon-1', code: command.code, templateId: 'template-1',
-      template: { merchantId: command.merchantId }, status: CouponStatus.CLAIMED,
+      id: 'coupon-1',
+      code: command.code,
+      templateId: 'template-1',
+      template: { merchantId: command.merchantId },
+      status: CouponStatus.CLAIMED,
       expiresAt: new Date('2099-01-01T00:00:00.000Z'),
     };
     const duplicate = {
-      ...claimed, status: CouponStatus.REDEEMED,
+      ...claimed,
+      status: CouponStatus.REDEEMED,
       redeemedMerchantId: command.merchantId,
       attributedAmountCents: command.attributedAmountCents,
       idempotencyKey: command.idempotencyKey,
     };
     let keyLookups = 0;
     const service = new AllianceService({
-      userRole: { findFirst: vi.fn().mockResolvedValue({ merchantId: command.merchantId }) },
-      merchant: { findUnique: vi.fn().mockResolvedValue({ status: UserStatus.ACTIVE }) },
-      couponCode: { findUnique: vi.fn(async ({ where }: any) => {
-        if ('idempotencyKey' in where) return keyLookups++ === 0 ? null : duplicate;
-        return claimed;
-      }) },
+      userRole: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ merchantId: command.merchantId }),
+      },
+      merchant: {
+        findUnique: vi.fn().mockResolvedValue({ status: UserStatus.ACTIVE }),
+      },
+      couponCode: {
+        findUnique: vi.fn(async ({ where }: any) => {
+          if ('idempotencyKey' in where)
+            return keyLookups++ === 0 ? null : duplicate;
+          return claimed;
+        }),
+      },
       $transaction: vi.fn().mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('unique', {
-          code: 'P2002', clientVersion: 'test',
+          code: 'P2002',
+          clientVersion: 'test',
         }),
       ),
     } as never);
 
     const result = await service.redeem(command, merchant);
-    expect(result).toMatchObject({ id: duplicate.id, status: CouponStatus.REDEEMED });
+    expect(result).toMatchObject({
+      id: duplicate.id,
+      status: CouponStatus.REDEEMED,
+    });
     expect(result).not.toHaveProperty('idempotencyKey');
   });
 });
@@ -381,24 +411,29 @@ describe('AllianceService settlement workflow', () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(created);
     const tx = {
-      allianceSettlement: { create: vi.fn().mockResolvedValue(created), findUnique, findFirst: vi.fn().mockResolvedValue(null) },
+      allianceSettlement: {
+        create: vi.fn().mockResolvedValue(created),
+        findUnique,
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       reconciliationPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
     };
     const prisma = {
       merchant: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'merchant-1',
-            settlementRule: { mode: 'FIXED', feeCents: 100 },
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'merchant-1',
+          settlementRule: { mode: 'FIXED', feeCents: 100 },
+        }),
       },
       couponCode: { findMany: vi.fn().mockResolvedValue([]) },
       allianceSettlement: { findUnique },
       $transaction: runner(tx),
     };
-    Object.assign(tx, { merchant: prisma.merchant, couponCode: prisma.couponCode });
+    Object.assign(tx, {
+      merchant: prisma.merchant,
+      couponCode: prisma.couponCode,
+    });
     const service = new AllianceService(prisma as never);
     const dto = {
       merchantId: 'merchant-1',
@@ -410,7 +445,9 @@ describe('AllianceService settlement workflow', () => {
     const second = await service.createSettlement(dto, finance);
     expect(first).toMatchObject({ id: created.id, status: created.status });
     expect(second).toEqual(first);
-    expect(JSON.stringify({ first, second })).not.toMatch(/codeIds|settlementRule/);
+    expect(JSON.stringify({ first, second })).not.toMatch(
+      /codeIds|settlementRule/,
+    );
     expect(tx.allianceSettlement.create).toHaveBeenCalledOnce();
     expect(tx.auditLog.create).toHaveBeenCalledOnce();
   });
@@ -455,7 +492,10 @@ describe('AllianceService settlement workflow', () => {
       allianceSettlement: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: runner(tx),
     };
-    Object.assign(tx, { merchant: prisma.merchant, couponCode: prisma.couponCode });
+    Object.assign(tx, {
+      merchant: prisma.merchant,
+      couponCode: prisma.couponCode,
+    });
     const createService = new AllianceService(prisma as never);
     await expect(
       createService.createSettlement(
@@ -507,7 +547,14 @@ describe('AllianceService settlement workflow', () => {
         codeIds: ['coupon-secret'],
         settlementRule: { mode: 'PER_REDEMPTION', amountCents: 1000 },
         workflowState: SettlementStatus.DRAFT,
-        workflowHistory: [{ action: 'CREATED', state: SettlementStatus.DRAFT, actorId: finance.sub, at: '2026-09-01T00:00:00.000Z' }],
+        workflowHistory: [
+          {
+            action: 'CREATED',
+            state: SettlementStatus.DRAFT,
+            actorId: finance.sub,
+            at: '2026-09-01T00:00:00.000Z',
+          },
+        ],
       },
       merchant: { id: 'merchant-1', code: 'M-1', name: '联盟商户' },
     };
@@ -516,12 +563,19 @@ describe('AllianceService settlement workflow', () => {
     } as never);
 
     const [result] = await service.listSettlements(finance);
-    expect(result).toMatchObject({ id: raw.id, merchant: { name: '联盟商户' } });
+    expect(result).toMatchObject({
+      id: raw.id,
+      merchant: { name: '联盟商户' },
+    });
     expect(result.detail.workflowHistory[0]).toEqual({
-      action: 'CREATED', state: SettlementStatus.DRAFT, reason: null,
+      action: 'CREATED',
+      state: SettlementStatus.DRAFT,
+      reason: null,
       at: '2026-09-01T00:00:00.000Z',
     });
-    expect(JSON.stringify(result)).not.toMatch(/codeIds|settlementRule|actorId/);
+    expect(JSON.stringify(result)).not.toMatch(
+      /codeIds|settlementRule|actorId/,
+    );
   });
 
   it('returns member coupons with only the public merchant catalogue fields', async () => {

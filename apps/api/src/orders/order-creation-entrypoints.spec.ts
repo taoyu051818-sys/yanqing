@@ -1,24 +1,37 @@
-import { createHash } from 'node:crypto'
+import { createHash } from 'node:crypto';
 
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest';
 
-import type { AuthUser } from '../common/auth/auth-user.js'
-import { EventsService } from "../../test/support/events-service-fixture.js"
-import { GamesService } from '../games/games.service.js'
-import { GoodsService } from '../goods/goods.service.js'
-import { MembershipsService } from '../memberships/memberships.service.js'
-import { TrainingService } from "../../test/support/training-service-fixture.js"
-import { VenuesService } from '../venues/venues.service.js'
-import { AppRole, SourceChannel, TeamCategory } from '../generated/prisma/enums.js'
-import { orderCreationCommandHash } from './order-creation-idempotency.js'
+import type { AuthUser } from '../common/auth/auth-user.js';
+import { EventsService } from '../../test/support/events-service-fixture.js';
+import { GamesService } from '../../test/support/games-fixture.js';
+import { GoodsService } from '../goods/goods.service.js';
+import { MembershipsService } from '../../test/support/memberships-fixture.js';
+import { TrainingService } from '../../test/support/training-service-fixture.js';
+import { VenuesService } from '../../test/support/venues-fixture.js';
+import {
+  AppRole,
+  SourceChannel,
+  TeamCategory,
+} from '../generated/prisma/enums.js';
+import { orderCreationCommandHash } from './order-creation-idempotency.js';
 
-const actor: AuthUser = { sub: 'member-1', displayName: '会员', roles: [AppRole.MEMBER] }
-const key = 'creation-request-key-1'
+const actor: AuthUser = {
+  sub: 'member-1',
+  displayName: '会员',
+  roles: [AppRole.MEMBER],
+};
+const key = 'creation-request-key-1';
 
-const replayPrisma = (command: unknown, result: Record<string, unknown> = { id: 'order-existing' }) => ({
+const replayPrisma = (
+  command: unknown,
+  result: Record<string, unknown> = { id: 'order-existing' },
+) => ({
   order: {
     findUnique: vi.fn().mockResolvedValue({
-      id: 'order-existing', memberId: actor.sub, creationCommandHash: orderCreationCommandHash(command),
+      id: 'order-existing',
+      memberId: actor.sub,
+      creationCommandHash: orderCreationCommandHash(command),
     }),
     findUniqueOrThrow: vi.fn().mockResolvedValue(result),
     create: vi.fn(),
@@ -31,108 +44,225 @@ const replayPrisma = (command: unknown, result: Record<string, unknown> = { id: 
   inventoryItem: { findMany: vi.fn() },
   event: { findUnique: vi.fn() },
   $transaction: vi.fn(),
-})
+});
 
 describe('all direct order creation entrypoints', () => {
   it('persists the key and command hash on a newly-created order', async () => {
-    const prisma = replayPrisma({})
-    prisma.order.findUnique.mockResolvedValue(null)
+    const prisma = replayPrisma({});
+    prisma.order.findUnique.mockResolvedValue(null);
     prisma.membershipProduct.findUnique.mockResolvedValue({
-      id: 'gold', code: 'MEMBERSHIP_GOLD', version: 1, enabled: true, name: '金卡', level: 'GOLD',
-      durationDays: 365, priceCents: 69_900, benefits: {},
+      id: 'gold',
+      code: 'MEMBERSHIP_GOLD',
+      version: 1,
+      enabled: true,
+      name: '金卡',
+      level: 'GOLD',
+      durationDays: 365,
+      priceCents: 69_900,
+      benefits: {},
       effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
       effectiveTo: new Date('2099-01-01T00:00:00.000Z'),
-    })
-    prisma.memberProfile.findUnique.mockResolvedValue({ id: 'profile-1' })
-    prisma.order.create.mockResolvedValue({ id: 'order-new' })
-    const auditCreate = vi.fn().mockResolvedValue({})
-    prisma.$transaction.mockImplementation(async (work: (tx: unknown) => unknown) => work({
-      memberSubscription: { findFirst: vi.fn().mockResolvedValue(null) },
-      membershipProduct: prisma.membershipProduct,
-      memberProfile: prisma.memberProfile,
-      order: prisma.order,
-      auditLog: { create: auditCreate },
-    }))
+    });
+    prisma.memberProfile.findUnique.mockResolvedValue({ id: 'profile-1' });
+    prisma.order.create.mockResolvedValue({ id: 'order-new' });
+    const auditCreate = vi.fn().mockResolvedValue({});
+    prisma.$transaction.mockImplementation(
+      async (work: (tx: unknown) => unknown) =>
+        work({
+          memberSubscription: { findFirst: vi.fn().mockResolvedValue(null) },
+          membershipProduct: prisma.membershipProduct,
+          memberProfile: prisma.memberProfile,
+          order: prisma.order,
+          auditLog: { create: auditCreate },
+        }),
+    );
 
-    await new MembershipsService(prisma as never).purchase({ productId: 'gold', creationIdempotencyKey: key }, actor)
+    await new MembershipsService(prisma as never).purchase(
+      { productId: 'gold', creationIdempotencyKey: key },
+      actor,
+    );
 
-    expect(prisma.order.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        creationIdempotencyKey: key,
-        creationCommandHash: orderCreationCommandHash({ kind: 'MEMBERSHIP_PURCHASE', productId: 'gold' }),
+    expect(prisma.order.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          creationIdempotencyKey: key,
+          creationCommandHash: orderCreationCommandHash({
+            kind: 'MEMBERSHIP_PURCHASE',
+            productId: 'gold',
+          }),
+        }),
       }),
-    }))
-    expect(auditCreate).toHaveBeenCalledOnce()
-  })
+    );
+    expect(auditCreate).toHaveBeenCalledOnce();
+  });
 
   it('replays membership purchase before reloading a mutable product', async () => {
-    const command = { kind: 'MEMBERSHIP_PURCHASE', productId: 'gold' }
-    const prisma = replayPrisma(command, { id: 'order-existing', membership: { id: 'subscription-1' } })
-    const result = await new MembershipsService(prisma as never).purchase({ productId: 'gold', creationIdempotencyKey: key }, actor)
-    expect(result).toMatchObject({ id: 'order-existing' })
-    expect(prisma.membershipProduct.findUnique).not.toHaveBeenCalled()
-  })
+    const command = { kind: 'MEMBERSHIP_PURCHASE', productId: 'gold' };
+    const prisma = replayPrisma(command, {
+      id: 'order-existing',
+      membership: { id: 'subscription-1' },
+    });
+    const result = await new MembershipsService(prisma as never).purchase(
+      { productId: 'gold', creationIdempotencyKey: key },
+      actor,
+    );
+    expect(result).toMatchObject({ id: 'order-existing' });
+    expect(prisma.membershipProduct.findUnique).not.toHaveBeenCalled();
+  });
 
   it('replays recharge with the exact server-owned plan command', async () => {
-    const command = { kind: 'RECHARGE', planId: 'recharge-plan-1' }
-    const prisma = replayPrisma(command)
-    await expect(new MembershipsService(prisma as never).recharge({
-      planId: 'recharge-plan-1', creationIdempotencyKey: key,
-    }, actor)).resolves.toMatchObject({ id: 'order-existing' })
-    expect(prisma.order.create).not.toHaveBeenCalled()
-  })
+    const command = { kind: 'RECHARGE', planId: 'recharge-plan-1' };
+    const prisma = replayPrisma(command);
+    await expect(
+      new MembershipsService(prisma as never).recharge(
+        {
+          planId: 'recharge-plan-1',
+          creationIdempotencyKey: key,
+        },
+        actor,
+      ),
+    ).resolves.toMatchObject({ id: 'order-existing' });
+    expect(prisma.order.create).not.toHaveBeenCalled();
+  });
 
   it('replays a venue booking before checking current slot occupancy', async () => {
-    const command = { kind: 'VENUE_BOOKING', memberId: actor.sub, date: '2099-01-01', courtId: 'court-1', slotId: 'slot-1', sourceChannel: SourceChannel.MINI_PROGRAM, couponCode: null }
-    const prisma = replayPrisma(command, { id: 'order-existing', bookings: [], items: [] })
-    await expect(new VenuesService(prisma as never).createBooking({
-      date: '2099-01-01', courtId: 'court-1', slotId: 'slot-1', sourceChannel: SourceChannel.MINI_PROGRAM,
-      creationIdempotencyKey: key,
-    }, actor)).resolves.toMatchObject({ id: 'order-existing' })
-    expect(prisma.court.findUnique).not.toHaveBeenCalled()
-  })
+    const command = {
+      kind: 'VENUE_BOOKING',
+      memberId: actor.sub,
+      date: '2099-01-01',
+      courtId: 'court-1',
+      slotId: 'slot-1',
+      sourceChannel: SourceChannel.MINI_PROGRAM,
+      couponCode: null,
+    };
+    const prisma = replayPrisma(command, {
+      id: 'order-existing',
+      bookings: [],
+      items: [],
+    });
+    await expect(
+      new VenuesService(prisma as never).createBooking(
+        {
+          date: '2099-01-01',
+          courtId: 'court-1',
+          slotId: 'slot-1',
+          sourceChannel: SourceChannel.MINI_PROGRAM,
+          creationIdempotencyKey: key,
+        },
+        actor,
+      ),
+    ).resolves.toMatchObject({ id: 'order-existing' });
+    expect(prisma.court.findUnique).not.toHaveBeenCalled();
+  });
 
   it('replays training purchase before consuming another seat reservation', async () => {
-    const command = { kind: 'TRAINING_PURCHASE', productId: 'adult', classId: 'class-1', studentId: null, sourceChannel: SourceChannel.MINI_PROGRAM }
-    const prisma = replayPrisma(command, { id: 'order-existing', trainingEnrollment: { id: 'enrollment-1' }, items: [] })
-    await expect(new TrainingService(prisma as never).purchase({
-      productId: 'adult', classId: 'class-1', sourceChannel: SourceChannel.MINI_PROGRAM,
-      creationIdempotencyKey: key,
-    }, actor)).resolves.toMatchObject({ id: 'order-existing' })
-    expect(prisma.trainingProduct.findUnique).not.toHaveBeenCalled()
-  })
+    const command = {
+      kind: 'TRAINING_PURCHASE',
+      productId: 'adult',
+      classId: 'class-1',
+      studentId: null,
+      sourceChannel: SourceChannel.MINI_PROGRAM,
+    };
+    const prisma = replayPrisma(command, {
+      id: 'order-existing',
+      trainingEnrollment: { id: 'enrollment-1' },
+      items: [],
+    });
+    await expect(
+      new TrainingService(prisma as never).purchase(
+        {
+          productId: 'adult',
+          classId: 'class-1',
+          sourceChannel: SourceChannel.MINI_PROGRAM,
+          creationIdempotencyKey: key,
+        },
+        actor,
+      ),
+    ).resolves.toMatchObject({ id: 'order-existing' });
+    expect(prisma.trainingProduct.findUnique).not.toHaveBeenCalled();
+  });
 
   it('normalizes an equivalent goods cart before replay', async () => {
-    const command = { kind: 'GOODS_ORDER', items: [{ itemId: 'ball', quantity: 3 }, { itemId: 'grip', quantity: 1 }] }
-    const prisma = replayPrisma(command, { id: 'order-existing', items: [] })
-    await expect(new GoodsService(prisma as never).createOrder({
-      items: [{ itemId: 'grip', quantity: 1 }, { itemId: 'ball', quantity: 1 }, { itemId: 'ball', quantity: 2 }],
-      creationIdempotencyKey: key,
-    }, actor)).resolves.toMatchObject({ id: 'order-existing' })
-    expect(prisma.inventoryItem.findMany).not.toHaveBeenCalled()
-  })
+    const command = {
+      kind: 'GOODS_ORDER',
+      items: [
+        { itemId: 'ball', quantity: 3 },
+        { itemId: 'grip', quantity: 1 },
+      ],
+    };
+    const prisma = replayPrisma(command, { id: 'order-existing', items: [] });
+    await expect(
+      new GoodsService(prisma as never).createOrder(
+        {
+          items: [
+            { itemId: 'grip', quantity: 1 },
+            { itemId: 'ball', quantity: 1 },
+            { itemId: 'ball', quantity: 2 },
+          ],
+          creationIdempotencyKey: key,
+        },
+        actor,
+      ),
+    ).resolves.toMatchObject({ id: 'order-existing' });
+    expect(prisma.inventoryItem.findMany).not.toHaveBeenCalled();
+  });
 
   it('replays a game registration before the active-registration conflict check', async () => {
-    const command = { kind: 'GAME_REGISTRATION', gameId: 'game-1', sourceChannel: SourceChannel.MINI_PROGRAM }
-    const prisma = replayPrisma(command, { id: 'order-existing', gameRegistration: { id: 'registration-1' } })
-    await expect(new GamesService(prisma as never).register('game-1', {
-      sourceChannel: SourceChannel.MINI_PROGRAM, creationIdempotencyKey: key,
-    }, actor)).resolves.toMatchObject({ id: 'order-existing' })
-    expect(prisma.$transaction).not.toHaveBeenCalled()
-  })
+    const command = {
+      kind: 'GAME_REGISTRATION',
+      gameId: 'game-1',
+      sourceChannel: SourceChannel.MINI_PROGRAM,
+    };
+    const prisma = replayPrisma(command, {
+      id: 'order-existing',
+      gameRegistration: { id: 'registration-1' },
+    });
+    await expect(
+      new GamesService(prisma as never).register(
+        'game-1',
+        {
+          sourceChannel: SourceChannel.MINI_PROGRAM,
+          creationIdempotencyKey: key,
+        },
+        actor,
+      ),
+    ).resolves.toMatchObject({ id: 'order-existing' });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
 
   it('replays a normalized fixed-doubles event registration', async () => {
-    const partnerInviteCode = 'EP_order_replay_partner_code_123456'
+    const partnerInviteCode = 'EP_order_replay_partner_code_123456';
     const command = {
-      kind: 'EVENT_REGISTRATION', eventId: 'event-1', name: '金羽组合', playerAName: null, playerBName: null,
-      playerAUserId: actor.sub, playerBUserId: null, category: TeamCategory.MIXED_DOUBLES, sourceChannel: SourceChannel.MINI_PROGRAM,
-      partnerInviteTokenHash: createHash('sha256').update(partnerInviteCode).digest('hex'),
-    }
-    const prisma = replayPrisma(command, { id: 'order-existing', eventTeam: { id: 'team-1' } })
-    await expect(new EventsService(prisma as never).register('event-1', {
-      name: ' 金羽组合 ', partnerInviteCode, category: TeamCategory.MIXED_DOUBLES,
-      sourceChannel: SourceChannel.MINI_PROGRAM, creationIdempotencyKey: key,
-    }, actor)).resolves.toMatchObject({ id: 'order-existing' })
-    expect(prisma.event.findUnique).not.toHaveBeenCalled()
-  })
-})
+      kind: 'EVENT_REGISTRATION',
+      eventId: 'event-1',
+      name: '金羽组合',
+      playerAName: null,
+      playerBName: null,
+      playerAUserId: actor.sub,
+      playerBUserId: null,
+      category: TeamCategory.MIXED_DOUBLES,
+      sourceChannel: SourceChannel.MINI_PROGRAM,
+      partnerInviteTokenHash: createHash('sha256')
+        .update(partnerInviteCode)
+        .digest('hex'),
+    };
+    const prisma = replayPrisma(command, {
+      id: 'order-existing',
+      eventTeam: { id: 'team-1' },
+    });
+    await expect(
+      new EventsService(prisma as never).register(
+        'event-1',
+        {
+          name: ' 金羽组合 ',
+          partnerInviteCode,
+          category: TeamCategory.MIXED_DOUBLES,
+          sourceChannel: SourceChannel.MINI_PROGRAM,
+          creationIdempotencyKey: key,
+        },
+        actor,
+      ),
+    ).resolves.toMatchObject({ id: 'order-existing' });
+    expect(prisma.event.findUnique).not.toHaveBeenCalled();
+  });
+});

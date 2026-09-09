@@ -1,3 +1,4 @@
+import { createOrderFinalizerService } from './support/domain-consumer-fixtures.js';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import ExcelJS from 'exceljs';
@@ -7,13 +8,13 @@ import { ConfigurationService } from '../src/configuration/configuration.service
 import { ReconciliationService } from '../src/reconciliation/reconciliation.service.js';
 import { ReportsService } from '../src/reports/reports.service.js';
 import { BossService } from '../src/boss/boss.service.js';
-import { GovernanceService } from '../src/governance/governance.service.js';
+import { GovernanceService } from './support/governance-fixture.js';
 import { DashboardService } from '../src/dashboard/dashboard.service.js';
-import { VenuesService } from '../src/venues/venues.service.js';
-import { MembershipsService } from '../src/memberships/memberships.service.js';
+import { VenuesService } from './support/venues-fixture.js';
+import { MembershipsService } from './support/memberships-fixture.js';
 import { TrainingService } from './support/training-service-fixture.js';
-import { OrdersService } from '../src/orders/orders.service.js';
-import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';
+import { OrdersService } from './support/orders-fixture.js';
+
 import { dayRange } from '../src/boss/boss.logic.js';
 import type { AuthUser } from '../src/common/auth/auth-user.js';
 
@@ -50,7 +51,7 @@ describe.skipIf(!url)('reporting boundaries on PostgreSQL', () => {
     orders = new OrdersService(
       db,
       new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
-      new OrderFinalizerService({} as never),
+      createOrderFinalizerService({} as never),
       {} as never,
     );
   });

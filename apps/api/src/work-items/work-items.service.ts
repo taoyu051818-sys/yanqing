@@ -1,120 +1,77 @@
-import { canManageGames, GAME_MANAGEMENT_ROLES, trainingSessionScope } from '../common/auth/operation-scopes.js';
+import { canManageGames } from '../common/auth/operation-scopes.js';
 import { Injectable } from '@nestjs/common';
-
 import type { AuthUser } from '../common/auth/auth-user.js';
 import { PrismaService } from '../database/prisma.service.js';
 import {
   AppRole,
-  AccountAdjustmentStatus,
   BookingStatus,
   BusinessType,
-  DataErasureRequestStatus,
-  EventPrizeStatus,
-  EventStatus,
-  GameStatus,
-  HostStatus,
-  LeadStatus,
-  MatchStatus,
-  OrderStatus,
   Prisma,
   RegistrationStatus,
-  RefundStatus,
-  SettlementStatus,
-  AttendanceStatus,
-  TrainingConsumeCorrectionStatus,
-  TrainingSessionStatus,
-  TrainingTrialStatus,
-  YouthTrainingRuleStatus,
 } from '../generated/prisma/client.js';
-
-export type WorkItemKind =
-  | 'ACCOUNT_ADJUSTMENT_REVIEW'
-  | 'CUSTOMER_LEAD_SLA'
-  | 'HOST_APPLICATION_REVIEW'
-  | 'DATA_ERASURE_REVIEW'
-  | 'REFUND_REVIEW'
-  | 'TRAINING_CONSUME_CORRECTION_REVIEW'
-  | 'TRAINING_TRIAL_CHECK_IN'
-  | 'TRAINING_TRIAL_ASSESSMENT'
-  | 'TRAINING_TRIAL_DECISION'
-  | 'YOUTH_TRAINING_RULE_REVIEW'
-  | 'TRAINING_SESSION_OPERATION'
-  | 'TRAINING_ATTENDANCE'
-  | 'EVENT_SCORE'
-  | 'EVENT_PRIZE_RECEIPT'
-  | 'ALLIANCE_SETTLEMENT'
-  | 'TRAINING_SETTLEMENT'
-  | 'CONSIGNMENT_SETTLEMENT'
-  | 'LOW_STOCK'
-  | 'GAME_OPERATION'
-  | 'ORDER_FULFILLMENT';
-
-export type WorkItemGroup =
-  | 'CUSTOMER'
-  | 'REFUND'
-  | 'TRAINING'
-  | 'EVENT'
-  | 'ALLIANCE'
-  | 'INVENTORY'
-  | 'FULFILLMENT'
-  | 'RECONCILIATION'
-  | 'GOVERNANCE';
-
-const WORK_ITEM_GROUP_BY_KIND: Record<WorkItemKind, WorkItemGroup> = {
-  ACCOUNT_ADJUSTMENT_REVIEW: 'REFUND',
-  CUSTOMER_LEAD_SLA: 'CUSTOMER',
-  HOST_APPLICATION_REVIEW: 'CUSTOMER',
-  DATA_ERASURE_REVIEW: 'GOVERNANCE',
-  REFUND_REVIEW: 'REFUND',
-  TRAINING_CONSUME_CORRECTION_REVIEW: 'TRAINING',
-  TRAINING_TRIAL_CHECK_IN: 'TRAINING',
-  TRAINING_TRIAL_ASSESSMENT: 'TRAINING',
-  TRAINING_TRIAL_DECISION: 'TRAINING',
-  YOUTH_TRAINING_RULE_REVIEW: 'GOVERNANCE',
-  TRAINING_SESSION_OPERATION: 'TRAINING',
-  TRAINING_ATTENDANCE: 'TRAINING',
-  EVENT_SCORE: 'EVENT',
-  EVENT_PRIZE_RECEIPT: 'EVENT',
-  ALLIANCE_SETTLEMENT: 'RECONCILIATION',
-  TRAINING_SETTLEMENT: 'RECONCILIATION',
-  CONSIGNMENT_SETTLEMENT: 'RECONCILIATION',
-  LOW_STOCK: 'INVENTORY',
-  GAME_OPERATION: 'FULFILLMENT',
-  ORDER_FULFILLMENT: 'FULFILLMENT',
-};
-
-export interface WorkItem {
-  id: string;
-  kind: WorkItemKind;
-  /** Server-owned queue classification. Clients must not infer responsibility from title text. */
-  group?: WorkItemGroup;
-  objectType: string;
-  objectId: string;
-  status: string;
-  priority: number;
-  title: string;
-  description: string;
-  ownerRoles: AppRole[];
-  createdAt: string;
-  dueAt?: string;
-  amountCents?: number;
-  action: string;
-  metadata?: Record<string, unknown>;
-}
-
-const INTERNAL_ROLES = new Set<AppRole>([
-  AppRole.FRONT_DESK,
-  AppRole.COACH,
-  AppRole.EVENT_MANAGER,
-  AppRole.HOST,
-  AppRole.MERCHANT,
-  AppRole.FINANCE,
-  AppRole.ADMIN,
-  AppRole.SUPER_ADMIN,
-]);
-
-const hasAny = (roles: readonly AppRole[], allowed: readonly AppRole[]) =>
-  roles.some((role) => allowed.includes(role));
+import {
+  WORK_ITEM_GROUP_BY_KIND,
+  WorkItem,
+  INTERNAL_ROLES,
+  hasAny,
+} from './work-item-context.js';
+import { loadRefunds, mapRefundsWorkItems } from './domains/refunds.js';
+import {
+  loadAttendances,
+  mapAttendancesWorkItems,
+} from './domains/attendances.js';
+import { loadMatches, mapMatchesWorkItems } from './domains/matches.js';
+import {
+  loadPrizeReceipts,
+  mapPrizeReceiptsWorkItems,
+} from './domains/prize-receipts.js';
+import {
+  loadAllianceSettlements,
+  mapAllianceSettlementsWorkItems,
+} from './domains/alliance-settlements.js';
+import {
+  loadTrainingSettlements,
+  mapTrainingSettlementsWorkItems,
+} from './domains/training-settlements.js';
+import {
+  loadConsignmentSettlements,
+  mapConsignmentSettlementsWorkItems,
+} from './domains/consignment-settlements.js';
+import { loadInventory, mapInventoryWorkItems } from './domains/inventory.js';
+import { loadOrders, mapOrdersWorkItems } from './domains/orders.js';
+import {
+  loadCustomerLeads,
+  mapCustomerLeadsWorkItems,
+} from './domains/customer-leads.js';
+import {
+  loadHostApplications,
+  mapHostApplicationsWorkItems,
+} from './domains/host-applications.js';
+import {
+  loadDataErasureRequests,
+  mapDataErasureRequestsWorkItems,
+} from './domains/data-erasure-requests.js';
+import {
+  loadAccountAdjustments,
+  mapAccountAdjustmentsWorkItems,
+} from './domains/account-adjustments.js';
+import {
+  loadTrainingConsumeCorrections,
+  mapTrainingConsumeCorrectionsWorkItems,
+} from './domains/training-consume-corrections.js';
+import {
+  loadTrainingTrials,
+  mapTrainingTrialsWorkItems,
+} from './domains/training-trials.js';
+import {
+  loadYouthTrainingRules,
+  mapYouthTrainingRulesWorkItems,
+} from './domains/youth-training-rules.js';
+import { loadGames, mapGamesWorkItems } from './domains/games.js';
+import {
+  loadTrainingSessions,
+  mapTrainingSessionsWorkItems,
+} from './domains/training-sessions.js';
 
 @Injectable()
 export class WorkItemsService {
@@ -252,830 +209,79 @@ export class WorkItemsService {
       games,
       trainingSessions,
     ] = await Promise.all([
-      canReviewMoney
-        ? this.prisma.refund.findMany({
-            where: { status: RefundStatus.REQUESTED },
-            include: {
-              order: { select: { orderNo: true, title: true, memberId: true } },
-            },
-            orderBy: { requestedAt: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canReviewTrainingConsumes
-        ? this.prisma.trainingAttendance.findMany({
-            where: {
-              status: AttendanceStatus.ATTENDED,
-              operatorId: { not: null },
-              consumedAt: null,
-              consumedSessions: 0,
-            },
-            include: {
-              session: { include: { class: { select: { name: true } } } },
-              enrollment: {
-                include: { student: { select: { displayName: true } } },
-              },
-            },
-            orderBy: { createdAt: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canOperateEvents
-        ? this.prisma.eventMatch.findMany({
-            where: {
-              status: { in: [MatchStatus.PENDING, MatchStatus.SUBMITTED] },
-              event: {
-                status: { in: [EventStatus.IN_PROGRESS, EventStatus.FULL] },
-              },
-            },
-            include: { event: { select: { name: true, startsAt: true } } },
-            orderBy: [{ round: 'asc' }, { createdAt: 'asc' }],
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canOperateEvents
-        ? this.prisma.eventPrizeAward.findMany({
-            where: { status: EventPrizeStatus.ISSUED },
-            include: {
-              event: { select: { name: true } },
-              team: { select: { name: true } },
-              inventoryItem: { select: { name: true, sku: true } },
-            },
-            orderBy: { issuedAt: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canReviewAlliance
-        ? this.prisma.allianceSettlement.findMany({
-            where: isMerchantOnly
-              ? {
-                  merchantId: { in: merchantIds || [] },
-                  status: SettlementStatus.PENDING_CONFIRMATION,
-                }
-              : {
-                  status: {
-                    in: [
-                      SettlementStatus.DRAFT,
-                      SettlementStatus.PENDING_CONFIRMATION,
-                    ],
-                  },
-                },
-            include: { merchant: { select: { name: true } } },
-            orderBy: { periodEnd: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canReviewMoney
-        ? this.prisma.trainingSettlement.findMany({
-            where: {
-              status: {
-                in: [
-                  SettlementStatus.DRAFT,
-                  SettlementStatus.PENDING_CONFIRMATION,
-                  SettlementStatus.CONFIRMED,
-                ],
-              },
-            },
-            orderBy: { periodEnd: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canReviewMoney && this.prisma.consignmentSettlement?.findMany
-        ? this.prisma.consignmentSettlement.findMany({
-            where: {
-              OR: [
-                { status: SettlementStatus.DRAFT },
-                {
-                  status: {
-                    in: [
-                      SettlementStatus.PENDING_CONFIRMATION,
-                      SettlementStatus.CONFIRMED,
-                    ],
-                  },
-                  createdById: { not: actor.sub },
-                },
-              ],
-            },
-            include: { supplier: { select: { name: true, code: true } } },
-            orderBy: [{ periodEnd: 'asc' }, { createdAt: 'asc' }],
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canOperateInventory
-        ? this.prisma.inventoryItem.findMany({
-            where: { enabled: true },
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              stock: true,
-              safeStock: true,
-              updatedAt: true,
-            },
-            orderBy: { stock: 'asc' },
-            take: Math.min(limit * 2, 200),
-          })
-        : Promise.resolve([]),
-      canOperateOrders
-        ? this.prisma.order.findMany({
-            where: {
-              completedAt: null,
-              status: {
-                in: [
-                  OrderStatus.PAID,
-                  OrderStatus.CHECKED_IN,
-                  OrderStatus.COMPLETED,
-                  OrderStatus.REFUND_PENDING,
-                  OrderStatus.PARTIALLY_REFUNDED,
-                ],
-              },
-              OR: orderFulfillmentScopes,
-            },
-            select: {
-              id: true,
-              orderNo: true,
-              title: true,
-              status: true,
-              businessType: true,
-              createdAt: true,
-              bookings: {
-                where: {
-                  status: {
-                    in: [BookingStatus.CONFIRMED, BookingStatus.CHECKED_IN],
-                  },
-                },
-                select: {
-                  id: true,
-                  status: true,
-                  startsAt: true,
-                  endsAt: true,
-                },
-                take: 1,
-              },
-              gameRegistration: {
-                select: {
-                  id: true,
-                  status: true,
-                  game: {
-                    select: {
-                      id: true,
-                      title: true,
-                      startsAt: true,
-                      endsAt: true,
-                    },
-                  },
-                },
-              },
-              eventTeam: {
-                select: {
-                  id: true,
-                  status: true,
-                  event: { select: { id: true, name: true, startsAt: true } },
-                },
-              },
-            },
-            orderBy: { createdAt: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canOperateCustomers
-        ? this.prisma.customerLead.findMany({
-            where: {
-              status: {
-                notIn: [
-                  LeadStatus.CONVERTED,
-                  LeadStatus.LOST,
-                  LeadStatus.ARCHIVED,
-                ],
-              },
-            },
-            include: { owner: { select: { id: true, displayName: true } } },
-            orderBy: [{ slaDueAt: 'asc' }, { createdAt: 'asc' }],
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canReviewHosts
-        ? this.prisma.hostProfile.findMany({
-            where: { status: HostStatus.APPLIED },
-            include: {
-              user: {
-                select: {
-                  displayName: true,
-                  memberProfile: { select: { level: true, visitCount: true } },
-                },
-              },
-            },
-            orderBy: { appliedAt: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canReviewErasure && this.prisma.dataErasureRequest?.findMany
-        ? this.prisma.dataErasureRequest.findMany({
-            where: { status: DataErasureRequestStatus.REQUESTED },
-            include: {
-              user: {
-                select: {
-                  displayName: true,
-                  status: true,
-                  primaryRole: true,
-                },
-              },
-            },
-            orderBy: { requestedAt: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canReviewMoney
-        ? this.prisma.accountAdjustmentRequest.findMany({
-            where: {
-              status: AccountAdjustmentStatus.REQUESTED,
-              requestedById: { not: actor.sub },
-            },
-            include: {
-              account: { include: { user: { select: { displayName: true } } } },
-              requestedBy: { select: { displayName: true } },
-            },
-            orderBy: { createdAt: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canReviewTrainingCorrections
-        ? this.prisma.trainingConsumeCorrection.findMany({
-            where: { status: TrainingConsumeCorrectionStatus.REQUESTED },
-            include: {
-              attendance: {
-                include: {
-                  session: { include: { class: { select: { name: true } } } },
-                  enrollment: {
-                    include: {
-                      student: { select: { displayName: true } },
-                      buyer: { select: { displayName: true } },
-                    },
-                  },
-                },
-              },
-              requestedBy: { select: { displayName: true } },
-            },
-            orderBy: { requestedAt: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      (canCheckInTrials || canAssessTrials || canDecideTrials) &&
-      this.prisma.trainingTrial?.findMany
-        ? this.prisma.trainingTrial.findMany({
-            where: {
-              OR: [
-                ...(canCheckInTrials
-                  ? [{ status: TrainingTrialStatus.RESERVED }]
-                  : []),
-                ...(canAssessTrials
-                  ? [
-                      {
-                        status: TrainingTrialStatus.CHECKED_IN,
-                        ...(isOperationsAdmin ? {} : { coachId: actor.sub }),
-                      },
-                    ]
-                  : []),
-                ...(canDecideTrials
-                  ? [{ status: TrainingTrialStatus.ASSESSED }]
-                  : []),
-              ],
-            },
-            include: {
-              product: { select: { name: true } },
-              student: { select: { displayName: true } },
-              member: { select: { displayName: true } },
-              lead: { select: { displayName: true } },
-              coach: { select: { displayName: true } },
-            },
-            orderBy: { scheduledStartsAt: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canReviewYouthRules && this.prisma.youthTrainingRule?.findMany
-        ? this.prisma.youthTrainingRule.findMany({
-            where: { status: YouthTrainingRuleStatus.DRAFT },
-            include: { requestedBy: { select: { displayName: true } } },
-            orderBy: { createdAt: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canOperateGames && this.prisma.game?.findMany
-        ? this.prisma.game.findMany({
-            where: {
-              status: {
-                in: [GameStatus.OPEN, GameStatus.FULL, GameStatus.IN_PROGRESS],
-              },
-              startsAt: { lte: nowDate },
-              ...(roles.includes(AppRole.HOST) && !isOperationsAdmin
-                ? { hostId: actor.sub }
-                : {}),
-            },
-            select: {
-              id: true,
-              title: true,
-              hostId: true,
-              status: true,
-              startsAt: true,
-              endsAt: true,
-              _count: {
-                select: {
-                  registrations: {
-                    where: {
-                      status: {
-                        in: [
-                          RegistrationStatus.PAID,
-                          RegistrationStatus.CHECKED_IN,
-                        ],
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            orderBy: [{ startsAt: 'asc' }, { createdAt: 'asc' }],
-            take: limit,
-          })
-        : Promise.resolve([]),
-      canOperateTrainingSessions && this.prisma.trainingSession?.findMany
-        ? this.prisma.trainingSession.findMany({
-            where: {
-              status: {
-                in: [
-                  TrainingSessionStatus.SCHEDULED,
-                  TrainingSessionStatus.IN_PROGRESS,
-                ],
-              },
-              startsAt: { lte: nowDate },
-              ...trainingSessionScope(actor),
-            },
-            select: {
-              id: true,
-              status: true,
-              startsAt: true,
-              endsAt: true,
-              class: { select: { id: true, name: true, coachId: true } },
-              _count: {
-                select: {
-                  attendances: {
-                    where: { status: AttendanceStatus.PENDING },
-                  },
-                },
-              },
-            },
-            orderBy: [{ startsAt: 'asc' }, { createdAt: 'asc' }],
-            take: limit,
-          })
-        : Promise.resolve([]),
+      loadRefunds(this.prisma, { limit, canReviewMoney }),
+      loadAttendances(this.prisma, { limit, canReviewTrainingConsumes }),
+      loadMatches(this.prisma, { limit, canOperateEvents }),
+      loadPrizeReceipts(this.prisma, { limit, canOperateEvents }),
+      loadAllianceSettlements(this.prisma, {
+        limit,
+        merchantIds,
+        isMerchantOnly,
+        canReviewAlliance,
+      }),
+      loadTrainingSettlements(this.prisma, { limit, canReviewMoney }),
+      loadConsignmentSettlements(this.prisma, { actor, limit, canReviewMoney }),
+      loadInventory(this.prisma, { limit, canOperateInventory }),
+      loadOrders(this.prisma, {
+        limit,
+        orderFulfillmentScopes,
+        canOperateOrders,
+      }),
+      loadCustomerLeads(this.prisma, { limit, canOperateCustomers }),
+      loadHostApplications(this.prisma, { limit, canReviewHosts }),
+      loadDataErasureRequests(this.prisma, { limit, canReviewErasure }),
+      loadAccountAdjustments(this.prisma, { actor, limit, canReviewMoney }),
+      loadTrainingConsumeCorrections(this.prisma, {
+        limit,
+        canReviewTrainingCorrections,
+      }),
+      loadTrainingTrials(this.prisma, {
+        actor,
+        limit,
+        isOperationsAdmin,
+        canCheckInTrials,
+        canAssessTrials,
+        canDecideTrials,
+      }),
+      loadYouthTrainingRules(this.prisma, { limit, canReviewYouthRules }),
+      loadGames(this.prisma, {
+        actor,
+        limit,
+        roles,
+        nowDate,
+        canOperateGames,
+        isOperationsAdmin,
+      }),
+      loadTrainingSessions(this.prisma, {
+        actor,
+        limit,
+        nowDate,
+        canOperateTrainingSessions,
+      }),
     ]);
 
     const now = nowDate.getTime();
     const items: WorkItem[] = [
-      ...trainingSessions.map((session) => {
-        const ended = session.endsAt.getTime() <= now;
-        const pending = session._count.attendances;
-        return {
-          id: `training-session-operation:${session.id}`,
-          kind: 'TRAINING_SESSION_OPERATION' as const,
-          objectType: 'TrainingSession',
-          objectId: session.id,
-          status: session.status,
-          priority: ended ? 91 : 83,
-          title: `${ended ? '课次待结课' : '课次待点名'} · ${session.class.name}`,
-          description: `${pending} 名待登记 · 完成点名后提交消课建议`,
-          ownerRoles: [
-            AppRole.COACH,
-            AppRole.FRONT_DESK,
-            AppRole.ADMIN,
-            AppRole.SUPER_ADMIN,
-          ],
-          createdAt: session.startsAt.toISOString(),
-          dueAt: (ended ? session.endsAt : session.startsAt).toISOString(),
-          action: `/packages/ops/pages/coach/index?focus=session&sessionId=${session.id}`,
-          metadata: {
-            sessionId: session.id,
-            classId: session.class.id,
-            coachId: session.class.coachId,
-            pendingAttendanceCount: pending,
-            startsAt: session.startsAt.toISOString(),
-            endsAt: session.endsAt.toISOString(),
-          },
-        };
+      ...mapTrainingSessionsWorkItems(trainingSessions, { now }),
+      ...mapGamesWorkItems(games, { now }),
+      ...mapTrainingTrialsWorkItems(trainingTrials, { now }),
+      ...mapYouthTrainingRulesWorkItems(youthTrainingRules),
+      ...mapAccountAdjustmentsWorkItems(accountAdjustments),
+      ...mapTrainingConsumeCorrectionsWorkItems(trainingConsumeCorrections),
+      ...mapCustomerLeadsWorkItems(customerLeads, { now }),
+      ...mapHostApplicationsWorkItems(hostApplications),
+      ...mapDataErasureRequestsWorkItems(dataErasureRequests),
+      ...mapRefundsWorkItems(refunds),
+      ...mapAttendancesWorkItems(attendances),
+      ...mapMatchesWorkItems(matches),
+      ...mapPrizeReceiptsWorkItems(prizeReceipts),
+      ...mapAllianceSettlementsWorkItems(allianceSettlements, {
+        isMerchantOnly,
       }),
-      ...games.map((game) => {
-        const ended = game.endsAt.getTime() <= now;
-        return {
-          id: `game-operation:${game.id}`,
-          kind: 'GAME_OPERATION' as const,
-          objectType: 'Game',
-          objectId: game.id,
-          status: game.status,
-          priority: ended ? 90 : 84,
-          title: `${ended ? '球局待完赛' : '球局现场待处理'} · ${game.title}`,
-          description: `${game._count.registrations} 名已支付/签到 · 主理人现场队列`,
-          ownerRoles: [...GAME_MANAGEMENT_ROLES],
-          createdAt: game.startsAt.toISOString(),
-          dueAt: (ended ? game.endsAt : game.startsAt).toISOString(),
-          action: `/packages/ops/pages/host/index?focus=game&gameId=${game.id}`,
-          metadata: {
-            gameId: game.id,
-            hostId: game.hostId,
-            activeRegistrationCount: game._count.registrations,
-            startsAt: game.startsAt.toISOString(),
-            endsAt: game.endsAt.toISOString(),
-          },
-        };
-      }),
-      ...trainingTrials.map((trial) => {
-        const subjectName =
-          trial.student?.displayName ||
-          trial.member?.displayName ||
-          trial.lead?.displayName ||
-          '待确认学员';
-        const isArrival = trial.status === TrainingTrialStatus.RESERVED;
-        const isAssessment = trial.status === TrainingTrialStatus.CHECKED_IN;
-        const dueAt = isArrival
-          ? trial.scheduledStartsAt
-          : trial.scheduledEndsAt;
-        return {
-          id: `training-trial:${trial.id}`,
-          kind: isArrival
-            ? ('TRAINING_TRIAL_CHECK_IN' as const)
-            : isAssessment
-              ? ('TRAINING_TRIAL_ASSESSMENT' as const)
-              : ('TRAINING_TRIAL_DECISION' as const),
-          objectType: 'TrainingTrial',
-          objectId: trial.id,
-          status: trial.status,
-          priority:
-            isArrival && dueAt.getTime() <= now ? 94 : isAssessment ? 89 : 87,
-          title: isArrival
-            ? `试听待到场 · ${subjectName}`
-            : isAssessment
-              ? `试听待测评 · ${subjectName}`
-              : `试听待转化决策 · ${subjectName}`,
-          description: `${trial.product.name} · ${trial.coach.displayName} · ${trial.scheduledStartsAt.toISOString()}`,
-          ownerRoles: isArrival
-            ? [AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN]
-            : isAssessment
-              ? [AppRole.COACH, AppRole.ADMIN, AppRole.SUPER_ADMIN]
-              : [AppRole.ADMIN, AppRole.SUPER_ADMIN],
-          createdAt: trial.createdAt.toISOString(),
-          dueAt: dueAt.toISOString(),
-          action: `/packages/ops/pages/coach/index?focus=trials&id=${trial.id}`,
-          metadata: {
-            trialNo: trial.trialNo,
-            productId: trial.productId,
-            coachId: trial.coachId,
-            scheduledStartsAt: trial.scheduledStartsAt.toISOString(),
-            scheduledEndsAt: trial.scheduledEndsAt.toISOString(),
-          },
-        };
-      }),
-      ...youthTrainingRules.map((rule) => ({
-        id: `youth-training-rule:${rule.id}`,
-        kind: 'YOUTH_TRAINING_RULE_REVIEW' as const,
-        objectType: 'YouthTrainingRule',
-        objectId: rule.id,
-        status: rule.status,
-        priority: 93,
-        title: `青少年培训规则待复核 · ${rule.version}`,
-        description: `${rule.requestedBy.displayName}提交 · 课时${rule.maxTotalSessions} · 有效期${rule.maxValidityDays}天 · 金额上限¥${(rule.maxContractAmountCents / 100).toFixed(2)}`,
-        ownerRoles: [AppRole.SUPER_ADMIN],
-        createdAt: rule.createdAt.toISOString(),
-        dueAt: rule.effectiveFrom.toISOString(),
-        action: `/packages/ops/pages/governance/index?focus=youth-training-rule&id=${rule.id}`,
-        metadata: {
-          requestedById: rule.requestedById,
-          effectiveFrom: rule.effectiveFrom.toISOString(),
-          hardBlock: rule.hardBlock,
-        },
-      })),
-      ...accountAdjustments.map((request) => ({
-        id: `account-adjustment:${request.id}`,
-        kind: 'ACCOUNT_ADJUSTMENT_REVIEW' as const,
-        objectType: 'AccountAdjustmentRequest',
-        objectId: request.id,
-        status: request.status,
-        priority: 98,
-        title: `账户调整待复核 · ${request.account.user.displayName}`,
-        description: `${request.account.type} ${request.amount > 0 ? '+' : ''}${request.amount} · ${request.reason}`,
-        ownerRoles: [AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN],
-        createdAt: request.createdAt.toISOString(),
-        amountCents:
-          request.account.type === 'CASH_PRINCIPAL' ||
-          request.account.type === 'GIFT_BALANCE'
-            ? request.amount
-            : undefined,
-        action: `/members/account-adjustments/${request.id}/approve`,
-        metadata: {
-          requestedBy: request.requestedBy.displayName,
-          requestedById: request.requestedById,
-        },
-      })),
-      ...trainingConsumeCorrections.map((correction) => {
-        const studentName =
-          correction.attendance.enrollment.student?.displayName ||
-          correction.attendance.enrollment.buyer.displayName ||
-          '成人学员';
-        return {
-          id: `training-consume-correction:${correction.id}`,
-          kind: 'TRAINING_CONSUME_CORRECTION_REVIEW' as const,
-          objectType: 'TrainingConsumeCorrection',
-          objectId: correction.id,
-          status: correction.status,
-          priority: 92,
-          title: `消课冲正待复核 · ${studentName}`,
-          description: `${correction.attendance.session.class.name} · 学员 ${studentName} · 申请人 ${correction.requestedBy.displayName} · ${correction.reason}`,
-          ownerRoles: [AppRole.ADMIN, AppRole.SUPER_ADMIN],
-          createdAt: correction.requestedAt.toISOString(),
-          action: `/training/consume-corrections/${correction.id}/approve`,
-          metadata: {
-            recognitionId: correction.recognitionId,
-            attendanceId: correction.attendanceId,
-            requestedById: correction.requestedById,
-          },
-        };
-      }),
-      ...customerLeads.map((lead) => ({
-        id: `customer-lead:${lead.id}`,
-        kind: 'CUSTOMER_LEAD_SLA' as const,
-        objectType: 'CustomerLead',
-        objectId: lead.id,
-        status: lead.status,
-        priority: lead.slaDueAt.getTime() < now ? 95 : 65,
-        title: `${lead.slaDueAt.getTime() < now ? '线索已逾期' : '客户待跟进'} · ${lead.displayName}`,
-        description: `${lead.campaign || lead.sourceChannel} · 负责人 ${lead.owner?.displayName || '待认领'}`,
-        ownerRoles: [AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN],
-        createdAt: lead.createdAt.toISOString(),
-        dueAt: lead.slaDueAt.toISOString(),
-        action: `/members/leads/${lead.id}`,
-        metadata: {
-          ownerId: lead.ownerId,
-          sourceChannel: lead.sourceChannel,
-          campaign: lead.campaign,
-          overdue: lead.slaDueAt.getTime() < now,
-        },
-      })),
-      ...hostApplications.map((application) => ({
-        id: `host-application:${application.id}`,
-        kind: 'HOST_APPLICATION_REVIEW' as const,
-        objectType: 'HostProfile',
-        objectId: application.id,
-        status: application.status,
-        priority: 88,
-        title: `主理人申请待审核 · ${application.user.displayName}`,
-        description: `${application.user.memberProfile?.level || '普通会员'} · 到店 ${application.user.memberProfile?.visitCount || 0} 次`,
-        ownerRoles: [AppRole.ADMIN, AppRole.SUPER_ADMIN],
-        createdAt: application.appliedAt.toISOString(),
-        action: `/games/hosts/${application.userId}/approve`,
-        metadata: { userId: application.userId },
-      })),
-      ...dataErasureRequests.map((request) => ({
-        id: `data-erasure:${request.id}`,
-        kind: 'DATA_ERASURE_REVIEW' as const,
-        objectType: 'DataErasureRequest',
-        objectId: request.id,
-        status: request.status,
-        priority: 99,
-        title: `账号注销待复核 · ${request.user.displayName}`,
-        description: `${request.user.status} · ${request.user.primaryRole} · ${request.reason}`,
-        ownerRoles: [AppRole.ADMIN, AppRole.SUPER_ADMIN],
-        createdAt: request.requestedAt.toISOString(),
-        action: `/packages/ops/pages/governance/index?focus=privacy&id=${request.id}`,
-        metadata: { userId: request.userId, requestedById: request.userId },
-      })),
-      ...refunds.map((refund) => ({
-        id: `refund:${refund.id}`,
-        kind: 'REFUND_REVIEW' as const,
-        objectType: 'Refund',
-        objectId: refund.id,
-        status: refund.status,
-        priority: 100,
-        title: `退款待审核 · ${refund.order.orderNo}`,
-        description: `${refund.order.title}，申请金额 ¥${(refund.amountCents / 100).toFixed(2)}`,
-        ownerRoles: [AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN],
-        createdAt: refund.requestedAt.toISOString(),
-        amountCents: refund.amountCents,
-        action: `/orders/refunds/${refund.id}/approve`,
-        metadata: {
-          orderNo: refund.order.orderNo,
-          memberId: refund.order.memberId,
-        },
-      })),
-      ...attendances.map((attendance) => ({
-        id: `training-attendance:${attendance.id}`,
-        kind: 'TRAINING_ATTENDANCE' as const,
-        objectType: 'TrainingAttendance',
-        objectId: attendance.id,
-        status: attendance.status,
-        priority: 80,
-        title: `消课建议待确认 · ${attendance.enrollment.student?.displayName || '成人学员'}`,
-        description: `${attendance.session.class.name} · 教练已提交 · ${attendance.session.startsAt.toISOString()}`,
-        ownerRoles: [AppRole.ADMIN, AppRole.SUPER_ADMIN],
-        createdAt: attendance.createdAt.toISOString(),
-        dueAt: attendance.session.endsAt.toISOString(),
-        action: `/training/sessions/${attendance.sessionId}/consume`,
-        metadata: {
-          sessionId: attendance.sessionId,
-          enrollmentId: attendance.enrollmentId,
-        },
-      })),
-      ...matches.map((match) => ({
-        id: `event-score:${match.id}`,
-        kind: 'EVENT_SCORE' as const,
-        objectType: 'EventMatch',
-        objectId: match.id,
-        status: match.status,
-        priority: 85,
-        title: `第${match.round}轮待录比分 · ${match.event.name}`,
-        description: `赛事开始于 ${match.event.startsAt.toISOString()}`,
-        ownerRoles: [
-          AppRole.EVENT_MANAGER,
-          AppRole.FRONT_DESK,
-          AppRole.ADMIN,
-          AppRole.SUPER_ADMIN,
-        ],
-        createdAt: match.createdAt.toISOString(),
-        action: `/events/matches/${match.id}/score`,
-        metadata: {
-          eventId: match.eventId,
-          round: match.round,
-          courtLabel: match.courtLabel,
-        },
-      })),
-      ...prizeReceipts.map((award) => ({
-        id: `event-prize-receipt:${award.id}`,
-        kind: 'EVENT_PRIZE_RECEIPT' as const,
-        objectType: 'EventPrizeAward',
-        objectId: award.id,
-        status: award.status,
-        priority: 82,
-        title: `奖品待签收 · ${award.event.name}`,
-        description: `${award.team.name} · ${award.awardName} · ${award.inventoryItem.name} × ${award.quantity}`,
-        ownerRoles: [
-          AppRole.EVENT_MANAGER,
-          AppRole.FRONT_DESK,
-          AppRole.ADMIN,
-          AppRole.SUPER_ADMIN,
-        ],
-        createdAt: award.issuedAt.toISOString(),
-        action: `/events/${award.eventId}/prizes/${award.id}/receive`,
-        metadata: {
-          eventId: award.eventId,
-          teamId: award.teamId,
-          sku: award.inventoryItem.sku,
-          recipientNames: award.recipientNames,
-        },
-      })),
-      ...allianceSettlements.map((settlement) => ({
-        id: `alliance-settlement:${settlement.id}`,
-        kind: 'ALLIANCE_SETTLEMENT' as const,
-        objectType: 'AllianceSettlement',
-        objectId: settlement.id,
-        status: settlement.status,
-        priority: 70,
-        title: `联盟结算待处理 · ${settlement.merchant.name}`,
-        description: `周期 ${settlement.periodStart.toISOString().slice(0, 10)} 至 ${settlement.periodEnd.toISOString().slice(0, 10)}`,
-        ownerRoles: isMerchantOnly
-          ? [AppRole.MERCHANT, AppRole.ADMIN, AppRole.SUPER_ADMIN]
-          : [AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN],
-        createdAt: settlement.createdAt.toISOString(),
-        dueAt: settlement.periodEnd.toISOString(),
-        amountCents: settlement.cooperationFeeCents,
-        action:
-          settlement.status === SettlementStatus.PENDING_CONFIRMATION
-            ? `/alliance/settlements/${settlement.id}/confirm`
-            : `/alliance/settlements/${settlement.id}`,
-        metadata: {
-          merchantId: settlement.merchantId,
-          effectiveNewCustomers: settlement.effectiveNewCustomers,
-        },
-      })),
-      ...trainingSettlements.map((settlement) => ({
-        id: `training-settlement:${settlement.id}`,
-        kind: 'TRAINING_SETTLEMENT' as const,
-        objectType: 'TrainingSettlement',
-        objectId: settlement.id,
-        status: settlement.status,
-        priority: 75,
-        title:
-          settlement.status === SettlementStatus.DRAFT
-            ? '培训结算草稿待提交'
-            : settlement.status === SettlementStatus.PENDING_CONFIRMATION
-              ? '培训结算待复核确认'
-              : '培训结算待入账',
-        description: `有效流水 ¥${(settlement.effectiveRevenueCents / 100).toFixed(2)} · 场馆20% ¥${(settlement.venueContributionCents / 100).toFixed(2)}`,
-        ownerRoles: [AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN],
-        createdAt: settlement.createdAt.toISOString(),
-        dueAt: settlement.periodEnd.toISOString(),
-        amountCents: settlement.venueContributionCents,
-        action: `/packages/ops/pages/finance/index?focus=training-settlement&id=${settlement.id}`,
-        metadata: {
-          venueFeeCents: settlement.venueFeeCents,
-          trainingPayableVenueCents: settlement.trainingPayableVenueCents,
-        },
-      })),
-      ...consignmentSettlements.map((settlement) => ({
-        id: `consignment-settlement:${settlement.id}`,
-        kind: 'CONSIGNMENT_SETTLEMENT' as const,
-        objectType: 'ConsignmentSettlement',
-        objectId: settlement.id,
-        status: settlement.status,
-        priority: 78,
-        title:
-          settlement.status === SettlementStatus.DRAFT
-            ? `寄售结算草稿待提交 · ${settlement.supplier.name}`
-            : settlement.status === SettlementStatus.PENDING_CONFIRMATION
-              ? `寄售结算待复核 · ${settlement.supplier.name}`
-              : `寄售结算待付款 · ${settlement.supplier.name}`,
-        description: `${settlement.statementNo} · ${settlement.entryCount} 条明细 · 应付 ¥${(settlement.payableCents / 100).toFixed(2)}`,
-        ownerRoles: [AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN],
-        createdAt: settlement.createdAt.toISOString(),
-        dueAt: settlement.periodEnd.toISOString(),
-        amountCents: settlement.payableCents,
-        action: `/packages/ops/pages/finance/index?focus=consignment-settlement&id=${settlement.id}`,
-        metadata: {
-          statementNo: settlement.statementNo,
-          supplierId: settlement.supplierId,
-          supplierCode: settlement.supplier.code,
-          createdById: settlement.createdById,
-          entryCount: settlement.entryCount,
-        },
-      })),
-      ...inventory
-        .filter((item) => item.stock <= item.safeStock)
-        .slice(0, limit)
-        .map((item) => ({
-          id: `stock:${item.id}`,
-          kind: 'LOW_STOCK' as const,
-          objectType: 'InventoryItem',
-          objectId: item.id,
-          status: 'OPEN',
-          priority: 60,
-          title: `库存低于安全线 · ${item.name}`,
-          description: `当前 ${item.stock} 件，安全线 ${item.safeStock} 件`,
-          ownerRoles: [
-            AppRole.FRONT_DESK,
-            AppRole.ADMIN,
-            AppRole.SUPER_ADMIN,
-          ],
-          createdAt: item.updatedAt.toISOString(),
-          action: `/packages/ops/pages/inventory/index?focus=low-stock&id=${item.id}`,
-          metadata: {
-            sku: item.sku,
-            stock: item.stock,
-            safeStock: item.safeStock,
-          },
-        })),
-      ...orders.map((order) => {
-        const booking = order.bookings[0];
-        const registration = order.gameRegistration;
-        const team = order.eventTeam;
-        const fulfillmentStatus =
-          booking?.status ||
-          registration?.status ||
-          team?.status ||
-          order.status;
-        const dueAt =
-          fulfillmentStatus === BookingStatus.CHECKED_IN
-            ? booking?.endsAt || registration?.game.endsAt || team?.event.startsAt
-            : booking?.startsAt || registration?.game.startsAt || team?.event.startsAt;
-        const fulfillmentObjectId =
-          booking?.id || registration?.id || team?.id || order.id;
-        const ownerRoles =
-          order.businessType === BusinessType.VENUE
-            ? [AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN]
-            : order.businessType === BusinessType.GAME
-              ? [AppRole.HOST, AppRole.ADMIN, AppRole.SUPER_ADMIN]
-              : [AppRole.EVENT_MANAGER, AppRole.ADMIN, AppRole.SUPER_ADMIN];
-        const action =
-          order.businessType === BusinessType.VENUE
-            ? `/packages/ops/pages/frontdesk/index?focus=fulfillment&orderId=${order.id}`
-            : order.businessType === BusinessType.GAME
-              ? `/packages/ops/pages/host/index?focus=fulfillment&orderId=${order.id}`
-              : `/packages/ops/pages/event/index?focus=fulfillment&orderId=${order.id}`;
-        return {
-          id: `order:${order.id}`,
-          kind: 'ORDER_FULFILLMENT' as const,
-          objectType: 'Order',
-          objectId: order.id,
-          status: order.status,
-          priority: order.status === OrderStatus.CHECKED_IN ? 78 : 72,
-          title: `${fulfillmentStatus === 'CHECKED_IN' ? '已签到待完成' : '已开场待签到'} · ${order.orderNo}`,
-          description: `${order.title} · ${order.businessType}`,
-          ownerRoles,
-          createdAt: order.createdAt.toISOString(),
-          dueAt: dueAt?.toISOString(),
-          action,
-          metadata: {
-            businessType: order.businessType,
-            fulfillmentObjectId,
-            fulfillmentStatus,
-            dueAt: dueAt?.toISOString(),
-          },
-        };
-      }),
+      ...mapTrainingSettlementsWorkItems(trainingSettlements),
+      ...mapConsignmentSettlementsWorkItems(consignmentSettlements),
+      ...mapInventoryWorkItems(inventory, { limit }),
+      ...mapOrdersWorkItems(orders),
     ];
 
     return items
@@ -1090,3 +296,8 @@ export class WorkItemsService {
       }));
   }
 }
+export type {
+  WorkItem,
+  WorkItemKind,
+  WorkItemGroup,
+} from './work-item-context.js';

@@ -22,7 +22,7 @@ import {
   UserStatus,
 } from '../generated/prisma/enums.js';
 import { orderCreationCommandHash } from '../orders/order-creation-idempotency.js';
-import { VenuesService } from './venues.service.js';
+import { VenuesService } from '../../test/support/venues-fixture.js';
 
 const frontDesk: AuthUser = {
   sub: 'front-desk-1',
@@ -250,27 +250,23 @@ describe('VenuesService booking ownership', () => {
         findUniqueOrThrow: vi.fn(),
       },
       court: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'court-1',
-            code: 'C01',
-            name: '1号场',
-            enabled: true,
-            usage: CourtUsage.RETAIL,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'court-1',
+          code: 'C01',
+          name: '1号场',
+          enabled: true,
+          usage: CourtUsage.RETAIL,
+        }),
       },
       timeSlot: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'slot-1',
-            code: 'S01',
-            label: '上午场',
-            enabled: true,
-            startMinutes: 540,
-            endMinutes: 660,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'slot-1',
+          code: 'S01',
+          label: '上午场',
+          enabled: true,
+          startMinutes: 540,
+          endMinutes: 660,
+        }),
       },
       memberProfile: {
         findUnique: vi.fn().mockResolvedValue({ level: 'GOLD' }),
@@ -280,7 +276,15 @@ describe('VenuesService booking ownership', () => {
       },
       $transaction: transaction,
     };
-    Object.assign(tx, Object.fromEntries(['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode'].filter(key => key in prisma).map(key => [key, (prisma as any)[key]])), { $queryRaw: vi.fn().mockResolvedValue([]) });
+    Object.assign(
+      tx,
+      Object.fromEntries(
+        ['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode']
+          .filter((key) => key in prisma)
+          .map((key) => [key, (prisma as any)[key]]),
+      ),
+      { $queryRaw: vi.fn().mockResolvedValue([]) },
+    );
     const service = new VenuesService(prisma as never);
 
     const results = await Promise.allSettled([
@@ -329,27 +333,23 @@ describe('VenuesService booking ownership', () => {
     const transaction = vi.fn().mockRejectedValue(serializableRace);
     const prisma = {
       court: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'court-1',
-            code: 'C01',
-            name: '1号场',
-            enabled: true,
-            usage: CourtUsage.RETAIL,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'court-1',
+          code: 'C01',
+          name: '1号场',
+          enabled: true,
+          usage: CourtUsage.RETAIL,
+        }),
       },
       timeSlot: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'slot-1',
-            code: 'S01',
-            label: '上午场',
-            enabled: true,
-            startMinutes: 540,
-            endMinutes: 660,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'slot-1',
+          code: 'S01',
+          label: '上午场',
+          enabled: true,
+          startMinutes: 540,
+          endMinutes: 660,
+        }),
       },
       memberProfile: {
         findUnique: vi.fn().mockResolvedValue({ level: 'GOLD' }),
@@ -374,7 +374,10 @@ describe('VenuesService booking ownership', () => {
     const service = new VenuesService(prisma as never);
 
     await expect(
-      service.createBooking({ ...bookingDto, sourceChannel: SourceChannel.STORE_VISIT }, frontDesk),
+      service.createBooking(
+        { ...bookingDto, sourceChannel: SourceChannel.STORE_VISIT },
+        frontDesk,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.user.findFirst).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
@@ -392,7 +395,9 @@ describe('VenuesService booking ownership', () => {
 
   it('rejects a delegated target that is missing, disabled, or not a member', async () => {
     const user = { findFirst: vi.fn().mockResolvedValue(null) };
-    const service = new VenuesService({ $transaction: runner({ user }) } as never);
+    const service = new VenuesService({
+      $transaction: runner({ user }),
+    } as never);
 
     await expect(
       service.createBooking(
@@ -412,42 +417,62 @@ describe('VenuesService booking ownership', () => {
   });
 
   it.each([
-    { actor: frontDesk, customer: 'member-2', owner: 'member-2', assisted: true },
-    { actor: administrator, customer: undefined, owner: administrator.sub, assisted: false },
-    { actor: frontDesk, customer: undefined, owner: frontDesk.sub, assisted: false },
-    { actor: { ...member, roles: [AppRole.MEMBER, AppRole.SUPER_ADMIN] }, customer: undefined, owner: member.sub, assisted: false },
-  ])('assigns the chosen owner without turning staff self-bookings into delegated orders: %j', async ({ actor, customer, owner, assisted }) => {
-    const tx = {
-      frontDeskShift: {
-        findFirst: vi.fn().mockResolvedValue({ id: 'shift-open' }),
-      },
-      user: { findFirst: vi.fn().mockResolvedValue({ id: 'member-2' }) },
-      courtClosure: { findFirst: vi.fn().mockResolvedValue(null) },
-      courtBooking: { findFirst: vi.fn().mockResolvedValue(null) },
-      order: {
-        create: vi
-          .fn()
-          .mockResolvedValue({ id: 'order-assisted', bookings: [], items: [] }),
-      },
-      auditLog: { create: vi.fn().mockResolvedValue({}) },
-    };
-    const prisma = {
-      user: { findFirst: vi.fn().mockResolvedValue({ id: 'member-2' }) },
-      court: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
+    {
+      actor: frontDesk,
+      customer: 'member-2',
+      owner: 'member-2',
+      assisted: true,
+    },
+    {
+      actor: administrator,
+      customer: undefined,
+      owner: administrator.sub,
+      assisted: false,
+    },
+    {
+      actor: frontDesk,
+      customer: undefined,
+      owner: frontDesk.sub,
+      assisted: false,
+    },
+    {
+      actor: { ...member, roles: [AppRole.MEMBER, AppRole.SUPER_ADMIN] },
+      customer: undefined,
+      owner: member.sub,
+      assisted: false,
+    },
+  ])(
+    'assigns the chosen owner without turning staff self-bookings into delegated orders: %j',
+    async ({ actor, customer, owner, assisted }) => {
+      const tx = {
+        frontDeskShift: {
+          findFirst: vi.fn().mockResolvedValue({ id: 'shift-open' }),
+        },
+        user: { findFirst: vi.fn().mockResolvedValue({ id: 'member-2' }) },
+        courtClosure: { findFirst: vi.fn().mockResolvedValue(null) },
+        courtBooking: { findFirst: vi.fn().mockResolvedValue(null) },
+        order: {
+          create: vi.fn().mockResolvedValue({
+            id: 'order-assisted',
+            bookings: [],
+            items: [],
+          }),
+        },
+        auditLog: { create: vi.fn().mockResolvedValue({}) },
+      };
+      const prisma = {
+        user: { findFirst: vi.fn().mockResolvedValue({ id: 'member-2' }) },
+        court: {
+          findUnique: vi.fn().mockResolvedValue({
             id: 'court-1',
             code: 'C01',
             name: '1号场',
             enabled: true,
             usage: CourtUsage.RETAIL,
           }),
-      },
-      timeSlot: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
+        },
+        timeSlot: {
+          findUnique: vi.fn().mockResolvedValue({
             id: 'slot-1',
             code: 'S01',
             label: '上午场',
@@ -455,56 +480,71 @@ describe('VenuesService booking ownership', () => {
             startMinutes: 540,
             endMinutes: 660,
           }),
-      },
-      memberProfile: {
-        findUnique: vi.fn().mockResolvedValue({ level: 'GOLD' }),
-      },
-      priceRule: {
-        findMany: vi.fn().mockResolvedValue([priceRuleFixture(6_800, 4_800)]),
-      },
-      $transaction: runner(tx),
-    };
-    Object.assign(tx, Object.fromEntries(['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode'].filter(key => key in prisma).map(key => [key, (prisma as any)[key]])), { $queryRaw: vi.fn().mockResolvedValue([]) });
-    const service = new VenuesService(prisma as never);
+        },
+        memberProfile: {
+          findUnique: vi.fn().mockResolvedValue({ level: 'GOLD' }),
+        },
+        priceRule: {
+          findMany: vi.fn().mockResolvedValue([priceRuleFixture(6_800, 4_800)]),
+        },
+        $transaction: runner(tx),
+      };
+      Object.assign(
+        tx,
+        Object.fromEntries(
+          ['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode']
+            .filter((key) => key in prisma)
+            .map((key) => [key, (prisma as any)[key]]),
+        ),
+        { $queryRaw: vi.fn().mockResolvedValue([]) },
+      );
+      const service = new VenuesService(prisma as never);
 
-    await expect(
-      service.createBooking({ ...bookingDto, ...(customer ? { memberId: customer } : {}) }, actor),
-    ).resolves.toMatchObject({ id: 'order-assisted' });
+      await expect(
+        service.createBooking(
+          { ...bookingDto, ...(customer ? { memberId: customer } : {}) },
+          actor,
+        ),
+      ).resolves.toMatchObject({ id: 'order-assisted' });
 
-    expect(tx.order.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          memberId: owner,
-          createdById: actor.sub,
-          bookings: {
-            create: expect.objectContaining({ memberId: owner }),
-          },
-          parameterSnapshot: expect.objectContaining({
-            targetMemberId: owner,
+      expect(tx.order.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            memberId: owner,
             createdById: actor.sub,
-            operatorAssisted: assisted,
-            operatingShare: expect.objectContaining({
-              rateBps: 1_500,
-              businessType: BusinessType.VENUE,
-              included: true,
-              basis: 'REALIZED_NET_REVENUE',
+            bookings: {
+              create: expect.objectContaining({ memberId: owner }),
+            },
+            parameterSnapshot: expect.objectContaining({
+              targetMemberId: owner,
+              createdById: actor.sub,
+              operatorAssisted: assisted,
+              operatingShare: expect.objectContaining({
+                rateBps: 1_500,
+                businessType: BusinessType.VENUE,
+                included: true,
+                basis: 'REALIZED_NET_REVENUE',
+              }),
             }),
           }),
         }),
-      }),
-    );
-    expect(tx.auditLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        actorId: actor.sub,
-        action: 'VENUE_ORDER_CREATED',
-        newValue: expect.objectContaining({
-          memberId: owner,
-          createdById: actor.sub,
+      );
+      expect(tx.auditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          actorId: actor.sub,
+          action: 'VENUE_ORDER_CREATED',
+          newValue: expect.objectContaining({
+            memberId: owner,
+            createdById: actor.sub,
+          }),
         }),
-      }),
-    });
-    if (!assisted) { expect(tx.frontDeskShift.findFirst).not.toHaveBeenCalled(); expect(prisma.user.findFirst).not.toHaveBeenCalled() }
-  });
+      });
+      if (!assisted) {
+        expect(tx.frontDeskShift.findFirst).not.toHaveBeenCalled();
+        expect(prisma.user.findFirst).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it('does not create an assisted booking when the front desk has no open shift', async () => {
     const tx = {
@@ -515,27 +555,23 @@ describe('VenuesService booking ownership', () => {
     const prisma = {
       user: { findFirst: vi.fn().mockResolvedValue({ id: 'member-2' }) },
       court: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'court-1',
-            code: 'C01',
-            name: '1号场',
-            enabled: true,
-            usage: CourtUsage.RETAIL,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'court-1',
+          code: 'C01',
+          name: '1号场',
+          enabled: true,
+          usage: CourtUsage.RETAIL,
+        }),
       },
       timeSlot: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'slot-1',
-            code: 'S01',
-            label: '上午场',
-            enabled: true,
-            startMinutes: 540,
-            endMinutes: 660,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'slot-1',
+          code: 'S01',
+          label: '上午场',
+          enabled: true,
+          startMinutes: 540,
+          endMinutes: 660,
+        }),
       },
       memberProfile: {
         findUnique: vi.fn().mockResolvedValue({ level: 'GOLD' }),
@@ -546,7 +582,15 @@ describe('VenuesService booking ownership', () => {
       $transaction: runner(tx),
     };
 
-    Object.assign(tx, Object.fromEntries(['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode'].filter(key => key in prisma).map(key => [key, (prisma as any)[key]])), { $queryRaw: vi.fn().mockResolvedValue([]) });
+    Object.assign(
+      tx,
+      Object.fromEntries(
+        ['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode']
+          .filter((key) => key in prisma)
+          .map((key) => [key, (prisma as any)[key]]),
+      ),
+      { $queryRaw: vi.fn().mockResolvedValue([]) },
+    );
     tx.user.findFirst.mockResolvedValue({ id: 'member-2' } as never);
     await expect(
       new VenuesService(prisma as never).createBooking(
@@ -606,15 +650,13 @@ describe('VenuesService booking ownership', () => {
     };
     const prisma = {
       court: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'court-1',
-            code: 'C01',
-            name: '1号场',
-            enabled: true,
-            usage: CourtUsage.RETAIL,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'court-1',
+          code: 'C01',
+          name: '1号场',
+          enabled: true,
+          usage: CourtUsage.RETAIL,
+        }),
       },
       timeSlot: {
         findUnique: vi.fn().mockResolvedValue({
@@ -655,7 +697,10 @@ describe('VenuesService booking ownership', () => {
       systemParameter,
       $transaction: vi.fn(),
     };
-    prisma.$transaction = runner({ ...prisma, $queryRaw: vi.fn().mockResolvedValue([]) });
+    prisma.$transaction = runner({
+      ...prisma,
+      $queryRaw: vi.fn().mockResolvedValue([]),
+    });
     const service = new VenuesService(prisma as never);
 
     await expect(
@@ -691,15 +736,13 @@ describe('VenuesService booking ownership', () => {
     };
     const prisma = {
       court: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'court-1',
-            code: 'C01',
-            name: '1号场',
-            enabled: true,
-            usage: CourtUsage.RETAIL,
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'court-1',
+          code: 'C01',
+          name: '1号场',
+          enabled: true,
+          usage: CourtUsage.RETAIL,
+        }),
       },
       timeSlot: {
         findUnique: vi.fn().mockResolvedValue({
@@ -738,16 +781,22 @@ describe('VenuesService booking ownership', () => {
         }),
       },
       systemParameter: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'newcomer-periods-v1',
-            value: [SlotPeriod.EARLY, SlotPeriod.DAYTIME],
-          }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'newcomer-periods-v1',
+          value: [SlotPeriod.EARLY, SlotPeriod.DAYTIME],
+        }),
       },
       $transaction: runner(tx),
     };
-    Object.assign(tx, Object.fromEntries(['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode'].filter(key => key in prisma).map(key => [key, (prisma as any)[key]])), { $queryRaw: vi.fn().mockResolvedValue([]) });
+    Object.assign(
+      tx,
+      Object.fromEntries(
+        ['court', 'timeSlot', 'memberProfile', 'priceRule', 'couponCode']
+          .filter((key) => key in prisma)
+          .map((key) => [key, (prisma as any)[key]]),
+      ),
+      { $queryRaw: vi.fn().mockResolvedValue([]) },
+    );
     const service = new VenuesService(prisma as never);
 
     await expect(

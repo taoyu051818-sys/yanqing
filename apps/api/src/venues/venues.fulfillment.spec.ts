@@ -9,7 +9,7 @@ import {
   FrontDeskShiftStatus,
   OrderStatus,
 } from '../generated/prisma/client.js';
-import { VenuesService } from './venues.service.js';
+import { VenuesService } from '../../test/support/venues-fixture.js';
 
 const frontDesk: AuthUser = {
   sub: 'front-desk-1',

@@ -14,7 +14,7 @@ import {
   SettlementStatus,
   SupplierType,
 } from '../generated/prisma/client.js';
-import { ConsignmentSettlementService } from './consignment-settlement.service.js';
+import { ConsignmentSettlementService } from '../../test/support/consignment-settlement-fixture.js';
 
 const admin: AuthUser = {
   sub: 'admin-1',
@@ -51,55 +51,104 @@ const transactionRunner = (tx: Record<string, unknown>) =>
 
 describe('consignment finance response privacy', () => {
   const ruleSnapshot = {
-    supplierCode: 'CONSIGN-1', supplierName: '品牌寄售',
-    settlementCycle: 'MONTHLY', commissionRateBps: 2500,
-    commissionMeaning: 'VENUE_COMMISSION', privateContractClause: 'raw-secret',
+    supplierCode: 'CONSIGN-1',
+    supplierName: '品牌寄售',
+    settlementCycle: 'MONTHLY',
+    commissionRateBps: 2500,
+    commissionMeaning: 'VENUE_COMMISSION',
+    privateContractClause: 'raw-secret',
   };
   const transition = {
-    id: 'transition-1', action: ConsignmentSettlementAction.SUBMITTED,
-    fromStatus: SettlementStatus.DRAFT, toStatus: SettlementStatus.PENDING_CONFIRMATION,
-    reason: '核对完成', actorId: finance.sub, actor: { id: finance.sub, displayName: finance.displayName },
-    idempotencyKey: 'secret-transition-key', commandHash: 'secret-transition-hash',
+    id: 'transition-1',
+    action: ConsignmentSettlementAction.SUBMITTED,
+    fromStatus: SettlementStatus.DRAFT,
+    toStatus: SettlementStatus.PENDING_CONFIRMATION,
+    reason: '核对完成',
+    actorId: finance.sub,
+    actor: { id: finance.sub, displayName: finance.displayName },
+    idempotencyKey: 'secret-transition-key',
+    commandHash: 'secret-transition-hash',
     createdAt: completedAt,
   };
   const settlement = {
-    id: 'settlement-1', statementNo: 'CS202608001', supplierId: 'supplier-1',
+    id: 'settlement-1',
+    statementNo: 'CS202608001',
+    supplierId: 'supplier-1',
     supplier: { id: 'supplier-1', code: 'CONSIGN-1', name: '品牌寄售' },
-    periodStart: completedAt, periodEnd: completedAt, version: 1,
-    status: SettlementStatus.PENDING_CONFIRMATION, entryCount: 1, netQuantity: 2,
-    grossSaleCents: 3000, commissionCents: 750, payableCents: 2250,
-    ruleSnapshot, creationReason: '月结', createdById: finance.sub,
-    creationIdempotencyKey: 'secret-create-key', creationCommandHash: 'secret-create-hash',
+    periodStart: completedAt,
+    periodEnd: completedAt,
+    version: 1,
+    status: SettlementStatus.PENDING_CONFIRMATION,
+    entryCount: 1,
+    netQuantity: 2,
+    grossSaleCents: 3000,
+    commissionCents: 750,
+    payableCents: 2250,
+    ruleSnapshot,
+    creationReason: '月结',
+    createdById: finance.sub,
+    creationIdempotencyKey: 'secret-create-key',
+    creationCommandHash: 'secret-create-hash',
     createdBy: { id: finance.sub, displayName: finance.displayName },
-    transitions: [transition], lines: [], createdAt: completedAt, updatedAt: completedAt,
+    transitions: [transition],
+    lines: [],
+    createdAt: completedAt,
+    updatedAt: completedAt,
   };
 
   it('returns readable rules but no raw rule or command evidence from list and detail', async () => {
     const prisma: any = {
-      consignmentPayableEntry: { findMany: vi.fn().mockResolvedValue([{ ...settlement,
-        id: 'payable-1', type: ConsignmentPayableEntryType.SALE, quantity: 2,
-        unitSalePriceCents: 1500, occurredAt: completedAt, settlementLines: [],
-        item: { id: 'item-1', sku: 'GRIP-1', name: '手胶' }, order: null, refund: null,
-      }]), count: vi.fn().mockResolvedValue(1) },
-      consignmentSettlement: { findMany: vi.fn().mockResolvedValue([settlement]),
-        count: vi.fn().mockResolvedValue(1), findUnique: vi.fn().mockResolvedValue(settlement) },
+      consignmentPayableEntry: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            ...settlement,
+            id: 'payable-1',
+            type: ConsignmentPayableEntryType.SALE,
+            quantity: 2,
+            unitSalePriceCents: 1500,
+            occurredAt: completedAt,
+            settlementLines: [],
+            item: { id: 'item-1', sku: 'GRIP-1', name: '手胶' },
+            order: null,
+            refund: null,
+          },
+        ]),
+        count: vi.fn().mockResolvedValue(1),
+      },
+      consignmentSettlement: {
+        findMany: vi.fn().mockResolvedValue([settlement]),
+        count: vi.fn().mockResolvedValue(1),
+        findUnique: vi.fn().mockResolvedValue(settlement),
+      },
     };
     prisma.$transaction = vi.fn(async (work: any) =>
-      Array.isArray(work) ? Promise.all(work) : work(prisma));
+      Array.isArray(work) ? Promise.all(work) : work(prisma),
+    );
     const service = new ConsignmentSettlementService(prisma as never);
     const query = { page: 1, pageSize: 20 };
 
     const payable = await service.listPayables(query as never, finance);
     const settlements = await service.listSettlements(query as never, finance);
     const detail = await service.detail(settlement.id, finance);
-    expect(payable.items[0].businessRule).toMatchObject({ commissionRateBps: 2500 });
+    expect(payable.items[0].businessRule).toMatchObject({
+      commissionRateBps: 2500,
+    });
     expect(settlements.items[0]).toMatchObject({ isOwnCreator: true });
-    expect(detail.transitions[0]).toEqual(expect.objectContaining({ action: transition.action }));
+    expect(detail.transitions[0]).toEqual(
+      expect.objectContaining({ action: transition.action }),
+    );
     const serialized = JSON.stringify({ payable, settlements, detail });
     for (const forbidden of [
-      'ruleSnapshot', 'creationIdempotencyKey', 'creationCommandHash',
-      'idempotencyKey', 'commandHash', 'actorId', 'createdById', 'privateContractClause',
-    ]) expect(serialized).not.toContain(`"${forbidden}"`);
+      'ruleSnapshot',
+      'creationIdempotencyKey',
+      'creationCommandHash',
+      'idempotencyKey',
+      'commandHash',
+      'actorId',
+      'createdById',
+      'privateContractClause',
+    ])
+      expect(serialized).not.toContain(`"${forbidden}"`);
   });
 });
 

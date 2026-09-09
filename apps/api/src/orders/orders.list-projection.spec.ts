@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AuthUser } from '../common/auth/auth-user.js';
-import { AppRole, BusinessType, OrderStatus } from '../generated/prisma/enums.js';
-import { OrdersService } from './orders.service.js';
+import {
+  AppRole,
+  BusinessType,
+  OrderStatus,
+} from '../generated/prisma/enums.js';
+import { OrdersService } from '../../test/support/orders-fixture.js';
 
 describe('OrdersService list fulfillment projection', () => {
   it('includes the business schedule needed by the customer order list', async () => {

@@ -1,15 +1,17 @@
+import { releaseExpiredHolds } from '../src/venues/availability/venues-availability.commands.js';
+import { createOrderFinalizerService } from './support/domain-consumer-fixtures.js';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import { PrismaService } from '../src/database/prisma.service.js';
-import { VenuesService } from '../src/venues/venues.service.js';
-import { OrdersService } from '../src/orders/orders.service.js';
-import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';
-import { ConsignmentSettlementService } from '../src/inventory/consignment-settlement.service.js';
-import { GovernanceService } from '../src/governance/governance.service.js';
+import { VenuesService } from './support/venues-fixture.js';
+import { OrdersService } from './support/orders-fixture.js';
+
+import { ConsignmentSettlementService } from './support/consignment-settlement-fixture.js';
+import { GovernanceService } from './support/governance-fixture.js';
 import { WorkItemsService } from '../src/work-items/work-items.service.js';
 import { TrainingService } from './support/training-service-fixture.js';
-import { GamesService } from '../src/games/games.service.js';
+import { GamesService } from './support/games-fixture.js';
 import { YouthTrainingRulesService } from '../src/training/youth-training-rules.service.js';
 import type { AuthUser } from '../src/common/auth/auth-user.js';
 import type { AppRole } from '../src/generated/prisma/client.js';
@@ -49,7 +51,7 @@ describe.skipIf(!url)(
       orders = new OrdersService(
         db,
         new ConfigService({ PAYMENT_PROVIDER: 'wechat' }),
-        new OrderFinalizerService(new ConsignmentSettlementService(db)),
+        createOrderFinalizerService(new ConsignmentSettlementService(db)),
         {} as never,
       );
       admin = await person('ADMIN');
@@ -678,7 +680,7 @@ describe.skipIf(!url)(
         where: { orderId: order.id },
         data: { holdExpiresAt: new Date(Date.now() - 1000) },
       });
-      await venues.releaseExpiredHolds();
+      await releaseExpiredHolds(db);
       expect(
         (await db.order.findUniqueOrThrow({ where: { id: order.id } })).status,
       ).toBe('CANCELLED');

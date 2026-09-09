@@ -1,3 +1,11 @@
+import { Inject } from '@nestjs/common';
+import { InventoryCatalogService } from './catalog/inventory-catalog.service.js';
+import { InventoryTransactionsService } from './transactions/inventory-transactions.service.js';
+import { InventorySuppliersService } from './suppliers/inventory-operations-suppliers.service.js';
+import { InventoryLocationsService } from './locations/inventory-operations-locations.service.js';
+import { InventoryPurchasingService } from './purchasing/inventory-operations-purchasing.service.js';
+import { InventoryStocktakingService } from './stocktaking/inventory-operations-stocktaking.service.js';
+import { InventoryMovementsService } from './movements/inventory-operations-movements.service.js';
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
@@ -22,8 +30,6 @@ import {
   UpdateInventoryLocationDto,
   UpdateSupplierDto,
 } from './inventory.dto.js';
-import { InventoryOperationsService } from './inventory-operations.service.js';
-import { InventoryService } from './inventory.service.js';
 
 @ApiTags('商品库存')
 @ApiBearerAuth()
@@ -31,19 +37,31 @@ import { InventoryService } from './inventory.service.js';
 @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
 export class InventoryController {
   constructor(
-    private readonly inventory: InventoryService,
-    private readonly operations: InventoryOperationsService,
+    @Inject(InventoryCatalogService)
+    private readonly inventoryInventoryCatalog: InventoryCatalogService,
+    @Inject(InventoryTransactionsService)
+    private readonly inventoryInventoryTransactions: InventoryTransactionsService,
+    @Inject(InventorySuppliersService)
+    private readonly operationsInventorySuppliers: InventorySuppliersService,
+    @Inject(InventoryLocationsService)
+    private readonly operationsInventoryLocations: InventoryLocationsService,
+    @Inject(InventoryPurchasingService)
+    private readonly operationsInventoryPurchasing: InventoryPurchasingService,
+    @Inject(InventoryStocktakingService)
+    private readonly operationsInventoryStocktaking: InventoryStocktakingService,
+    @Inject(InventoryMovementsService)
+    private readonly operationsInventoryMovements: InventoryMovementsService,
   ) {}
 
   @Get()
   list(@CurrentUser() actor: AuthUser) {
-    return this.inventory.list(actor);
+    return this.inventoryInventoryCatalog.list(actor);
   }
 
   @Get('low-stock')
   @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   lowStock(@CurrentUser() actor: AuthUser) {
-    return this.inventory.lowStock(actor);
+    return this.inventoryInventoryCatalog.lowStock(actor);
   }
 
   @Get('award-options')
@@ -54,22 +72,22 @@ export class InventoryController {
     AppRole.SUPER_ADMIN,
   )
   awardOptions(@CurrentUser() actor: AuthUser) {
-    return this.inventory.awardOptions(actor);
+    return this.inventoryInventoryCatalog.awardOptions(actor);
   }
 
   @Get('items/:id')
   itemDetail(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.inventory.detail(id, actor);
+    return this.inventoryInventoryCatalog.detail(id, actor);
   }
 
   @Get('suppliers')
   suppliers(@CurrentUser() actor: AuthUser) {
-    return this.operations.suppliers(actor);
+    return this.operationsInventorySuppliers.suppliers(actor);
   }
 
   @Get('suppliers/:id')
   supplierDetail(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.operations.supplierDetail(id, actor);
+    return this.operationsInventorySuppliers.supplierDetail(id, actor);
   }
 
   @Post('suppliers')
@@ -78,7 +96,7 @@ export class InventoryController {
     @Body() dto: CreateSupplierDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.createSupplier(dto, actor);
+    return this.operationsInventorySuppliers.createSupplier(dto, actor);
   }
 
   @Post('suppliers/:id/update')
@@ -88,7 +106,7 @@ export class InventoryController {
     @Body() dto: UpdateSupplierDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.updateSupplier(id, dto, actor);
+    return this.operationsInventorySuppliers.updateSupplier(id, dto, actor);
   }
 
   @Post('suppliers/:id/status')
@@ -98,17 +116,17 @@ export class InventoryController {
     @Body() dto: SetMasterDataStatusDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.setSupplierStatus(id, dto, actor);
+    return this.operationsInventorySuppliers.setSupplierStatus(id, dto, actor);
   }
 
   @Get('locations')
   locations(@CurrentUser() actor: AuthUser) {
-    return this.operations.locations(actor);
+    return this.operationsInventoryLocations.locations(actor);
   }
 
   @Get('locations/:id')
   locationDetail(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.operations.locationDetail(id, actor);
+    return this.operationsInventoryLocations.locationDetail(id, actor);
   }
 
   @Post('locations')
@@ -117,7 +135,7 @@ export class InventoryController {
     @Body() dto: CreateInventoryLocationDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.createLocation(dto, actor);
+    return this.operationsInventoryLocations.createLocation(dto, actor);
   }
 
   @Post('locations/:id/update')
@@ -127,7 +145,7 @@ export class InventoryController {
     @Body() dto: UpdateInventoryLocationDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.updateLocation(id, dto, actor);
+    return this.operationsInventoryLocations.updateLocation(id, dto, actor);
   }
 
   @Post('locations/:id/status')
@@ -137,12 +155,12 @@ export class InventoryController {
     @Body() dto: SetMasterDataStatusDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.setLocationStatus(id, dto, actor);
+    return this.operationsInventoryLocations.setLocationStatus(id, dto, actor);
   }
 
   @Get('purchase-orders')
   purchaseOrders(@CurrentUser() actor: AuthUser) {
-    return this.operations.purchaseOrders(actor);
+    return this.operationsInventoryPurchasing.purchaseOrders(actor);
   }
 
   @Post('purchase-orders')
@@ -151,13 +169,13 @@ export class InventoryController {
     @Body() dto: CreatePurchaseOrderDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.createPurchaseOrder(dto, actor);
+    return this.operationsInventoryPurchasing.createPurchaseOrder(dto, actor);
   }
 
   @Post('purchase-orders/:id/submit')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   submitPurchaseOrder(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.operations.submitPurchaseOrder(id, actor);
+    return this.operationsInventoryPurchasing.submitPurchaseOrder(id, actor);
   }
 
   @Post('purchase-orders/:id/approve')
@@ -166,7 +184,7 @@ export class InventoryController {
     @Param('id') id: string,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.approvePurchaseOrder(id, actor);
+    return this.operationsInventoryPurchasing.approvePurchaseOrder(id, actor);
   }
 
   @Post('purchase-orders/:id/receive')
@@ -176,7 +194,11 @@ export class InventoryController {
     @Body() dto: ReceivePurchaseOrderDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.receivePurchaseOrder(id, dto, actor);
+    return this.operationsInventoryPurchasing.receivePurchaseOrder(
+      id,
+      dto,
+      actor,
+    );
   }
 
   @Post('purchase-orders/:id/cancel')
@@ -186,12 +208,16 @@ export class InventoryController {
     @Body() dto: CancelDocumentDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.cancelPurchaseOrder(id, dto, actor);
+    return this.operationsInventoryPurchasing.cancelPurchaseOrder(
+      id,
+      dto,
+      actor,
+    );
   }
 
   @Get('stocktakes')
   stocktakes(@CurrentUser() actor: AuthUser) {
-    return this.operations.stocktakes(actor);
+    return this.operationsInventoryStocktaking.stocktakes(actor);
   }
 
   @Post('stocktakes')
@@ -200,13 +226,13 @@ export class InventoryController {
     @Body() dto: CreateStocktakeDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.createStocktake(dto, actor);
+    return this.operationsInventoryStocktaking.createStocktake(dto, actor);
   }
 
   @Post('stocktakes/:id/start')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   startStocktake(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.operations.startStocktake(id, actor);
+    return this.operationsInventoryStocktaking.startStocktake(id, actor);
   }
 
   @Post('stocktakes/:id/lines/:lineId/count')
@@ -217,13 +243,18 @@ export class InventoryController {
     @Body() dto: CountStocktakeLineDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.countStocktakeLine(id, lineId, dto, actor);
+    return this.operationsInventoryStocktaking.countStocktakeLine(
+      id,
+      lineId,
+      dto,
+      actor,
+    );
   }
 
   @Post('stocktakes/:id/submit')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   submitStocktake(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.operations.submitStocktake(id, actor);
+    return this.operationsInventoryStocktaking.submitStocktake(id, actor);
   }
 
   @Post('stocktakes/:id/post')
@@ -233,12 +264,12 @@ export class InventoryController {
     @Body() dto: PostStocktakeDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.postStocktake(id, dto, actor);
+    return this.operationsInventoryStocktaking.postStocktake(id, dto, actor);
   }
 
   @Get('operations')
   operationDocuments(@CurrentUser() actor: AuthUser) {
-    return this.operations.operations(actor);
+    return this.operationsInventoryMovements.operations(actor);
   }
 
   @Post('operations')
@@ -247,19 +278,19 @@ export class InventoryController {
     @Body() dto: CreateInventoryOperationDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.createOperation(dto, actor);
+    return this.operationsInventoryMovements.createOperation(dto, actor);
   }
 
   @Post('operations/:id/submit')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   submitOperation(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.operations.submitOperation(id, actor);
+    return this.operationsInventoryMovements.submitOperation(id, actor);
   }
 
   @Post('operations/:id/approve')
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   approveOperation(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.operations.approveOperation(id, actor);
+    return this.operationsInventoryMovements.approveOperation(id, actor);
   }
 
   @Post('operations/:id/post')
@@ -269,7 +300,7 @@ export class InventoryController {
     @Body() dto: PostInventoryOperationDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.postOperation(id, dto, actor);
+    return this.operationsInventoryMovements.postOperation(id, dto, actor);
   }
 
   @Post('operations/:id/cancel')
@@ -279,13 +310,13 @@ export class InventoryController {
     @Body() dto: CancelDocumentDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.operations.cancelOperation(id, dto, actor);
+    return this.operationsInventoryMovements.cancelOperation(id, dto, actor);
   }
 
   @Post()
   @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   create(@Body() dto: CreateInventoryItemDto, @CurrentUser() actor: AuthUser) {
-    return this.inventory.create(dto, actor);
+    return this.inventoryInventoryCatalog.create(dto, actor);
   }
 
   @Post('items/:id/update')
@@ -295,7 +326,7 @@ export class InventoryController {
     @Body() dto: UpdateInventoryItemDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.inventory.update(id, dto, actor);
+    return this.inventoryInventoryCatalog.update(id, dto, actor);
   }
 
   @Post('items/:id/status')
@@ -305,7 +336,7 @@ export class InventoryController {
     @Body() dto: SetMasterDataStatusDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.inventory.setStatus(id, dto, actor);
+    return this.inventoryInventoryCatalog.setStatus(id, dto, actor);
   }
 
   @Post(':id/transactions')
@@ -315,6 +346,6 @@ export class InventoryController {
     @Body() dto: InventoryTransactionDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.inventory.transact(id, dto, actor);
+    return this.inventoryInventoryTransactions.transact(id, dto, actor);
   }
 }
