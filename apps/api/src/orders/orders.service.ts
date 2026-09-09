@@ -194,7 +194,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   async detail(orderId: string, actor: AuthUser) {
-    const order = await this.prisma.order.findFirstOrThrow({
+    const order = await this.prisma.order.findFirst({
       where: this.canManageAll(actor)
         ? { id: orderId }
         : { id: orderId, memberId: actor.sub },
@@ -209,6 +209,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
         trainingEnrollment: { include: { product: true, student: true } },
       },
     });
+    if (!order) throw new NotFoundException('订单不存在');
     return orderResponse(order);
   }
 
