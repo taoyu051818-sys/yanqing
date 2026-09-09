@@ -14,6 +14,7 @@ import {
   AccountAdjustmentStatus,
   AccountType,
   AppRole,
+  BookingStatus,
   CouponStatus,
   DataErasureRequestStatus,
   ExportStatus,
@@ -337,6 +338,7 @@ export class PrivacyService {
       },
     })
     if (!user || user.deletedAt || user.status === UserStatus.DELETED) return []
+    const now = new Date()
 
     const [
       spendableAccounts,
@@ -364,13 +366,28 @@ export class PrivacyService {
         },
       }),
       client.order.count({
-        where: { memberId: userId, status: { in: [OrderStatus.PENDING, OrderStatus.PAID, OrderStatus.CHECKED_IN, OrderStatus.REFUND_PENDING] } },
+        where: {
+          memberId: userId,
+          OR: [
+            { status: { in: [OrderStatus.PENDING, OrderStatus.PAID, OrderStatus.CHECKED_IN, OrderStatus.REFUND_PENDING] } },
+            // A partial refund does not complete the remaining service.
+            { status: OrderStatus.PARTIALLY_REFUNDED, completedAt: null },
+            // Preserve a live reservation even if legacy order completion
+            // evidence is inconsistent with its booking state.
+            { bookings: { some: { OR: [
+              { status: { in: [BookingStatus.CONFIRMED, BookingStatus.CHECKED_IN] } },
+              { status: BookingStatus.HELD, holdExpiresAt: { gt: now } },
+            ] } } },
+          ],
+        },
       }),
       client.payment.count({ where: { userId, status: { in: [PaymentStatus.CREATED, PaymentStatus.PROCESSING] } } }),
       client.refund.count({
         where: { order: { memberId: userId }, status: { in: [RefundStatus.REQUESTED, RefundStatus.APPROVED, RefundStatus.PROCESSING] } },
       }),
-      client.memberSubscription.count({ where: { member: { userId }, status: MembershipStatus.ACTIVE } }),
+      // endsAt also protects prepaid renewals whose startsAt is still in the
+      // future. Natural expiry need not be materialized as an EXPIRED status.
+      client.memberSubscription.count({ where: { member: { userId }, status: MembershipStatus.ACTIVE, endsAt: { gt: now } } }),
       client.gameRegistration.count({
         where: { userId, status: { in: [RegistrationStatus.WAITLISTED, RegistrationStatus.REGISTERED, RegistrationStatus.PAID, RegistrationStatus.CHECKED_IN] } },
       }),
@@ -398,7 +415,10 @@ export class PrivacyService {
           },
         },
       }),
-      client.couponCode.count({ where: { holderId: userId, status: CouponStatus.CLAIMED } }),
+      client.couponCode.count({ where: {
+        holderId: userId, status: CouponStatus.CLAIMED,
+        expiresAt: { gt: now }, template: { validTo: { gt: now } },
+      } }),
       client.accountAdjustmentRequest.count({ where: {
         OR: [{ account: { userId } }, { requestedById: userId }],
         status: AccountAdjustmentStatus.REQUESTED,
@@ -422,7 +442,7 @@ export class PrivacyService {
       { code: 'ACTIVE_ORDER', count: activeOrders, message: '仍有未完成订单或待履约订单' },
       { code: 'ACTIVE_PAYMENT', count: activePayments, message: '仍有处理中支付' },
       { code: 'ACTIVE_REFUND', count: activeRefunds, message: '仍有待处理退款' },
-      { code: 'ACTIVE_MEMBERSHIP', count: activeMemberships, message: '仍有生效中的会员权益' },
+      { code: 'ACTIVE_MEMBERSHIP', count: activeMemberships, message: '仍有未到期的会员权益（含待生效续费）' },
       { code: 'ACTIVE_GAME_ENTRY', count: activeGameEntries, message: '仍有待参加球局或候补报名' },
       { code: 'ACTIVE_EVENT_ENTRY', count: activeEventEntries, message: '仍有待参加赛事报名' },
       { code: 'ACTIVE_TRAINING', count: activeTraining, message: '仍有未结课、未退清的培训课包' },
