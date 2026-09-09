@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { endpoints } from '../services/api'
 import {
@@ -6,6 +6,10 @@ import {
   pendingReferralInvite,
 } from '../services/referral-attribution'
 import {
+  AuthSessionChangedError,
+  assertAuthSessionCurrent,
+  captureAuthSession,
+  isAuthSessionCurrent,
   clearAuthSession,
   saveAuthSession,
   useAccessToken,
@@ -26,84 +30,147 @@ export const useSessionStore = defineStore('session', () => {
   const referralAttribution = ref<'idle' | 'bound' | 'already-bound' | 'failed'>('idle')
   const referralAttributionMessage = ref('')
 
+  let loginAttempt = 0
+  let loadingOperation = 0
+
+  function resetUser() {
+    user.value = null
+    referralAttribution.value = 'idle'
+    referralAttributionMessage.value = ''
+  }
+
+  // The transport may invalidate authentication without calling store.logout().
+  watch(accessToken, (token) => {
+    resetUser()
+    if (!token) {
+      loginAttempt += 1
+      loadingOperation += 1
+      loading.value = false
+    }
+  }, { flush: 'sync' })
+
   const saveSession = (result: { accessToken: string; user: SessionUser }) => {
     saveAuthSession(result.accessToken, result.user.id)
     user.value = result.user
   }
 
   async function applyPendingReferral() {
+    const session = captureAuthSession()
     const inviteCode = pendingReferralInvite()
     if (!inviteCode || !user.value) return referralAttribution.value
     if (user.value.hasReferrer) {
-      clearPendingReferral()
+      clearPendingReferral(inviteCode)
       referralAttribution.value = 'already-bound'
       referralAttributionMessage.value = '账号已有推荐关系，原关系保持不变'
       return referralAttribution.value
     }
     try {
       await endpoints.bindReferral(inviteCode)
-      user.value = await endpoints.me()
-      clearPendingReferral()
+      assertAuthSessionCurrent(session)
+      const profile = await endpoints.me()
+      assertAuthSessionCurrent(session)
+      user.value = profile
+      clearPendingReferral(inviteCode)
       referralAttribution.value = 'bound'
       referralAttributionMessage.value = '邀请关系已绑定，首单完成后双方可获得奖励'
     } catch (cause: any) {
+      if (!isAuthSessionCurrent(session)) return referralAttribution.value
       referralAttribution.value = 'failed'
       referralAttributionMessage.value = cause?.message || '邀请关系绑定失败'
-      // A transport failure may recover on the next launch. Business-rule
-      // failures are terminal and must not create an endless retry loop.
-      if (cause?.statusCode !== 0) clearPendingReferral()
+      // Invalid/expired/self invitations and missing inviters are terminal.
+      // Keep network, auth, rate-limit, concurrency and server failures for retry.
+      if (cause?.statusCode === 400 || cause?.statusCode === 404) clearPendingReferral(inviteCode)
     }
     return referralAttribution.value
   }
 
-  async function loginWithWechat() {
+  async function login(
+    loadSession: (code?: string) => Promise<{ accessToken: string; user: SessionUser }>,
+    authorize?: () => Promise<string>,
+  ) {
+    const attempt = ++loginAttempt
+    const operation = ++loadingOperation
     loading.value = true
+    const initialSession = captureAuthSession()
+    const assertAttempt = () => {
+      if (attempt !== loginAttempt) throw new AuthSessionChangedError()
+    }
     try {
-      const login = await uni.login({ provider: 'weixin' })
-      saveSession(await endpoints.wechatLogin(login.code))
-      user.value = await endpoints.me()
+      const code = authorize ? await authorize() : undefined
+      assertAttempt()
+      assertAuthSessionCurrent(initialSession)
+      const result = await loadSession(code)
+      assertAttempt()
+      assertAuthSessionCurrent(initialSession)
+      saveSession(result)
+      const session = captureAuthSession()
+      const profile = await endpoints.me()
+      assertAttempt()
+      assertAuthSessionCurrent(session)
+      user.value = profile
       await applyPendingReferral()
-    } finally { loading.value = false }
+      assertAttempt()
+      assertAuthSessionCurrent(session)
+    } finally {
+      if (operation === loadingOperation) loading.value = false
+    }
+  }
+
+  async function loginWithWechat() {
+    // Include the native authorization step in the cancellable login attempt.
+    return login(
+      (code) => endpoints.wechatLogin(code!),
+      async () => (await uni.login({ provider: 'weixin' })).code,
+    )
   }
 
   async function loginForDevelopment(role: AppRole) {
-    loading.value = true
-    try {
-      saveSession(await endpoints.devLogin(role))
-      user.value = await endpoints.me()
-      await applyPendingReferral()
-    } finally { loading.value = false }
+    return login(() => endpoints.devLogin(role))
   }
 
   async function hydrate() {
-    if (!isAuthenticated.value) return false
+    const session = captureAuthSession()
+    if (!session.token) return false
     try {
-      user.value = await endpoints.me()
+      const profile = await endpoints.me()
+      assertAuthSessionCurrent(session)
+      user.value = profile
       await applyPendingReferral()
-      return true
+      return isAuthSessionCurrent(session)
     }
     catch (cause: any) {
       // A temporary transport/server failure must not destroy a valid session.
       // Authorization is still checked by the API on every protected action.
-      if (cause?.statusCode === 401 || !isAuthenticated.value) logout()
+      if (isAuthSessionCurrent(session) && cause?.statusCode === 401) logout()
       return false
     }
   }
 
   async function updateWechatProfile(displayName: string, avatarFilePath?: string) {
+    const session = captureAuthSession()
+    const operation = ++loadingOperation
     loading.value = true
     try {
-      if (avatarFilePath && !isMockMode) user.value = await endpoints.uploadMyAvatar(avatarFilePath)
-      user.value = await endpoints.updateMyProfile(displayName)
+      if (avatarFilePath && !isMockMode) {
+        const profile = await endpoints.uploadMyAvatar(avatarFilePath)
+        assertAuthSessionCurrent(session)
+        user.value = profile
+      }
+      const profile = await endpoints.updateMyProfile(displayName)
+      assertAuthSessionCurrent(session)
+      user.value = profile
       return user.value
-    } finally { loading.value = false }
+    } finally {
+      if (operation === loadingOperation) loading.value = false
+    }
   }
 
   function logout() {
     clearAuthSession()
-    user.value = null
-    referralAttribution.value = 'idle'
-    referralAttributionMessage.value = ''
+    loginAttempt += 1
+    loadingOperation += 1
+    loading.value = false
+    resetUser()
   }
 
   return {

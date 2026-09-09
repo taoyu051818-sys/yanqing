@@ -2734,12 +2734,14 @@ export async function mockRequest<T>(
   method: string,
   url: string,
   data: any = {},
+  options: { persistLoginToken?: boolean; beforeHandle?: () => void } = {},
 ): Promise<T> {
   await new Promise((resolve) => setTimeout(resolve, 120));
+  options.beforeHandle?.();
   expireMockPurchases();
-  if (url === "/auth/wechat-login") return ok(mockLogin("MEMBER"));
+  if (url === "/auth/wechat-login") return ok(mockLogin("MEMBER", options.persistLoginToken));
   if (url === "/auth/dev-login")
-    return ok(mockLogin((data.role || "MEMBER") as AppRole));
+    return ok(mockLogin((data.role || "MEMBER") as AppRole, options.persistLoginToken));
   if (url === "/auth/me") return ok(mockUser());
   if (url === "/auth/profile" && method === "PATCH") {
     const displayName = text(data.displayName);

@@ -55,7 +55,8 @@ export const captureReferralAttribution = (
 export const pendingReferralInvite = (): string | null =>
   normalizedInviteCode(uni.getStorageSync(PENDING_INVITE_KEY))
 
-export const clearPendingReferral = () => {
+export const clearPendingReferral = (expectedInvite?: string) => {
+  if (expectedInvite && pendingReferralInvite() !== expectedInvite) return
   uni.removeStorageSync(PENDING_INVITE_KEY)
   uni.removeStorageSync(LEGACY_REFERRER_KEY)
 }
