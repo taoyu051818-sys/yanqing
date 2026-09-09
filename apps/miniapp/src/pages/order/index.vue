@@ -36,7 +36,9 @@ let canWechatPay = isMockMode
 // #ifdef MP-WEIXIN
 canWechatPay = true
 // #endif
+const freeConfirmation = computed(() => paymentQuote.value?.payableCents === 0)
 const paymentChoices = computed<Array<{ channel: string; label: string; note: string; disabled: boolean; debitAmount: number }>>(() => (paymentQuote.value?.options || []).map((option: any) => {
+  if (freeConfirmation.value) return { channel: option.channel, debitAmount: 0, label: '免费确认', note: option.reason || '本订单无需付款，确认后即可生效', disabled: !option.enabled }
   const coin = option.unit === 'COIN'
   const wechat = option.channel === 'WECHAT'
   const balance = coin ? option.availableBalance + ' 币' : money(option.availableBalance)
@@ -83,12 +85,12 @@ const deadlineExpired = (order: any) => {
 }
 function paymentCountdown(order: any) {
   const deadline = paymentDeadline(order)
-  if (!deadline) return '请尽快完成支付'
+  if (!deadline) return order.payableCents === 0 ? '请尽快确认订单' : '请尽快完成支付'
   const remainingSeconds = Math.max(0, Math.ceil((new Date(deadline).getTime() - nowMs.value) / 1000))
-  if (!remainingSeconds) return '支付时间已到，正在同步订单状态'
+  if (!remainingSeconds) return '保留时间已到，正在同步订单状态'
   const minutes = Math.floor(remainingSeconds / 60)
   const seconds = String(remainingSeconds % 60).padStart(2, '0')
-  return `支付剩余 ${minutes}:${seconds}`
+  return `${order.payableCents === 0 ? '确认' : '支付'}剩余 ${minutes}:${seconds}`
 }
 function orderTimeLabel(order: any) {
   const booking = order.bookings?.[0]
@@ -147,7 +149,7 @@ async function pay(order: any) {
       await uni.requestPayment(wechatPay)
       uni.showToast({ title: '支付结果确认中', icon: 'success' })
     } else {
-      uni.showToast({ title: payment.status === 'SUCCEEDED' ? '支付成功' : '正在同步支付结果', icon: 'none' })
+      uni.showToast({ title: payment.status === 'SUCCEEDED' ? (order.payableCents === 0 ? '订单确认成功' : '支付成功') : '正在同步支付结果', icon: 'none' })
     }
     payingId.value = ''
     await load()
@@ -240,18 +242,19 @@ onPullDownRefresh(() => load())
         <view class="payment-window"><AppIcon name="clock" :size="28" :tone="deadlineExpired(order) ? 'danger' : 'accent'" /><text>{{ paymentCountdown(order) }}</text></view>
         <view class="actions">
           <button v-if="['VENUE', 'GAME', 'TRAINING', 'MEMBERSHIP', 'RECHARGE', 'GOODS'].includes(order.businessType)" class="danger small" :loading="actionKey === `cancel:${order.id}`" :disabled="Boolean(actionKey) || deadlineExpired(order)" @tap="cancelPending(order)"><AppIcon name="close" :size="30" tone="danger" />取消订单</button>
-          <button v-if="payingId !== order.id" class="primary small" :loading="actionKey === `pay:${order.id}`" :disabled="Boolean(actionKey) || deadlineExpired(order)" @tap="preparePay(order)"><AppIcon name="finance" :size="30" tone="inverse" />立即支付</button>
+          <button v-if="payingId !== order.id" class="primary small" :loading="actionKey === `pay:${order.id}`" :disabled="Boolean(actionKey) || deadlineExpired(order)" @tap="preparePay(order)"><AppIcon name="finance" :size="30" tone="inverse" />{{ order.payableCents === 0 ? '确认订单' : '立即支付' }}</button>
         </view>
       </view>
       <view v-if="payingId === order.id && order.status === 'PENDING'" class="payment-selection">
-        <text class="title">选择支付方式</text>
+        <text class="title">{{ order.payableCents === 0 ? '确认免费订单' : '选择支付方式' }}</text>
         <text v-if="order.businessType === 'RECHARGE'" class="use-note">充值订单仅支持微信支付，不可使用已有余额充值。</text>
-        <text v-if="balanceLoading" class="use-note">正在同步最新余额…</text>
-        <button v-for="choice in paymentChoices" :key="choice.channel" class="payment-choice" :aria-pressed="paymentChannel === choice.channel" :disabled="Boolean(actionKey) || choice.disabled" @tap="paymentChannel = choice.channel"><text>{{ paymentChannel === choice.channel ? '已选 · ' : '' }}{{ choice.label }}</text><text class="muted">{{ choice.note }}</text></button>
+        <text v-if="balanceLoading" class="use-note">正在核对订单…</text>
+        <text v-if="freeConfirmation" class="use-note">{{ paymentChoices[0]?.note }}</text>
+        <button v-for="choice in (freeConfirmation ? [] : paymentChoices)" :key="choice.channel" class="payment-choice" :aria-pressed="paymentChannel === choice.channel" :disabled="Boolean(actionKey) || choice.disabled" @tap="paymentChannel = choice.channel"><text>{{ paymentChannel === choice.channel ? '已选 · ' : '' }}{{ choice.label }}</text><text class="muted">{{ choice.note }}</text></button>
         <button v-if="!balanceLoading && !actionKey && (!paymentQuote || paymentError)" class="secondary" @tap="preparePay(order)">重新同步支付方式</button>
         <text v-if="paymentError" class="payment-error" role="alert">{{ paymentError }}</text>
-        <button class="primary" :loading="actionKey === 'pay:' + order.id" :disabled="Boolean(actionKey) || deadlineExpired(order) || !paymentChoices.some(item => item.channel === paymentChannel && !item.disabled)" @tap="pay(order)">确认支付 {{ money(order.payableCents) }}</button>
-        <button class="secondary" :disabled="Boolean(actionKey)" @tap="payingId = ''">暂不付款</button>
+        <button class="primary" :loading="actionKey === 'pay:' + order.id" :disabled="Boolean(actionKey) || deadlineExpired(order) || !paymentChoices.some(item => item.channel === paymentChannel && !item.disabled)" @tap="pay(order)">{{ order.payableCents === 0 ? '免费确认' : '确认支付 ' + money(order.payableCents) }}</button>
+        <button class="secondary" :disabled="Boolean(actionKey)" @tap="payingId = ''">{{ order.payableCents === 0 ? '稍后确认' : '暂不付款' }}</button>
       </view>
       <button v-if="['GAME','EVENT','TRAINING'].includes(order.businessType)" class="secondary related-order" @tap="openRelated(order)">{{ order.businessType === 'TRAINING' ? '查看课程与退费' : order.businessType === 'EVENT' ? '查看报名与取消' : '查看球局安排' }}</button>
       <view v-if="!['EVENT','TRAINING'].includes(order.businessType) && ['PAID','CHECKED_IN','COMPLETED','PARTIALLY_REFUNDED'].includes(order.status) && refundableAmount(order) > 0" class="actions"><button class="secondary small" :disabled="Boolean(actionKey)" @tap="refundingId = order.id; refundError = ''"><AppIcon name="refund" :size="28" />申请退款</button></view>

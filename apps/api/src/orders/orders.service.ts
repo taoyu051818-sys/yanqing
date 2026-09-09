@@ -502,6 +502,12 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
         try { await this.assertBookingCouponScope(tx, order); }
         catch (error) { unavailable = error instanceof Error ? error.message : '券适用范围已变化'; }
       }
+      // Keep the existing command channel for old clients; no provider or wallet
+      // is involved in confirming a free order.
+      if (order.payableCents === 0) return {
+        orderId, payableCents: 0, paymentExpiresAt: deadline?.toISOString(), quotedAt: now.toISOString(),
+        options: [{ channel: PaymentChannel.WECHAT, enabled: !unavailable, reason: unavailable, debitAmount: 0, unit: 'CENT' }],
+      };
       const channels = [PaymentChannel.WECHAT, PaymentChannel.CASH_PRINCIPAL, PaymentChannel.GIFT_BALANCE, PaymentChannel.BADMINTON_COIN];
       const options = await Promise.all(channels.map(async channel => {
         let reason = unavailable;
@@ -660,8 +666,12 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
             },
           });
 
+          const zeroAmount = order.payableCents === 0;
+          if (zeroAmount && dto.expectedDebitAmount !== undefined && dto.expectedDebitAmount !== 0) {
+            throw new ConflictException('抵扣报价已变化，请重新选择支付方式并核对金额');
+          }
           const accountType = ACCOUNT_CHANNELS[dto.channel];
-          if (accountType) {
+          if (accountType && !zeroAmount) {
             const debitAmount = await this.accountDebitAmount(
               tx,
               dto.channel,
@@ -705,7 +715,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
               },
             });
           } else if (
-            dto.channel !== PaymentChannel.WECHAT &&
+            !accountType && dto.channel !== PaymentChannel.WECHAT &&
             dto.channel !== PaymentChannel.OFFLINE_CASH
           ) {
             throw new BadRequestException('暂不支持该支付渠道');
@@ -714,7 +724,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
           const mockWechat =
             dto.channel !== PaymentChannel.WECHAT ||
             this.config.get<string>('PAYMENT_PROVIDER', 'mock') === 'mock';
-          if (!mockWechat) {
+          if (!mockWechat && !zeroAmount) {
             if (!order.member.openId)
               throw new BadRequestException(
                 '当前用户未绑定微信 OpenID，无法发起微信支付',
@@ -746,12 +756,12 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
               status: PaymentStatus.SUCCEEDED,
               paidAt: now,
               providerTradeNo:
-                dto.channel === PaymentChannel.WECHAT
+                !zeroAmount && dto.channel === PaymentChannel.WECHAT
                   ? serial('MOCKWX')
                   : undefined,
               providerPayload: {
                 provider:
-                  dto.channel === PaymentChannel.WECHAT
+                  zeroAmount ? 'zero-amount' : dto.channel === PaymentChannel.WECHAT
                     ? 'mock-wechat'
                     : 'internal',
                 operatorId: actor.sub,
@@ -1215,19 +1225,6 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
 
             const accountType = ACCOUNT_CHANNELS[payment.channel];
             if (accountType) {
-              const originalTxn = await tx.accountTransaction.findFirst({
-                where: {
-                  orderId: refund.orderId,
-                  account: { type: accountType },
-                },
-                orderBy: { createdAt: 'asc' },
-              });
-              const restoreAmount = originalTxn
-                ? Math.round(
-                    (Math.abs(originalTxn.amount) * refund.amountCents) /
-                      payment.amountCents,
-                  )
-                : refund.amountCents;
               const account = await tx.account.findUniqueOrThrow({
                 where: {
                   userId_type: {
@@ -1236,6 +1233,28 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
                   },
                 },
               });
+              let restoreAmount = refund.amountCents;
+              if (payment.channel === PaymentChannel.BADMINTON_COIN) {
+                const originalTxn = await tx.accountTransaction.findFirst({
+                  where: { orderId: refund.orderId, accountId: account.id, kind: AccountTxnKind.DEBIT, reasonCode: 'ORDER_PAYMENT' },
+                  orderBy: { createdAt: 'asc' },
+                });
+                if (!originalTxn || originalTxn.amount >= 0 || payment.amountCents <= 0) {
+                  throw new ConflictException('缺少有效的原支付扣币流水，请核对账务后退款');
+                }
+                const returned = await tx.accountTransaction.aggregate({
+                  where: { orderId: refund.orderId, accountId: account.id, kind: AccountTxnKind.REVERSAL, reasonCode: 'ORDER_REFUND' },
+                  _sum: { amount: true },
+                });
+                // Round the cumulative entitlement, then subtract coins actually
+                // returned, including legacy rounding. Never take coins back
+                // during a refund if older installments already returned more.
+                const cumulativeCents = Math.min(payment.amountCents, refund.order.refundedCents + refund.amountCents);
+                const numerator = BigInt(-originalTxn.amount) * BigInt(cumulativeCents);
+                const denominator = BigInt(payment.amountCents);
+                const target = Number((2n * numerator + denominator) / (2n * denominator));
+                restoreAmount = Math.max(0, target - (returned._sum.amount ?? 0));
+              }
               await tx.account.update({
                 where: { id: account.id },
                 data: {
