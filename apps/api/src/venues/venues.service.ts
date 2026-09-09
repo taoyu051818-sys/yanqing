@@ -1,3 +1,5 @@
+import { releasePendingOrderResources } from '../orders/pending-order-resources.js';
+import { transitionOrder } from '../orders/order-transition.js';
 import { randomBytes } from 'node:crypto';
 
 import {
@@ -922,7 +924,7 @@ export class VenuesService {
         where: { orderId, status: BookingStatus.CONFIRMED },
         data: { status: BookingStatus.CHECKED_IN },
       });
-      const changed = await tx.order.updateMany({
+      const changed = await transitionOrder(tx, 'CHECK_IN', {
         where: { id: orderId, status: OrderStatus.PAID },
         data: { status: OrderStatus.CHECKED_IN },
       });
@@ -1766,7 +1768,7 @@ export class VenuesService {
         );
         if (paymentInFlight) continue;
         if (order?.status === OrderStatus.PENDING) {
-          const changed = await tx.order.updateMany({
+          const changed = await transitionOrder(tx, 'CANCEL_UNPAID', {
             where: { id: order.id, status: OrderStatus.PENDING },
             data: { status: OrderStatus.CANCELLED, cancelledAt: now },
           });
@@ -1799,10 +1801,14 @@ export class VenuesService {
           order.status === OrderStatus.PENDING ||
           order.status === OrderStatus.CANCELLED
         ) {
-          await tx.courtBooking.updateMany({
-            where: { id: booking.id, status: BookingStatus.HELD },
-            data: { status: BookingStatus.CANCELLED, holdExpiresAt: null },
-          });
+          if (order?.businessType === BusinessType.VENUE) {
+            await releasePendingOrderResources(tx, order, { cause: 'CANCELLATION', now });
+          } else {
+            await tx.courtBooking.updateMany({
+              where: { id: booking.id, status: BookingStatus.HELD },
+              data: { status: BookingStatus.CANCELLED, holdExpiresAt: null },
+            });
+          }
         }
       }
     });

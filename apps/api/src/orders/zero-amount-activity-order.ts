@@ -1,3 +1,4 @@
+import { transitionOrder } from './order-transition.js';
 import { ConflictException } from '@nestjs/common';
 import type { AuthUser } from '../common/auth/auth-user.js';
 import { BusinessType, OrderStatus, PaymentStatus, Prisma, RewardStatus } from '../generated/prisma/client.js';
@@ -31,7 +32,7 @@ export async function cancelZeroAmountActivityOrder(
 ) {
   if (!order || !isZeroAmountConfirmedActivityOrder(order))
     throw new ConflictException('订单不是可直接取消的零元活动订单');
-  const changed = await tx.order.updateMany({
+  const changed = await transitionOrder(tx, 'CANCEL_FREE', {
     where: {
       id: order.id, status: order.status, businessType: order.businessType,
       payableCents: 0, paidCents: 0, refundedCents: 0, completedAt: null,

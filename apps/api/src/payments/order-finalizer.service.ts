@@ -1,3 +1,4 @@
+import { transitionOrder } from '../orders/order-transition.js';
 import { activateMembership } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import { syncTrainingEnrollmentRoster, trainingActiveSeatWhere } from '../training/training-roster.js';
@@ -135,7 +136,7 @@ export class OrderFinalizerService {
         throw new ConflictException('赛事已关闭报名或已开赛');
       }
     }
-    const changed = await tx.order.updateMany({
+    const changed = await transitionOrder(tx, 'PAY', {
       where: { id: order.id, status: OrderStatus.PENDING },
       data: {
         status: OrderStatus.PAID,

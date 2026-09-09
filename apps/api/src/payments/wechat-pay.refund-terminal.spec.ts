@@ -49,7 +49,7 @@ describe('WechatPayService refund terminal handling', () => {
         findUnique: vi.fn().mockResolvedValue(refund),
         update: vi.fn().mockResolvedValue({ ...refund, status: RefundStatus.SUCCEEDED }),
       },
-      order: { update: vi.fn().mockResolvedValue({ ...order, status: OrderStatus.REFUNDED }) },
+      order: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       referralReward: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
@@ -146,9 +146,10 @@ describe('WechatPayService refund terminal handling', () => {
         }),
       },
       order: {
-        update: vi.fn().mockImplementation(async ({ data }) => {
+        updateMany: vi.fn().mockImplementation(async ({ where, data }) => {
+          if (order.status !== where.status) return { count: 0 }
           Object.assign(order, data)
-          return order
+          return { count: 1 }
         }),
       },
       account: {
@@ -261,7 +262,7 @@ describe('WechatPayService refund terminal handling', () => {
       },
     })
     expect(tx.refund.update).toHaveBeenCalledOnce()
-    expect(tx.order.update).toHaveBeenCalledOnce()
+    expect(tx.order.updateMany).toHaveBeenCalledOnce()
     expect(tx.accountTransaction.create).toHaveBeenCalledOnce()
     expect(tx.riskEvent.create).toHaveBeenCalledOnce()
     expect(auditCreate).toHaveBeenCalledOnce()

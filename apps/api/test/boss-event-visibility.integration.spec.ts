@@ -26,7 +26,7 @@ describe.skipIf(!url)('owner exception visibility boundaries', () => {
     const target = new URL(url!);
     if (
       target.hostname !== '127.0.0.1' ||
-      target.pathname !== '/yanqing_boss_events_test'
+      (target.pathname !== '/yanqing_boss_events_test' && !/^\/yanqing_core_boss_events_[0-9a-f]{12}_test$/.test(target.pathname))
     )
       throw new Error('Dedicated local boss events test database required');
     db = new PrismaService(new ConfigService({ DATABASE_URL: url }));

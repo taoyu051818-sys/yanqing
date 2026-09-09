@@ -396,8 +396,13 @@ describe.skipIf(!url)('reporting boundaries on PostgreSQL', () => {
         'orders',
         { ...admin, roles: [role] },
       );
-      await read;
       try {
+        await Promise.race([
+          read,
+          exporting.then(() => {
+            throw new Error('Export finished before its snapshot barrier');
+          }),
+        ]);
         await orders.pay(
           order.id,
           { channel: 'CASH_PRINCIPAL', idempotencyKey: key() },
@@ -443,9 +448,14 @@ describe.skipIf(!url)('reporting boundaries on PostgreSQL', () => {
 
   for (const action of ['REVIEW', 'RESOLVE'] as const) {
     it('scanner preserves ' + action + ' reason and status', async () => {
-      const order = await db.order.findFirstOrThrow({
-        where: { memberId: buyer.sub, paidCents: { gte: 100000 } },
-      });
+      // Each scanner assertion owns its evidence; an earlier export test must
+      // not determine whether this test can exercise review/resolution.
+      const order = await pendingMembership();
+      await orders.pay(
+        order.id,
+        { channel: 'CASH_PRINCIPAL', idempotencyKey: key() },
+        buyer,
+      );
       const boss = new BossService(db, new ConfigService({ NODE_ENV: 'test' }));
       const governance = new GovernanceService(db);
       await boss.scan();
@@ -535,8 +545,13 @@ describe.skipIf(!url)('reporting boundaries on PostgreSQL', () => {
       scannerDb as never,
       new ConfigService({ NODE_ENV: 'test' }),
     ).scan();
-    await arrived;
     try {
+      await Promise.race([
+        arrived,
+        scanning.then(() => {
+          throw new Error('Scan finished before its review barrier');
+        }),
+      ]);
       await new GovernanceService(db).transitionRisk(
         risk.id,
         'REVIEW',

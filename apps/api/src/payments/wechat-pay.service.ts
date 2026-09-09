@@ -1,6 +1,8 @@
-import { reserveBookingCoupon, releaseBookingCoupon } from '../orders/booking-coupon.js';
-import { applyTrainingRefund } from '../training/training-refund.js';
-import { cancelMembershipEntitlement, membershipPurchaseUnavailable } from '../memberships/membership-entitlements.js';
+import { releasePendingOrderResources } from '../orders/pending-order-resources.js';
+import { releaseRefundedResources } from '../orders/refund-resources.js';
+import { requireOrderTransition } from '../orders/order-transition.js';
+import { reserveBookingCoupon } from '../orders/booking-coupon.js';
+import { membershipPurchaseUnavailable } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import {
   createDecipheriv,
@@ -24,22 +26,17 @@ import {
   AccountTxnKind,
   AccountType,
   AppRole,
-  BookingStatus,
   BusinessType,
   EventStatus,
-  InventoryTxnType,
-  MembershipStatus,
   OrderStatus,
   PaymentChannel,
   PaymentStatus,
   Prisma,
   RefundStatus,
   RegistrationStatus,
-  RewardStatus,
 } from '../generated/prisma/client.js';
-import { assertGoodsStockAvailable, restoreGoodsSale } from '../inventory/goods-stock.js';
+import { assertGoodsStockAvailable } from '../inventory/goods-stock.js';
 import { OrderFinalizerService } from './order-finalizer.service.js';
-import { promoteNextGameWaitlist } from '../games/games.service.js';
 import { promoteNextEventWaitlist } from '../events/events.service.js';
 import { captureCancelledOrderPayment } from './late-payment.js';
 
@@ -271,18 +268,17 @@ export class WechatPayService {
         if (order.membership && order.status === OrderStatus.PENDING) {
           const reason = await membershipPurchaseUnavailable(tx, order.membership.memberId, order.membership.product.level, order.membership.id, now);
           if (reason) {
-            await tx.order.update({ where: { id: order.id }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
-            await tx.memberSubscription.update({ where: { id: order.membership.id }, data: { status: MembershipStatus.CANCELLED } });
+            await requireOrderTransition(tx, 'CANCEL_UNPAID', { where: { id: order.id, status: OrderStatus.PENDING }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
+            await releasePendingOrderResources(tx, order, { cause: 'PAYMENT_UNAVAILABLE', now });
             return captureCancelledOrderPayment(tx, { ...order, status: OrderStatus.CANCELLED }, payment.id, notice.transaction_id, now, `会员权益冲突，未授予新权益：${reason}`);
           }
         }
         if (order.businessType === BusinessType.GAME && order.status === OrderStatus.PENDING && gamePaymentUnavailable(order.gameRegistration, order.createdAt, now)) {
           // The external payment succeeded, but the seat is no longer payable.
           // Close this reservation before recording a compensation-only refund.
-          await tx.order.update({ where: { id: order.id }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
-          await tx.gameRegistration.updateMany({ where: { orderId: order.id, status: RegistrationStatus.REGISTERED }, data: { status: RegistrationStatus.CANCELLED } });
+          await requireOrderTransition(tx, 'CANCEL_UNPAID', { where: { id: order.id, status: OrderStatus.PENDING }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
+          await releasePendingOrderResources(tx, order, { cause: 'PAYMENT_UNAVAILABLE', now });
           const captured = await captureCancelledOrderPayment(tx, { ...order, status: OrderStatus.CANCELLED }, payment.id, notice.transaction_id, now);
-          if (order.gameRegistration) await promoteNextGameWaitlist(tx, order.gameRegistration.gameId, undefined, undefined);
           return captured;
         }
         const invalidEventReservation =
@@ -308,8 +304,12 @@ export class WechatPayService {
               },
             },
           });
-          await tx.order.update({
-            where: { id: order.id },
+          await requireOrderTransition(tx, 'CANCEL_UNPAID', {
+            where: { id: order.id, status: OrderStatus.PENDING },
+            data: { status: OrderStatus.CANCELLED, cancelledAt: now },
+          });
+          await requireOrderTransition(tx, 'CAPTURE_COMPENSATION', {
+            where: { id: order.id, status: OrderStatus.CANCELLED },
             data: {
               status:
                 order.payableCents > 0
@@ -396,8 +396,8 @@ export class WechatPayService {
             unavailable = error.message;
           }
           if (unavailable) {
-            await tx.order.update({
-              where: { id: order.id },
+            await requireOrderTransition(tx, 'CANCEL_UNPAID', {
+              where: { id: order.id, status: OrderStatus.PENDING },
               data: { status: OrderStatus.CANCELLED, cancelledAt: now },
             });
             return captureCancelledOrderPayment(
@@ -420,9 +420,8 @@ export class WechatPayService {
           if (unavailable) {
             // External money already exists. Preserve it and request compensation;
             // never roll it back merely because its discounted booking cannot be delivered.
-            await tx.order.update({ where: { id: order.id }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
-            await tx.courtBooking.updateMany({ where: { orderId: order.id, status: BookingStatus.HELD }, data: { status: BookingStatus.CANCELLED, holdExpiresAt: null } });
-            await releaseBookingCoupon(tx, order);
+            await requireOrderTransition(tx, 'CANCEL_UNPAID', { where: { id: order.id, status: OrderStatus.PENDING }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
+            await releasePendingOrderResources(tx, order, { cause: 'PAYMENT_UNAVAILABLE', now });
             return captureCancelledOrderPayment(tx, { ...order, status: OrderStatus.CANCELLED }, payment.id, notice.transaction_id, now,
               `优惠券订场无法履约，未交付场地：${unavailable}`);
           }
@@ -498,8 +497,8 @@ export class WechatPayService {
                 completedAt: now,
               },
             });
-            await tx.order.update({
-              where: { id: refund.orderId },
+            await requireOrderTransition(tx, 'REFUND_SUCCEEDED', {
+              where: { id: refund.orderId, status: refund.order.status },
               data: {
                 refundedCents,
                 status: fullyRefunded
@@ -517,14 +516,6 @@ export class WechatPayService {
                 newValue: { refundId: notice.refund_id, amountCents: refund.amountCents, compensationOnly: true },
               } });
               return { accepted: true, outstandingRecoveryCents: 0 };
-            }
-            if (refund.order.trainingEnrollment) {
-              await applyTrainingRefund(
-                tx,
-                refund.order.trainingEnrollment,
-                { id: refund.id, amountCents: refund.amountCents, fullyRefunded, reason: refund.reason },
-                { sub: refund.approvedById || refund.requestedById, roles: [AppRole.FINANCE] },
-              );
             }
             if (refund.order.businessType === BusinessType.RECHARGE) {
               const payment = refund.order.payments[0];
@@ -573,104 +564,9 @@ export class WechatPayService {
                 }
               }
             }
-            if (fullyRefunded) {
-              await tx.courtBooking.updateMany({
-                where: {
-                  orderId: refund.orderId,
-                  status: {
-                    notIn: [BookingStatus.COMPLETED, BookingStatus.NO_SHOW],
-                  },
-                },
-                data: { status: BookingStatus.CANCELLED },
-              });
-              if (refund.order.membership) {
-                await cancelMembershipEntitlement(tx, refund.order.membership);
-              }
-              if (refund.order.businessType === BusinessType.GOODS) {
-                for (const item of refund.order.items) {
-                  if (!item.itemId) continue;
-                  const inventory = await tx.inventoryItem.findUniqueOrThrow({
-                    where: { id: item.itemId },
-                  });
-                  const { stockAfter } = await restoreGoodsSale(
-                    tx,
-                    inventory,
-                    item.quantity,
-                    item.id,
-                  );
-                  await tx.inventoryTransaction.create({
-                    data: {
-                      itemId: inventory.id,
-                      type: InventoryTxnType.ADJUSTMENT,
-                      quantity: item.quantity,
-                      stockBefore: inventory.stock,
-                      stockAfter,
-                      unitCostCents: inventory.purchasePriceCents,
-                      orderItemId: item.id,
-                      operatorId: refund.approvedById || refund.requestedById,
-                      reason: `微信退款 ${refund.refundNo} 退货入库`,
-                      idempotencyKey: `GOODS-REFUND:${refund.id}:${item.id}`,
-                    },
-                  });
-                }
-                await this.finalizer.recordSucceededGoodsRefund(
-                  tx,
-                  refund.id,
-                  refund.approvedById || refund.requestedById,
-                  AppRole.FINANCE,
-                );
-              }
-              if (
-                refund.order.businessType === BusinessType.GAME &&
-                refund.order.gameRegistration
-              ) {
-                await tx.gameRegistration.update({
-                  where: { id: refund.order.gameRegistration.id },
-                  data: { status: 'REFUNDED' },
-                });
-                await promoteNextGameWaitlist(
-                  tx,
-                  refund.order.gameRegistration.gameId,
-                  refund.approvedById || refund.requestedById,
-                  AppRole.FINANCE,
-                );
-              }
-              if (
-                refund.order.businessType === BusinessType.EVENT &&
-                refund.order.eventTeam
-              ) {
-                await tx.eventTeam.update({
-                  where: { id: refund.order.eventTeam.id },
-                  data: {
-                    status: RegistrationStatus.REFUNDED,
-                    paymentDueAt: null,
-                    cancellationPending: false,
-                    cancellationResolvedAt: refund.order.eventTeam
-                      .cancelRequestedAt
-                      ? (refund.order.eventTeam.cancellationResolvedAt ?? now)
-                      : undefined,
-                  },
-                });
-                await promoteNextEventWaitlist(
-                  tx,
-                  refund.order.eventTeam.eventId,
-                  refund.approvedById || refund.requestedById,
-                  AppRole.FINANCE,
-                );
-              }
-            }
-            await tx.referralReward.updateMany({
-              where: {
-                triggerOrderId: refund.orderId,
-                status: {
-                  in: [
-                    RewardStatus.PENDING_OBSERVATION,
-                    RewardStatus.AVAILABLE,
-                  ],
-                },
-              },
-              data: { status: RewardStatus.REVERSED, reversedAt: now },
-            });
+            await releaseRefundedResources(tx, refund, fullyRefunded,
+              { sub: refund.approvedById || refund.requestedById, roles: [AppRole.FINANCE] },
+              (...args) => this.finalizer.recordSucceededGoodsRefund(...args), now);
             await tx.auditLog.create({
               data: {
                 actorId: refund.approvedById || refund.requestedById,

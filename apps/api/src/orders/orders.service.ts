@@ -1,7 +1,9 @@
-import { payableBookingCoupon, reserveBookingCoupon, releaseBookingCoupon } from './booking-coupon.js';
+import { releasePendingOrderResources } from './pending-order-resources.js';
+import { releaseRefundedResources } from '../orders/refund-resources.js';
+import { transitionOrder, requireOrderTransition } from './order-transition.js';
+import { payableBookingCoupon, reserveBookingCoupon } from './booking-coupon.js';
 import { cancelZeroAmountVenueOrder } from './zero-amount-venue-order.js';
-import { applyTrainingRefund } from '../training/training-refund.js';
-import { cancelMembershipEntitlement, membershipPurchaseUnavailable, assertMembershipPurchaseCompatible } from '../memberships/membership-entitlements.js';
+import { membershipPurchaseUnavailable, assertMembershipPurchaseCompatible } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -25,8 +27,6 @@ import {
   AppRole,
   BookingStatus,
   BusinessType,
-  InventoryTxnType,
-  MembershipStatus,
   OrderStatus,
   PaymentChannel,
   PaymentStatus,
@@ -34,9 +34,8 @@ import {
   RefundStatus,
   RegistrationStatus,
   TrainingEnrollmentStatus,
-  RewardStatus,
 } from '../generated/prisma/client.js';
-import { assertGoodsStockAvailable, restoreGoodsSale } from '../inventory/goods-stock.js';
+import { assertGoodsStockAvailable } from '../inventory/goods-stock.js';
 import type {
   CancelPendingOrderDto,
   OrderQueryDto,
@@ -46,7 +45,6 @@ import type {
 } from './orders.dto.js';
 import { OrderFinalizerService } from '../payments/order-finalizer.service.js';
 import { WechatPayService } from '../payments/wechat-pay.service.js';
-import { promoteNextGameWaitlist } from '../games/games.service.js';
 import {
   eventTeamCancellationRefundKey,
   promoteNextEventWaitlist,
@@ -400,7 +398,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
           !processingWechat.some(observed => observed.id === payment.id)
         )) throw new ConflictException('微信支付请求已变化，请刷新后重试取消');
         const cancelledAt = new Date();
-        const changed = await tx.order.updateMany({
+        const changed = await transitionOrder(tx, 'CANCEL_UNPAID', {
           where: { id: orderId, status: OrderStatus.PENDING },
           data: { status: OrderStatus.CANCELLED, cancelledAt },
         });
@@ -414,45 +412,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
           },
           data: { status: PaymentStatus.CLOSED },
         });
-        if (current.businessType === BusinessType.GAME) {
-          const registration = current.gameRegistration;
-          if (!registration || registration.status !== RegistrationStatus.REGISTERED) {
-            throw new ConflictException('球局报名状态已经变化，请刷新后重试');
-          }
-          const released = await tx.gameRegistration.updateMany({
-            where: { id: registration.id, orderId, status: RegistrationStatus.REGISTERED },
-            data: { status: RegistrationStatus.CANCELLED },
-          });
-          if (released.count !== 1) throw new ConflictException('球局名额状态已经变化，请重试');
-          // Release this member's seat, never the courts reserved for the whole game.
-          await promoteNextGameWaitlist(tx, registration.gameId, actor?.sub, actor?.roles[0]);
-        } else if (current.businessType === BusinessType.EVENT) {
-          const team = current.eventTeam;
-          if (!team || team.status !== RegistrationStatus.REGISTERED) throw new ConflictException('赛事队伍状态已经变化');
-          const released = await tx.eventTeam.updateMany({
-            where: { id: team.id, orderId, status: RegistrationStatus.REGISTERED },
-            data: { status: RegistrationStatus.CANCELLED, paymentDueAt: null, cancelledAt },
-          });
-          if (released.count !== 1) throw new ConflictException('赛事席位状态已经变化');
-          await promoteNextEventWaitlist(tx, team.eventId, undefined, undefined);
-        } else if (current.businessType === BusinessType.TRAINING) {
-          const released = await tx.trainingEnrollment.updateMany({
-            where: { orderId, status: TrainingEnrollmentStatus.PENDING_PAYMENT },
-            data: { status: TrainingEnrollmentStatus.CANCELLED, seatReservedUntil: null },
-          });
-          if (released.count !== 1) throw new ConflictException('课程报名状态已经变化，请刷新后重试');
-        } else if (current.businessType === BusinessType.MEMBERSHIP) {
-          await tx.memberSubscription.updateMany({
-            where: { orderId, status: MembershipStatus.FROZEN },
-            data: { status: MembershipStatus.CANCELLED },
-          });
-        } else if (current.businessType === BusinessType.VENUE) {
-          await releaseBookingCoupon(tx, current);
-          await tx.courtBooking.updateMany({
-            where: { orderId, status: BookingStatus.HELD },
-            data: { status: BookingStatus.CANCELLED, holdExpiresAt: null },
-          });
-        }
+        await releasePendingOrderResources(tx, current, { cause: 'CANCELLATION', actor, now: cancelledAt });
         await tx.auditLog.create({
           data: {
             actorId: actor?.sub,
@@ -1008,7 +968,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
             originalOrderStatus: current.status,
           },
         });
-        const reserved = await tx.order.updateMany({
+        const reserved = await transitionOrder(tx, 'REQUEST_REFUND', {
           where: { id: orderId, status: current.status },
           data: { status: OrderStatus.REFUND_PENDING },
         });
@@ -1134,7 +1094,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
           refund.order.refundedCents,
         );
         if (refund.order.status !== restoredStatus) {
-          const restored = await tx.order.updateMany({
+          const restored = await transitionOrder(tx, 'REJECT_REFUND', {
             where: { id: refund.orderId, status: refund.order.status },
             data: { status: restoredStatus },
           });
@@ -1413,8 +1373,8 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
                 completedAt,
               },
             });
-            await tx.order.update({
-              where: { id: refund.orderId },
+            await requireOrderTransition(tx, 'REFUND_SUCCEEDED', {
+              where: { id: refund.orderId, status: refund.order.status },
               data: {
                 refundedCents,
                 status: fullyRefunded
@@ -1422,113 +1382,8 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
                   : OrderStatus.PARTIALLY_REFUNDED,
               },
             });
-            if (refund.order.trainingEnrollment) {
-              await applyTrainingRefund(
-                tx,
-                refund.order.trainingEnrollment,
-                { id: refund.id, amountCents: refund.amountCents, fullyRefunded, reason: dto.reason },
-                actor,
-              );
-            }
-            if (fullyRefunded) {
-              await tx.courtBooking.updateMany({
-                where: {
-                  orderId: refund.orderId,
-                  status: {
-                    notIn: [BookingStatus.COMPLETED, BookingStatus.NO_SHOW],
-                  },
-                },
-                data: { status: BookingStatus.CANCELLED },
-              });
-              if (refund.order.membership) {
-                await cancelMembershipEntitlement(tx, refund.order.membership);
-              }
-              if (refund.order.businessType === BusinessType.GOODS) {
-                for (const item of refund.order.items) {
-                  if (!item.itemId) continue;
-                  const inventory = await tx.inventoryItem.findUniqueOrThrow({
-                    where: { id: item.itemId },
-                  });
-                  const { stockAfter } = await restoreGoodsSale(
-                    tx,
-                    inventory,
-                    item.quantity,
-                    item.id,
-                  );
-                  await tx.inventoryTransaction.create({
-                    data: {
-                      itemId: inventory.id,
-                      type: InventoryTxnType.ADJUSTMENT,
-                      quantity: item.quantity,
-                      stockBefore: inventory.stock,
-                      stockAfter,
-                      unitCostCents: inventory.purchasePriceCents,
-                      orderItemId: item.id,
-                      operatorId: actor.sub,
-                      reason: `退款 ${refund.refundNo} 退货入库`,
-                      idempotencyKey: `GOODS-REFUND:${refund.id}:${item.id}`,
-                    },
-                  });
-                }
-                await this.finalizer.recordSucceededGoodsRefund(
-                  tx,
-                  refund.id,
-                  actor.sub,
-                  actor.roles[0],
-                );
-              }
-              if (
-                refund.order.businessType === BusinessType.GAME &&
-                refund.order.gameRegistration
-              ) {
-                await tx.gameRegistration.update({
-                  where: { id: refund.order.gameRegistration.id },
-                  data: { status: 'REFUNDED' },
-                });
-                await promoteNextGameWaitlist(
-                  tx,
-                  refund.order.gameRegistration.gameId,
-                  actor.sub,
-                  actor.roles[0],
-                );
-              }
-              if (
-                refund.order.businessType === BusinessType.EVENT &&
-                refund.order.eventTeam
-              ) {
-                await tx.eventTeam.update({
-                  where: { id: refund.order.eventTeam.id },
-                  data: {
-                    status: RegistrationStatus.REFUNDED,
-                    paymentDueAt: null,
-                    cancellationPending: false,
-                    cancellationResolvedAt: refund.order.eventTeam
-                      .cancelRequestedAt
-                      ? (refund.order.eventTeam.cancellationResolvedAt ??
-                        new Date())
-                      : undefined,
-                  },
-                });
-                await promoteNextEventWaitlist(
-                  tx,
-                  refund.order.eventTeam.eventId,
-                  actor.sub,
-                  actor.roles[0],
-                );
-              }
-            }
-            await tx.referralReward.updateMany({
-              where: {
-                triggerOrderId: refund.orderId,
-                status: {
-                  in: [
-                    RewardStatus.PENDING_OBSERVATION,
-                    RewardStatus.AVAILABLE,
-                  ],
-                },
-              },
-              data: { status: RewardStatus.REVERSED, reversedAt: new Date() },
-            });
+            await releaseRefundedResources(tx, refund, fullyRefunded, actor,
+              (...args) => this.finalizer.recordSucceededGoodsRefund(...args), completedAt, dto.reason);
             await tx.auditLog.create({
               data: {
                 actorId: actor.sub,

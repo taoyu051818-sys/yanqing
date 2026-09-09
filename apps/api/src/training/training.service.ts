@@ -1,3 +1,4 @@
+import { transitionOrder } from '../orders/order-transition.js';
 import { trainingSessionScope } from '../common/auth/operation-scopes.js';
 import { randomBytes } from 'node:crypto';
 
@@ -2700,7 +2701,7 @@ export class TrainingService {
             order.status === OrderStatus.COMPLETED
               ? OrderStatus.PAID
               : order.status;
-          const reopened = await tx.order.updateMany({
+          const reopened = await transitionOrder(tx, 'REOPEN_TRAINING', {
             where: {
               id: order.id,
               status: order.status,

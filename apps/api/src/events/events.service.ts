@@ -1,3 +1,4 @@
+import { transitionOrder, requireOrderTransition } from '../orders/order-transition.js';
 import { cancelZeroAmountActivityOrder, isZeroAmountConfirmedActivityOrder } from '../orders/zero-amount-activity-order.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { stateTransition, lockAdmissionOrder } from '../common/state-transition.js';
@@ -363,7 +364,7 @@ async function expireEventReservations(
     });
     if (claimed.count !== 1) continue;
     if (team.orderId) {
-      await tx.order.updateMany({
+      await requireOrderTransition(tx, 'CANCEL_UNPAID', {
         where: { id: team.orderId, status: OrderStatus.PENDING },
         data: { status: OrderStatus.CANCELLED, cancelledAt: now },
       });
@@ -2862,7 +2863,7 @@ export class EventsService {
               if (zeroAmountOrder) {
                 await cancelZeroAmountActivityOrder(tx, team.order, actor, reason, now);
               } else {
-                const cancelled = await tx.order.updateMany({
+                const cancelled = await transitionOrder(tx, 'CANCEL_UNPAID', {
                   where: { id: team.order.id, status: OrderStatus.PENDING },
                   data: { status: OrderStatus.CANCELLED, cancelledAt: now },
                 });
@@ -2969,7 +2970,7 @@ export class EventsService {
               originalOrderStatus: team.order.status,
             },
           });
-          const orderChanged = await tx.order.updateMany({
+          const orderChanged = await transitionOrder(tx, 'REQUEST_REFUND', {
             where: { id: team.order.id, status: OrderStatus.PAID },
             data: { status: OrderStatus.REFUND_PENDING },
           });
@@ -3220,10 +3221,11 @@ export class EventsService {
               cancelledWaitlist += 1;
             }
             if (team.order?.status === OrderStatus.PENDING) {
-              const cancelled = await tx.order.updateMany({
+              const cancelled = await transitionOrder(tx, 'CANCEL_UNPAID', {
                 where: { id: team.order.id, status: OrderStatus.PENDING },
                 data: { status: OrderStatus.CANCELLED, cancelledAt: now },
               });
+              if (cancelled.count !== 1) throw new ConflictException('待支付订单状态已变化，请重试取消');
               cancelledPendingOrders += cancelled.count;
               await tx.payment.updateMany({
                 where: {
@@ -3291,20 +3293,24 @@ export class EventsService {
                   originalOrderStatus: plan.originalOrderStatus,
                 },
               }));
-            await tx.order.updateMany({
-              where: {
-                id: plan.order.id,
-                status: {
-                  in: [
-                    OrderStatus.PAID,
-                    OrderStatus.CHECKED_IN,
-                    OrderStatus.COMPLETED,
-                    OrderStatus.PARTIALLY_REFUNDED,
-                  ],
+            // A whole-activity cancellation can top up an existing refund request.
+            // Its order is already pending review; only new review states transition.
+            if (plan.order.status !== OrderStatus.REFUND_PENDING) {
+              await requireOrderTransition(tx, 'REQUEST_REFUND', {
+                where: {
+                  id: plan.order.id,
+                  status: {
+                    in: [
+                      OrderStatus.PAID,
+                      OrderStatus.CHECKED_IN,
+                      OrderStatus.COMPLETED,
+                      OrderStatus.PARTIALLY_REFUNDED,
+                    ],
+                  },
                 },
-              },
-              data: { status: OrderStatus.REFUND_PENDING },
-            });
+                data: { status: OrderStatus.REFUND_PENDING },
+              });
+            }
             await tx.auditLog.create({
               data: {
                 actorId: actor.sub,
@@ -4304,7 +4310,7 @@ export class EventsService {
         outcome === RegistrationStatus.CANCELLED &&
         team.order?.status === OrderStatus.PENDING
       ) {
-        await tx.order.updateMany({
+        await requireOrderTransition(tx, 'CANCEL_UNPAID', {
           where: { id: team.order.id, status: OrderStatus.PENDING },
           data: { status: OrderStatus.CANCELLED, cancelledAt: completedAt },
         });

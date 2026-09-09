@@ -1,0 +1,42 @@
+{
+  "shared": {
+    "purpose": "订场、支付、代订、报名、候补、库存、会员权益、退款、账本及权限的一致性",
+    "isolated": false,
+    "files": [
+      "test/order-lifecycle-policy.integration.spec.ts",
+      "test/payment-lifecycle.integration.spec.ts",
+      "test/registration-boundaries.integration.spec.ts",
+      "test/operations-boundaries.integration.spec.ts",
+      "test/ledger-boundaries.integration.spec.ts",
+      "test/entitlement-boundaries.integration.spec.ts",
+      "test/lead-boundaries.integration.spec.ts",
+      "test/admission-boundaries.integration.spec.ts",
+      "test/venue-operation-boundaries.integration.spec.ts",
+      "test/goods-payment-stock.integration.spec.ts",
+      "test/privacy-lifecycle.integration.spec.ts",
+      "test/zero-amount-cancellation.integration.spec.ts",
+      "test/zero-amount-venue-cancellation.integration.spec.ts",
+      "test/coupon-payment.integration.spec.ts"
+    ]
+  },
+  "training": {
+    "purpose": "微信与余额退款后，课包余额、历史消课、未来名单和席位同步",
+    "isolated": true,
+    "files": ["test/training-refund-roster.integration.spec.ts"]
+  },
+  "reporting": {
+    "purpose": "经营摘要、使用率、退款净额与实际订单一致",
+    "isolated": true,
+    "files": ["test/reporting-boundaries.integration.spec.ts"]
+  },
+  "boss_events": {
+    "purpose": "关键事件和老板摘要可见性、去重及权限",
+    "isolated": true,
+    "files": ["test/boss-event-visibility.integration.spec.ts"]
+  },
+  "amounts": {
+    "purpose": "支付金额、免费订单及混合现金赠送余额边界",
+    "isolated": true,
+    "files": ["test/payment-amount-boundaries.integration.spec.ts"]
+  }
+}

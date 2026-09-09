@@ -77,7 +77,7 @@ describe('refund original order status evidence', () => {
         update: vi.fn().mockResolvedValue({ ...refund, status: RefundStatus.SUCCEEDED }),
         findUniqueOrThrow: vi.fn().mockResolvedValue({ ...refund, status: RefundStatus.SUCCEEDED }),
       },
-      order: { update: vi.fn().mockResolvedValue({ ...order, status: OrderStatus.REFUNDED }) },
+      order: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       courtBooking: { updateMany: courtBookingUpdate },
       referralReward: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       auditLog: { create: vi.fn().mockResolvedValue({}) },

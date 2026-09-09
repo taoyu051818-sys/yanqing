@@ -1,3 +1,4 @@
+import { transitionOrder, requireOrderTransition } from '../orders/order-transition.js';
 import { cancelZeroAmountActivityOrder, isZeroAmountConfirmedActivityOrder } from '../orders/zero-amount-activity-order.js';
 import { canManageGames } from '../common/auth/operation-scopes.js'
 import { randomBytes } from 'node:crypto'
@@ -979,10 +980,11 @@ export class GamesService {
               continue
             }
             if (registration.order?.status !== OrderStatus.PENDING) continue
-            const cancelledOrder = await tx.order.updateMany({
+            const cancelledOrder = await transitionOrder(tx, 'CANCEL_UNPAID', {
               where: { id: registration.order.id, status: OrderStatus.PENDING },
               data: { status: OrderStatus.CANCELLED, cancelledAt: now },
             })
+            if (cancelledOrder.count !== 1) throw new ConflictException('待支付订单状态已变化，请重试取消')
             cancelledPendingOrders += cancelledOrder.count
             await tx.payment.updateMany({
               where: {
@@ -1032,20 +1034,24 @@ export class GamesService {
                 originalOrderStatus: plan.originalOrderStatus,
               },
             })
-            await tx.order.updateMany({
-              where: {
-                id: plan.order.id,
-                status: {
-                  in: [
-                    OrderStatus.PAID,
-                    OrderStatus.CHECKED_IN,
-                    OrderStatus.COMPLETED,
-                    OrderStatus.PARTIALLY_REFUNDED,
-                  ],
+            // A whole-activity cancellation can top up an existing refund request.
+            // Its order is already pending review; only new review states transition.
+            if (plan.order.status !== OrderStatus.REFUND_PENDING) {
+              await requireOrderTransition(tx, 'REQUEST_REFUND', {
+                where: {
+                  id: plan.order.id,
+                  status: {
+                    in: [
+                      OrderStatus.PAID,
+                      OrderStatus.CHECKED_IN,
+                      OrderStatus.COMPLETED,
+                      OrderStatus.PARTIALLY_REFUNDED,
+                    ],
+                  },
                 },
-              },
-              data: { status: OrderStatus.REFUND_PENDING },
-            })
+                data: { status: OrderStatus.REFUND_PENDING },
+              })
+            }
             await tx.auditLog.create({
               data: {
                 actorId: actor.sub,
@@ -1568,7 +1574,7 @@ export class GamesService {
         previousStatus === RegistrationStatus.REGISTERED &&
         registration.order?.status === OrderStatus.PENDING
       ) {
-        await tx.order.updateMany({
+        await requireOrderTransition(tx, 'CANCEL_UNPAID', {
           where: { id: registration.order.id, status: OrderStatus.PENDING },
           data: { status: OrderStatus.CANCELLED, cancelledAt: completedAt },
         })

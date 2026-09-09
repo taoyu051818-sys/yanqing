@@ -1,3 +1,4 @@
+import { requireOrderTransition } from '../orders/order-transition.js';
 import { randomUUID } from 'node:crypto'
 import { ConflictException } from '@nestjs/common'
 import {
@@ -42,8 +43,8 @@ export async function captureCancelledOrderPayment(
       },
     },
   })
-  await tx.order.update({
-    where: { id: order.id },
+  await requireOrderTransition(tx, 'CAPTURE_COMPENSATION', {
+    where: { id: order.id, status: OrderStatus.CANCELLED },
     data: {
       status:
         order.payableCents > 0

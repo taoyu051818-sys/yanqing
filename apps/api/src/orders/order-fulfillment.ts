@@ -1,3 +1,4 @@
+import { transitionOrder } from './order-transition.js';
 import { ConflictException, NotFoundException } from '@nestjs/common'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
@@ -64,7 +65,7 @@ export async function completeOrderFulfillment(
   )
     ? OrderStatus.COMPLETED
     : order.status
-  const changed = await tx.order.updateMany({
+  const changed = await transitionOrder(tx, 'COMPLETE', {
     where: {
       id: order.id,
       status: order.status,

@@ -41,7 +41,11 @@ function fixture(kind: string) {
   const tx: any = {
     order: {
       findUnique: vi.fn(async () => order),
-      update: vi.fn(async ({ data }) => Object.assign(order, data)),
+      updateMany: vi.fn(async ({ where, data }) => {
+        if (order.status !== where.status) return { count: 0 }
+        Object.assign(order, data)
+        return { count: 1 }
+      }),
     },
     payment: {
       update: vi.fn(async ({ data }) => Object.assign(order.payments[0], data)),

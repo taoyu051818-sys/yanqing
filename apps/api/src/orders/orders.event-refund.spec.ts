@@ -61,7 +61,7 @@ const harness = (amountCents: number) => {
         status: RefundStatus.SUCCEEDED,
       }),
     },
-    order: { update: vi.fn().mockResolvedValue({}) },
+    order: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     eventTeam: { update: vi.fn().mockResolvedValue({}) },
     event: {
@@ -95,8 +95,8 @@ describe('whole event order refund releases its team seat', () => {
       finance,
     );
 
-    expect(tx.order.update).toHaveBeenCalledWith({
-      where: { id: 'order-event' },
+    expect(tx.order.updateMany).toHaveBeenCalledWith({
+      where: { id: 'order-event', status: OrderStatus.PAID },
       data: {
         refundedCents: 8_800,
         status: OrderStatus.REFUNDED,
@@ -122,8 +122,8 @@ describe('whole event order refund releases its team seat', () => {
       finance,
     );
 
-    expect(tx.order.update).toHaveBeenCalledWith({
-      where: { id: 'order-event' },
+    expect(tx.order.updateMany).toHaveBeenCalledWith({
+      where: { id: 'order-event', status: OrderStatus.PAID },
       data: {
         refundedCents: 4_400,
         status: OrderStatus.PARTIALLY_REFUNDED,

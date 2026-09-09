@@ -1,3 +1,4 @@
+import { transitionOrder } from './order-transition.js';
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { AuthUser } from '../common/auth/auth-user.js';
 import type { PrismaService } from '../database/prisma.service.js';
@@ -20,7 +21,7 @@ export async function cancelZeroAmountVenueOrder(db: PrismaService, orderId: str
         if (order.status !== OrderStatus.PAID || order.completedAt || !order.bookings.length ||
           order.bookings.some(booking => booking.status !== BookingStatus.CONFIRMED || booking.startsAt <= now))
           throw new ConflictException('仅未开始、未核销的免费预约可取消');
-        const changed = await tx.order.updateMany({
+        const changed = await transitionOrder(tx, 'CANCEL_FREE', {
           where: { id: orderId, businessType: BusinessType.VENUE, status: OrderStatus.PAID,
             payableCents: 0, paidCents: 0, refundedCents: 0, completedAt: null,
             payments: { none: { amountCents: { gt: 0 }, status: { in: [PaymentStatus.CREATED, PaymentStatus.PROCESSING, PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED] } } },

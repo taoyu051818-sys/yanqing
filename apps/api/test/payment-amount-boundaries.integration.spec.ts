@@ -26,7 +26,7 @@ describe.skipIf(!url)('zero payment and cumulative coin refund boundaries', () =
   };
   beforeAll(async () => {
     const target = new URL(url!);
-    if (target.hostname !== '127.0.0.1' || target.pathname !== '/yanqing_payment_amount_test') throw new Error('Dedicated local test database required');
+    if (target.hostname !== '127.0.0.1' || (target.pathname !== '/yanqing_payment_amount_test' && !/^\/yanqing_core_amounts_[0-9a-f]{12}_test$/.test(target.pathname))) throw new Error('Dedicated local test database required');
     db = new PrismaService(new ConfigService({ DATABASE_URL: url }));
     await db.$connect();
     games = new GamesService(db);
