@@ -1,4 +1,13 @@
 import {
+  assertEventConfiguration,
+  assertFixedDoubles,
+  assertEventManager,
+  EVENT_MANAGER_ROLES,
+} from './event-competition-policy.js';
+import { startNextRound, correctPairings } from './event-rounds.js';
+import { submitScore, correctScore } from './event-scoring.js';
+import { finish } from './event-completion.js';
+import {
   serial,
   isPrismaErrorCode,
   normaliseText,
@@ -25,23 +34,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  buildSwissPairings,
-  eventPointsForRank,
-  rankSwissPairs,
-  startingScoreFor,
-  validateEventScore,
-} from '@yanqing/shared';
 
 import type { AuthUser } from '../common/auth/auth-user.js';
 import { PrismaService } from '../database/prisma.service.js';
 import {
-  AccountTxnKind,
-  AccountType,
   AppRole,
   BusinessType,
   EventStatus,
-  MatchStatus,
   OrderStatus,
   PaymentStatus,
   Prisma,
@@ -52,7 +51,6 @@ import {
   UserStatus,
 } from '../generated/prisma/client.js';
 import { orderCreationCommandHash } from '../orders/order-creation-idempotency.js';
-import { completeOrderFulfillment } from '../orders/order-fulfillment.js';
 import { orderResponse } from '../orders/order-response.js';
 import type {
   CancelEventDto,
@@ -87,16 +85,6 @@ const DEFAULT_RULES = [
   '男双对女双让 5 分，男双对混双让 2 分，混双对女双让 2 分',
   '五轮瑞士积分制，尽量避免重复对手',
 ];
-
-const TERMINAL_MATCH_STATUSES: MatchStatus[] = [
-  MatchStatus.CONFIRMED,
-  MatchStatus.CORRECTED,
-];
-
-const isTerminalMatch = (status: MatchStatus): boolean =>
-  TERMINAL_MATCH_STATUSES.includes(status);
-
-const SCORE_CONCURRENCY_MESSAGE = '比分已被其他操作提交，请刷新后重试';
 
 const eventRegistrationResponse = (value: any) => {
   if (value?.orderNo || value?.businessType) return orderResponse(value);
@@ -165,29 +153,6 @@ const eventTeamCommandResponse = (team: any) => ({
   cancellationPending: Boolean(team.cancellationPending),
   order: team.order ? { status: team.order.status } : undefined,
 });
-
-const EVENT_STATUSES_NOT_STARTABLE: readonly EventStatus[] = [
-  EventStatus.DRAFT,
-  EventStatus.CANCELLED,
-  EventStatus.COMPLETED,
-];
-
-const EVENT_STATUSES_NOT_FINISHABLE: readonly EventStatus[] = [
-  EventStatus.DRAFT,
-  EventStatus.CANCELLED,
-];
-
-const EVENT_MANAGER_ROLES: readonly AppRole[] = [
-  AppRole.EVENT_MANAGER,
-  AppRole.ADMIN,
-  AppRole.SUPER_ADMIN,
-];
-
-const MATCH_STATUSES_ACCEPTING_SCORE: readonly MatchStatus[] = [
-  MatchStatus.PENDING,
-  MatchStatus.IN_PROGRESS,
-  MatchStatus.SUBMITTED,
-];
 export const EVENT_PARTNER_INVITE_TTL_MINUTES = 15;
 
 const eventPartnerInviteHash = (value: string): string =>
@@ -212,32 +177,6 @@ const ACTIVE_REFUND_STATUSES: readonly RefundStatus[] = [
   RefundStatus.PROCESSING,
 ];
 
-const EVENT_NO_SHOW_ORDER_STATUSES: ReadonlySet<OrderStatus> = new Set([
-  OrderStatus.PAID,
-  OrderStatus.CHECKED_IN,
-  OrderStatus.COMPLETED,
-  OrderStatus.PARTIALLY_REFUNDED,
-]);
-
-const EVENT_COMPLETED_ORDER_STATUSES: ReadonlySet<OrderStatus> = new Set(
-  EVENT_NO_SHOW_ORDER_STATUSES,
-);
-
-export const eventPointRecipientIds = (team: {
-  captainId: string;
-  captainPlays?: boolean;
-  playerAUserId?: string | null;
-  playerBUserId?: string | null;
-}): string[] => [
-  ...new Set(
-    [
-      team.playerAUserId,
-      team.playerBUserId,
-      ...(team.captainPlays === false ? [] : [team.captainId]),
-    ].filter((id): id is string => Boolean(id)),
-  ),
-];
-
 const parseDate = (value: unknown, field: string): Date => {
   const date = new Date(String(value));
   if (Number.isNaN(date.getTime())) {
@@ -249,104 +188,6 @@ const parseDate = (value: unknown, field: string): Date => {
 @Injectable()
 export class EventsService {
   constructor(private readonly prisma: PrismaService) {}
-
-  /**
-   * Validate the locked tournament format at the API boundary.  The database
-   * schema predates these invariants, so the service must also validate values
-   * loaded from existing rows before using them for pairing or scoring.
-   */
-  private assertEventConfiguration(
-    event: {
-      capacityPeople: number;
-      minimumPeople: number;
-      totalRounds: number;
-    },
-    mode: 'create' | 'stored' = 'stored',
-  ): void {
-    const fail = (message: string): never => {
-      if (mode === 'create') throw new BadRequestException(message);
-      throw new ConflictException(message);
-    };
-
-    if (
-      !Number.isInteger(event.totalRounds) ||
-      event.totalRounds !== EVENT_TOTAL_ROUNDS
-    ) {
-      fail(`赛事必须固定为${EVENT_TOTAL_ROUNDS}轮瑞士制`);
-    }
-    if (
-      !Number.isInteger(event.minimumPeople) ||
-      event.minimumPeople !== EVENT_MINIMUM_PEOPLE
-    ) {
-      fail(`赛事成赛人数必须固定为${EVENT_MINIMUM_PEOPLE}人`);
-    }
-    if (
-      !Number.isInteger(event.capacityPeople) ||
-      event.capacityPeople < EVENT_MINIMUM_PEOPLE ||
-      event.capacityPeople > EVENT_MAX_CAPACITY_PEOPLE ||
-      event.capacityPeople % 2 !== 0
-    ) {
-      fail(
-        `赛事容量必须为${EVENT_MINIMUM_PEOPLE}-${EVENT_MAX_CAPACITY_PEOPLE}人且为双数`,
-      );
-    }
-  }
-
-  private assertFixedDoubles(
-    team: {
-      playerAName: string | null | undefined;
-      playerBName: string | null | undefined;
-      playerAUserId?: string | null;
-      playerBUserId?: string | null;
-      playerAPhone?: string | null;
-      playerBPhone?: string | null;
-    },
-    mode: 'create' | 'stored' = 'stored',
-  ): void {
-    const fail = (message: string): never => {
-      if (mode === 'create') throw new BadRequestException(message);
-      throw new ConflictException(message);
-    };
-    const playerAName = normaliseText(team.playerAName);
-    const playerBName = normaliseText(team.playerBName);
-    if (!playerAName || !playerBName) fail('固定双打必须填写两名队员');
-    if (
-      playerAName.toLocaleLowerCase() === playerBName.toLocaleLowerCase() &&
-      !(
-        team.playerAPhone &&
-        team.playerBPhone &&
-        team.playerAPhone !== team.playerBPhone
-      )
-    ) {
-      fail('固定双打的两名队员不能相同');
-    }
-    const playerAUserId = normaliseOptionalText(team.playerAUserId);
-    const playerBUserId = normaliseOptionalText(team.playerBUserId);
-    if (playerAUserId && playerBUserId && playerAUserId === playerBUserId) {
-      fail('固定双打的两名账号不能相同');
-    }
-  }
-
-  private assertParticipantIdsUnique(
-    teams: ReadonlyArray<{
-      playerAUserId?: string | null;
-      playerBUserId?: string | null;
-    }>,
-  ): void {
-    const seen = new Set<string>();
-    for (const team of teams) {
-      for (const userId of [team.playerAUserId, team.playerBUserId]) {
-        const normalized = normaliseOptionalText(userId);
-        if (!normalized) continue;
-        if (seen.has(normalized)) {
-          throw new ConflictException(
-            '同一账号不能参加同一赛事的多个固定双打队伍',
-          );
-        }
-        seen.add(normalized);
-      }
-    }
-  }
 
   private async resolvePartnerInvite(
     client: Pick<Prisma.TransactionClient, 'eventPartnerInvite' | 'eventTeam'>,
@@ -902,150 +743,6 @@ export class EventsService {
     };
   }
 
-  private assertPeopleRange(teamCount: number, capacityPeople: number): void {
-    const people = teamCount * 2;
-    if (people < EVENT_MINIMUM_PEOPLE) {
-      throw new ConflictException(
-        `签到人数不足${EVENT_MINIMUM_PEOPLE}人，暂不能开赛`,
-      );
-    }
-    if (people > capacityPeople || people > EVENT_MAX_CAPACITY_PEOPLE) {
-      throw new ConflictException(`签到人数超过赛事${capacityPeople}人容量`);
-    }
-  }
-
-  private assertRoundMatches(
-    teams: ReadonlyArray<{
-      id: string;
-      playerAName: string;
-      playerBName: string;
-      playerAUserId: string | null;
-      playerBUserId: string | null;
-    }>,
-    matches: ReadonlyArray<{
-      id: string;
-      round: number;
-      teamAId: string;
-      teamBId: string | null;
-      startingScoreA: number;
-      startingScoreB: number;
-      scoreA: number | null;
-      scoreB: number | null;
-      status: MatchStatus;
-    }>,
-    round: number,
-    options: { requireTerminal: boolean } = { requireTerminal: true },
-  ): void {
-    if (!Number.isInteger(round) || round < 1 || round > EVENT_TOTAL_ROUNDS) {
-      throw new ConflictException(
-        `赛事轮次必须在1-${EVENT_TOTAL_ROUNDS}轮之间`,
-      );
-    }
-    const teamIds = new Set(teams.map((team) => team.id));
-    const roundMatches = matches.filter((match) => match.round === round);
-    const expectedMatchCount = Math.ceil(teams.length / 2);
-    if (roundMatches.length !== expectedMatchCount) {
-      throw new ConflictException(
-        `第${round}轮配对记录不完整，应有${expectedMatchCount}场，实际${roundMatches.length}场`,
-      );
-    }
-
-    const appearances = new Set<string>();
-    const pairKeys = new Set<string>();
-    let byeCount = 0;
-    for (const match of roundMatches) {
-      if (!teamIds.has(match.teamAId)) {
-        throw new ConflictException(`第${round}轮存在不在签到名单中的队伍`);
-      }
-      if (appearances.has(match.teamAId)) {
-        throw new ConflictException(`第${round}轮队伍重复配对`);
-      }
-      appearances.add(match.teamAId);
-
-      if (match.teamBId === null) {
-        byeCount += 1;
-        if (match.scoreA !== 21 || match.scoreB !== 0) {
-          throw new ConflictException(`第${round}轮轮空结果必须为21-0`);
-        }
-      } else {
-        if (!teamIds.has(match.teamBId) || match.teamAId === match.teamBId) {
-          throw new ConflictException(`第${round}轮存在无效对阵`);
-        }
-        if (appearances.has(match.teamBId)) {
-          throw new ConflictException(`第${round}轮队伍重复配对`);
-        }
-        appearances.add(match.teamBId);
-        const pairKey = [match.teamAId, match.teamBId].sort().join(':');
-        if (pairKeys.has(pairKey)) {
-          throw new ConflictException(`第${round}轮存在重复对阵`);
-        }
-        pairKeys.add(pairKey);
-        if (options.requireTerminal && !isTerminalMatch(match.status)) {
-          throw new ConflictException(`第${round}轮仍有未确认比分`);
-        }
-        if (match.scoreA === null || match.scoreB === null) {
-          throw new ConflictException(`第${round}轮存在空比分`);
-        }
-        try {
-          validateEventScore(
-            match.scoreA,
-            match.scoreB,
-            match.startingScoreA,
-            match.startingScoreB,
-          );
-        } catch (error) {
-          throw new ConflictException(
-            `第${round}轮存在无效比分：${error instanceof Error ? error.message : '请重新录入'}`,
-          );
-        }
-      }
-    }
-
-    if (appearances.size !== teams.length) {
-      throw new ConflictException(`第${round}轮未覆盖全部签到队伍`);
-    }
-    if (byeCount !== teams.length % 2) {
-      throw new ConflictException(`第${round}轮轮空数量不正确`);
-    }
-  }
-
-  private assertPairings(
-    teamIds: readonly string[],
-    pairings: ReadonlyArray<{
-      pairAId: string;
-      pairBId: string | null;
-      isBye: boolean;
-    }>,
-  ): void {
-    const allowed = new Set(teamIds);
-    const seen = new Set<string>();
-    let byeCount = 0;
-    for (const pairing of pairings) {
-      if (!allowed.has(pairing.pairAId) || seen.has(pairing.pairAId)) {
-        throw new ConflictException('瑞士配对包含重复或无效队伍');
-      }
-      seen.add(pairing.pairAId);
-      if (pairing.isBye || pairing.pairBId === null) {
-        byeCount += 1;
-        if (pairing.pairBId !== null) {
-          throw new ConflictException('轮空配对不能包含第二支队伍');
-        }
-        continue;
-      }
-      if (
-        !allowed.has(pairing.pairBId) ||
-        seen.has(pairing.pairBId) ||
-        pairing.pairAId === pairing.pairBId
-      ) {
-        throw new ConflictException('瑞士配对包含重复或无效队伍');
-      }
-      seen.add(pairing.pairBId);
-    }
-    if (seen.size !== teamIds.length || byeCount !== teamIds.length % 2) {
-      throw new ConflictException('瑞士配对未覆盖全部签到队伍');
-    }
-  }
-
   async list() {
     return this.prisma.event.findMany({
       where: {
@@ -1328,11 +1025,11 @@ export class EventsService {
   }
 
   create(dto: CreateEventDto, actor: AuthUser) {
-    this.assertEventManager(actor);
+    assertEventManager(actor);
     const capacityPeople = dto.capacityPeople ?? EVENT_MAX_CAPACITY_PEOPLE;
     const minimumPeople = dto.minimumPeople ?? EVENT_MINIMUM_PEOPLE;
     const totalRounds = dto.totalRounds ?? EVENT_TOTAL_ROUNDS;
-    this.assertEventConfiguration(
+    assertEventConfiguration(
       { capacityPeople, minimumPeople, totalRounds },
       'create',
     );
@@ -1426,7 +1123,7 @@ export class EventsService {
     dto: PublishEventDto | undefined,
     actor: AuthUser,
   ) {
-    this.assertEventManager(actor);
+    assertEventManager(actor);
     const reason = normaliseOptionalText(dto?.reason);
     return this.prisma.$transaction(
       async (tx) => {
@@ -1443,7 +1140,7 @@ export class EventsService {
 
         // Re-validate persisted values at the workflow boundary.  This also
         // protects drafts created by an older client or a direct database seed.
-        this.assertEventConfiguration(current);
+        assertEventConfiguration(current);
         if (current.registrationEndsAt >= current.startsAt) {
           throw new ConflictException('报名截止时间必须早于开赛时间');
         }
@@ -1545,7 +1242,7 @@ export class EventsService {
       playerAUserId = captainPlays ? actor.sub : undefined;
       playerBUserId = undefined;
     } else {
-      this.assertFixedDoubles(
+      assertFixedDoubles(
         {
           playerAName,
           playerBName,
@@ -1663,7 +1360,7 @@ export class EventsService {
     ) {
       throw new NotFoundException('赛事不在报名期');
     }
-    this.assertEventConfiguration(preflightEvent);
+    assertEventConfiguration(preflightEvent);
     const preflightNow = new Date();
     if (
       preflightNow >= preflightEvent.registrationEndsAt ||
@@ -1688,7 +1385,7 @@ export class EventsService {
           ) {
             throw new NotFoundException('赛事不在报名期');
           }
-          this.assertEventConfiguration(event);
+          assertEventConfiguration(event);
           const now = new Date();
           if (now >= event.registrationEndsAt || now >= event.startsAt) {
             throw new ConflictException('赛事报名已截止');
@@ -1725,7 +1422,7 @@ export class EventsService {
             playerBPhone = partnerInvite.playerBPhone || '';
             partnerInviteId = partnerInvite.id;
           }
-          this.assertFixedDoubles(
+          assertFixedDoubles(
             {
               playerAName: resolvedPlayerAName,
               playerBName: resolvedPlayerBName,
@@ -2373,7 +2070,7 @@ export class EventsService {
 
   /** Manually retry timeout cleanup and FIFO promotion from event operations. */
   async promoteWaitlist(eventId: string, actor: AuthUser) {
-    this.assertEventManager(actor);
+    assertEventManager(actor);
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
         return await this.prisma.$transaction(
@@ -2413,7 +2110,7 @@ export class EventsService {
   }
 
   async cancel(eventId: string, dto: CancelEventDto, actor: AuthUser) {
-    this.assertEventManager(actor);
+    assertEventManager(actor);
     const reason = normaliseText(dto.reason);
     const idempotencyKey = normaliseText(dto.idempotencyKey);
     if (reason.length < 2) throw new BadRequestException('取消原因至少2个字符');
@@ -2739,7 +2436,7 @@ export class EventsService {
         },
       });
       if (!team) throw new NotFoundException('参赛组合不存在');
-      this.assertFixedDoubles(team);
+      assertFixedDoubles(team);
       if (
         ![RegistrationStatus.PAID, RegistrationStatus.CHECKED_IN].includes(
           team.status as never,
@@ -2802,156 +2499,7 @@ export class EventsService {
   }
 
   async startNextRound(eventId: string, actor: AuthUser) {
-    this.assertEventManager(actor);
-    return this.prisma.$transaction(
-      async (tx) => {
-        const event = await tx.event.findUnique({
-          where: { id: eventId },
-          include: {
-            teams: { where: { status: RegistrationStatus.CHECKED_IN } },
-            matches: { where: { round: { gt: 0 } } },
-          },
-        });
-        if (!event) throw new NotFoundException('赛事不存在');
-        this.assertEventConfiguration(event);
-        if (EVENT_STATUSES_NOT_STARTABLE.includes(event.status)) {
-          throw new ConflictException('当前赛事状态不允许生成下一轮配对');
-        }
-        const currentRound = event.currentRound ?? 0;
-        if (
-          !Number.isInteger(currentRound) ||
-          currentRound < 0 ||
-          currentRound > EVENT_TOTAL_ROUNDS
-        ) {
-          throw new ConflictException('赛事当前轮次数据无效，请先修复赛事配置');
-        }
-        if (currentRound >= EVENT_TOTAL_ROUNDS)
-          throw new ConflictException('所有轮次已经完成');
-        this.assertPeopleRange(event.teams.length, event.capacityPeople);
-        this.assertParticipantIdsUnique(event.teams);
-        for (const team of event.teams) this.assertFixedDoubles(team);
-
-        if (currentRound > 0) {
-          // Every team in the previous round must have a terminal result before
-          // Swiss ranking is used to generate the next round.
-          this.assertRoundMatches(event.teams, event.matches, currentRound);
-        } else if (event.matches.some((match) => match.round > 0)) {
-          throw new ConflictException('赛事首轮尚未开始却已存在配对记录');
-        }
-
-        const round = currentRound + 1;
-        if (event.matches.some((match) => match.round === round)) {
-          throw new ConflictException(`第${round}轮配对已经生成，请勿重复操作`);
-        }
-
-        let pairings;
-        try {
-          pairings = buildSwissPairings(
-            event.teams.map((team) => ({ ...team, checkedIn: true })),
-          );
-        } catch (error) {
-          throw new ConflictException(
-            `无法生成第${round}轮瑞士配对：${error instanceof Error ? error.message : '队伍历史数据不完整'}`,
-          );
-        }
-        this.assertPairings(
-          event.teams.map((team) => team.id),
-          pairings,
-        );
-
-        const created: Array<{
-          id: string;
-          round: number;
-          teamAId: string;
-          teamBId: string | null;
-        }> = [];
-        const pairingAudit: Array<Record<string, unknown>> = [];
-        for (const [index, pairing] of pairings.entries()) {
-          const teamA = event.teams.find((team) => team.id === pairing.pairAId);
-          if (!teamA) throw new ConflictException('瑞士配对缺少队伍');
-          if (pairing.isBye) {
-            const match = await tx.eventMatch.create({
-              data: {
-                eventId,
-                round,
-                courtLabel: '轮空',
-                teamAId: teamA.id,
-                teamBId: null,
-                scoreA: 21,
-                scoreB: 0,
-                status: MatchStatus.CONFIRMED,
-                confirmedAt: new Date(),
-              },
-            });
-            await tx.eventTeam.update({
-              where: { id: teamA.id },
-              data: {
-                points: { increment: 1 },
-                wins: { increment: 1 },
-                opponents: { push: 'BYE' },
-              },
-            });
-            created.push(match);
-            pairingAudit.push({
-              matchId: match.id,
-              teamAId: teamA.id,
-              teamBId: null,
-              isBye: true,
-              startingScoreA: 0,
-              startingScoreB: 0,
-            });
-            continue;
-          }
-          const teamB = event.teams.find((team) => team.id === pairing.pairBId);
-          if (!teamB) throw new ConflictException('瑞士配对缺少对手队伍');
-          const [startingScoreA, startingScoreB] = startingScoreFor(
-            teamA.category,
-            teamB.category,
-          );
-          const match = await tx.eventMatch.create({
-            data: {
-              eventId,
-              round,
-              courtLabel: `${index + 1}号场`,
-              teamAId: teamA.id,
-              teamBId: teamB.id,
-              startingScoreA,
-              startingScoreB,
-            },
-          });
-          created.push(match);
-          pairingAudit.push({
-            matchId: match.id,
-            teamAId: teamA.id,
-            teamBId: teamB.id,
-            isBye: false,
-            startingScoreA,
-            startingScoreB,
-          });
-        }
-        await tx.event.update({
-          where: { id: eventId },
-          data: { currentRound: round, status: EventStatus.IN_PROGRESS },
-        });
-        await tx.auditLog.create({
-          data: {
-            actorId: actor.sub,
-            actorRole: actor.roles[0],
-            action: 'EVENT_ROUND_STARTED',
-            objectType: 'Event',
-            objectId: eventId,
-            oldValue: { currentRound, status: event.status } as never,
-            newValue: {
-              round,
-              pairingCount: created.length,
-              pairings: pairingAudit,
-            } as never,
-          },
-        });
-        return created;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+    return startNextRound(this.prisma, eventId, actor);
   }
 
   async correctPairings(
@@ -2960,833 +2508,18 @@ export class EventsService {
     dto: CorrectEventPairingsDto,
     actor: AuthUser,
   ) {
-    this.assertEventManager(actor);
-    if (!Number.isInteger(round) || round < 1 || round > EVENT_TOTAL_ROUNDS) {
-      throw new BadRequestException(
-        `赛事轮次必须在1-${EVENT_TOTAL_ROUNDS}轮之间`,
-      );
-    }
-    const reason = normaliseText(dto.reason);
-    if (reason.length < 2) {
-      throw new BadRequestException('人工调整配对必须填写至少2个字的原因');
-    }
-    const idempotencyKey = normaliseText(dto.idempotencyKey);
-    assertCommandKey(idempotencyKey, '配对调整幂等键');
-    const pairings = dto.pairings.map((pairing, index) => ({
-      pairAId: normaliseText(pairing.teamAId),
-      pairBId: normaliseOptionalText(pairing.teamBId) ?? null,
-      isBye: !normaliseOptionalText(pairing.teamBId),
-      courtLabel:
-        normaliseOptionalText(pairing.courtLabel) ??
-        (!normaliseOptionalText(pairing.teamBId) ? '轮空' : `${index + 1}号场`),
-    }));
-    if (pairings.some((pairing) => !pairing.pairAId)) {
-      throw new BadRequestException('人工配对缺少第一支队伍');
-    }
-    const requestId = `EVENT_PAIRINGS:${idempotencyKey}`;
-    const commandHash = createHash('sha256')
-      .update(JSON.stringify({ eventId, round, reason, pairings }))
-      .digest('hex');
-
-    const assertReplay = (audit: { newValue: unknown }) => {
-      const value = audit.newValue as { commandHash?: unknown } | null;
-      if (value?.commandHash !== commandHash) {
-        throw new ConflictException(
-          '配对调整幂等键已用于其他指令，请更换幂等键',
-        );
-      }
-    };
-    const loadRound = (client: Prisma.TransactionClient | PrismaService) =>
-      client.eventMatch.findMany({
-        where: { eventId, round },
-        orderBy: { createdAt: 'asc' },
-      });
-
-    try {
-      return await this.prisma.$transaction(
-        async (tx) => {
-          const replay = await tx.auditLog.findFirst({
-            where: { requestId, action: 'EVENT_PAIRINGS_CORRECTED' },
-          });
-          if (replay) {
-            assertReplay(replay);
-            return loadRound(tx);
-          }
-
-          const event = await tx.event.findUnique({
-            where: { id: eventId },
-            include: {
-              teams: { where: { status: RegistrationStatus.CHECKED_IN } },
-              matches: { where: { round }, orderBy: { createdAt: 'asc' } },
-            },
-          });
-          if (!event) throw new NotFoundException('赛事不存在');
-          this.assertEventConfiguration(event);
-          if (
-            event.status !== EventStatus.IN_PROGRESS ||
-            event.currentRound !== round
-          ) {
-            throw new ConflictException('只能调整当前进行中轮次的配对');
-          }
-          this.assertPeopleRange(event.teams.length, event.capacityPeople);
-          this.assertParticipantIdsUnique(event.teams);
-          for (const team of event.teams) this.assertFixedDoubles(team);
-          if (!event.matches.length) {
-            throw new ConflictException(`第${round}轮尚未生成配对`);
-          }
-          if (
-            event.matches.some(
-              (match) =>
-                match.teamBId !== null &&
-                (match.status !== MatchStatus.PENDING ||
-                  match.scoreA !== null ||
-                  match.scoreB !== null),
-            )
-          ) {
-            throw new ConflictException(
-              '本轮已有比分或已进入确认流程，不能再调整配对',
-            );
-          }
-
-          this.assertPairings(
-            event.teams.map((team) => team.id),
-            pairings,
-          );
-          const oldPairings = event.matches.map((match) => ({
-            teamAId: match.teamAId,
-            teamBId: match.teamBId,
-            courtLabel: match.courtLabel,
-          }));
-          const signature = (items: typeof oldPairings) =>
-            JSON.stringify(
-              [...items].sort((left, right) =>
-                `${left.teamAId}:${left.teamBId ?? ''}`.localeCompare(
-                  `${right.teamAId}:${right.teamBId ?? ''}`,
-                ),
-              ),
-            );
-          const newPairings = pairings.map((pairing) => ({
-            teamAId: pairing.pairAId,
-            teamBId: pairing.pairBId,
-            courtLabel: pairing.courtLabel,
-          }));
-          if (signature(oldPairings) === signature(newPairings)) {
-            throw new BadRequestException('人工调整后的配对与当前配对相同');
-          }
-
-          await tx.eventMatch.deleteMany({ where: { eventId, round } });
-          const created = [];
-          for (const pairing of pairings) {
-            const teamA = event.teams.find(
-              (team) => team.id === pairing.pairAId,
-            );
-            const teamB = event.teams.find(
-              (team) => team.id === pairing.pairBId,
-            );
-            if (!teamA) throw new ConflictException('人工配对缺少队伍');
-            const startingScore = teamB
-              ? startingScoreFor(teamA.category, teamB.category)
-              : ([0, 0] as const);
-            created.push(
-              await tx.eventMatch.create({
-                data: {
-                  eventId,
-                  round,
-                  courtLabel: pairing.courtLabel,
-                  teamAId: teamA.id,
-                  teamBId: teamB?.id ?? null,
-                  startingScoreA: startingScore[0],
-                  startingScoreB: startingScore[1],
-                  scoreA: teamB ? null : 21,
-                  scoreB: teamB ? null : 0,
-                  status: teamB ? MatchStatus.PENDING : MatchStatus.CONFIRMED,
-                  confirmedAt: teamB ? null : new Date(),
-                },
-              }),
-            );
-          }
-          await this.recomputeStandings(tx, eventId);
-          await tx.auditLog.create({
-            data: {
-              actorId: actor.sub,
-              actorRole: actor.roles[0],
-              action: 'EVENT_PAIRINGS_CORRECTED',
-              objectType: 'Event',
-              objectId: eventId,
-              oldValue: { round, pairings: oldPairings } as never,
-              newValue: {
-                round,
-                pairings: newPairings,
-                commandHash,
-              } as never,
-              reason,
-              requestId,
-            },
-          });
-          return created;
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-      );
-    } catch (error) {
-      if (isPrismaErrorCode(error, 'P2034')) {
-        const replay = await this.prisma.auditLog.findFirst({
-          where: { requestId, action: 'EVENT_PAIRINGS_CORRECTED' },
-        });
-        if (replay) {
-          assertReplay(replay);
-          return loadRound(this.prisma);
-        }
-        throw new ConflictException('配对调整发生并发冲突，请刷新后重试');
-      }
-      throw error;
-    }
+    return correctPairings(this.prisma, eventId, round, dto, actor);
   }
 
   async submitScore(matchId: string, dto: SubmitScoreDto, actor: AuthUser) {
-    try {
-      return await this.prisma.$transaction(
-        async (tx) => {
-          const match = await tx.eventMatch.findUnique({
-            where: { id: matchId },
-          });
-          if (!match?.teamBId) throw new NotFoundException('对阵不存在');
-          if (match.round < 1 || match.round > EVENT_TOTAL_ROUNDS) {
-            throw new ConflictException('赛事轮次数据无效，不能录入比分');
-          }
-          if (!MATCH_STATUSES_ACCEPTING_SCORE.includes(match.status)) {
-            throw new ConflictException('比分已确认，修正请使用纠错接口');
-          }
-          try {
-            // The starting handicap is part of the match snapshot.  Both normal
-            // submission and correction must validate against it, otherwise a
-            // player could submit a score below the handicap or above 21.
-            validateEventScore(
-              dto.scoreA,
-              dto.scoreB,
-              match.startingScoreA,
-              match.startingScoreB,
-            );
-          } catch (error) {
-            throw new BadRequestException(
-              error instanceof Error ? error.message : '比分无效',
-            );
-          }
-          const teamAWon = dto.scoreA > dto.scoreB;
-
-          // Compare-and-set the match state before touching either team.  A
-          // plain update after a non-locking read allows two concurrent
-          // requests to both increment standings and append opponents.  The
-          // status predicate is evaluated atomically by the database; only
-          // the request that moves PENDING/IN_PROGRESS/SUBMITTED -> CONFIRMED
-          // may continue.  Prisma reports a lost compare-and-set as P2025.
-          try {
-            await tx.eventMatch.update({
-              where: {
-                id: matchId,
-                status: { in: [...MATCH_STATUSES_ACCEPTING_SCORE] },
-              },
-              data: {
-                scoreA: dto.scoreA,
-                scoreB: dto.scoreB,
-                status: MatchStatus.CONFIRMED,
-                submittedById: actor.sub,
-                confirmedById: actor.sub,
-                submittedAt: new Date(),
-                confirmedAt: new Date(),
-              },
-            });
-          } catch (error) {
-            if (
-              isPrismaErrorCode(error, 'P2025') ||
-              isPrismaErrorCode(error, 'P2034')
-            ) {
-              throw new ConflictException(SCORE_CONCURRENCY_MESSAGE);
-            }
-            throw error;
-          }
-
-          // All writes below are in the same transaction as the compare-and-
-          // set.  If either team update or the audit insert fails, the match
-          // confirmation is rolled back as well, so there is no partially
-          // counted score to reconcile later.
-          await tx.eventTeam.update({
-            where: { id: match.teamAId },
-            data: {
-              points: { increment: teamAWon ? 1 : 0 },
-              wins: { increment: teamAWon ? 1 : 0 },
-              losses: { increment: teamAWon ? 0 : 1 },
-              scoreDiff: { increment: dto.scoreA - dto.scoreB },
-              opponents: { push: match.teamBId },
-            },
-          });
-          await tx.eventTeam.update({
-            where: { id: match.teamBId },
-            data: {
-              points: { increment: teamAWon ? 0 : 1 },
-              wins: { increment: teamAWon ? 0 : 1 },
-              losses: { increment: teamAWon ? 1 : 0 },
-              scoreDiff: { increment: dto.scoreB - dto.scoreA },
-              opponents: { push: match.teamAId },
-            },
-          });
-          await tx.auditLog.create({
-            data: {
-              actorId: actor.sub,
-              actorRole: actor.roles[0],
-              action: 'EVENT_SCORE_SUBMITTED',
-              objectType: 'EventMatch',
-              objectId: matchId,
-              oldValue: {
-                status: match.status,
-                scoreA: match.scoreA,
-                scoreB: match.scoreB,
-              } as never,
-              newValue: {
-                status: MatchStatus.CONFIRMED,
-                scoreA: dto.scoreA,
-                scoreB: dto.scoreB,
-                startingScoreA: match.startingScoreA,
-                startingScoreB: match.startingScoreB,
-              } as never,
-            },
-          });
-          return tx.eventMatch.findUniqueOrThrow({ where: { id: matchId } });
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-      );
-    } catch (error) {
-      // PostgreSQL can reject a Serializable transaction at commit time with
-      // P2034, outside the callback above.  Surface it as the same safe,
-      // retryable business conflict instead of leaking a 500 response.
-      if (isPrismaErrorCode(error, 'P2034')) {
-        throw new ConflictException(SCORE_CONCURRENCY_MESSAGE);
-      }
-      throw error;
-    }
+    return submitScore(this.prisma, matchId, dto, actor);
   }
 
   async correctScore(matchId: string, dto: CorrectScoreDto, actor: AuthUser) {
-    try {
-      return await this.prisma.$transaction(
-        async (tx) => {
-          const match = await tx.eventMatch.findUnique({
-            where: { id: matchId },
-          });
-          if (!match?.teamBId) throw new NotFoundException('对阵不存在');
-          const event = await tx.event.findUnique({
-            where: { id: match.eventId },
-            select: { status: true },
-          });
-          if (!event) throw new NotFoundException('赛事不存在');
-          if (event.status !== EventStatus.IN_PROGRESS) {
-            throw new ConflictException(
-              event.status === EventStatus.COMPLETED
-                ? '赛事已完赛封账，不能再纠正比分'
-                : '当前赛事不在进行中，不能纠正比分',
-            );
-          }
-          if (match.round < 1 || match.round > EVENT_TOTAL_ROUNDS) {
-            throw new ConflictException('赛事轮次数据无效，不能纠正比分');
-          }
-          if (!isTerminalMatch(match.status)) {
-            throw new ConflictException('只有已确认比分才能发起纠错');
-          }
-          try {
-            validateEventScore(
-              dto.scoreA,
-              dto.scoreB,
-              match.startingScoreA,
-              match.startingScoreB,
-            );
-          } catch (error) {
-            throw new BadRequestException(
-              error instanceof Error ? error.message : '比分无效',
-            );
-          }
-          await tx.eventMatch.update({
-            where: { id: matchId },
-            data: {
-              scoreA: dto.scoreA,
-              scoreB: dto.scoreB,
-              status: MatchStatus.CORRECTED,
-              correctionReason: dto.reason,
-              confirmedById: actor.sub,
-              confirmedAt: new Date(),
-            },
-          });
-          await this.recomputeStandings(tx, match.eventId);
-          await tx.auditLog.create({
-            data: {
-              actorId: actor.sub,
-              actorRole: actor.roles[0],
-              action: 'EVENT_SCORE_CORRECTED',
-              objectType: 'EventMatch',
-              objectId: matchId,
-              oldValue: {
-                status: match.status,
-                scoreA: match.scoreA,
-                scoreB: match.scoreB,
-                startingScoreA: match.startingScoreA,
-                startingScoreB: match.startingScoreB,
-              } as never,
-              newValue: {
-                status: MatchStatus.CORRECTED,
-                scoreA: dto.scoreA,
-                scoreB: dto.scoreB,
-                startingScoreA: match.startingScoreA,
-                startingScoreB: match.startingScoreB,
-              } as never,
-              reason: dto.reason,
-            },
-          });
-          return tx.eventMatch.findUniqueOrThrow({ where: { id: matchId } });
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-      );
-    } catch (error) {
-      if (isPrismaErrorCode(error, 'P2034')) {
-        throw new ConflictException(
-          '赛事封账或比分已被其他操作更新，请刷新后重试',
-        );
-      }
-      throw error;
-    }
+    return correctScore(this.prisma, matchId, dto, actor);
   }
 
   async finish(eventId: string, actor: AuthUser) {
-    return this.prisma.$transaction(
-      async (tx) => {
-        const event = await tx.event.findUnique({
-          where: { id: eventId },
-          // Include completed teams as well: finish marks the participant rows
-          // COMPLETED, and a retry must still be able to rebuild the ranking
-          // from those immutable rows.
-          include: {
-            teams: {
-              include: {
-                order: {
-                  select: {
-                    id: true,
-                    status: true,
-                    completedAt: true,
-                    paidCents: true,
-                    refundedCents: true,
-                  },
-                },
-              },
-            },
-            matches: true,
-          },
-        });
-        if (!event) throw new NotFoundException('赛事不存在');
-
-        this.assertEventConfiguration(event);
-        const teams = event.teams.filter((team) =>
-          event.status === EventStatus.COMPLETED
-            ? team.status === RegistrationStatus.CHECKED_IN ||
-              team.status === RegistrationStatus.COMPLETED
-            : team.status === RegistrationStatus.CHECKED_IN,
-        );
-
-        // Completion is the idempotency boundary.  Once the event is marked
-        // completed, all award writes from the same transaction have committed
-        // and a retry must only return the persisted ranking.
-        if (event.status === EventStatus.COMPLETED) {
-          await this.completeTerminalEventOrders(
-            tx,
-            event.id,
-            event.teams,
-            actor,
-          );
-          const ranked = rankSwissPairs(teams);
-          return ranked.map((team, index) => ({
-            ...team,
-            finalRank: team.finalRank ?? index + 1,
-            eventPointsAwarded:
-              team.eventPointsAwarded ||
-              eventPointsForRank(index + 1, ranked.length),
-          }));
-        }
-        if (EVENT_STATUSES_NOT_FINISHABLE.includes(event.status)) {
-          throw new ConflictException('当前赛事状态不允许完赛');
-        }
-        if (
-          event.teams.some(
-            (team) => team.order?.status === OrderStatus.REFUND_PENDING,
-          )
-        ) {
-          throw new ConflictException(
-            '赛事存在待审退款报名，请先处理退款再完赛',
-          );
-        }
-        if (event.currentRound !== EVENT_TOTAL_ROUNDS) {
-          throw new ConflictException(
-            `赛事必须完成${EVENT_TOTAL_ROUNDS}轮后才能完赛`,
-          );
-        }
-        this.assertPeopleRange(teams.length, event.capacityPeople);
-        this.assertParticipantIdsUnique(teams);
-        for (const team of teams) this.assertFixedDoubles(team);
-        for (let round = 1; round <= EVENT_TOTAL_ROUNDS; round += 1) {
-          this.assertRoundMatches(teams, event.matches, round);
-        }
-
-        const ranked = rankSwissPairs(teams);
-        const participantOutcomes = await this.finalizeEventNonParticipants(
-          tx,
-          event.id,
-          event.teams,
-          actor,
-          new Date(),
-        );
-        let awardedCount = 0;
-        for (const [index, team] of ranked.entries()) {
-          const rank = index + 1;
-          const points = eventPointsForRank(rank, ranked.length);
-          await tx.eventTeam.update({
-            where: { id: team.id },
-            data: {
-              finalRank: rank,
-              eventPointsAwarded: points,
-              status: RegistrationStatus.COMPLETED,
-            },
-          });
-          if (
-            team.order &&
-            EVENT_COMPLETED_ORDER_STATUSES.has(team.order.status)
-          ) {
-            await completeOrderFulfillment(tx, {
-              orderId: team.order.id,
-              actor,
-              objectType: 'EventTeam',
-              objectId: team.id,
-              outcome: 'COMPLETED',
-              reason: '赛事完赛且队伍有签到及完整赛果',
-              metadata: {
-                eventId: event.id,
-                finalRank: rank,
-                eventPointsAwarded: points,
-              },
-            });
-          }
-          const playerIds = eventPointRecipientIds(team);
-          for (const userId of playerIds) {
-            const idempotencyKey = `EVENT:${event.id}:${userId}`;
-            // AccountTransaction.idempotencyKey is unique.  Check it before
-            // changing the balance so an operator retry cannot issue points a
-            // second time.  The optional guard keeps lightweight unit-test
-            // doubles compatible while the real Prisma client always exposes
-            // findUnique.
-            const findAward = tx.accountTransaction?.findUnique;
-            const existingAward =
-              typeof findAward === 'function'
-                ? await findAward.call(tx.accountTransaction, {
-                    where: { idempotencyKey },
-                  })
-                : null;
-            if (existingAward) {
-              if (
-                existingAward.amount !== points ||
-                existingAward.reasonCode !== 'EVENT_RANK_POINTS'
-              ) {
-                throw new ConflictException(
-                  `赛事积分幂等流水 ${idempotencyKey} 与本次发放不一致`,
-                );
-              }
-              continue;
-            }
-            const account = await tx.account.upsert({
-              where: {
-                userId_type: { userId, type: AccountType.EVENT_POINTS },
-              },
-              update: {},
-              create: { userId, type: AccountType.EVENT_POINTS },
-            });
-            const balanceBefore = Number(account.balance ?? 0);
-            await tx.account.update({
-              where: { id: account.id },
-              data: {
-                balance: { increment: points },
-                version: { increment: 1 },
-              },
-            });
-            await tx.accountTransaction.create({
-              data: {
-                accountId: account.id,
-                kind: AccountTxnKind.CREDIT,
-                amount: points,
-                balanceBefore,
-                balanceAfter: balanceBefore + points,
-                reasonCode: 'EVENT_RANK_POINTS',
-                reason: `${event.name} 第${rank}名`,
-                operatorId: actor.sub,
-                idempotencyKey,
-              },
-            });
-            awardedCount += 1;
-          }
-        }
-        await tx.event.update({
-          where: { id: eventId },
-          data: { status: EventStatus.COMPLETED },
-        });
-        await tx.auditLog.create({
-          data: {
-            actorId: actor.sub,
-            actorRole: actor.roles[0],
-            action: 'EVENT_FINISHED',
-            objectType: 'Event',
-            objectId: eventId,
-            oldValue: {
-              status: event.status,
-              currentRound: event.currentRound,
-            } as never,
-            newValue: {
-              status: EventStatus.COMPLETED,
-              currentRound: EVENT_TOTAL_ROUNDS,
-              ranking: ranked.map((team, index) => ({
-                teamId: team.id,
-                finalRank: index + 1,
-                eventPointsAwarded: eventPointsForRank(
-                  index + 1,
-                  ranked.length,
-                ),
-              })),
-              awardedCount,
-              noShowTeamIds: participantOutcomes.noShowTeamIds,
-              expiredTeamIds: participantOutcomes.expiredTeamIds,
-            } as never,
-          },
-        });
-        return ranked.map((team, index) => ({
-          ...team,
-          finalRank: index + 1,
-          eventPointsAwarded: eventPointsForRank(index + 1, ranked.length),
-        }));
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
-  }
-
-  private async completeTerminalEventOrders(
-    tx: Prisma.TransactionClient,
-    eventId: string,
-    teams: Array<{
-      id: string;
-      status: RegistrationStatus;
-      finalRank: number | null;
-      order?: {
-        id: string;
-        status: OrderStatus;
-        completedAt: Date | null;
-      } | null;
-    }>,
-    actor: AuthUser,
-  ): Promise<void> {
-    for (const team of teams) {
-      if (
-        !team.order ||
-        team.order.completedAt ||
-        (team.status !== RegistrationStatus.COMPLETED &&
-          team.status !== RegistrationStatus.NO_SHOW)
-      ) {
-        continue;
-      }
-      const allowed =
-        team.status === RegistrationStatus.NO_SHOW
-          ? EVENT_NO_SHOW_ORDER_STATUSES
-          : EVENT_COMPLETED_ORDER_STATUSES;
-      if (!allowed.has(team.order.status)) continue;
-      await completeOrderFulfillment(tx, {
-        orderId: team.order.id,
-        actor,
-        objectType: 'EventTeam',
-        objectId: team.id,
-        outcome:
-          team.status === RegistrationStatus.NO_SHOW ? 'NO_SHOW' : 'COMPLETED',
-        reason:
-          team.status === RegistrationStatus.NO_SHOW
-            ? '赛事结束且队伍无签到记录'
-            : '补全历史完赛订单履约时间',
-        metadata: { eventId, finalRank: team.finalRank },
-      });
-    }
-  }
-
-  private async finalizeEventNonParticipants(
-    tx: Prisma.TransactionClient,
-    eventId: string,
-    teams: Array<{
-      id: string;
-      status: RegistrationStatus;
-      orderId: string | null;
-      paymentDueAt: Date | null;
-      order?: {
-        id: string;
-        status: OrderStatus;
-        completedAt: Date | null;
-      } | null;
-    }>,
-    actor: AuthUser,
-    completedAt: Date,
-  ): Promise<{ noShowTeamIds: string[]; expiredTeamIds: string[] }> {
-    const noShowTeamIds: string[] = [];
-    const expiredTeamIds: string[] = [];
-    for (const team of teams) {
-      let outcome: RegistrationStatus | null = null;
-      if (
-        team.status === RegistrationStatus.PAID &&
-        (!team.order || EVENT_NO_SHOW_ORDER_STATUSES.has(team.order.status))
-      ) {
-        outcome = RegistrationStatus.NO_SHOW;
-      } else if (
-        team.status === RegistrationStatus.REGISTERED ||
-        team.status === RegistrationStatus.WAITLISTED
-      ) {
-        outcome = RegistrationStatus.CANCELLED;
-      }
-      if (!outcome) continue;
-
-      const changed = await tx.eventTeam.updateMany({
-        where: { id: team.id, eventId, status: team.status },
-        data:
-          outcome === RegistrationStatus.NO_SHOW
-            ? { status: outcome, paymentDueAt: null }
-            : { status: outcome, paymentDueAt: null, cancelledAt: completedAt },
-      });
-      if (changed.count !== 1) continue;
-
-      if (
-        outcome === RegistrationStatus.CANCELLED &&
-        team.order?.status === OrderStatus.PENDING
-      ) {
-        await requireOrderTransition(tx, 'CANCEL_UNPAID', {
-          where: { id: team.order.id, status: OrderStatus.PENDING },
-          data: { status: OrderStatus.CANCELLED, cancelledAt: completedAt },
-        });
-        await tx.payment.updateMany({
-          where: {
-            orderId: team.order.id,
-            status: {
-              in: [
-                PaymentStatus.CREATED,
-                PaymentStatus.PROCESSING,
-                PaymentStatus.FAILED,
-              ],
-            },
-          },
-          data: { status: PaymentStatus.CLOSED },
-        });
-      } else if (outcome === RegistrationStatus.NO_SHOW && team.order) {
-        await completeOrderFulfillment(tx, {
-          orderId: team.order.id,
-          actor,
-          objectType: 'EventTeam',
-          objectId: team.id,
-          outcome: 'NO_SHOW',
-          completedAt,
-          reason: '赛事结束且队伍无签到记录',
-          metadata: { eventId },
-        });
-      }
-
-      if (outcome === RegistrationStatus.NO_SHOW) noShowTeamIds.push(team.id);
-      else expiredTeamIds.push(team.id);
-      await tx.auditLog.create({
-        data: {
-          actorId: actor.sub,
-          actorRole: actor.roles[0],
-          action:
-            outcome === RegistrationStatus.NO_SHOW
-              ? 'EVENT_TEAM_NO_SHOW'
-              : 'EVENT_REGISTRATION_EXPIRED',
-          objectType: 'EventTeam',
-          objectId: team.id,
-          oldValue: {
-            status: team.status,
-            paymentDueAt: team.paymentDueAt?.toISOString() ?? null,
-          } as never,
-          newValue: {
-            status: outcome,
-            eventId,
-            orderId: team.order?.id ?? null,
-            completedAt: completedAt.toISOString(),
-          } as never,
-        },
-      });
-    }
-    return { noShowTeamIds, expiredTeamIds };
-  }
-
-  private assertEventManager(actor: AuthUser): void {
-    if (!actor.roles.some((role) => EVENT_MANAGER_ROLES.includes(role))) {
-      throw new ForbiddenException('仅赛事管理员或管理员可创建、发布赛事');
-    }
-  }
-
-  private async recomputeStandings(
-    tx: Prisma.TransactionClient,
-    eventId: string,
-  ): Promise<void> {
-    const [teams, matches] = await Promise.all([
-      tx.eventTeam.findMany({ where: { eventId } }),
-      tx.eventMatch.findMany({
-        where: {
-          eventId,
-          status: { in: [MatchStatus.CONFIRMED, MatchStatus.CORRECTED] },
-        },
-        orderBy: [{ round: 'asc' }, { createdAt: 'asc' }],
-      }),
-    ]);
-    const state = new Map(
-      teams.map((team) => [
-        team.id,
-        {
-          points: 0,
-          wins: 0,
-          losses: 0,
-          scoreDiff: 0,
-          opponents: [] as string[],
-        },
-      ]),
-    );
-    for (const match of matches) {
-      const a = state.get(match.teamAId);
-      if (!a) continue;
-      if (!match.teamBId) {
-        a.points += 1;
-        a.wins += 1;
-        a.opponents.push('BYE');
-        continue;
-      }
-      const b = state.get(match.teamBId);
-      if (!b || match.scoreA === null || match.scoreB === null) continue;
-      try {
-        validateEventScore(
-          match.scoreA,
-          match.scoreB,
-          match.startingScoreA,
-          match.startingScoreB,
-        );
-      } catch (error) {
-        throw new ConflictException(
-          `赛事存在无效比分（${match.id}）：${error instanceof Error ? error.message : '请重新录入'}`,
-        );
-      }
-      const aWon = match.scoreA > match.scoreB;
-      a.points += aWon ? 1 : 0;
-      b.points += aWon ? 0 : 1;
-      a.wins += aWon ? 1 : 0;
-      b.wins += aWon ? 0 : 1;
-      a.losses += aWon ? 0 : 1;
-      b.losses += aWon ? 1 : 0;
-      a.scoreDiff += match.scoreA - match.scoreB;
-      b.scoreDiff += match.scoreB - match.scoreA;
-      a.opponents.push(match.teamBId);
-      b.opponents.push(match.teamAId);
-    }
-    for (const [teamId, values] of state) {
-      await tx.eventTeam.update({ where: { id: teamId }, data: values });
-    }
+    return finish(this.prisma, eventId, actor);
   }
 }

@@ -9,7 +9,8 @@ import {
   SourceChannel,
   TeamCategory,
 } from '../generated/prisma/enums.js';
-import { EventsService, eventPointRecipientIds } from './events.service.js';
+import { EventsService } from './events.service.js';
+import { eventPointRecipientIds } from './event-completion.js';
 import {
   RegisterEventTeamDto,
   AcceptEventTeamInviteDto,

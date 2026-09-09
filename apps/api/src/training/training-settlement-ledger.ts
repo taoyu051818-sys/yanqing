@@ -1,6 +1,10 @@
 import { ConflictException } from '@nestjs/common';
 import { trainingContractContributionCents } from '@yanqing/shared';
-import { Prisma, type TrainingSettlement } from '../generated/prisma/client.js';
+import {
+  Prisma,
+  ReconciliationPeriodStatus,
+  type TrainingSettlement,
+} from '../generated/prisma/client.js';
 import type { PrismaService } from '../database/prisma.service.js';
 
 type LedgerClient = Pick<
@@ -196,4 +200,34 @@ export function trainingTransaction<T>(
         throw new ConflictException('培训数据发生并发变更，请刷新后重试');
       throw error;
     });
+}
+
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
+
+export async function assertSettlementPeriodUnlocked(
+  client: Pick<Prisma.TransactionClient, 'reconciliationPeriod'>,
+  periodStart: Date,
+  periodEnd: Date,
+  operation = '新增或变更结算',
+): Promise<void> {
+  const shifted = new Date(periodStart.getTime() + SHANGHAI_OFFSET_MS);
+  const firstBusinessDay = new Date(
+    Date.UTC(
+      shifted.getUTCFullYear(),
+      shifted.getUTCMonth(),
+      shifted.getUTCDate(),
+    ) - SHANGHAI_OFFSET_MS,
+  );
+  const locked = await client.reconciliationPeriod.findFirst({
+    where: {
+      status: ReconciliationPeriodStatus.LOCKED,
+      businessDate: { gte: firstBusinessDay, lt: periodEnd },
+    },
+    select: { businessDate: true },
+  });
+  if (locked) {
+    throw new ConflictException(
+      `账期包含已锁定营业日 ${locked.businessDate.toISOString().slice(0, 10)}，不能${operation}`,
+    );
+  }
 }

@@ -1,3 +1,13 @@
+import {
+  EVENT_MINIMUM_PEOPLE,
+  EVENT_MAX_CAPACITY_PEOPLE,
+  EVENT_TOTAL_ROUNDS,
+} from './event-competition-policy.js';
+export {
+  EVENT_MINIMUM_PEOPLE,
+  EVENT_MAX_CAPACITY_PEOPLE,
+  EVENT_TOTAL_ROUNDS,
+} from './event-competition-policy.js';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -21,15 +31,6 @@ import {
 } from 'class-validator';
 
 import { SourceChannel, TeamCategory } from '../generated/prisma/enums.js';
-
-/**
- * The venue's Swiss event format is intentionally not configurable.  Keeping
- * these values next to the transport contract makes it impossible for a
- * client to accidentally create a different tournament variant.
- */
-export const EVENT_MINIMUM_PEOPLE = 24 as const;
-export const EVENT_MAX_CAPACITY_PEOPLE = 48 as const;
-export const EVENT_TOTAL_ROUNDS = 5 as const;
 
 export class CreateEventDto {
   @IsString()

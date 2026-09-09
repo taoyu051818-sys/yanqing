@@ -45,7 +45,14 @@ describe('core architecture regression boundaries', () => {
       'events/event-waitlist.ts',
       'games/game-waitlist.ts',
       'events/event-prizes.ts',
+      'events/event-rounds.ts',
+      'events/event-scoring.ts',
+      'events/event-completion.ts',
+      'events/event-standings.ts',
+      'events/event-competition-policy.ts',
       'training/training-settlements.ts',
+      'training/training-consume-corrections.ts',
+      'training/training-access.ts',
     ];
     const visited = new Set<string>();
     const violations: string[] = [];
