@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TrainingProductView } from "@yanqing/shared";
+
 import { toRefs, computed } from "vue";
 
 const props = defineProps<{
@@ -14,7 +16,7 @@ const props = defineProps<{
   actionKey: string;
   loading: boolean;
   createProduct: () => Promise<void>;
-  activeProducts: any[];
+  activeProducts: TrainingProductView[];
   classProductIndex: number;
   selectedClassProduct: any;
   classCode: string;

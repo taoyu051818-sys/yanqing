@@ -1,17 +1,22 @@
 <script setup lang="ts">
+import type { TrainingProductView } from "@yanqing/shared";
+
 import { toRefs, computed } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import { money } from "../../../../../utils/format";
 
 const props = defineProps<{
-  activeProducts: any[];
+  activeProducts: TrainingProductView[];
   activeClasses: any[];
-  products: any[];
-  coachDisplayName: (coachId?: string, fallback?: string) => any;
+  products: TrainingProductView[];
+  coachDisplayName: (coachId?: string | null, fallback?: string) => any;
   canConfigureTraining: boolean;
   actionKey: string;
-  beginProductEdit: (product: any) => void;
-  updateProduct: (product: any, enabled?: boolean) => Promise<void>;
+  beginProductEdit: (product: TrainingProductView) => void;
+  updateProduct: (
+    product: TrainingProductView,
+    enabled?: boolean,
+  ) => Promise<void>;
   editingProductId: string;
   editProductName: string;
   editProductTotalSessions: string;

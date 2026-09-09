@@ -1,3 +1,4 @@
+import type { TrainingEnrollmentView } from "@yanqing/shared";
 import type { Ref, ComputedRef } from "vue";
 import {
   useOperationTask,
@@ -43,7 +44,7 @@ interface ActionContext {
   load: () => Promise<void>;
   canAssessTrials: ComputedRef<boolean>;
   canConvertTrials: ComputedRef<boolean>;
-  enrollments: Ref<any[], any[]>;
+  enrollments: Ref<TrainingEnrollmentView[]>;
 }
 
 export function useCoachTrialsActions({

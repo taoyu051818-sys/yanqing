@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import type {
+  TrainingEnrollmentView,
+  TrainingSessionView,
+} from "@yanqing/shared";
+
 import type { useSessionStore } from "../../../../../stores/session";
 import { toRefs } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
@@ -7,47 +12,71 @@ import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
 
 const props = defineProps<{
   loading: boolean;
-  activeLessons: any[];
-  lessons: any[];
+  activeLessons: TrainingSessionView[];
+  lessons: TrainingSessionView[];
   focusedRecord: string;
-  studentsFor: (lesson: any) => any[];
-  attendanceStatus: (lesson: any, enrollment: any) => any;
+  studentsFor: (lesson: TrainingSessionView) => any[];
+  attendanceStatus: (
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) => any;
   attendanceLabel: (status: string) => string;
-  recognitionTimeline: (lesson: any, enrollment: any) => any[];
-  isConsumableLesson: (lesson: any) => boolean;
+  recognitionTimeline: (
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) => any[];
+  isConsumableLesson: (lesson: TrainingSessionView) => boolean;
   canMarkAttendance: boolean;
   canUseLessonWindow: (
-    lesson: any,
+    lesson: TrainingSessionView,
     kind: "attendanceWindow" | "completionWindow",
   ) => any;
   attendanceWindowHint: (
-    lesson: any,
+    lesson: TrainingSessionView,
   ) => "" | "未到点名窗口" | "管理员可补录点名" | "点名窗口已关闭";
   mark: (
-    lesson: any,
-    enrollment: any,
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
     status: "ATTENDED" | "ABSENT" | "LEAVE" | "CANCELLED",
   ) => void;
-  isRefundPending: (enrollment: any) => boolean;
+  isRefundPending: (enrollment: TrainingEnrollmentView) => boolean;
   canProposeConsume: boolean;
-  hasPendingProposal: (lesson: any, enrollment: any) => boolean;
-  attendanceFor: (lesson: any, enrollment: any) => any;
-  propose: (lesson: any, enrollment: any) => void;
+  hasPendingProposal: (
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) => boolean;
+  attendanceFor: (
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) => any;
+  propose: (
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) => void;
   isChecker: boolean;
   session: ReturnType<typeof useSessionStore>;
-  confirm: (lesson: any, enrollment: any) => void;
+  confirm: (
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) => void;
   completionActionLabel: (
-    lesson: any,
+    lesson: TrainingSessionView,
   ) => "待下课后确认" | "补录确认入账" | "确认窗口已关闭" | "确认入账";
   canRequestCorrection: boolean;
-  activeRecognition: (lesson: any, enrollment: any) => any;
+  activeRecognition: (
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) => any;
   activeCorrection: (recognitionId: string) => any;
-  requestCorrection: (lesson: any, enrollment: any) => void;
+  requestCorrection: (
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) => void;
   canCreateSession: boolean;
-  hasUnresolvedAttendance: (lesson: any) => boolean;
-  complete: (lesson: any) => void;
+  hasUnresolvedAttendance: (lesson: TrainingSessionView) => boolean;
+  complete: (lesson: TrainingSessionView) => void;
   lessonWindowState: (
-    lesson: any,
+    lesson: TrainingSessionView,
     kind: "attendanceWindow" | "completionWindow",
   ) => any;
 }>();

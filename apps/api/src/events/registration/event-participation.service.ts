@@ -21,7 +21,6 @@ import {
   Prisma,
   RegistrationStatus,
 } from '../../generated/prisma/client.js';
-import { orderResponse } from '../../orders/order-response.js';
 import type { EventTeamCheckInDto } from '../events.dto.js';
 import {
   assertOperationTimeWindow,
@@ -91,7 +90,24 @@ export class EventParticipationService {
       scoreDiff: registration.scoreDiff,
       finalRank: registration.finalRank,
       eventPointsAwarded: registration.eventPointsAwarded,
-      order: registration.order ? orderResponse(registration.order) : null,
+      // This endpoint intentionally exposes only registration payment evidence.
+      order: registration.order
+        ? {
+            id: registration.order.id,
+            orderNo: registration.order.orderNo,
+            status: registration.order.status,
+            payableCents: registration.order.payableCents,
+            paidCents: registration.order.paidCents,
+            refunds: registration.order.refunds.map((refund) => ({
+              id: refund.id,
+              amountCents: refund.amountCents,
+              reason: refund.reason,
+              status: refund.status,
+              requestedAt: refund.requestedAt,
+              completedAt: refund.completedAt,
+            })),
+          }
+        : null,
     };
     if (registration.status !== RegistrationStatus.WAITLISTED) {
       return { registration: registrationView, waitlistPosition: null };

@@ -1405,6 +1405,14 @@ describe("miniapp mock acceptance journeys", () => {
         reason: "错误地提前关账",
       }),
     ).rejects.toThrow("营业日结束后才可关账");
+    // This scenario owns only the cash variance. Relative demo lessons may
+    // fall into yesterday just after Shanghai midnight.
+    saveTrainingSessions(
+      getTrainingSessions().map((session) => ({
+        ...session,
+        status: "CANCELLED",
+      })),
+    );
     const blockedDate = shanghaiDate(-1);
     saveFrontDeskShifts([
       {

@@ -88,6 +88,96 @@ describe.skipIf(!url)('payment lifecycle on PostgreSQL', () => {
     const service = new OrdersService(db, config, finalizer, provider as never);
     return { member, finance, order, actor: actor as never, service };
   }
+  it('rolls back earlier domain effects when coupon fulfillment fails, then retries once', async () => {
+    const f = await fixture();
+    await db.order.update({
+      where: { id: f.order.id },
+      data: { consumedCouponCode: unique() },
+    });
+    const paymentKey = unique();
+    const execute = () =>
+      db.$transaction(async (tx) => {
+        const order = await tx.order.findUniqueOrThrow({
+          where: { id: f.order.id },
+          include: {
+            items: true,
+            membership: { include: { product: true } },
+            member: { select: { openId: true } },
+          },
+        });
+        const payment = await tx.payment.create({
+          data: {
+            paymentNo: unique(),
+            orderId: order.id,
+            userId: f.member.id,
+            operatorId: f.member.id,
+            channel: 'WECHAT',
+            amountCents: order.payableCents,
+            status: 'SUCCEEDED',
+            idempotencyKey: paymentKey,
+          },
+        });
+        await finalizer.finalize(tx, order, payment, f.member.id, 'MEMBER');
+        return { order, payment };
+      });
+    await expect(execute()).rejects.toThrow('订单优惠券不存在');
+    expect(
+      await db.order.findUniqueOrThrow({ where: { id: f.order.id } }),
+    ).toMatchObject({ status: 'PENDING', paidCents: 0, paidAt: null });
+    expect(
+      await db.courtBooking.findUniqueOrThrow({
+        where: { orderId: f.order.id },
+      }),
+    ).toMatchObject({ status: 'HELD' });
+    expect(await db.payment.count({ where: { orderId: f.order.id } })).toBe(0);
+    expect(
+      await db.auditLog.count({
+        where: { objectId: f.order.id, action: 'ORDER_PAID' },
+      }),
+    ).toBe(0);
+    await db.order.update({
+      where: { id: f.order.id },
+      data: { consumedCouponCode: null },
+    });
+    const completed = await execute();
+    const detail = JSON.parse(
+      JSON.stringify(await f.service.detail(f.order.id, f.actor)),
+    );
+    expect(detail).toMatchObject({
+      id: f.order.id,
+      status: 'PAID',
+      payableCents: 8800,
+      paidCents: 8800,
+      member: { id: f.member.id },
+    });
+    expect(detail.createdAt).toEqual(expect.any(String));
+    expect(detail.paidAt).toEqual(expect.any(String));
+    expect(detail).not.toHaveProperty('parameterSnapshot');
+    expect(detail.bookings[0].startsAt).toEqual(expect.any(String));
+    await db.$transaction((tx) =>
+      finalizer.finalize(
+        tx,
+        completed.order,
+        completed.payment,
+        f.member.id,
+        'MEMBER',
+      ),
+    );
+    expect(
+      await db.order.findUniqueOrThrow({ where: { id: f.order.id } }),
+    ).toMatchObject({ status: 'PAID', paidCents: 8800 });
+    expect(
+      await db.courtBooking.findUniqueOrThrow({
+        where: { orderId: f.order.id },
+      }),
+    ).toMatchObject({ status: 'CONFIRMED', holdExpiresAt: null });
+    expect(await db.payment.count({ where: { orderId: f.order.id } })).toBe(1);
+    expect(
+      await db.auditLog.count({
+        where: { objectId: f.order.id, action: 'ORDER_PAID' },
+      }),
+    ).toBe(1);
+  });
   it('rejects cancellation when prepay commits between its two reads, then safely retries', async () => {
     const f = await fixture();
     let signalRead!: () => void, resume!: () => void;

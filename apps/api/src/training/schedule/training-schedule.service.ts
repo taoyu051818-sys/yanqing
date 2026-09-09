@@ -1,3 +1,4 @@
+import type { TrainingSessionView } from '@yanqing/shared';
 import { trainingSessionScope } from '../../common/auth/operation-scopes.js';
 import {
   Inject,
@@ -55,7 +56,9 @@ const TRAINING_SESSION_OPERATOR_ROLES: readonly AppRole[] = [
 export class TrainingScheduleService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async listSessions(actor?: AuthUser) {
+  async listSessions(
+    actor?: AuthUser,
+  ): Promise<TrainingSessionView<Date, Prisma.Decimal>[]> {
     const observedAt = new Date();
     const [sessions, attendanceConfiguration, completionConfiguration] =
       await Promise.all([
@@ -108,10 +111,10 @@ export class TrainingScheduleService {
       );
       const state =
         observedAt < opensAt
-          ? 'NOT_OPEN'
+          ? ('NOT_OPEN' as const)
           : observedAt <= closesAt
-            ? 'OPEN'
-            : 'CLOSED';
+            ? ('OPEN' as const)
+            : ('CLOSED' as const);
       return {
         opensAt: opensAt.toISOString(),
         closesAt: closesAt.toISOString(),

@@ -1,3 +1,4 @@
+import type { PaymentQuote } from '@yanqing/shared';
 import {
   payableBookingCoupon,
   reserveBookingCoupon,
@@ -49,7 +50,7 @@ export async function paymentOptions(
   config: ConfigService,
   orderId: string,
   actor: AuthUser,
-) {
+): Promise<PaymentQuote> {
   return prisma.$transaction(
     async (tx) => {
       // A cashier is not entitled to inspect another member's payment balances.
@@ -498,7 +499,7 @@ export async function pay(
               providerPayload: {
                 provider: 'wechat',
                 orderNo: order.orderNo,
-                wechatPay,
+                wechatPay: { ...wechatPay },
               },
             },
           });

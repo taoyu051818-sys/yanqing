@@ -29,6 +29,57 @@ function access(
     return { owner: node.expression, name: node.argumentExpression.text };
 }
 describe('core architecture regression boundaries', () => {
+  it('keeps payment orchestration out of domain storage and effects inside the caller transaction', () => {
+    const entry = readFileSync(
+      resolve(root, 'src/payments/order-finalizer.service.ts'),
+      'utf8',
+    );
+    const file = ts.createSourceFile(
+      'finalizer.ts',
+      entry,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const directStores = new Set<string>();
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isPropertyAccessExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'tx'
+      )
+        directStores.add(node.name.text);
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+    expect([...directStores].sort()).toEqual(['auditLog', 'order']);
+    const effects = sources(resolve(root, 'src')).filter((path) =>
+      path.endsWith('-payment-fulfillment.ts'),
+    );
+    expect(effects.length).toBeGreaterThan(0);
+    for (const path of effects) {
+      const source = readFileSync(path, 'utf8');
+      const ast = ts.createSourceFile(
+        path,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+      );
+      const inspect = (node: ts.Node) => {
+        if (ts.isPropertyAccessExpression(node))
+          expect(node.name.text, relative(root, path)).not.toBe('$transaction');
+        if (
+          ts.isImportDeclaration(node) &&
+          ts.isStringLiteral(node.moduleSpecifier)
+        ) {
+          expect(node.moduleSpecifier.text, relative(root, path)).not.toMatch(
+            /prisma\.service|payments\/|paid-order-effects/,
+          );
+        }
+        ts.forEachChild(node, inspect);
+      };
+      inspect(ast);
+    }
+  });
   it('keeps the remaining retired services out of production', () => {
     expect(
       existsSync(

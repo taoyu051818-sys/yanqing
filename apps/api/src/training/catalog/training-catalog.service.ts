@@ -1,3 +1,4 @@
+import type { TrainingProductView } from '@yanqing/shared';
 import {
   Inject,
   ConflictException,
@@ -43,7 +44,7 @@ export class TrainingCatalogService {
     private readonly youthRules?: YouthTrainingRulesService,
   ) {}
 
-  async listProducts(actor: AuthUser) {
+  async listProducts(actor: AuthUser): Promise<TrainingProductView[]> {
     const mayConfigureProducts = actor.roles.some(
       (role) => role === AppRole.ADMIN || role === AppRole.SUPER_ADMIN,
     );

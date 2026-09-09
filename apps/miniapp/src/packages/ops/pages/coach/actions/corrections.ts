@@ -1,3 +1,7 @@
+import type {
+  TrainingEnrollmentView,
+  TrainingSessionView,
+} from "@yanqing/shared";
 import type { Ref, ComputedRef } from "vue";
 import {
   useOperationTask,
@@ -9,7 +13,10 @@ import { idempotencyKey } from "../../../../../utils/format";
 import { withPendingCreationKey } from "../../../../../utils/pending-creation-key";
 
 interface ActionContext {
-  attendanceFor: (lesson: any, enrollment: any) => any;
+  attendanceFor: (
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) => any;
   corrections: Ref<any[], any[]>;
   session: ReturnType<typeof useSessionStore>;
   canRequestCorrection: ComputedRef<boolean>;
@@ -29,13 +36,19 @@ export function useCoachCorrectionsActions({
   load,
   isChecker,
 }: ActionContext) {
-  function recognitionTimeline(lesson: any, enrollment: any) {
+  function recognitionTimeline(
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) {
     return [
       ...(attendanceFor(lesson, enrollment)?.revenueRecognitions || []),
     ].sort((a: any, b: any) => Number(a.sequence) - Number(b.sequence));
   }
 
-  function activeRecognition(lesson: any, enrollment: any) {
+  function activeRecognition(
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) {
     return [...recognitionTimeline(lesson, enrollment)]
       .reverse()
       .find((item: any) => item.type === "CONSUME" && !item.reversedBy);
@@ -61,7 +74,10 @@ export function useCoachCorrectionsActions({
     );
   }
 
-  function requestCorrection(lesson: any, enrollment: any) {
+  function requestCorrection(
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) {
     if (!canRequestCorrection.value) return;
     const recognition = activeRecognition(lesson, enrollment);
     if (!recognition || activeCorrection(recognition.id)) {
@@ -71,7 +87,7 @@ export function useCoachCorrectionsActions({
     task.start({
       title: "申请消课冲正",
       description:
-        (enrollment.student?.name ||
+        (enrollment.student?.displayName ||
           enrollment.buyer?.displayName ||
           "成人学员") +
         " · 申请不立即改变课时和收入，原消课保留，须另一名管理员批准。",

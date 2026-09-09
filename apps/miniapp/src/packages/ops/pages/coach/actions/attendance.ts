@@ -1,3 +1,7 @@
+import type {
+  TrainingEnrollmentView,
+  TrainingSessionView,
+} from "@yanqing/shared";
 import type { Ref, ComputedRef } from "vue";
 import {
   useOperationTask,
@@ -8,7 +12,7 @@ import type { useSessionStore } from "../../../../../stores/session";
 import { money } from "../../../../../utils/format";
 
 interface ActionContext {
-  activeStudents: ComputedRef<any[]>;
+  activeStudents: ComputedRef<TrainingEnrollmentView[]>;
   session: ReturnType<typeof useSessionStore>;
   task: ReturnType<typeof useOperationTask>;
   load: () => Promise<void>;
@@ -22,24 +26,30 @@ export function useCoachAttendanceActions({
   load,
   errorMessage,
 }: ActionContext) {
-  function studentsFor(lesson: any) {
+  function studentsFor(lesson: TrainingSessionView) {
     return activeStudents.value.filter(
       (item) => item.classId === lesson.classId,
     );
   }
 
-  function attendanceFor(lesson: any, enrollment: any) {
+  function attendanceFor(
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) {
     return (enrollment.attendances || []).find(
       (item: any) =>
         item.sessionId === lesson.id || item.session?.id === lesson.id,
     );
   }
 
-  function attendanceStatus(lesson: any, enrollment: any) {
+  function attendanceStatus(
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) {
     return attendanceFor(lesson, enrollment)?.status || "PENDING";
   }
 
-  function isRefundPending(enrollment: any) {
+  function isRefundPending(enrollment: TrainingEnrollmentView) {
     return enrollment.order?.status === "REFUND_PENDING";
   }
 
@@ -55,7 +65,10 @@ export function useCoachAttendanceActions({
     return labels[status] || status;
   }
 
-  function hasPendingProposal(lesson: any, enrollment: any) {
+  function hasPendingProposal(
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) {
     const attendance = attendanceFor(lesson, enrollment);
     return (
       attendance?.status === "ATTENDED" &&
@@ -64,12 +77,12 @@ export function useCoachAttendanceActions({
     );
   }
 
-  function isConsumableLesson(lesson: any) {
+  function isConsumableLesson(lesson: TrainingSessionView) {
     return !["COMPLETED", "CANCELLED"].includes(lesson.status);
   }
 
   function lessonWindowState(
-    lesson: any,
+    lesson: TrainingSessionView,
     kind: "attendanceWindow" | "completionWindow",
   ) {
     if (lesson?.[kind]?.state) return lesson[kind].state;
@@ -86,7 +99,7 @@ export function useCoachAttendanceActions({
   }
 
   function canUseLessonWindow(
-    lesson: any,
+    lesson: TrainingSessionView,
     kind: "attendanceWindow" | "completionWindow",
   ) {
     const state = lessonWindowState(lesson, kind);
@@ -96,7 +109,7 @@ export function useCoachAttendanceActions({
     );
   }
 
-  function attendanceWindowHint(lesson: any) {
+  function attendanceWindowHint(lesson: TrainingSessionView) {
     const state = lessonWindowState(lesson, "attendanceWindow");
     if (state === "NOT_OPEN") return "未到点名窗口";
     if (state === "CLOSED" && lesson?.attendanceWindow?.mayHistoricallyOverride)
@@ -105,7 +118,7 @@ export function useCoachAttendanceActions({
     return "";
   }
 
-  function completionActionLabel(lesson: any) {
+  function completionActionLabel(lesson: TrainingSessionView) {
     const state = lessonWindowState(lesson, "completionWindow");
     if (state === "NOT_OPEN") return "待下课后确认";
     if (state === "CLOSED" && lesson?.completionWindow?.mayHistoricallyOverride)
@@ -114,8 +127,8 @@ export function useCoachAttendanceActions({
     return "确认入账";
   }
 
-  function hasUnresolvedAttendance(lesson: any) {
-    return studentsFor(lesson).some((enrollment: any) => {
+  function hasUnresolvedAttendance(lesson: TrainingSessionView) {
+    return studentsFor(lesson).some((enrollment: TrainingEnrollmentView) => {
       const attendance = attendanceFor(lesson, enrollment);
       if (!attendance) return true;
       if (["PENDING", "LEAVE", "MAKEUP_REQUIRED"].includes(attendance.status))
@@ -167,8 +180,8 @@ export function useCoachAttendanceActions({
   }
 
   function mark(
-    lesson: any,
-    enrollment: any,
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
     status: "ATTENDED" | "ABSENT" | "LEAVE" | "CANCELLED",
   ) {
     const labels = {
@@ -217,7 +230,10 @@ export function useCoachAttendanceActions({
     });
   }
 
-  function propose(lesson: any, enrollment: any) {
+  function propose(
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) {
     if (!isConsumableLesson(lesson)) {
       errorMessage.value = "已结束或取消的课次不能继续消课";
       return;
@@ -250,7 +266,10 @@ export function useCoachAttendanceActions({
     });
   }
 
-  function confirm(lesson: any, enrollment: any) {
+  function confirm(
+    lesson: TrainingSessionView,
+    enrollment: TrainingEnrollmentView,
+  ) {
     if (!isConsumableLesson(lesson)) return;
     const attendance = attendanceFor(lesson, enrollment);
     if (!attendance?.operatorId || attendance.operatorId === session.user?.id) {
@@ -294,7 +313,7 @@ export function useCoachAttendanceActions({
     });
   }
 
-  function complete(lesson: any) {
+  function complete(lesson: TrainingSessionView) {
     if (!isConsumableLesson(lesson)) return;
     if (hasUnresolvedAttendance(lesson)) {
       errorMessage.value = "仍有未处理出勤或未确认消课，请逐个处理后结束课次。";

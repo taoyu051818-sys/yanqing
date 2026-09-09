@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import type {
+  TrainingEnrollmentView,
+  TrainingProductView,
+  TrainingSessionView,
+} from "@yanqing/shared";
+
 import { useCoachViewModel } from "./actions/projection.js";
 
 import { useTrainingProductForm } from "./forms/product-form";
@@ -51,13 +57,13 @@ const task = useOperationTask();
 
 const session = useSessionStore();
 
-const lessons = ref<any[]>([]);
+const lessons = ref<TrainingSessionView[]>([]);
 
-const enrollments = ref<any[]>([]);
+const enrollments = ref<TrainingEnrollmentView[]>([]);
 
 const corrections = ref<any[]>([]);
 
-const products = ref<any[]>([]);
+const products = ref<TrainingProductView[]>([]);
 
 const courtAvailability = ref<CourtAvailability | null>(null);
 
@@ -220,7 +226,10 @@ const {
   trials,
 });
 
-function coachDisplayName(coachId?: string, fallback = "班级教练待配置") {
+function coachDisplayName(
+  coachId?: string | null,
+  fallback = "班级教练待配置",
+) {
   if (!coachId) return fallback;
   if (coachId === session.user?.id)
     return session.user?.displayName || "当前教练";

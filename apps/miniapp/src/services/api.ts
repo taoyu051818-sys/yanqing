@@ -1,6 +1,15 @@
+import type {
+  OrderView,
+  OrderPage,
+  PaymentQuote,
+  PaymentResult,
+  TrainingProductView,
+  TrainingSessionView,
+  TrainingEnrollmentView,
+} from "@yanqing/shared";
 import { api, download, request, upload } from "./http";
-import type { GameDetail, GameParticipants } from '../types/game';
-import type { TeamInviteView } from '../types/event-signup';
+import type { GameDetail, GameParticipants } from "../types/game";
+import type { TeamInviteView } from "../types/event-signup";
 import type {
   CourtAvailability,
   Member360View,
@@ -117,11 +126,20 @@ export const endpoints = {
   cancelVenueClosure: (id: string, reason: string) =>
     api.post<VenueClosure>(`/venues/closures/${id}/cancel`, { reason }),
   createBooking: (data: CreateVenueBookingCommand) =>
-    api.post<Record<string, any>>("/venues/bookings", data),
-  orders: (params: { status?: string; businessType?: string; page?: number; pageSize?: number } = {}) => api.get<{ items: any[]; total: number }>("/orders", params),
-  order: (id: string) => api.get<Record<string, any>>(`/orders/${id}`),
-  paymentOptions: (id: string) => api.get<any>(`/orders/${id}/payment-options`),
-  payOrder: (id: string, data: object) => api.post(`/orders/${id}/pay`, data),
+    api.post<OrderView>("/venues/bookings", data),
+  orders: (
+    params: {
+      status?: string;
+      businessType?: string;
+      page?: number;
+      pageSize?: number;
+    } = {},
+  ) => api.get<OrderPage>("/orders", params),
+  order: (id: string) => api.get<OrderView>(`/orders/${id}`),
+  paymentOptions: (id: string) =>
+    api.get<PaymentQuote>(`/orders/${id}/payment-options`),
+  payOrder: (id: string, data: object) =>
+    api.post<PaymentResult>(`/orders/${id}/pay`, data),
   cancelPendingOrder: (id: string, data: object) =>
     api.post(`/orders/${id}/cancel`, data),
   refundOrder: (id: string, data: object) =>
@@ -132,9 +150,12 @@ export const endpoints = {
     api.post(`/orders/refunds/${refundId}/reject`, data),
   games: () => api.get<any[]>("/games"),
   game: (id: string) => api.get<GameDetail>(`/games/${encodeURIComponent(id)}`),
-  gameParticipants: (id: string) => request<GameParticipants>({
-    url: `/games/${encodeURIComponent(id)}/participants`, method: 'GET', redirectOnUnauthorized: false,
-  }),
+  gameParticipants: (id: string) =>
+    request<GameParticipants>({
+      url: `/games/${encodeURIComponent(id)}/participants`,
+      method: "GET",
+      redirectOnUnauthorized: false,
+    }),
   createGame: (data: object) => api.post("/games", data),
   applyHost: () => api.post("/games/hosts/apply"),
   hostApplications: () => api.get<any[]>("/games/host-applications"),
@@ -147,15 +168,25 @@ export const endpoints = {
   cancelGame: (id: string, data: object) =>
     api.post(`/games/${id}/cancel`, data),
   registerGame: (id: string, creationIdempotencyKey?: string) =>
-    request({ url: `/games/${encodeURIComponent(id)}/register`, method: 'POST', redirectOnUnauthorized: false, data: {
-      sourceChannel: "MINI_PROGRAM",
-      creationIdempotencyKey,
-    } }),
+    request({
+      url: `/games/${encodeURIComponent(id)}/register`,
+      method: "POST",
+      redirectOnUnauthorized: false,
+      data: {
+        sourceChannel: "MINI_PROGRAM",
+        creationIdempotencyKey,
+      },
+    }),
   promoteGameWaitlist: (id: string) =>
     api.post(`/games/${id}/promote-waitlist`),
   grantMaturedGameRewards: () => api.post("/games/rewards/grant-matured"),
   events: () => api.get<any[]>("/events"),
-  event: (id: string) => request<Record<string, any>>({ url: `/events/${encodeURIComponent(id)}`, method: 'GET', redirectOnUnauthorized: false }),
+  event: (id: string) =>
+    request<Record<string, any>>({
+      url: `/events/${encodeURIComponent(id)}`,
+      method: "GET",
+      redirectOnUnauthorized: false,
+    }),
   managedEvents: () => api.get<any[]>("/events/managed"),
   managedEvent: (id: string) =>
     api.get<Record<string, any>>(`/events/managed/${id}`),
@@ -170,18 +201,29 @@ export const endpoints = {
       sourceChannel: "MINI_PROGRAM",
     }),
   createTeamInvite: (id: string, data: object) =>
-    api.post<{ partnerInviteCode: string; expiresAt: string }>(`/events/${encodeURIComponent(id)}/team-invites`, data),
+    api.post<{ partnerInviteCode: string; expiresAt: string }>(
+      `/events/${encodeURIComponent(id)}/team-invites`,
+      data,
+    ),
   teamInvite: (id: string, partnerInviteCode: string, authenticated = false) =>
-    request<TeamInviteView>({ url: `/events/${encodeURIComponent(id)}/team-invites/${authenticated ? 'context' : 'preview'}`, method: 'POST', data: { partnerInviteCode }, redirectOnUnauthorized: false }),
+    request<TeamInviteView>({
+      url: `/events/${encodeURIComponent(id)}/team-invites/${authenticated ? "context" : "preview"}`,
+      method: "POST",
+      data: { partnerInviteCode },
+      redirectOnUnauthorized: false,
+    }),
   acceptTeamInvite: (id: string, data: object) =>
-    api.post<TeamInviteView>(`/events/${encodeURIComponent(id)}/team-invites/accept`, data),
+    api.post<TeamInviteView>(
+      `/events/${encodeURIComponent(id)}/team-invites/accept`,
+      data,
+    ),
   promoteEventWaitlist: (id: string) =>
     api.post(`/events/${id}/promote-waitlist`),
   cancelEventRegistration: (id: string, data: object) =>
     api.post(`/events/${id}/registration/cancel`, data),
   cancelEvent: (id: string, data: object) =>
     api.post(`/events/${id}/cancel`, data),
-  trainingProducts: () => api.get<any[]>("/training/products"),
+  trainingProducts: () => api.get<TrainingProductView[]>("/training/products"),
   createTrainingProduct: (data: object) => api.post("/training/products", data),
   updateTrainingProduct: (id: string, data: object) =>
     api.patch(`/training/products/${id}`, data),
@@ -228,7 +270,9 @@ export const endpoints = {
     api.get<any[]>("/members/me/accounts/transactions"),
   referralRewards: () => api.get<any[]>("/referrals/me/rewards"),
   createReferralInvite: () =>
-    api.post<{ inviteCode: string; expiresAt: string }>("/referrals/me/invites"),
+    api.post<{ inviteCode: string; expiresAt: string }>(
+      "/referrals/me/invites",
+    ),
   bindReferral: (inviteCode: string) =>
     api.post<{ bound: true }>("/members/me/referrer", {
       inviteCode,
@@ -246,7 +290,8 @@ export const endpoints = {
     api.post(`/alliance/coupon-templates/${templateId}/status`, data),
   generateCouponCodes: (templateId: string, data: object) =>
     api.post(`/alliance/coupon-templates/${templateId}/codes`, data),
-  claimCoupon: (code: string) => api.post(`/alliance/coupons/${encodeURIComponent(code)}/claim`),
+  claimCoupon: (code: string) =>
+    api.post(`/alliance/coupons/${encodeURIComponent(code)}/claim`),
   myCoupons: () => api.get<any[]>("/alliance/coupons/me"),
   couponQr: (code: string) =>
     api.get<Record<string, any>>(`/alliance/coupons/${code}/qr`),
@@ -344,8 +389,7 @@ export const endpoints = {
     api.post(`/inventory/operations/${id}/post`, { idempotencyKey }),
   cancelInventoryOperation: (id: string, reason: string) =>
     api.post(`/inventory/operations/${id}/cancel`, { reason }),
-  adminOrders: () =>
-    api.get<{ items: any[]; total: number }>("/orders/admin/all"),
+  adminOrders: () => api.get<OrderPage>("/orders/admin/all"),
   currentFrontDeskShift: () => api.get<any>("/operations/shifts/current"),
   frontDeskShiftHistory: (params: Record<string, any> = {}) =>
     api.get<any[]>("/operations/shifts/history", params),
@@ -355,7 +399,8 @@ export const endpoints = {
     api.post(`/operations/shifts/${id}/close`, data),
   reviewFrontDeskShiftVariance: (id: string, data: object) =>
     api.post(`/operations/shifts/${id}/review-variance`, data),
-  adminEnrollments: () => api.get<any[]>("/training/admin/enrollments"),
+  adminEnrollments: () =>
+    api.get<TrainingEnrollmentView[]>("/training/admin/enrollments"),
   managedGames: () => api.get<any[]>("/games/managed"),
   checkInVenueOrder: (orderId: string, data: object = {}) =>
     api.post(`/venues/orders/${orderId}/check-in`, data),
@@ -364,9 +409,11 @@ export const endpoints = {
   checkInGame: (gameId: string, userId: string, data: object = {}) =>
     api.post(`/games/${gameId}/check-in/${userId}`, data),
   completeGame: (gameId: string) => api.post(`/games/${gameId}/complete`),
-  members: (params: Record<string, any> = {}) => api.get<MemberDirectory>("/members", params),
+  members: (params: Record<string, any> = {}) =>
+    api.get<MemberDirectory>("/members", params),
   member360: (id: string) => api.get<Member360View>(`/members/${id}/360`),
-  leadOwners: (params: Record<string, any> = {}) => api.get<any>("/members/leads/owners", params),
+  leadOwners: (params: Record<string, any> = {}) =>
+    api.get<any>("/members/leads/owners", params),
   customerLeads: (params: Record<string, any> = {}) =>
     api.get<any>("/members/leads", params),
   createCustomerLead: (data: object) => api.post("/members/leads", data),
@@ -423,7 +470,7 @@ export const endpoints = {
     api.post(`/training/sessions/${sessionId}/attendance/makeup`, data),
   completeTrainingSession: (sessionId: string, data: object = {}) =>
     api.post(`/training/sessions/${sessionId}/complete`, data),
-  trainingSessions: () => api.get<any[]>("/training/sessions"),
+  trainingSessions: () => api.get<TrainingSessionView[]>("/training/sessions"),
   nextEventRound: (eventId: string) =>
     api.post(`/events/${eventId}/rounds/next`),
   correctEventPairings: (eventId: string, round: number, data: object) =>

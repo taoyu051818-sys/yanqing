@@ -1,3 +1,8 @@
+import type {
+  TrainingEnrollmentView,
+  TrainingProductView,
+  TrainingSessionView,
+} from "@yanqing/shared";
 import type { Ref, ComputedRef } from "vue";
 import { computed } from "vue";
 import { hasOperationsAccess } from "../../../../../config/operations";
@@ -8,10 +13,10 @@ interface ActionContext {
   session: ReturnType<typeof useSessionStore>;
   staffUsers: Ref<any[], any[]>;
   corrections: Ref<any[], any[]>;
-  products: Ref<any[], any[]>;
+  products: Ref<TrainingProductView[]>;
   classProductIndex: Ref<number, number>;
   sessionClassIndex: Ref<number, number>;
-  lessons: Ref<any[], any[]>;
+  lessons: Ref<TrainingSessionView[]>;
   trialSessionIndex: Ref<number, number>;
   trialSubjectIndex: Ref<number, number>;
   leads: Ref<any[], any[]>;
@@ -24,7 +29,7 @@ interface ActionContext {
   sessionDate: Ref<string, string>;
   sessionStartTime: Ref<string, string>;
   sessionEndTime: Ref<string, string>;
-  enrollments: Ref<any[], any[]>;
+  enrollments: Ref<TrainingEnrollmentView[]>;
   trials: Ref<any[], any[]>;
 }
 
@@ -146,8 +151,8 @@ export function useCoachViewModel({
   const activeClasses = computed(() =>
     activeProducts.value.flatMap((product) =>
       (product.classes || [])
-        .filter((trainingClass: any) => trainingClass.active !== false)
-        .map((trainingClass: any) => ({ ...trainingClass, product })),
+        .filter((trainingClass) => trainingClass.active !== false)
+        .map((trainingClass) => ({ ...trainingClass, product })),
     ),
   );
 
@@ -189,7 +194,7 @@ export function useCoachViewModel({
     () =>
       selectedTrialClass.value?.product ||
       activeProducts.value.find(
-        (item) => item.id === selectedTrialClass.value?.productId,
+        (item) => item.id === selectedTrialClass.value?.product?.id,
       ) ||
       null,
   );
@@ -262,7 +267,7 @@ export function useCoachViewModel({
       "已消课",
       String(
         enrollments.value.reduce(
-          (total, item) => total + Number(item.usedSessions || 0),
+          (total, item) => total + Number(item.consumedSessions || 0),
           0,
         ),
       ),

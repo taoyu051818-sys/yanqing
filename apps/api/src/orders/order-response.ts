@@ -1,19 +1,49 @@
-import { pendingPaymentDeadline } from './pending-order-policy.js'
+import type { OrderView } from '@yanqing/shared';
+import { pendingPaymentDeadline } from './pending-order-policy.js';
 
-type JsonRecord = Record<string, any>
+import type {
+  Order,
+  OrderItem,
+  Payment,
+  Refund,
+  CourtBooking,
+  Court,
+  GameRegistration,
+  Game,
+  EventTeam,
+  Event,
+  TrainingEnrollment,
+  TrainingProduct,
+  Student,
+} from '../generated/prisma/client.js';
 
-const record = (value: unknown): JsonRecord =>
-  value && typeof value === 'object' ? (value as JsonRecord) : {}
+type BookingSource = CourtBooking & { court?: Court };
+type GameRegistrationSource = GameRegistration & { game?: Game };
+type EventTeamSource = EventTeam & { event?: Event };
+type EnrollmentSource = TrainingEnrollment & {
+  product?: TrainingProduct;
+  student?: Student | null;
+};
+export type OrderProjectionSource = Order & {
+  member?: { id: string; displayName: string };
+  items?: OrderItem[];
+  payments?: Payment[];
+  refunds?: Refund[];
+  bookings?: BookingSource[];
+  gameRegistration?: GameRegistrationSource | null;
+  eventTeam?: EventTeamSource | null;
+  trainingEnrollment?: EnrollmentSource | null;
+};
 
-const compact = <T extends JsonRecord>(value: T): T => {
-  for (const key of Object.keys(value)) {
-    if (value[key] === undefined) delete value[key]
+const compact = <T extends object>(value: T): T => {
+  for (const key of Object.keys(value) as Array<keyof T>) {
+    if (value[key] === undefined) delete value[key];
   }
-  return value
-}
+  return value;
+};
 
-const orderItemView = (value: unknown) => {
-  const item = record(value)
+const orderItemView = (value: OrderItem) => {
+  const item = value;
   return compact({
     id: item.id,
     itemType: item.itemType,
@@ -22,11 +52,11 @@ const orderItemView = (value: unknown) => {
     quantity: item.quantity,
     unitPriceCents: item.unitPriceCents,
     amountCents: item.amountCents,
-  })
-}
+  });
+};
 
-const paymentView = (value: unknown) => {
-  const payment = record(value)
+const paymentView = (value: Payment) => {
+  const payment = value;
   return compact({
     id: payment.id,
     paymentNo: payment.paymentNo,
@@ -36,11 +66,11 @@ const paymentView = (value: unknown) => {
     paidAt: payment.paidAt,
     createdAt: payment.createdAt,
     updatedAt: payment.updatedAt,
-  })
-}
+  });
+};
 
-const refundView = (value: unknown) => {
-  const refund = record(value)
+const refundView = (value: Refund) => {
+  const refund = value;
   return compact({
     id: refund.id,
     refundNo: refund.refundNo,
@@ -51,34 +81,33 @@ const refundView = (value: unknown) => {
     requestedAt: refund.requestedAt,
     approvedAt: refund.approvedAt,
     completedAt: refund.completedAt,
-  })
-}
+  });
+};
 
-const bookingView = (value: unknown) => {
-  const booking = record(value)
-  const court = record(booking.court)
+const bookingView = (value: BookingSource) => {
+  const booking = value;
+  const court = booking.court;
   return compact({
     id: booking.id,
     status: booking.status,
     startsAt: booking.startsAt,
     endsAt: booking.endsAt,
-    checkedInAt: booking.checkedInAt,
     operatorOverride: booking.operatorOverride || undefined,
-    completedAt: booking.completedAt,
-    court: court.id
+    completedAt: booking.fulfilledAt,
+    court: court?.id
       ? compact({ id: court.id, code: court.code, name: court.name })
       : undefined,
-  })
-}
+  });
+};
 
-const gameRegistrationView = (value: unknown) => {
-  const registration = record(value)
-  const game = record(registration.game)
+const gameRegistrationView = (value: GameRegistrationSource) => {
+  const registration = value;
+  const game = registration.game;
   return compact({
     id: registration.id,
     status: registration.status,
     checkedInAt: registration.checkedInAt,
-    game: game.id
+    game: game?.id
       ? compact({
           id: game.id,
           code: game.code,
@@ -89,19 +118,19 @@ const gameRegistrationView = (value: unknown) => {
           endsAt: game.endsAt,
         })
       : undefined,
-  })
-}
+  });
+};
 
-const eventTeamView = (value: unknown) => {
-  const team = record(value)
-  const event = record(team.event)
+const eventTeamView = (value: EventTeamSource) => {
+  const team = value;
+  const event = team.event;
   return compact({
     id: team.id,
     name: team.name,
     category: team.category,
     status: team.status,
     paymentDueAt: team.paymentDueAt,
-    event: event.id
+    event: event?.id
       ? compact({
           id: event.id,
           code: event.code,
@@ -110,34 +139,39 @@ const eventTeamView = (value: unknown) => {
           startsAt: event.startsAt,
         })
       : undefined,
-  })
-}
+  });
+};
 
-const trainingEnrollmentView = (value: unknown) => {
-  const enrollment = record(value)
-  const product = record(enrollment.product)
-  const student = record(enrollment.student)
+const trainingEnrollmentView = (value: EnrollmentSource) => {
+  const enrollment = value;
+  const product = enrollment.product;
+  const student = enrollment.student;
   return compact({
     id: enrollment.id,
     status: enrollment.status,
     totalSessions: enrollment.totalSessions,
-    remainingSessions: enrollment.remainingSessions,
-    product: product.id
+    remainingSessions: Math.max(
+      0,
+      enrollment.totalSessions - enrollment.consumedSessions,
+    ),
+    product: product?.id
       ? compact({ id: product.id, code: product.code, name: product.name })
       : undefined,
-    student: student.id
-      ? compact({ id: student.id, name: student.name })
+    student: student?.id
+      ? compact({ id: student.id, name: student.displayName })
       : undefined,
-  })
-}
+  });
+};
 
 /**
  * HTTP order DTO. Economic and idempotency snapshots remain in PostgreSQL for
  * fulfilment, settlement and audit, but never cross the client boundary.
  */
-export const orderResponse = (value: unknown) => {
-  const order = record(value)
-  const member = record(order.member)
+export const orderResponse = (
+  value: OrderProjectionSource,
+): OrderView<Date> => {
+  const order = value;
+  const member = order.member;
   return compact({
     id: order.id,
     orderNo: order.orderNo,
@@ -155,11 +189,10 @@ export const orderResponse = (value: unknown) => {
     paidAt: order.paidAt,
     completedAt: order.completedAt,
     cancelledAt: order.cancelledAt,
-    paymentExpiresAt:
-      pendingPaymentDeadline(order)?.toISOString(),
+    paymentExpiresAt: pendingPaymentDeadline(order)?.toISOString(),
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
-    member: member.id
+    member: member?.id
       ? compact({ id: member.id, displayName: member.displayName })
       : undefined,
     items: Array.isArray(order.items)
@@ -181,5 +214,5 @@ export const orderResponse = (value: unknown) => {
     trainingEnrollment: order.trainingEnrollment
       ? trainingEnrollmentView(order.trainingEnrollment)
       : undefined,
-  })
-}
+  });
+};

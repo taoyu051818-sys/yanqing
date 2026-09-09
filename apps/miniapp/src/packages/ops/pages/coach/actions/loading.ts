@@ -1,3 +1,8 @@
+import type {
+  TrainingEnrollmentView,
+  TrainingProductView,
+  TrainingSessionView,
+} from "@yanqing/shared";
 import type { Ref, ComputedRef } from "vue";
 import { nextTick } from "vue";
 import { endpoints } from "../../../../../services/api";
@@ -16,10 +21,10 @@ interface ActionContext {
   loading: Ref<boolean, boolean>;
   canManageTrials: ComputedRef<boolean>;
   canConfigureTraining: ComputedRef<boolean>;
-  lessons: Ref<any[], any[]>;
-  enrollments: Ref<any[], any[]>;
+  lessons: Ref<TrainingSessionView[]>;
+  enrollments: Ref<TrainingEnrollmentView[]>;
   corrections: Ref<any[], any[]>;
-  products: Ref<any[], any[]>;
+  products: Ref<TrainingProductView[]>;
   trials: Ref<any[], any[]>;
   leads: Ref<any[], any[]>;
   trialStudents: Ref<any[], any[]>;
@@ -28,109 +33,20 @@ interface ActionContext {
   youthRules: Ref<any[], any[]>;
   staffUsers: Ref<any[], any[]>;
   classProductIndex: Ref<number, number>;
-  activeProducts: ComputedRef<any[]>;
+  activeProducts: ComputedRef<TrainingProductView[]>;
   sessionClassIndex: Ref<number, number>;
   sessionClasses: ComputedRef<any[]>;
   trialSessionIndex: Ref<number, number>;
-  schedulableTrialSessions: ComputedRef<any[]>;
+  schedulableTrialSessions: ComputedRef<TrainingSessionView[]>;
   selectedTrialClass: ComputedRef<any>;
   trialCoachId: Ref<string, string>;
   canCreateSession: ComputedRef<boolean>;
   managementView: Ref<string, string>;
   managementViewHandled: Ref<boolean, boolean>;
   deepLinkHandled: Ref<boolean, boolean>;
-  deepLinkQuery: Ref<
-    {
-      focus?: string | undefined;
-      id?: string | undefined;
-      orderId?: string | undefined;
-      eventId?: string | undefined;
-      gameId?: string | undefined;
-      sessionId?: string | undefined;
-      attendanceId?: string | undefined;
-      userId?: string | undefined;
-      round?: string | undefined;
-    },
-    | OpsDeepLinkQuery
-    | {
-        focus?: string | undefined;
-        id?: string | undefined;
-        orderId?: string | undefined;
-        eventId?: string | undefined;
-        gameId?: string | undefined;
-        sessionId?: string | undefined;
-        attendanceId?: string | undefined;
-        userId?: string | undefined;
-        round?: string | undefined;
-      }
-  >;
+  deepLinkQuery: Ref<OpsDeepLinkQuery>;
   focusedRecord: Ref<string, string>;
-  courtAvailability: Ref<
-    {
-      date: string;
-      courts: { id: string; name: string; usage: string; enabled: boolean }[];
-      slots: {
-        id: string;
-        label: string;
-        startMinutes: number;
-        endMinutes: number;
-        period?: "EARLY" | "DAYTIME" | "PRIME" | undefined;
-        enabled: boolean;
-        price?:
-          | {
-              priceCents: number;
-              newcomerPriceCents?: number | null | undefined;
-            }
-          | undefined;
-      }[];
-      bookings: {
-        courtId: string;
-        startsAt: string;
-        endsAt: string;
-        status: string;
-        usage: string;
-      }[];
-      closures: {
-        courtId: string;
-        startsAt: string;
-        endsAt: string;
-        status: "ACTIVE" | "CANCELLED";
-      }[];
-    } | null,
-    | CourtAvailability
-    | {
-        date: string;
-        courts: { id: string; name: string; usage: string; enabled: boolean }[];
-        slots: {
-          id: string;
-          label: string;
-          startMinutes: number;
-          endMinutes: number;
-          period?: "EARLY" | "DAYTIME" | "PRIME" | undefined;
-          enabled: boolean;
-          price?:
-            | {
-                priceCents: number;
-                newcomerPriceCents?: number | null | undefined;
-              }
-            | undefined;
-        }[];
-        bookings: {
-          courtId: string;
-          startsAt: string;
-          endsAt: string;
-          status: string;
-          usage: string;
-        }[];
-        closures: {
-          courtId: string;
-          startsAt: string;
-          endsAt: string;
-          status: "ACTIVE" | "CANCELLED";
-        }[];
-      }
-    | null
-  >;
+  courtAvailability: Ref<CourtAvailability | null>;
   sessionDate: Ref<string, string>;
   selectedCourtIds: Ref<string[], string[]>;
   sessionCourts: ComputedRef<

@@ -1,3 +1,4 @@
+import type { WechatPaymentParameters } from '@yanqing/shared';
 import {
   createDecipheriv,
   createSign,
@@ -37,7 +38,7 @@ export class WechatPayService {
     description: string;
     amountCents: number;
     openId: string;
-  }) {
+  }): Promise<WechatPaymentParameters> {
     const appId = this.required('WECHAT_APP_ID');
     const mchId = this.required('WECHAT_PAY_MCH_ID');
     const serialNo = this.required('WECHAT_PAY_SERIAL_NO');

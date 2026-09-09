@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TrainingSessionView } from "@yanqing/shared";
+
 import { toRefs, computed } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import { shortDate } from "../../../../../utils/format";
@@ -18,7 +20,7 @@ const props = defineProps<{
   trialStudentIndex: number;
   trialLinkLead: boolean;
   setTrialLinkLead: (event: any) => void;
-  schedulableTrialSessions: any[];
+  schedulableTrialSessions: TrainingSessionView[];
   trialSessionIndex: number;
   changeTrialSession: (event: any) => void;
   selectedTrialSession: any;

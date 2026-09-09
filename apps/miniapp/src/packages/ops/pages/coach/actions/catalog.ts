@@ -1,3 +1,4 @@
+import type { TrainingProductView } from "@yanqing/shared";
 import type { Ref, ComputedRef } from "vue";
 import {
   useOperationTask,
@@ -154,7 +155,7 @@ export function useCoachCatalogActions({
     }
   }
 
-  function beginProductEdit(product: any) {
+  function beginProductEdit(product: TrainingProductView) {
     editingProductId.value = product.id;
     editProductName.value = product.name || "";
     editProductTotalSessions.value = String(product.totalSessions || "");
@@ -171,7 +172,7 @@ export function useCoachCatalogActions({
   }
 
   async function updateProduct(
-    product: any,
+    product: TrainingProductView,
     enabled = product.enabled !== false,
   ) {
     if (!canConfigureTraining.value || actionKey.value) return;

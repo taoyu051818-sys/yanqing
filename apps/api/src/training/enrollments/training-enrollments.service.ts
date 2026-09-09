@@ -1,3 +1,4 @@
+import type { TrainingEnrollmentView } from '@yanqing/shared';
 import {
   Inject,
   BadRequestException,
@@ -40,7 +41,10 @@ export class TrainingEnrollmentsService {
     private readonly youthRules?: YouthTrainingRulesService,
   ) {}
 
-  async listEnrollments(actor: AuthUser, all = false) {
+  async listEnrollments(
+    actor: AuthUser,
+    all = false,
+  ): Promise<TrainingEnrollmentView<Date>[]> {
     const coachScope =
       all &&
       actor.roles.includes(AppRole.COACH) &&

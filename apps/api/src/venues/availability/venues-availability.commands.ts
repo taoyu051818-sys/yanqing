@@ -1,3 +1,4 @@
+import type { CourtAvailability } from '@yanqing/shared';
 import { releasePendingOrderResources } from '../../orders/pending-order-resources.js';
 import { transitionOrder } from '../../orders/order-transition.js';
 import { PrismaService } from '../../database/prisma.service.js';
@@ -15,7 +16,7 @@ export async function availability(
   prisma: PrismaService,
   date: string,
   includeUnavailable = false,
-) {
+): Promise<CourtAvailability<Date>> {
   await releaseExpiredHolds(prisma);
   const dayStart = atMinutes(date, 0);
   const dayEnd = atMinutes(date, 24 * 60);
