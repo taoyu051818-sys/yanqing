@@ -1,4 +1,4 @@
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 export type Row = Record<string, any>;
 export interface Session {
   user: { id: string; displayName: string; roles: string[] };
@@ -7,6 +7,12 @@ export interface Session {
   expiresAt: string;
 }
 export const session = ref<Session | null>(null);
+let sessionVersion = 0;
+watch(session, () => { sessionVersion += 1; }, { flush: 'sync' });
+export class SessionChangedError extends Error {
+  constructor() { super('登录状态已更新，请重新操作'); }
+}
+
 export const roleNames: Record<string, string> = {
   MEMBER: '会员',
   FRONT_DESK: '前台',
@@ -65,17 +71,29 @@ export async function api<T = any>(
   method = 'GET',
   data?: unknown,
 ): Promise<T> {
-  const response = await fetch('/api/v1' + path, {
-    method,
-    credentials: 'same-origin',
-    headers: {
-      ...(data !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(session.value ? { 'X-CSRF-Token': session.value.csrfToken } : {}),
-    },
-    body: data === undefined ? undefined : JSON.stringify(data),
-    cache: 'no-store',
-  });
-  const payload = await response.json().catch(() => null);
+  const version = sessionVersion;
+  const assertCurrent = () => {
+    if (version !== sessionVersion) throw new SessionChangedError();
+  };
+  let response: Response;
+  let payload: any;
+  try {
+    response = await fetch('/api/v1' + path, {
+      method,
+      credentials: 'same-origin',
+      headers: {
+        ...(data !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(session.value ? { 'X-CSRF-Token': session.value.csrfToken } : {}),
+      },
+      body: data === undefined ? undefined : JSON.stringify(data),
+      cache: 'no-store',
+    });
+    payload = await response.json().catch(() => null);
+  } catch (cause) {
+    assertCurrent();
+    throw cause;
+  }
+  assertCurrent();
   if (!response.ok) {
     if (response.status === 401) session.value = null;
     throw new Error(

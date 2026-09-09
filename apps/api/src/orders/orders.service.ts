@@ -170,6 +170,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
       this.prisma.order.findMany({
         where,
         include: {
+          ...(all ? { member: { select: { id: true, displayName: true } } } : {}),
           items: true,
           payments: { orderBy: { createdAt: 'desc' } },
           refunds: { orderBy: { requestedAt: 'desc' } },

@@ -70,7 +70,10 @@ const today = new Intl.DateTimeFormat('zh-CN', {
   weekday: 'long',
 }).format(new Date());
 let sequence = 0;
+let detailSequence = 0;
 function go(id: string) {
+  sequence += 1;
+  detailSequence += 1;
   if (!nav.value.some((n) => n.id === id)) id = 'work';
   tab.value = id;
   location.hash = id;
@@ -92,7 +95,7 @@ async function load() {
     if (tab.value === 'work') r = await api('/work-items?limit=100');
     else if (tab.value === 'orders')
       r = await api(
-        '/orders' +
+        '/orders/admin/all' +
           query({ page: page.value, pageSize: 20, status: filter.value }),
       );
     else if (tab.value === 'audit')
@@ -106,7 +109,7 @@ async function load() {
       total.value = r.total ?? r.length;
     }
   } catch (e) {
-    error.value = (e as Error).message;
+    if (run === sequence) error.value = (e as Error).message;
   } finally {
     if (run === sequence) loading.value = false;
   }
@@ -149,12 +152,17 @@ async function revoke(row: Row) {
   }
 }
 async function open(row: Row) {
+  const run = ++detailSequence;
+  const owner = session.value;
   selected.value = row;
+  const current = () => run === detailSequence && session.value === owner &&
+    tab.value === 'orders' && selected.value?.id === row.id;
   if (tab.value === 'orders')
     try {
-      selected.value = await api('/orders/' + encodeURIComponent(row.id));
+      const detail = await api('/orders/' + encodeURIComponent(row.id));
+      if (current()) selected.value = detail;
     } catch (e) {
-      error.value = (e as Error).message;
+      if (current()) error.value = (e as Error).message;
     }
 }
 const groups: Record<string, string> = {
@@ -185,10 +193,19 @@ function onHash() {
 }
 import { watch } from 'vue';
 watch(
-  () => session.value?.user.id,
-  (id, old) => {
-    if (id && !old && !initial.value) go(tab.value);
+  session,
+  (value) => {
+    sequence += 1;
+    detailSequence += 1;
+    selected.value = null;
+    items.value = [];
+    total.value = 0;
+    error.value = '';
+    notice.value = '';
+    loading.value = false;
+    if (value && !initial.value) go(tab.value);
   },
+  { flush: 'sync' },
 );
 onMounted(() => {
   init();

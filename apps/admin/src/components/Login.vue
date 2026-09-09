@@ -11,6 +11,7 @@ let timeout: ReturnType<typeof setTimeout> | undefined,
   disposed = false,
   generation = 0;
 async function start() {
+  if (busy.value) return;
   const run = ++generation;
   clearTimeout(timeout);
   error.value = '';
@@ -27,9 +28,9 @@ async function start() {
     );
     poll(run);
   } catch (e) {
-    error.value = (e as Error).message;
+    if (!disposed && run === generation) error.value = (e as Error).message;
   } finally {
-    busy.value = false;
+    if (!disposed && run === generation) busy.value = false;
   }
 }
 async function poll(run: number) {
@@ -41,18 +42,24 @@ async function poll(run: number) {
     if (disposed || run !== generation) return;
     status.value = state.status;
     if (state.status === 'APPROVED') {
-      session.value = await api<Session>(
+      busy.value = true;
+      const result = await api<Session>(
         `/admin-auth/challenges/${challenge.value.id}/exchange`,
         'POST',
         {},
       );
+      if (!disposed && run === generation) session.value = result;
       return;
     }
     if (state.status !== 'WAITING') return;
     timeout = setTimeout(() => poll(run), 1800);
   } catch (e) {
-    error.value = (e as Error).message;
-    status.value = 'ERROR';
+    if (!disposed && run === generation) {
+      error.value = (e as Error).message;
+      status.value = 'ERROR';
+    }
+  } finally {
+    if (!disposed && run === generation) busy.value = false;
   }
 }
 onMounted(() => {
