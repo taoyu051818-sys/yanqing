@@ -568,6 +568,7 @@ export class AllianceService {
         code: true,
         status: true,
         holderId: true,
+        attributionOrderId: true,
         claimedAt: true,
         redeemedAt: true,
         expiresAt: true,
@@ -608,6 +609,8 @@ export class AllianceService {
       const reason =
         coupon.status !== 'CLAIMED'
           ? '此券不在可使用状态'
+          : coupon.attributionOrderId
+            ? '此券已用于待支付订场，请在订单页完成付款或取消订单'
           : coupon.expiresAt <= now || template.validTo <= now
             ? '此券已过期'
             : !template.enabled || template.merchant.status !== 'ACTIVE'
@@ -617,8 +620,9 @@ export class AllianceService {
                 : !newcomer && !template.allowVenueBooking
                   ? '仅限所属商户消费，不可抵扣订场'
                   : '';
+      const { attributionOrderId: _reservation, ...view } = coupon;
       return {
-        ...coupon,
+        ...view,
         bookingUsage: {
           eligible: !reason,
           reason,
@@ -953,6 +957,7 @@ export class AllianceService {
       await this.recordDuplicateRedemption(preflight);
       throw new ConflictException('券码未领取、已核销或已失效');
     }
+    if (preflight.attributionOrderId) throw new ConflictException('券码已用于待支付订场，请先取消原订单');
     if (preflight.template.merchantId !== dto.merchantId)
       throw new ForbiddenException('券码不属于本商户');
     if (preflight.expiresAt <= new Date())
@@ -977,6 +982,7 @@ export class AllianceService {
           if (!coupon) throw new NotFoundException('券码不存在');
           if (coupon.status !== CouponStatus.CLAIMED)
             throw new ConflictException('券码已被并发核销');
+          if (coupon.attributionOrderId) throw new ConflictException('券码已用于待支付订场，请先取消原订单');
           if (coupon.template.merchantId !== dto.merchantId)
             throw new ForbiddenException('券码不属于本商户');
           if (coupon.expiresAt <= new Date())
@@ -993,7 +999,7 @@ export class AllianceService {
             ? await requireOpenFrontDeskShift(tx, actor)
             : null;
           const changed = await tx.couponCode.updateMany({
-            where: { id: coupon.id, status: CouponStatus.CLAIMED },
+            where: { id: coupon.id, status: CouponStatus.CLAIMED, attributionOrderId: null },
             data: {
               status: CouponStatus.REDEEMED,
               redeemedById: actor.sub,

@@ -598,6 +598,7 @@ export class VenuesService {
                 '优惠券无效、已过期或不属于当前会员',
               );
             }
+            if (coupon.attributionOrderId) throw new ConflictException('优惠券已用于待支付订场，请先完成或取消原订单');
             couponId = coupon.id;
             if (coupon.template.code.startsWith(NEWCOMER_COUPON_PREFIX)) {
               newcomerPolicy = await this.resolveNewcomerAllowedPeriods(now);

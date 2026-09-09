@@ -2675,6 +2675,10 @@ function mockPaymentOptions(order: any) {
     const coupon = getCoupons().find(item => item.id === order.parameterSnapshot.couponId);
     const template = coupon && couponTemplate(coupon);
     if (template && !template.code?.startsWith('NEWCOMER') && !template.allowVenueBooking) reason ||= '此商户券不可抵扣订场，请取消后重新下单';
+    if (!coupon || coupon.holderId !== order.memberId || coupon.status !== 'CLAIMED') reason ||= '订单优惠券已被使用或已失效';
+    else if (isExpired(coupon.expiresAt) || isExpired(template?.validTo)) reason ||= '订单优惠券已过期';
+    else if (template?.enabled === false || (template?.validFrom && new Date(template.validFrom).getTime() > now) || getMerchants().find(row => row.id === couponMerchantId(coupon))?.status === 'DISABLED') reason ||= '订单优惠券活动或商户不可用';
+    else if (coupon.attributionOrderId && coupon.attributionOrderId !== order.id) reason ||= '订单优惠券已锁定到其他订单';
   }
   if (order.businessType === 'GOODS') for (const item of order.items || []) {
     const goods = getGoods().find(row => row.id === item.itemId);
@@ -4836,6 +4840,7 @@ export async function mockRequest<T>(
       if (
         coupon.holderId !== holderId ||
         coupon.status !== "CLAIMED" ||
+        Boolean(coupon.attributionOrderId) ||
         isExpired(coupon.expiresAt) ||
         template?.enabled === false ||
         isExpired(template?.validTo) ||
@@ -4915,6 +4920,7 @@ export async function mockRequest<T>(
         phone: targetMember.phone,
       },
       bookings: [booking],
+      consumedCouponCode: text(data.couponCode) || null,
       parameterSnapshot: {
         ...(operatorOverride ? { assistedBookingOverride: {
           reason: overrideReason, actorId: mockUser().id,
@@ -5291,6 +5297,15 @@ export async function mockRequest<T>(
         orderId: order.id, operatorId: mockUser().id, idempotencyKey: 'ACCOUNT:' + paymentKey,
         createdAt: new Date().toISOString(), metadata: { paymentChannel: channel, cashValueCents: order.payableCents },
       }, ...getMemberAccountTransactions()]);
+    }
+    if (order.businessType === 'VENUE' && order.parameterSnapshot?.couponId) {
+      const coupons = getCoupons(), templates = getCouponTemplates();
+      const coupon = coupons.find(row => row.id === order.parameterSnapshot.couponId)!;
+      const template = templates.find(row => row.id === coupon.templateId);
+      Object.assign(coupon, { status: 'REDEEMED', redeemedAt: new Date().toISOString(), redeemedById: mockUser().id,
+        redeemedMerchantId: couponMerchantId(coupon), attributionOrderId: order.id, attributedAmountCents: order.payableCents });
+      if (template) template.redeemedCount = Number(template.redeemedCount || 0) + 1;
+      saveCoupons(coupons); saveCouponTemplates(templates);
     }
     order.status = "PAID";
     order.paidCents = order.payableCents;
@@ -10003,6 +10018,7 @@ export async function mockRequest<T>(
       throw new Error("商户已停用，不能核销券码");
     if (coupon.status !== "CLAIMED")
       throw new Error("券码未领取、已核销或已失效");
+    if (coupon.attributionOrderId) throw new Error("券码已用于待支付订场，请先取消原订单");
     if (
       isExpired(coupon.expiresAt) ||
       isExpired(couponTemplate(coupon)?.validTo)

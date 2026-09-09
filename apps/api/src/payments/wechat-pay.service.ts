@@ -1,3 +1,4 @@
+import { reserveBookingCoupon, releaseBookingCoupon } from '../orders/booking-coupon.js';
 import { applyTrainingRefund } from '../training/training-refund.js';
 import { cancelMembershipEntitlement, membershipPurchaseUnavailable } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
@@ -407,6 +408,23 @@ export class WechatPayService {
               now,
               `商品无法出库，未交付商品：${unavailable}`,
             );
+          }
+        }
+        if (order.businessType === BusinessType.VENUE && order.status === OrderStatus.PENDING) {
+          let unavailable: string | undefined;
+          try { await reserveBookingCoupon(tx, order, now); }
+          catch (error) {
+            if (!(error instanceof ConflictException)) throw error;
+            unavailable = error.message;
+          }
+          if (unavailable) {
+            // External money already exists. Preserve it and request compensation;
+            // never roll it back merely because its discounted booking cannot be delivered.
+            await tx.order.update({ where: { id: order.id }, data: { status: OrderStatus.CANCELLED, cancelledAt: now } });
+            await tx.courtBooking.updateMany({ where: { orderId: order.id, status: BookingStatus.HELD }, data: { status: BookingStatus.CANCELLED, holdExpiresAt: null } });
+            await releaseBookingCoupon(tx, order);
+            return captureCancelledOrderPayment(tx, { ...order, status: OrderStatus.CANCELLED }, payment.id, notice.transaction_id, now,
+              `优惠券订场无法履约，未交付场地：${unavailable}`);
           }
         }
         const succeeded = await tx.payment.update({

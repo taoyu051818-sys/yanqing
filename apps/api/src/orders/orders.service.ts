@@ -1,3 +1,4 @@
+import { payableBookingCoupon, reserveBookingCoupon, releaseBookingCoupon } from './booking-coupon.js';
 import { cancelZeroAmountVenueOrder } from './zero-amount-venue-order.js';
 import { applyTrainingRefund } from '../training/training-refund.js';
 import { cancelMembershipEntitlement, membershipPurchaseUnavailable, assertMembershipPurchaseCompatible } from '../memberships/membership-entitlements.js';
@@ -446,6 +447,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
             data: { status: MembershipStatus.CANCELLED },
           });
         } else if (current.businessType === BusinessType.VENUE) {
+          await releaseBookingCoupon(tx, current);
           await tx.courtBooking.updateMany({
             where: { orderId, status: BookingStatus.HELD },
             data: { status: BookingStatus.CANCELLED, holdExpiresAt: null },
@@ -506,7 +508,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
         catch (error) { unavailable = error instanceof Error ? error.message : '商品库存不足'; }
       }
       if (!unavailable) {
-        try { await this.assertBookingCouponScope(tx, order); }
+        try { await payableBookingCoupon(tx, order); }
         catch (error) { unavailable = error instanceof Error ? error.message : '券适用范围已变化'; }
       }
       // Keep the existing command channel for old clients; no provider or wallet
@@ -590,6 +592,14 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
         throw new ForbiddenException('支付请求只能由原操作人重试');
       if (existing.channel === PaymentChannel.WECHAT && existing.status === PaymentStatus.PROCESSING) {
         const pending = await this.prisma.order.findUnique({ where: { id: orderId }, include: { membership: { include: { product: true } }, gameRegistration: { include: { game: true } } } });
+        if (pending?.businessType === BusinessType.VENUE) {
+          if (pending.status !== OrderStatus.PENDING) throw new ConflictException('订单当前状态不可支付');
+          await this.prisma.$transaction(async tx => {
+            const current = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
+            if (current.status !== OrderStatus.PENDING) throw new ConflictException('订单当前状态不可支付');
+            await reserveBookingCoupon(tx, current);
+          }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        }
         if (pending?.membership) {
           if (pending.status !== OrderStatus.PENDING) throw new ConflictException('订单当前状态不可支付');
           await assertMembershipPurchaseCompatible(this.prisma, pending.membership.memberId, pending.membership.product.level, pending.membership.id);
@@ -625,7 +635,7 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
           if (dto.channel !== PaymentChannel.WECHAT && order.payments?.some(payment => payment.channel === PaymentChannel.WECHAT && payment.status === PaymentStatus.PROCESSING))
             throw new ConflictException('微信支付结果确认中，暂不能改用其他渠道');
           if (order.membership) await assertMembershipPurchaseCompatible(tx, order.membership.memberId, order.membership.product.level, order.membership.id);
-          await this.assertBookingCouponScope(tx, order);
+          await reserveBookingCoupon(tx, order);
           const deadline = pendingPaymentDeadline(order);
           if (deadline && deadline <= new Date()) throw new ConflictException('支付保留期已过，请刷新订单后重新下单');
           if (order.businessType === BusinessType.GAME) {
@@ -1659,17 +1669,6 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
     ) {
       throw new ConflictException('订单状态与完成时间不一致，需先修复履约证据');
     }
-  }
-
-  private async assertBookingCouponScope(tx: Prisma.TransactionClient, order: { businessType: BusinessType; parameterSnapshot: unknown }) {
-    if (order.businessType !== BusinessType.VENUE) return;
-    const snapshot = order.parameterSnapshot as { couponId?: string } | null;
-    if (!snapshot?.couponId) return;
-    const coupon = await tx.couponCode.findUnique({ where: { id: snapshot.couponId }, select: {
-      template: { select: { code: true, allowVenueBooking: true } },
-    } });
-    if (coupon && !coupon.template.code.startsWith('NEWCOMER') && !coupon.template.allowVenueBooking)
-      throw new ConflictException('此订单使用的商户券已不支持订场，请取消后重新选择优惠下单');
   }
 
   private async accountDebitAmount(
