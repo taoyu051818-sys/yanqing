@@ -75,7 +75,7 @@ import {
   assertTrainingSettlementSources,
   trainingTransaction,
 } from './training-settlement-ledger.js';
-import { trainingEnrollmentCoversSession } from './training-roster.js';
+import { trainingActiveSeatWhere, trainingEnrollmentCoversSession } from './training-roster.js';
 import {
   trainingAttendanceCommandResponse,
   trainingConsumeConfirmationResponse,
@@ -1012,7 +1012,7 @@ export class TrainingService {
           const seatWhere: Prisma.TrainingEnrollmentWhereInput = {
             classId: trainingClass.id,
             OR: [
-              { status: { in: [...TRAINING_ATTENDING_STATUSES] } },
+              trainingActiveSeatWhere(),
               {
                 status: TrainingEnrollmentStatus.PENDING_PAYMENT,
                 seatReservedUntil: { gt: now },

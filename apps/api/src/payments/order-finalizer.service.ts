@@ -1,6 +1,6 @@
 import { activateMembership } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
-import { syncTrainingEnrollmentRoster } from '../training/training-roster.js';
+import { syncTrainingEnrollmentRoster, trainingActiveSeatWhere } from '../training/training-roster.js';
 import {
   ConflictException,
   Injectable,
@@ -174,12 +174,7 @@ export class OrderFinalizerService {
           where: {
             classId: enrollment.classId,
             id: { not: enrollment.id },
-            status: {
-              in: [
-                TrainingEnrollmentStatus.ACTIVE,
-                TrainingEnrollmentStatus.PARTIALLY_REFUNDED,
-              ],
-            },
+            ...trainingActiveSeatWhere(),
           },
         });
         if (occupiedSeats >= enrollment.class.capacity) {

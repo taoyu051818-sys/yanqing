@@ -1,3 +1,4 @@
+import { applyTrainingRefund } from '../training/training-refund.js';
 import { cancelMembershipEntitlement, membershipPurchaseUnavailable } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import {
@@ -500,24 +501,12 @@ export class WechatPayService {
               return { accepted: true, outstandingRecoveryCents: 0 };
             }
             if (refund.order.trainingEnrollment) {
-              const enrollment = refund.order.trainingEnrollment;
-              const enrollmentRefunded = Math.min(
-                enrollment.totalAmountCents,
-                enrollment.refundedCents + refund.amountCents,
+              await applyTrainingRefund(
+                tx,
+                refund.order.trainingEnrollment,
+                { id: refund.id, amountCents: refund.amountCents, fullyRefunded, reason: refund.reason },
+                { sub: refund.approvedById || refund.requestedById, roles: [AppRole.FINANCE] },
               );
-              await tx.trainingEnrollment.update({
-                where: { id: enrollment.id },
-                data: {
-                  refundedCents: enrollmentRefunded,
-                  prepaidBalanceCents: Math.max(
-                    0,
-                    enrollment.totalAmountCents -
-                      enrollment.confirmedRevenueCents -
-                      enrollmentRefunded,
-                  ),
-                  status: fullyRefunded ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
-                },
-              });
             }
             if (refund.order.businessType === BusinessType.RECHARGE) {
               const payment = refund.order.payments[0];

@@ -12,6 +12,11 @@ type Enrollment = {
 };
 type Session = { startsAt: Date; endsAt: Date };
 
+/** Partially refunded is a money status; an exhausted contract has no seat. */
+export function trainingActiveSeatWhere(): Prisma.TrainingEnrollmentWhereInput {
+  return { status: { in: ['ACTIVE', 'PARTIALLY_REFUNDED'] }, prepaidBalanceCents: { gt: 0 } };
+}
+
 export function trainingEnrollmentCoversSession(
   enrollment: Enrollment,
   session: Session,

@@ -1,3 +1,4 @@
+import { applyTrainingRefund } from '../training/training-refund.js';
 import { cancelMembershipEntitlement, membershipPurchaseUnavailable, assertMembershipPurchaseCompatible } from '../memberships/membership-entitlements.js';
 import { gamePaymentUnavailable } from '../games/game-registration-policy.js';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1406,23 +1407,12 @@ export class OrdersService implements OnApplicationBootstrap, OnModuleDestroy {
               },
             });
             if (refund.order.trainingEnrollment) {
-              const enrollment = refund.order.trainingEnrollment;
-              const enrollmentRefunded = Math.min(
-                enrollment.totalAmountCents,
-                enrollment.refundedCents + refund.amountCents,
+              await applyTrainingRefund(
+                tx,
+                refund.order.trainingEnrollment,
+                { id: refund.id, amountCents: refund.amountCents, fullyRefunded, reason: dto.reason },
+                actor,
               );
-              const remainingPrepaid = Math.max(
-                0,
-                enrollment.prepaidBalanceCents - refund.amountCents,
-              );
-              await tx.trainingEnrollment.update({
-                where: { id: enrollment.id },
-                data: {
-                  refundedCents: enrollmentRefunded,
-                  prepaidBalanceCents: remainingPrepaid,
-                  status: fullyRefunded ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
-                },
-              });
             }
             if (fullyRefunded) {
               await tx.courtBooking.updateMany({
