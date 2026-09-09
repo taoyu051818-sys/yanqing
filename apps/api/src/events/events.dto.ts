@@ -2,12 +2,12 @@ import {
   EVENT_MINIMUM_PEOPLE,
   EVENT_MAX_CAPACITY_PEOPLE,
   EVENT_TOTAL_ROUNDS,
-} from './event-competition-policy.js';
+} from './competition/event-competition-policy.js';
 export {
   EVENT_MINIMUM_PEOPLE,
   EVENT_MAX_CAPACITY_PEOPLE,
   EVENT_TOTAL_ROUNDS,
-} from './event-competition-policy.js';
+} from './competition/event-competition-policy.js';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,

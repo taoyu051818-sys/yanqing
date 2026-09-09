@@ -10,7 +10,7 @@ import {
   vi,
 } from 'vitest';
 import { PrismaService } from '../src/database/prisma.service.js';
-import { TrainingService } from '../src/training/training.service.js';
+import { TrainingService } from './support/training-service-fixture.js';
 import { OrdersService } from '../src/orders/orders.service.js';
 import { WechatPayService } from '../src/payments/wechat-pay.service.js';
 import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';

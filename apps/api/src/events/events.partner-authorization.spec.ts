@@ -10,7 +10,7 @@ import {
   TeamCategory,
   UserStatus,
 } from '../generated/prisma/enums.js'
-import { EventsService } from './events.service.js'
+import { EventsService } from "../../test/support/events-service-fixture.js"
 
 const captain: AuthUser = {
   sub: 'member-captain',

@@ -20,7 +20,7 @@ import type {
   ConsumeTrainingDto,
   MakeupAttendanceDto,
 } from './training.dto.js';
-import { TrainingService } from './training.service.js';
+import { TrainingService } from '../../test/support/training-service-fixture.js';
 import { orderCreationCommandHash } from '../orders/order-creation-idempotency.js';
 
 const coach: AuthUser = {

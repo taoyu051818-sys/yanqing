@@ -42,19 +42,37 @@
 
 ## 活动与培训模块边界
 
-候补递补入口分别位于 `events/event-waitlist.ts` 和 `games/game-waitlist.ts`。订单取消、退款、微信支付回调和活动管理均直接调用这些领域函数，不再从 `EventsService` / `GamesService` 导入候补函数。调用方继续持有原有事务；递补不会新建独立事务，也不会代会员扣款。
+赛事与培训按功能领域组织目录，控制器直接注入对应领域服务。原来的 `EventsService`、`TrainingService` 及两个聚合控制器已删除，模块只负责装配，不再保留业务聚合入口。现有 56 个 HTTP 路由、角色权限与公开分享入口保持不变。
 
-赛事的席位状态、支付保留时间和退出退款标识放在 `events/event-registration-policy.ts`；球局的容量限制与报名状态规则放在 `games/game-registration-policy.ts`。接口 DTO 引用领域容量限制，领域规则不反向依赖带装饰器的 DTO。
+| 目录（apps/api/src/ 下） | 责任 |
+| --- | --- |
+| events/catalog | 赛事查询、创建、发布；整场取消由单独的取消服务负责 |
+| events/invitations | 固定搭档邀请、邀请预览与接受、邀请凭证校验 |
+| events/registration | 报名下单、个人参赛状态、签到、候补递补、退出与退款申请 |
+| events/competition | 配对、比分、排名重算、轮次推进、完赛 |
+| events/prizes | 奖品查询、发放、签收、库存扣减与审计 |
+| events/shared | 赛事命令响应、文本与数据库错误处理 |
+| training/catalog | 课程产品、班级配置与青训产品校验 |
+| training/students | 学员档案、监护关系与可见范围 |
+| training/enrollments | 购课报名、课包席位预留、幂等下单 |
+| training/schedule | 课次查询、排课、课次完成 |
+| training/attendance | 考勤与补课安排 |
+| training/consumption | 消课、提交复核、确认消课、合同费率核验 |
+| training/corrections | 消课冲正申请、审批、驳回及账本回滚 |
+| training/settlements | 经营汇总、结算生命周期、来源账本与锁账期核验 |
+| training/shared | 操作权限、命令幂等、有效消课识别规则 |
 
-`events/event-prizes.ts` 负责奖品查询、发放与签收，包含该流程的权限、幂等核验、库存扣减、并发处理及审计。`training/training-settlements.ts` 负责培训经营汇总和结算单的创建、查询、提交、确认、结算、退回、作废，沿用 `training-settlement-ledger.ts` 的账本来源核验。原有服务方法保留为转发入口，所以控制器、其他业务调用方和 API 合约不变。
+`EventsModule` 装配 8 个服务与 5 个领域控制器；`TrainingModule` 装配本轮的 8 个服务与 8 个领域控制器，并继续装配既有体验课和青训规则入口。没有增加微服务或进程间调用。
 
-独立命令函数显式接收数据库依赖，私有校验函数留在所属文件内。没有通过继承大服务或传入整个服务对象来拆分。`test/core-architecture.spec.ts` 检查指定订单及领域入口的静态相对导入/导出链，防止重新依赖赛事、球局和培训的大服务文件。
+报名、整场取消、退报名是不同业务命令，分别持有自己的事务。共用候补函数在 `events/registration/event-waitlist.ts`，共用席位与退报名标识在 `event-registration-policy.ts`。订单取消、退款、微信支付回调直接引用领域规则；领域函数接收调用方的事务客户端，不另开事务，不代会员扣款。球局同类规则仍在 `games/game-waitlist.ts` 与 `game-registration-policy.ts`。
 
-赛事配对、比分和完赛分别由 `event-rounds.ts`、`event-scoring.ts`、`event-completion.ts` 负责。`event-competition-policy.ts` 保留共用的赛事配置、固定双打、轮次、配对完整性及管理权限规则；`event-standings.ts` 负责配对或比分纠正后的排名数据重算。固定人数及轮次常量由领域规则定义，DTO 单向引用并保留原常量导出，领域命令不运行时导入 DTO。
+赛事比赛执行继续细分为 `competition/event-rounds.ts`、`event-scoring.ts`、`event-completion.ts`、`event-standings.ts`。共用比赛规则在 `event-competition-policy.ts`。培训冲正与结算的命令实现分别位于 `corrections/training-consume-corrections.ts`、`settlements/training-settlements.ts`；薄服务提供 Nest 注入入口，私有校验留在所属领域内。审批人与申请人分离、幂等、并发条件、锁账期及原有事务边界保持不变。
 
-培训消课冲正的查询、申请、批准和驳回放在 `training-consume-corrections.ts`。消课确认与冲正共同调用 `training-access.ts` 的审批权限、`training-settlement-ledger.ts` 的锁账期检查。冲正流程仍在同一事务内修改反向流水、课包余额、考勤、成长积分及订单履约状态，不绕过原有申请人与复核人分离、幂等及并发条件。
+跨领域调用只共享必要规则和事务函数，不能传入整个服务对象或通过继承恢复聚合服务。原有回归场景通过 `test/support/*-service-fixture.ts` 组合真实领域服务；它们只有转发代码，只供测试使用，构建排除 `test/`。架构测试禁止生产源码引用这些测试组合器，并检查共享订单代码与领域服务的导入链和订单状态写入边界。
 
-赛事报名邀请与培训排课、消课确认仍留在原服务中，后续可按各自完整业务流程继续拆分。这两轮没有调整小程序页面、PC 页面或数据库结构。
+`test/domain-modules.e2e-spec.ts` 加载真实模块、控制器和领域服务，依据拆分前固化的 56 条路由合约，检查路径、公开标记、角色、实际 HTTP 分发以及普通会员越权拒绝。该装配测试替换业务方法返回值；真实业务行为和数据库事务由下述数据库验收覆盖。它不代替微信真机或真实支付验收。
+
+本轮拆出的赛事服务最大 599 行，培训服务最大 542 行。既有体验课服务约 961 行、消课冲正命令文件约 767 行仍较大，但各自属于明确领域；后续应根据独立业务流程继续拆分，而非只按行数切文件。本轮未调整页面、数据库结构或管理员/前台代订绕过权限。
 
 ## 可重复验收入口
 

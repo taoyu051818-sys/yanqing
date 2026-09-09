@@ -12,7 +12,7 @@ import type {
   CreateTrainingProductDto,
   CreateTrainingSessionDto,
 } from './training.dto.js';
-import { TrainingService } from './training.service.js';
+import { TrainingService } from '../../test/support/training-service-fixture.js';
 
 const admin: AuthUser = {
   sub: 'admin-audit-1',

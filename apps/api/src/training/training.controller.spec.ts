@@ -1,3 +1,93 @@
+import { TrainingCatalogController } from './catalog/training-catalog.controller.js';
+import { TrainingStudentsController } from './students/training-students.controller.js';
+import { TrainingEnrollmentsController } from './enrollments/training-enrollments.controller.js';
+import { TrainingScheduleController } from './schedule/training-schedule.controller.js';
+import { TrainingAttendanceController } from './attendance/training-attendance.controller.js';
+import { TrainingConsumptionController } from './consumption/training-consumption.controller.js';
+import { TrainingCorrectionsController } from './corrections/training-corrections.controller.js';
+import { TrainingSettlementsController } from './settlements/training-settlements.controller.js';
+
+const controllerMethods = {
+  products: TrainingCatalogController.prototype.products,
+  createProduct: TrainingCatalogController.prototype.createProduct,
+  updateProduct: TrainingCatalogController.prototype.updateProduct,
+  createClass: TrainingCatalogController.prototype.createClass,
+  students: TrainingStudentsController.prototype.students,
+  allStudents: TrainingStudentsController.prototype.allStudents,
+  createStudent: TrainingStudentsController.prototype.createStudent,
+  updateStudent: TrainingStudentsController.prototype.updateStudent,
+  purchase: TrainingEnrollmentsController.prototype.purchase,
+  myEnrollments: TrainingEnrollmentsController.prototype.myEnrollments,
+  allEnrollments: TrainingEnrollmentsController.prototype.allEnrollments,
+  sessions: TrainingScheduleController.prototype.sessions,
+  createSession: TrainingScheduleController.prototype.createSession,
+  complete: TrainingScheduleController.prototype.complete,
+  markAttendance: TrainingAttendanceController.prototype.markAttendance,
+  scheduleMakeup: TrainingAttendanceController.prototype.scheduleMakeup,
+  consume: TrainingConsumptionController.prototype.consume,
+  confirmConsume: TrainingConsumptionController.prototype.confirmConsume,
+  consumeCorrections:
+    TrainingCorrectionsController.prototype.consumeCorrections,
+  requestConsumeCorrection:
+    TrainingCorrectionsController.prototype.requestConsumeCorrection,
+  approveConsumeCorrection:
+    TrainingCorrectionsController.prototype.approveConsumeCorrection,
+  rejectConsumeCorrection:
+    TrainingCorrectionsController.prototype.rejectConsumeCorrection,
+  summary: TrainingSettlementsController.prototype.summary,
+  settlement: TrainingSettlementsController.prototype.settlement,
+  settlements: TrainingSettlementsController.prototype.settlements,
+  submitSettlement: TrainingSettlementsController.prototype.submitSettlement,
+  confirmSettlement: TrainingSettlementsController.prototype.confirmSettlement,
+  settleSettlement: TrainingSettlementsController.prototype.settleSettlement,
+  returnSettlement: TrainingSettlementsController.prototype.returnSettlement,
+  voidSettlement: TrainingSettlementsController.prototype.voidSettlement,
+};
+function createController(service: never) {
+  const catalog = new TrainingCatalogController(service);
+  const students = new TrainingStudentsController(service);
+  const enrollments = new TrainingEnrollmentsController(service);
+  const schedule = new TrainingScheduleController(service);
+  const attendance = new TrainingAttendanceController(service);
+  const consumption = new TrainingConsumptionController(service);
+  const corrections = new TrainingCorrectionsController(service);
+  const settlements = new TrainingSettlementsController(service);
+  return {
+    products: catalog.products.bind(catalog),
+    createProduct: catalog.createProduct.bind(catalog),
+    updateProduct: catalog.updateProduct.bind(catalog),
+    createClass: catalog.createClass.bind(catalog),
+    students: students.students.bind(students),
+    allStudents: students.allStudents.bind(students),
+    createStudent: students.createStudent.bind(students),
+    updateStudent: students.updateStudent.bind(students),
+    purchase: enrollments.purchase.bind(enrollments),
+    myEnrollments: enrollments.myEnrollments.bind(enrollments),
+    allEnrollments: enrollments.allEnrollments.bind(enrollments),
+    sessions: schedule.sessions.bind(schedule),
+    createSession: schedule.createSession.bind(schedule),
+    complete: schedule.complete.bind(schedule),
+    markAttendance: attendance.markAttendance.bind(attendance),
+    scheduleMakeup: attendance.scheduleMakeup.bind(attendance),
+    consume: consumption.consume.bind(consumption),
+    confirmConsume: consumption.confirmConsume.bind(consumption),
+    consumeCorrections: corrections.consumeCorrections.bind(corrections),
+    requestConsumeCorrection:
+      corrections.requestConsumeCorrection.bind(corrections),
+    approveConsumeCorrection:
+      corrections.approveConsumeCorrection.bind(corrections),
+    rejectConsumeCorrection:
+      corrections.rejectConsumeCorrection.bind(corrections),
+    summary: settlements.summary.bind(settlements),
+    settlement: settlements.settlement.bind(settlements),
+    settlements: settlements.settlements.bind(settlements),
+    submitSettlement: settlements.submitSettlement.bind(settlements),
+    confirmSettlement: settlements.confirmSettlement.bind(settlements),
+    settleSettlement: settlements.settleSettlement.bind(settlements),
+    returnSettlement: settlements.returnSettlement.bind(settlements),
+    voidSettlement: settlements.voidSettlement.bind(settlements),
+  };
+}
 import 'reflect-metadata';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -17,7 +107,6 @@ import type {
   MakeupAttendanceDto,
   TrainingSessionActionDto,
 } from './training.dto.js';
-import { TrainingController } from './training.controller.js';
 
 const actor: AuthUser = {
   sub: 'coach-1',
@@ -35,7 +124,7 @@ describe('TrainingController consumption commands', () => {
         .fn()
         .mockResolvedValue({ id: 'session-1', status: 'COMPLETED' }),
     };
-    const controller = new TrainingController(training as never);
+    const controller = createController(training as never);
     const product: CreateTrainingProductDto = {
       code: 'PRODUCT-1',
       name: '培训产品',
@@ -80,13 +169,10 @@ describe('TrainingController consumption commands', () => {
       completion,
     );
     expect(
-      Reflect.getMetadata(
-        ROLES_KEY,
-        TrainingController.prototype.createProduct,
-      ),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.createProduct),
     ).toEqual([AppRole.ADMIN, AppRole.SUPER_ADMIN]);
     expect(
-      Reflect.getMetadata(ROLES_KEY, TrainingController.prototype.createClass),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.createClass),
     ).toEqual([AppRole.ADMIN, AppRole.SUPER_ADMIN]);
   });
 
@@ -98,7 +184,7 @@ describe('TrainingController consumption commands', () => {
         .fn()
         .mockResolvedValue({ id: 'student-1', guardianConsentStatus: true }),
     };
-    const controller = new TrainingController(training as never);
+    const controller = createController(training as never);
     const create = { displayName: '小羽', guardianConsentStatus: true };
     const update = { guardianConsentStatus: true };
 
@@ -123,7 +209,7 @@ describe('TrainingController consumption commands', () => {
       'guardian-1',
     );
     expect(
-      Reflect.getMetadata(ROLES_KEY, TrainingController.prototype.allStudents),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.allStudents),
     ).toEqual([AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN]);
   });
 
@@ -133,7 +219,7 @@ describe('TrainingController consumption commands', () => {
         .fn()
         .mockResolvedValue({ workflowStatus: 'PENDING_CONFIRMATION' }),
     };
-    const controller = new TrainingController(training as never);
+    const controller = createController(training as never);
     const dto: ConsumeTrainingDto = {
       enrollmentId: 'enrollment-1',
       attendanceStatus: 'PRESENT',
@@ -149,7 +235,7 @@ describe('TrainingController consumption commands', () => {
     const training = {
       confirmConsume: vi.fn().mockResolvedValue({ id: 'recognition-1' }),
     };
-    const controller = new TrainingController(training as never);
+    const controller = createController(training as never);
     const dto: ConfirmTrainingConsumeDto = {
       enrollmentId: 'enrollment-1',
       reason: '核对签到表',
@@ -166,10 +252,7 @@ describe('TrainingController consumption commands', () => {
       actor,
     );
     expect(
-      Reflect.getMetadata(
-        ROLES_KEY,
-        TrainingController.prototype.confirmConsume,
-      ),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.confirmConsume),
     ).toEqual([AppRole.ADMIN, AppRole.SUPER_ADMIN]);
   });
 
@@ -180,7 +263,7 @@ describe('TrainingController consumption commands', () => {
         .fn()
         .mockResolvedValue({ workflowStatus: 'MAKEUP_SCHEDULED' }),
     };
-    const controller = new TrainingController(training as never);
+    const controller = createController(training as never);
     const attendance: AttendanceActionDto = {
       enrollmentId: 'enrollment-1',
       status: 'ATTENDED',
@@ -207,10 +290,7 @@ describe('TrainingController consumption commands', () => {
       actor,
     );
     expect(
-      Reflect.getMetadata(
-        ROLES_KEY,
-        TrainingController.prototype.markAttendance,
-      ),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.markAttendance),
     ).toEqual([
       AppRole.COACH,
       AppRole.FRONT_DESK,
@@ -218,10 +298,7 @@ describe('TrainingController consumption commands', () => {
       AppRole.SUPER_ADMIN,
     ]);
     expect(
-      Reflect.getMetadata(
-        ROLES_KEY,
-        TrainingController.prototype.scheduleMakeup,
-      ),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.scheduleMakeup),
     ).toEqual([AppRole.COACH, AppRole.ADMIN, AppRole.SUPER_ADMIN]);
   });
 
@@ -238,7 +315,7 @@ describe('TrainingController consumption commands', () => {
         .fn()
         .mockResolvedValue({ id: 'correction-1', status: 'REJECTED' }),
     };
-    const controller = new TrainingController(training as never);
+    const controller = createController(training as never);
     const request: CreateTrainingConsumeCorrectionDto = {
       recognitionId: 'recognition-1',
       reason: '误消课',
@@ -271,14 +348,11 @@ describe('TrainingController consumption commands', () => {
     expect(
       Reflect.getMetadata(
         ROLES_KEY,
-        TrainingController.prototype.approveConsumeCorrection,
+        controllerMethods.approveConsumeCorrection,
       ),
     ).toEqual([AppRole.ADMIN, AppRole.SUPER_ADMIN]);
     expect(
-      Reflect.getMetadata(
-        ROLES_KEY,
-        TrainingController.prototype.rejectConsumeCorrection,
-      ),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.rejectConsumeCorrection),
     ).toEqual([AppRole.ADMIN, AppRole.SUPER_ADMIN]);
   });
 });

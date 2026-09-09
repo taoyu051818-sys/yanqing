@@ -10,7 +10,7 @@ import {
   TeamCategory,
 } from '../generated/prisma/enums.js';
 import type { CorrectEventPairingsDto } from './events.dto.js';
-import { EventsService } from './events.service.js';
+import { EventsService } from '../../test/support/events-service-fixture.js';
 
 const manager: AuthUser = {
   sub: 'event-manager-1',

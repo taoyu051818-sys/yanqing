@@ -8,8 +8,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AuthUser } from '../common/auth/auth-user.js';
 import { ROLES_KEY } from '../common/auth/auth.decorators.js';
 import { AppRole, SettlementStatus } from '../generated/prisma/enums.js';
-import { TrainingService } from './training.service.js';
-import { TrainingController } from './training.controller.js';
+import { TrainingService } from '../../test/support/training-service-fixture.js';
+import { TrainingSettlementsController } from './settlements/training-settlements.controller.js';
 
 const finance: AuthUser = {
   sub: 'finance-1',
@@ -323,7 +323,7 @@ describe('TrainingService settlement list', () => {
   });
 });
 
-describe('TrainingController settlement contract', () => {
+describe('TrainingSettlementsController settlement contract', () => {
   it('delegates list and lifecycle commands behind finance/admin roles', async () => {
     const training = {
       listSettlements: vi.fn().mockResolvedValue([]),
@@ -335,7 +335,7 @@ describe('TrainingController settlement contract', () => {
       returnSettlement: vi.fn().mockResolvedValue({ status: 'DRAFT' }),
       voidSettlement: vi.fn().mockResolvedValue({ status: 'VOID' }),
     };
-    const controller = new TrainingController(training as never);
+    const controller = new TrainingSettlementsController(training as never);
     const command = {
       reason: '核对凭证',
       idempotencyKey: 'settlement-command-1',
@@ -360,7 +360,7 @@ describe('TrainingController settlement contract', () => {
     expect(
       Reflect.getMetadata(
         ROLES_KEY,
-        TrainingController.prototype.confirmSettlement,
+        TrainingSettlementsController.prototype.confirmSettlement,
       ),
     ).toEqual([AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN]);
   });

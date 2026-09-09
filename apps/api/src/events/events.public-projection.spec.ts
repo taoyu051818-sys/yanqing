@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { NotFoundException } from '@nestjs/common'
 
 import { EventStatus, RegistrationStatus } from '../generated/prisma/enums.js'
-import { EventsService } from './events.service.js'
+import { EventsService } from "../../test/support/events-service-fixture.js"
 
 const publishedStatuses = [
   EventStatus.OPEN,

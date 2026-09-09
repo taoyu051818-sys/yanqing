@@ -8,7 +8,7 @@ import {
   RegistrationStatus,
   TeamCategory,
 } from '../generated/prisma/client.js'
-import { EventsService } from './events.service.js'
+import { EventsService } from "../../test/support/events-service-fixture.js"
 
 const manager: AuthUser = {
   sub: 'manager-1',

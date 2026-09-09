@@ -7,7 +7,7 @@ import {
   EventStatus,
   MatchStatus,
 } from '../generated/prisma/enums.js'
-import { EventsService } from './events.service.js'
+import { EventsService } from "../../test/support/events-service-fixture.js"
 
 const actor: AuthUser = {
   sub: 'event-manager-1',

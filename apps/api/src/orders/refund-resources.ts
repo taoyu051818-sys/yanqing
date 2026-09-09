@@ -11,7 +11,7 @@ import { applyTrainingRefund } from '../training/training-refund.js';
 import { cancelMembershipEntitlement } from '../memberships/membership-entitlements.js';
 import { restoreGoodsSale } from '../inventory/goods-stock.js';
 import { promoteNextGameWaitlist } from '../games/game-waitlist.js';
-import { promoteNextEventWaitlist } from '../events/event-waitlist.js';
+import { promoteNextEventWaitlist } from '../events/registration/event-waitlist.js';
 import type { OrderFinalizerService } from '../payments/order-finalizer.service.js';
 
 type RefundResources = Prisma.RefundGetPayload<{

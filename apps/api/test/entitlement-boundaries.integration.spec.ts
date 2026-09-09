@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../src/database/prisma.service.js';
-import { TrainingService } from '../src/training/training.service.js';
+import { TrainingService } from './support/training-service-fixture.js';
 import { MembershipsService } from '../src/memberships/memberships.service.js';
 import { membershipEligibility } from '../src/memberships/membership-eligibility.js';
 import { OrdersService } from '../src/orders/orders.service.js';

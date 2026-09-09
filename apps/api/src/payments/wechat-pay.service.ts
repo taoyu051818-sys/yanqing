@@ -37,7 +37,7 @@ import {
 } from '../generated/prisma/client.js';
 import { assertGoodsStockAvailable } from '../inventory/goods-stock.js';
 import { OrderFinalizerService } from './order-finalizer.service.js';
-import { promoteNextEventWaitlist } from '../events/event-waitlist.js';
+import { promoteNextEventWaitlist } from '../events/registration/event-waitlist.js';
 import { captureCancelledOrderPayment } from './late-payment.js';
 
 interface NotificationResource {

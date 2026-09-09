@@ -11,7 +11,7 @@ import { GovernanceService } from '../src/governance/governance.service.js';
 import { DashboardService } from '../src/dashboard/dashboard.service.js';
 import { VenuesService } from '../src/venues/venues.service.js';
 import { MembershipsService } from '../src/memberships/memberships.service.js';
-import { TrainingService } from '../src/training/training.service.js';
+import { TrainingService } from './support/training-service-fixture.js';
 import { OrdersService } from '../src/orders/orders.service.js';
 import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';
 import { dayRange } from '../src/boss/boss.logic.js';

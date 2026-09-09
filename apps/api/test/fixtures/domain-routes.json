@@ -1,0 +1,839 @@
+[
+  {
+    "domain": "events",
+    "controller": "EventCatalogController",
+    "controllerFile": "events/catalog/event-catalog.controller.ts",
+    "method": "list",
+    "verb": "GET",
+    "path": "/api/v1/events",
+    "roles": [],
+    "isPublic": false,
+    "provider": "EventCatalogService",
+    "serviceMethod": "list"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCatalogController",
+    "controllerFile": "events/catalog/event-catalog.controller.ts",
+    "method": "managedList",
+    "verb": "GET",
+    "path": "/api/v1/events/managed",
+    "roles": [
+      "EVENT_MANAGER",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventCatalogService",
+    "serviceMethod": "managedList"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCatalogController",
+    "controllerFile": "events/catalog/event-catalog.controller.ts",
+    "method": "managedDetail",
+    "verb": "GET",
+    "path": "/api/v1/events/managed/:id",
+    "roles": [
+      "EVENT_MANAGER",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventCatalogService",
+    "serviceMethod": "managedDetail"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCatalogController",
+    "controllerFile": "events/catalog/event-catalog.controller.ts",
+    "method": "detail",
+    "verb": "GET",
+    "path": "/api/v1/events/:id",
+    "roles": [],
+    "isPublic": true,
+    "provider": "EventCatalogService",
+    "serviceMethod": "detail"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCatalogController",
+    "controllerFile": "events/catalog/event-catalog.controller.ts",
+    "method": "create",
+    "verb": "POST",
+    "path": "/api/v1/events",
+    "roles": [
+      "EVENT_MANAGER",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventCatalogService",
+    "serviceMethod": "create"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCatalogController",
+    "controllerFile": "events/catalog/event-catalog.controller.ts",
+    "method": "publish",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/publish",
+    "roles": [
+      "EVENT_MANAGER",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventCatalogService",
+    "serviceMethod": "publish"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCatalogController",
+    "controllerFile": "events/catalog/event-catalog.controller.ts",
+    "method": "cancel",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/cancel",
+    "roles": [
+      "EVENT_MANAGER",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventCancellationService",
+    "serviceMethod": "cancel"
+  },
+  {
+    "domain": "events",
+    "controller": "EventInvitationsController",
+    "controllerFile": "events/invitations/event-invitations.controller.ts",
+    "method": "createPartnerInvite",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/partner-invites",
+    "roles": [],
+    "isPublic": false,
+    "provider": "EventInvitationsService",
+    "serviceMethod": "createPartnerInvite"
+  },
+  {
+    "domain": "events",
+    "controller": "EventInvitationsController",
+    "controllerFile": "events/invitations/event-invitations.controller.ts",
+    "method": "createTeamInvite",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/team-invites",
+    "roles": [],
+    "isPublic": false,
+    "provider": "EventInvitationsService",
+    "serviceMethod": "createTeamInvite"
+  },
+  {
+    "domain": "events",
+    "controller": "EventInvitationsController",
+    "controllerFile": "events/invitations/event-invitations.controller.ts",
+    "method": "previewTeamInvite",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/team-invites/preview",
+    "roles": [],
+    "isPublic": true,
+    "provider": "EventInvitationsService",
+    "serviceMethod": "previewTeamInvite"
+  },
+  {
+    "domain": "events",
+    "controller": "EventInvitationsController",
+    "controllerFile": "events/invitations/event-invitations.controller.ts",
+    "method": "teamInviteContext",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/team-invites/context",
+    "roles": [],
+    "isPublic": false,
+    "provider": "EventInvitationsService",
+    "serviceMethod": "previewTeamInvite"
+  },
+  {
+    "domain": "events",
+    "controller": "EventInvitationsController",
+    "controllerFile": "events/invitations/event-invitations.controller.ts",
+    "method": "acceptTeamInvite",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/team-invites/accept",
+    "roles": [],
+    "isPublic": false,
+    "provider": "EventInvitationsService",
+    "serviceMethod": "acceptTeamInvite"
+  },
+  {
+    "domain": "events",
+    "controller": "EventInvitationsController",
+    "controllerFile": "events/invitations/event-invitations.controller.ts",
+    "method": "previewPartnerInvite",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/partner-invites/preview",
+    "roles": [],
+    "isPublic": false,
+    "provider": "EventInvitationsService",
+    "serviceMethod": "previewPartnerInvite"
+  },
+  {
+    "domain": "events",
+    "controller": "EventRegistrationController",
+    "controllerFile": "events/registration/event-registration.controller.ts",
+    "method": "myRegistration",
+    "verb": "GET",
+    "path": "/api/v1/events/:id/registration/me",
+    "roles": [],
+    "isPublic": false,
+    "provider": "EventParticipationService",
+    "serviceMethod": "myRegistration"
+  },
+  {
+    "domain": "events",
+    "controller": "EventRegistrationController",
+    "controllerFile": "events/registration/event-registration.controller.ts",
+    "method": "register",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/register",
+    "roles": [],
+    "isPublic": false,
+    "provider": "EventRegistrationService",
+    "serviceMethod": "register"
+  },
+  {
+    "domain": "events",
+    "controller": "EventRegistrationController",
+    "controllerFile": "events/registration/event-registration.controller.ts",
+    "method": "promoteWaitlist",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/promote-waitlist",
+    "roles": [
+      "EVENT_MANAGER",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventParticipationService",
+    "serviceMethod": "promoteWaitlist"
+  },
+  {
+    "domain": "events",
+    "controller": "EventRegistrationController",
+    "controllerFile": "events/registration/event-registration.controller.ts",
+    "method": "cancelRegistration",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/registration/cancel",
+    "roles": [],
+    "isPublic": false,
+    "provider": "EventWithdrawalService",
+    "serviceMethod": "cancelRegistration"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCompetitionController",
+    "controllerFile": "events/competition/event-competition.controller.ts",
+    "method": "checkIn",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/teams/:teamId/check-in",
+    "roles": [
+      "EVENT_MANAGER",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventParticipationService",
+    "serviceMethod": "checkIn"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCompetitionController",
+    "controllerFile": "events/competition/event-competition.controller.ts",
+    "method": "nextRound",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/rounds/next",
+    "roles": [
+      "EVENT_MANAGER",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventCompetitionService",
+    "serviceMethod": "startNextRound"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCompetitionController",
+    "controllerFile": "events/competition/event-competition.controller.ts",
+    "method": "correctPairings",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/rounds/:round/pairings/correct",
+    "roles": [
+      "EVENT_MANAGER",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventCompetitionService",
+    "serviceMethod": "correctPairings"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCompetitionController",
+    "controllerFile": "events/competition/event-competition.controller.ts",
+    "method": "score",
+    "verb": "POST",
+    "path": "/api/v1/events/matches/:matchId/score",
+    "roles": [
+      "EVENT_MANAGER",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventCompetitionService",
+    "serviceMethod": "submitScore"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCompetitionController",
+    "controllerFile": "events/competition/event-competition.controller.ts",
+    "method": "correct",
+    "verb": "POST",
+    "path": "/api/v1/events/matches/:matchId/correct",
+    "roles": [
+      "EVENT_MANAGER",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventCompetitionService",
+    "serviceMethod": "correctScore"
+  },
+  {
+    "domain": "events",
+    "controller": "EventCompetitionController",
+    "controllerFile": "events/competition/event-competition.controller.ts",
+    "method": "finish",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/finish",
+    "roles": [
+      "EVENT_MANAGER",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventCompetitionService",
+    "serviceMethod": "finish"
+  },
+  {
+    "domain": "events",
+    "controller": "EventPrizesController",
+    "controllerFile": "events/prizes/event-prizes.controller.ts",
+    "method": "prizes",
+    "verb": "GET",
+    "path": "/api/v1/events/:id/prizes",
+    "roles": [
+      "EVENT_MANAGER",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventPrizesService",
+    "serviceMethod": "listPrizeAwards"
+  },
+  {
+    "domain": "events",
+    "controller": "EventPrizesController",
+    "controllerFile": "events/prizes/event-prizes.controller.ts",
+    "method": "issuePrize",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/prizes",
+    "roles": [
+      "EVENT_MANAGER",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventPrizesService",
+    "serviceMethod": "issuePrize"
+  },
+  {
+    "domain": "events",
+    "controller": "EventPrizesController",
+    "controllerFile": "events/prizes/event-prizes.controller.ts",
+    "method": "receivePrize",
+    "verb": "POST",
+    "path": "/api/v1/events/:id/prizes/:awardId/receive",
+    "roles": [
+      "EVENT_MANAGER",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "EventPrizesService",
+    "serviceMethod": "receivePrize"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingCatalogController",
+    "controllerFile": "training/catalog/training-catalog.controller.ts",
+    "method": "products",
+    "verb": "GET",
+    "path": "/api/v1/training/products",
+    "roles": [],
+    "isPublic": false,
+    "provider": "TrainingCatalogService",
+    "serviceMethod": "listProducts"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingCatalogController",
+    "controllerFile": "training/catalog/training-catalog.controller.ts",
+    "method": "createProduct",
+    "verb": "POST",
+    "path": "/api/v1/training/products",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingCatalogService",
+    "serviceMethod": "createProduct"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingCatalogController",
+    "controllerFile": "training/catalog/training-catalog.controller.ts",
+    "method": "updateProduct",
+    "verb": "PATCH",
+    "path": "/api/v1/training/products/:id",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingCatalogService",
+    "serviceMethod": "updateProduct"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingCatalogController",
+    "controllerFile": "training/catalog/training-catalog.controller.ts",
+    "method": "createClass",
+    "verb": "POST",
+    "path": "/api/v1/training/classes",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingCatalogService",
+    "serviceMethod": "createClass"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingStudentsController",
+    "controllerFile": "training/students/training-students.controller.ts",
+    "method": "students",
+    "verb": "GET",
+    "path": "/api/v1/training/students",
+    "roles": [],
+    "isPublic": false,
+    "provider": "TrainingStudentsService",
+    "serviceMethod": "listStudents"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingStudentsController",
+    "controllerFile": "training/students/training-students.controller.ts",
+    "method": "allStudents",
+    "verb": "GET",
+    "path": "/api/v1/training/admin/students",
+    "roles": [
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingStudentsService",
+    "serviceMethod": "listStudents"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingStudentsController",
+    "controllerFile": "training/students/training-students.controller.ts",
+    "method": "createStudent",
+    "verb": "POST",
+    "path": "/api/v1/training/students",
+    "roles": [],
+    "isPublic": false,
+    "provider": "TrainingStudentsService",
+    "serviceMethod": "createStudent"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingStudentsController",
+    "controllerFile": "training/students/training-students.controller.ts",
+    "method": "updateStudent",
+    "verb": "PATCH",
+    "path": "/api/v1/training/students/:studentId",
+    "roles": [],
+    "isPublic": false,
+    "provider": "TrainingStudentsService",
+    "serviceMethod": "updateStudent"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingEnrollmentsController",
+    "controllerFile": "training/enrollments/training-enrollments.controller.ts",
+    "method": "purchase",
+    "verb": "POST",
+    "path": "/api/v1/training/purchase",
+    "roles": [],
+    "isPublic": false,
+    "provider": "TrainingEnrollmentsService",
+    "serviceMethod": "purchase"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingEnrollmentsController",
+    "controllerFile": "training/enrollments/training-enrollments.controller.ts",
+    "method": "myEnrollments",
+    "verb": "GET",
+    "path": "/api/v1/training/enrollments",
+    "roles": [],
+    "isPublic": false,
+    "provider": "TrainingEnrollmentsService",
+    "serviceMethod": "listEnrollments"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingEnrollmentsController",
+    "controllerFile": "training/enrollments/training-enrollments.controller.ts",
+    "method": "allEnrollments",
+    "verb": "GET",
+    "path": "/api/v1/training/admin/enrollments",
+    "roles": [
+      "COACH",
+      "FRONT_DESK",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingEnrollmentsService",
+    "serviceMethod": "listEnrollments"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingScheduleController",
+    "controllerFile": "training/schedule/training-schedule.controller.ts",
+    "method": "sessions",
+    "verb": "GET",
+    "path": "/api/v1/training/sessions",
+    "roles": [
+      "COACH",
+      "FRONT_DESK",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingScheduleService",
+    "serviceMethod": "listSessions"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingScheduleController",
+    "controllerFile": "training/schedule/training-schedule.controller.ts",
+    "method": "createSession",
+    "verb": "POST",
+    "path": "/api/v1/training/sessions",
+    "roles": [
+      "COACH",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingScheduleService",
+    "serviceMethod": "createSession"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingScheduleController",
+    "controllerFile": "training/schedule/training-schedule.controller.ts",
+    "method": "complete",
+    "verb": "POST",
+    "path": "/api/v1/training/sessions/:sessionId/complete",
+    "roles": [
+      "COACH",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingScheduleService",
+    "serviceMethod": "completeSession"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingAttendanceController",
+    "controllerFile": "training/attendance/training-attendance.controller.ts",
+    "method": "markAttendance",
+    "verb": "POST",
+    "path": "/api/v1/training/sessions/:sessionId/attendance",
+    "roles": [
+      "COACH",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingAttendanceService",
+    "serviceMethod": "markAttendance"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingAttendanceController",
+    "controllerFile": "training/attendance/training-attendance.controller.ts",
+    "method": "scheduleMakeup",
+    "verb": "POST",
+    "path": "/api/v1/training/sessions/:sessionId/attendance/makeup",
+    "roles": [
+      "COACH",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingAttendanceService",
+    "serviceMethod": "scheduleMakeup"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingConsumptionController",
+    "controllerFile": "training/consumption/training-consumption.controller.ts",
+    "method": "consume",
+    "verb": "POST",
+    "path": "/api/v1/training/sessions/:sessionId/consume",
+    "roles": [
+      "COACH",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingConsumptionService",
+    "serviceMethod": "consume"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingConsumptionController",
+    "controllerFile": "training/consumption/training-consumption.controller.ts",
+    "method": "confirmConsume",
+    "verb": "POST",
+    "path": "/api/v1/training/sessions/:sessionId/consume/confirm",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingConsumptionService",
+    "serviceMethod": "confirmConsume"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingCorrectionsController",
+    "controllerFile": "training/corrections/training-corrections.controller.ts",
+    "method": "consumeCorrections",
+    "verb": "GET",
+    "path": "/api/v1/training/consume-corrections",
+    "roles": [
+      "COACH",
+      "FRONT_DESK",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingCorrectionsService",
+    "serviceMethod": "listConsumeCorrections"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingCorrectionsController",
+    "controllerFile": "training/corrections/training-corrections.controller.ts",
+    "method": "requestConsumeCorrection",
+    "verb": "POST",
+    "path": "/api/v1/training/consume-corrections",
+    "roles": [
+      "COACH",
+      "FRONT_DESK",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingCorrectionsService",
+    "serviceMethod": "requestConsumeCorrection"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingCorrectionsController",
+    "controllerFile": "training/corrections/training-corrections.controller.ts",
+    "method": "approveConsumeCorrection",
+    "verb": "POST",
+    "path": "/api/v1/training/consume-corrections/:id/approve",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingCorrectionsService",
+    "serviceMethod": "approveConsumeCorrection"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingCorrectionsController",
+    "controllerFile": "training/corrections/training-corrections.controller.ts",
+    "method": "rejectConsumeCorrection",
+    "verb": "POST",
+    "path": "/api/v1/training/consume-corrections/:id/reject",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingCorrectionsService",
+    "serviceMethod": "rejectConsumeCorrection"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingSettlementsController",
+    "controllerFile": "training/settlements/training-settlements.controller.ts",
+    "method": "summary",
+    "verb": "GET",
+    "path": "/api/v1/training/financial-summary",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingSettlementsService",
+    "serviceMethod": "financialSummary"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingSettlementsController",
+    "controllerFile": "training/settlements/training-settlements.controller.ts",
+    "method": "settlement",
+    "verb": "POST",
+    "path": "/api/v1/training/settlements",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingSettlementsService",
+    "serviceMethod": "createSettlement"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingSettlementsController",
+    "controllerFile": "training/settlements/training-settlements.controller.ts",
+    "method": "settlements",
+    "verb": "GET",
+    "path": "/api/v1/training/settlements",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingSettlementsService",
+    "serviceMethod": "listSettlements"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingSettlementsController",
+    "controllerFile": "training/settlements/training-settlements.controller.ts",
+    "method": "submitSettlement",
+    "verb": "POST",
+    "path": "/api/v1/training/settlements/:id/submit",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingSettlementsService",
+    "serviceMethod": "submitSettlement"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingSettlementsController",
+    "controllerFile": "training/settlements/training-settlements.controller.ts",
+    "method": "confirmSettlement",
+    "verb": "POST",
+    "path": "/api/v1/training/settlements/:id/confirm",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingSettlementsService",
+    "serviceMethod": "confirmSettlement"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingSettlementsController",
+    "controllerFile": "training/settlements/training-settlements.controller.ts",
+    "method": "settleSettlement",
+    "verb": "POST",
+    "path": "/api/v1/training/settlements/:id/settle",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingSettlementsService",
+    "serviceMethod": "settleSettlement"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingSettlementsController",
+    "controllerFile": "training/settlements/training-settlements.controller.ts",
+    "method": "returnSettlement",
+    "verb": "POST",
+    "path": "/api/v1/training/settlements/:id/return",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingSettlementsService",
+    "serviceMethod": "returnSettlement"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingSettlementsController",
+    "controllerFile": "training/settlements/training-settlements.controller.ts",
+    "method": "voidSettlement",
+    "verb": "POST",
+    "path": "/api/v1/training/settlements/:id/void",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingSettlementsService",
+    "serviceMethod": "voidSettlement"
+  }
+]

@@ -13,7 +13,7 @@ import {
   TrainingRecognitionType,
   Prisma,
 } from '../generated/prisma/client.js';
-import { TrainingService } from './training.service.js';
+import { TrainingService } from '../../test/support/training-service-fixture.js';
 
 const coach: AuthUser = {
   sub: 'coach-1',

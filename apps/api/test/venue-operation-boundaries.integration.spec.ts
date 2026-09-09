@@ -8,7 +8,7 @@ import { OrderFinalizerService } from '../src/payments/order-finalizer.service.j
 import { ConsignmentSettlementService } from '../src/inventory/consignment-settlement.service.js';
 import { GovernanceService } from '../src/governance/governance.service.js';
 import { WorkItemsService } from '../src/work-items/work-items.service.js';
-import { TrainingService } from '../src/training/training.service.js';
+import { TrainingService } from './support/training-service-fixture.js';
 import { GamesService } from '../src/games/games.service.js';
 import { YouthTrainingRulesService } from '../src/training/youth-training-rules.service.js';
 import type { AuthUser } from '../src/common/auth/auth-user.js';

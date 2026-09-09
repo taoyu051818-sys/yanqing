@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { MembersService } from '../src/members/members.service.js';
 import { AllianceService } from '../src/alliance/alliance.service.js';
-import { TrainingService } from '../src/training/training.service.js';
+import { TrainingService } from './support/training-service-fixture.js';
 import { TrainingTrialsService } from '../src/training/training-trials.service.js';
 import { OrdersService } from '../src/orders/orders.service.js';
 import { OrderFinalizerService } from '../src/payments/order-finalizer.service.js';

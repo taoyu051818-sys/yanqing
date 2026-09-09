@@ -14,8 +14,8 @@ import {
 } from '../generated/prisma/client.js';
 import type { RegisterEventTeamDto } from './events.dto.js';
 import { EVENT_MINIMUM_PEOPLE, EVENT_TOTAL_ROUNDS } from './events.dto.js';
-import { EventsService } from './events.service.js';
-import { promoteNextEventWaitlist } from './event-waitlist.js';
+import { EventsService } from '../../test/support/events-service-fixture.js';
+import { promoteNextEventWaitlist } from './registration/event-waitlist.js';
 
 const member: AuthUser = {
   sub: 'member-queue',

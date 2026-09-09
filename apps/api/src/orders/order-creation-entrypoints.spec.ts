@@ -3,11 +3,11 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AuthUser } from '../common/auth/auth-user.js'
-import { EventsService } from '../events/events.service.js'
+import { EventsService } from "../../test/support/events-service-fixture.js"
 import { GamesService } from '../games/games.service.js'
 import { GoodsService } from '../goods/goods.service.js'
 import { MembershipsService } from '../memberships/memberships.service.js'
-import { TrainingService } from '../training/training.service.js'
+import { TrainingService } from "../../test/support/training-service-fixture.js"
 import { VenuesService } from '../venues/venues.service.js'
 import { AppRole, SourceChannel, TeamCategory } from '../generated/prisma/enums.js'
 import { orderCreationCommandHash } from './order-creation-idempotency.js'

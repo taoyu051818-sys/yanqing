@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../src/database/prisma.service.js';
-import { TrainingService } from '../src/training/training.service.js';
+import { TrainingService } from './support/training-service-fixture.js';
 import { MembersService } from '../src/members/members.service.js';
 import { PrivacyService } from '../src/privacy/privacy.service.js';
 import { InventoryOperationsService } from '../src/inventory/inventory-operations.service.js';

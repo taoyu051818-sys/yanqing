@@ -1,3 +1,77 @@
+import { EventCatalogController } from './catalog/event-catalog.controller.js';
+import { EventInvitationsController } from './invitations/event-invitations.controller.js';
+import { EventRegistrationController } from './registration/event-registration.controller.js';
+import { EventCompetitionController } from './competition/event-competition.controller.js';
+import { EventPrizesController } from './prizes/event-prizes.controller.js';
+
+const controllerMethods = {
+  list: EventCatalogController.prototype.list,
+  detail: EventCatalogController.prototype.detail,
+  managedList: EventCatalogController.prototype.managedList,
+  managedDetail: EventCatalogController.prototype.managedDetail,
+  create: EventCatalogController.prototype.create,
+  publish: EventCatalogController.prototype.publish,
+  cancel: EventCatalogController.prototype.cancel,
+  createPartnerInvite: EventInvitationsController.prototype.createPartnerInvite,
+  createTeamInvite: EventInvitationsController.prototype.createTeamInvite,
+  previewTeamInvite: EventInvitationsController.prototype.previewTeamInvite,
+  teamInviteContext: EventInvitationsController.prototype.teamInviteContext,
+  acceptTeamInvite: EventInvitationsController.prototype.acceptTeamInvite,
+  previewPartnerInvite:
+    EventInvitationsController.prototype.previewPartnerInvite,
+  myRegistration: EventRegistrationController.prototype.myRegistration,
+  register: EventRegistrationController.prototype.register,
+  promoteWaitlist: EventRegistrationController.prototype.promoteWaitlist,
+  cancelRegistration: EventRegistrationController.prototype.cancelRegistration,
+  checkIn: EventCompetitionController.prototype.checkIn,
+  nextRound: EventCompetitionController.prototype.nextRound,
+  correctPairings: EventCompetitionController.prototype.correctPairings,
+  score: EventCompetitionController.prototype.score,
+  correct: EventCompetitionController.prototype.correct,
+  finish: EventCompetitionController.prototype.finish,
+  prizes: EventPrizesController.prototype.prizes,
+  issuePrize: EventPrizesController.prototype.issuePrize,
+  receivePrize: EventPrizesController.prototype.receivePrize,
+};
+function createController(service: never) {
+  const catalog = new EventCatalogController(service, service);
+  const invitations = new EventInvitationsController(service);
+  const registration = new EventRegistrationController(
+    service,
+    service,
+    service,
+  );
+  const competition = new EventCompetitionController(service, service);
+  const prizes = new EventPrizesController(service);
+  return {
+    list: catalog.list.bind(catalog),
+    detail: catalog.detail.bind(catalog),
+    managedList: catalog.managedList.bind(catalog),
+    managedDetail: catalog.managedDetail.bind(catalog),
+    create: catalog.create.bind(catalog),
+    publish: catalog.publish.bind(catalog),
+    cancel: catalog.cancel.bind(catalog),
+    createPartnerInvite: invitations.createPartnerInvite.bind(invitations),
+    createTeamInvite: invitations.createTeamInvite.bind(invitations),
+    previewTeamInvite: invitations.previewTeamInvite.bind(invitations),
+    teamInviteContext: invitations.teamInviteContext.bind(invitations),
+    acceptTeamInvite: invitations.acceptTeamInvite.bind(invitations),
+    previewPartnerInvite: invitations.previewPartnerInvite.bind(invitations),
+    myRegistration: registration.myRegistration.bind(registration),
+    register: registration.register.bind(registration),
+    promoteWaitlist: registration.promoteWaitlist.bind(registration),
+    cancelRegistration: registration.cancelRegistration.bind(registration),
+    checkIn: competition.checkIn.bind(competition),
+    nextRound: competition.nextRound.bind(competition),
+    correctPairings: competition.correctPairings.bind(competition),
+    score: competition.score.bind(competition),
+    correct: competition.correct.bind(competition),
+    finish: competition.finish.bind(competition),
+    prizes: prizes.prizes.bind(prizes),
+    issuePrize: prizes.issuePrize.bind(prizes),
+    receivePrize: prizes.receivePrize.bind(prizes),
+  };
+}
 import 'reflect-metadata';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -11,7 +85,6 @@ import type {
   PublishEventDto,
   ReceiveEventPrizeDto,
 } from './events.dto.js';
-import { EventsController } from './events.controller.js';
 
 const actor: AuthUser = {
   sub: 'reviewer-1',
@@ -21,9 +94,20 @@ const actor: AuthUser = {
 
 describe('EventsController publish command', () => {
   it('allows shared event details without opening registration or management routes', () => {
-    expect(Reflect.getMetadata(IS_PUBLIC_KEY, EventsController.prototype.detail)).toBe(true);
-    for (const method of ['list', 'myRegistration', 'register', 'managedList', 'managedDetail', 'cancelRegistration'] as const) {
-      expect(Reflect.getMetadata(IS_PUBLIC_KEY, EventsController.prototype[method])).not.toBe(true);
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, controllerMethods.detail)).toBe(
+      true,
+    );
+    for (const method of [
+      'list',
+      'myRegistration',
+      'register',
+      'managedList',
+      'managedDetail',
+      'cancelRegistration',
+    ] as const) {
+      expect(
+        Reflect.getMetadata(IS_PUBLIC_KEY, controllerMethods[method]),
+      ).not.toBe(true);
     }
   });
 
@@ -35,10 +119,10 @@ describe('EventsController publish command', () => {
       AppRole.SUPER_ADMIN,
     ];
     expect(
-      Reflect.getMetadata(ROLES_KEY, EventsController.prototype.managedList),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.managedList),
     ).toEqual(roles);
     expect(
-      Reflect.getMetadata(ROLES_KEY, EventsController.prototype.managedDetail),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.managedDetail),
     ).toEqual(roles);
   });
 
@@ -46,7 +130,7 @@ describe('EventsController publish command', () => {
     const events = {
       create: vi.fn().mockResolvedValue({ id: 'event-1', status: 'DRAFT' }),
     };
-    const controller = new EventsController(events as never);
+    const controller = createController(events as never);
     const dto = {
       code: 'EV-01',
       name: '测试赛事',
@@ -67,7 +151,7 @@ describe('EventsController publish command', () => {
     const events = {
       publish: vi.fn().mockResolvedValue({ id: 'event-1', status: 'OPEN' }),
     };
-    const controller = new EventsController(events as never);
+    const controller = createController(events as never);
     const dto: PublishEventDto = { reason: '已完成审核' };
 
     await expect(controller.publish('event-1', dto, actor)).resolves.toEqual({
@@ -78,9 +162,11 @@ describe('EventsController publish command', () => {
   });
 
   it('protects the publish route with the same event-operations roles', () => {
-    expect(
-      Reflect.getMetadata(ROLES_KEY, EventsController.prototype.publish),
-    ).toEqual([AppRole.EVENT_MANAGER, AppRole.ADMIN, AppRole.SUPER_ADMIN]);
+    expect(Reflect.getMetadata(ROLES_KEY, controllerMethods.publish)).toEqual([
+      AppRole.EVENT_MANAGER,
+      AppRole.ADMIN,
+      AppRole.SUPER_ADMIN,
+    ]);
   });
 });
 
@@ -97,7 +183,7 @@ describe('EventsController reverse event workflow', () => {
       cancel: vi.fn().mockResolvedValue({ event: { status: 'CANCELLED' } }),
       cancelRegistration: vi.fn().mockResolvedValue({ outcome: 'CANCELLED' }),
     };
-    const controller = new EventsController(events as never);
+    const controller = createController(events as never);
     const cancelDto = {
       reason: '场馆临时停电',
       idempotencyKey: 'event-cancel-command-1',
@@ -118,14 +204,11 @@ describe('EventsController reverse event workflow', () => {
 
   it('protects promotion and cancellation with event-management roles', () => {
     expect(
-      Reflect.getMetadata(
-        ROLES_KEY,
-        EventsController.prototype.promoteWaitlist,
-      ),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.promoteWaitlist),
     ).toEqual(eventManagerRoles);
-    expect(
-      Reflect.getMetadata(ROLES_KEY, EventsController.prototype.cancel),
-    ).toEqual(eventManagerRoles);
+    expect(Reflect.getMetadata(ROLES_KEY, controllerMethods.cancel)).toEqual(
+      eventManagerRoles,
+    );
   });
 });
 
@@ -144,7 +227,7 @@ describe('EventsController prize commands', () => {
         .fn()
         .mockResolvedValue({ id: 'award-1', status: 'RECEIVED' }),
     };
-    const controller = new EventsController(events as never);
+    const controller = createController(events as never);
     const issue: IssueEventPrizeDto = {
       teamId: 'team-1',
       awardName: '冠军奖',
@@ -171,13 +254,13 @@ describe('EventsController prize commands', () => {
 
   it('shares prize issue and receipt only with event/inventory operators and admins', () => {
     expect(
-      Reflect.getMetadata(ROLES_KEY, EventsController.prototype.issuePrize),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.issuePrize),
     ).toEqual(prizeRoles);
     expect(
-      Reflect.getMetadata(ROLES_KEY, EventsController.prototype.receivePrize),
+      Reflect.getMetadata(ROLES_KEY, controllerMethods.receivePrize),
     ).toEqual(prizeRoles);
-    expect(
-      Reflect.getMetadata(ROLES_KEY, EventsController.prototype.prizes),
-    ).toEqual(prizeRoles);
+    expect(Reflect.getMetadata(ROLES_KEY, controllerMethods.prizes)).toEqual(
+      prizeRoles,
+    );
   });
 });

@@ -12,7 +12,7 @@ import {
 } from '../generated/prisma/client.js';
 import { releaseBookingCoupon } from './booking-coupon.js';
 import { promoteNextGameWaitlist } from '../games/game-waitlist.js';
-import { promoteNextEventWaitlist } from '../events/event-waitlist.js';
+import { promoteNextEventWaitlist } from '../events/registration/event-waitlist.js';
 
 type PendingResources = Parameters<typeof releaseBookingCoupon>[1] & {
   gameRegistration?: Pick<GameRegistration, 'id' | 'status' | 'gameId'> | null;

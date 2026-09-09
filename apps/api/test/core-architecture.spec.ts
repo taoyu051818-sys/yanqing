@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
@@ -29,6 +29,39 @@ function access(
     return { owner: node.expression, name: node.argumentExpression.text };
 }
 describe('core architecture regression boundaries', () => {
+  it('keeps retired aggregate services and controllers out of production', () => {
+    for (const domain of ['events', 'training']) {
+      for (const layer of ['service', 'controller']) {
+        expect(
+          existsSync(resolve(root, `src/${domain}/${domain}.${layer}.ts`)),
+        ).toBe(false);
+      }
+    }
+    for (const path of sources(resolve(root, 'src'))) {
+      const file = ts.createSourceFile(
+        path,
+        readFileSync(path, 'utf8'),
+        ts.ScriptTarget.Latest,
+        true,
+      );
+      for (const node of file.statements) {
+        if (
+          (!ts.isImportDeclaration(node) && !ts.isExportDeclaration(node)) ||
+          !node.moduleSpecifier ||
+          !ts.isStringLiteral(node.moduleSpecifier)
+        )
+          continue;
+        const target = node.moduleSpecifier.text;
+        if (target.startsWith('.')) {
+          expect(
+            relative(resolve(root, 'src'), resolve(dirname(path), target)),
+            relative(root, path),
+          ).not.toMatch(/^\.\.\/test(?:\/|$)/);
+        }
+      }
+    }
+  });
+
   it('keeps shared order and extracted workflows independent of activity orchestration services', () => {
     const forbidden = new Set(
       [
@@ -38,20 +71,37 @@ describe('core architecture regression boundaries', () => {
       ].map((name) => resolve(root, 'src', name)),
     );
     const entries = [
+      'events/catalog/event-catalog.service.ts',
+      'events/catalog/event-cancellation.service.ts',
+      'events/invitations/event-invitations.service.ts',
+      'events/registration/event-registration.service.ts',
+      'events/registration/event-participation.service.ts',
+      'events/registration/event-withdrawal.service.ts',
+      'events/competition/event-competition.service.ts',
+      'events/prizes/event-prizes.service.ts',
+      'training/catalog/training-catalog.service.ts',
+      'training/students/training-students.service.ts',
+      'training/enrollments/training-enrollments.service.ts',
+      'training/schedule/training-schedule.service.ts',
+      'training/attendance/training-attendance.service.ts',
+      'training/consumption/training-consumption.service.ts',
+      'training/corrections/training-corrections.service.ts',
+      'training/settlements/training-settlements.service.ts',
+
       'orders/orders.service.ts',
       'orders/pending-order-resources.ts',
       'orders/refund-resources.ts',
       'payments/wechat-pay.service.ts',
-      'events/event-waitlist.ts',
+      'events/registration/event-waitlist.ts',
       'games/game-waitlist.ts',
-      'events/event-prizes.ts',
-      'events/event-rounds.ts',
-      'events/event-scoring.ts',
-      'events/event-completion.ts',
-      'events/event-standings.ts',
-      'events/event-competition-policy.ts',
-      'training/training-settlements.ts',
-      'training/training-consume-corrections.ts',
+      'events/prizes/event-prizes.ts',
+      'events/competition/event-rounds.ts',
+      'events/competition/event-scoring.ts',
+      'events/competition/event-completion.ts',
+      'events/competition/event-standings.ts',
+      'events/competition/event-competition-policy.ts',
+      'training/settlements/training-settlements.ts',
+      'training/corrections/training-consume-corrections.ts',
       'training/training-access.ts',
     ];
     const visited = new Set<string>();

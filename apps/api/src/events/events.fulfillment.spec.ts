@@ -13,7 +13,7 @@ import {
   TeamCategory,
 } from '../generated/prisma/client.js'
 import { EVENT_TOTAL_ROUNDS } from './events.dto.js'
-import { EventsService } from './events.service.js'
+import { EventsService } from "../../test/support/events-service-fixture.js"
 
 const actor: AuthUser = {
   sub: 'event-manager-1',
