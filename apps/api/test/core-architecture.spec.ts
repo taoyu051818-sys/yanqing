@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs';
-import { resolve, relative } from 'node:path';
+import { resolve, relative, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
@@ -29,6 +29,59 @@ function access(
     return { owner: node.expression, name: node.argumentExpression.text };
 }
 describe('core architecture regression boundaries', () => {
+  it('keeps shared order and extracted workflows independent of activity orchestration services', () => {
+    const forbidden = new Set(
+      [
+        'events/events.service.ts',
+        'games/games.service.ts',
+        'training/training.service.ts',
+      ].map((name) => resolve(root, 'src', name)),
+    );
+    const entries = [
+      'orders/orders.service.ts',
+      'orders/pending-order-resources.ts',
+      'orders/refund-resources.ts',
+      'payments/wechat-pay.service.ts',
+      'events/event-waitlist.ts',
+      'games/game-waitlist.ts',
+      'events/event-prizes.ts',
+      'training/training-settlements.ts',
+    ];
+    const visited = new Set<string>();
+    const violations: string[] = [];
+    const visit = (path: string, chain: string[]) => {
+      if (forbidden.has(path)) {
+        violations.push([...chain, relative(root, path)].join(' -> '));
+        return;
+      }
+      if (visited.has(path) || path.includes('/generated/')) return;
+      visited.add(path);
+      const file = ts.createSourceFile(
+        path,
+        readFileSync(path, 'utf8'),
+        ts.ScriptTarget.Latest,
+        true,
+      );
+      for (const node of file.statements) {
+        if (!ts.isImportDeclaration(node) && !ts.isExportDeclaration(node))
+          continue;
+        if (ts.isImportDeclaration(node) && node.importClause?.isTypeOnly)
+          continue;
+        if (ts.isExportDeclaration(node) && node.isTypeOnly) continue;
+        if (!node.moduleSpecifier || !ts.isStringLiteral(node.moduleSpecifier))
+          continue;
+        const specifier = node.moduleSpecifier.text;
+        if (!specifier.startsWith('.') || !specifier.endsWith('.js')) continue;
+        visit(resolve(dirname(path), specifier.replace(/\.js$/, '.ts')), [
+          ...chain,
+          relative(root, path),
+        ]);
+      }
+    };
+    for (const entry of entries) visit(resolve(root, 'src', entry), []);
+    expect(violations).toEqual([]);
+  });
+
   it('keeps direct Order status updates inside the transition writer', () => {
     const violations: string[] = [];
     for (const path of sources(resolve(root, 'src'))) {

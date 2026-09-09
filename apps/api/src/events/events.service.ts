@@ -1,3 +1,17 @@
+import {
+  serial,
+  isPrismaErrorCode,
+  normaliseText,
+  normaliseOptionalText,
+  assertCommandKey,
+} from './event-command-support.js';
+import {
+  eventTeamCancellationRefundKey,
+  EVENT_SEAT_STATUSES,
+  eventPaymentDueAt,
+} from './event-registration-policy.js';
+import { promoteNextEventWaitlist } from './event-waitlist.js';
+import { listPrizeAwards, issuePrize, receivePrize } from './event-prizes.js';
 import { transitionOrder, requireOrderTransition } from '../orders/order-transition.js';
 import { cancelZeroAmountActivityOrder, isZeroAmountConfirmedActivityOrder } from '../orders/zero-amount-activity-order.js';
 import { createHash, randomBytes } from 'node:crypto';
@@ -26,12 +40,9 @@ import {
   AccountType,
   AppRole,
   BusinessType,
-  EventPrizeStatus,
   EventStatus,
-  InventoryTxnType,
   MatchStatus,
   OrderStatus,
-  PaymentChannel,
   PaymentStatus,
   Prisma,
   RefundStatus,
@@ -40,7 +51,6 @@ import {
   SubjectAccount,
   UserStatus,
 } from '../generated/prisma/client.js';
-import { applyInventoryDelta } from '../inventory/inventory-balance.js';
 import { orderCreationCommandHash } from '../orders/order-creation-idempotency.js';
 import { completeOrderFulfillment } from '../orders/order-fulfillment.js';
 import { orderResponse } from '../orders/order-response.js';
@@ -71,14 +81,6 @@ import {
   normalizeParticipantPhone,
 } from './events.dto.js';
 
-const serial = (prefix: string) =>
-  `${prefix}${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`;
-
-export const eventTeamCancellationRefundKey = (
-  teamId: string,
-  commandKey: string,
-) => `EVENT_TEAM_CANCEL:${teamId}:${commandKey}`;
-
 const DEFAULT_RULES = [
   '固定搭档双打，男双、女双、混双同场',
   '每场一局 21 分，20 平后不加分',
@@ -93,12 +95,6 @@ const TERMINAL_MATCH_STATUSES: MatchStatus[] = [
 
 const isTerminalMatch = (status: MatchStatus): boolean =>
   TERMINAL_MATCH_STATUSES.includes(status);
-
-const isPrismaErrorCode = (error: unknown, code: string): boolean =>
-  typeof error === 'object' &&
-  error !== null &&
-  'code' in error &&
-  (error as { code?: unknown }).code === code;
 
 const SCORE_CONCURRENCY_MESSAGE = '比分已被其他操作提交，请刷新后重试';
 
@@ -116,40 +112,6 @@ const eventRegistrationResponse = (value: any) => {
     },
   };
 };
-
-const prizeAwardResponse = (value: any) => ({
-  id: value.id,
-  awardName: value.awardName,
-  finalRank: value.finalRank,
-  recipientNames: value.recipientNames,
-  quantity: value.quantity,
-  status: value.status,
-  note: value.note,
-  receivedByName: value.receivedByName,
-  receiptNote: value.receiptNote,
-  issuedAt: value.issuedAt,
-  receivedAt: value.receivedAt,
-  team: value.team
-    ? {
-        id: value.team.id,
-        name: value.team.name,
-        finalRank: value.team.finalRank,
-      }
-    : undefined,
-  inventoryItem: value.inventoryItem
-    ? {
-        id: value.inventoryItem.id,
-        sku: value.inventoryItem.sku,
-        name: value.inventoryItem.name,
-      }
-    : undefined,
-  operator: value.operator
-    ? { id: value.operator.id, displayName: value.operator.displayName }
-    : undefined,
-  signedBy: value.signedBy
-    ? { id: value.signedBy.id, displayName: value.signedBy.displayName }
-    : undefined,
-});
 
 const eventCommandResponse = (event: any) => ({
   id: event.id,
@@ -221,23 +183,11 @@ const EVENT_MANAGER_ROLES: readonly AppRole[] = [
   AppRole.SUPER_ADMIN,
 ];
 
-// FRONT_DESK is the current inventory-custodian role used by the stock
-// centre.  Prize hand-over is shared with event operations, while members,
-// coaches and finance cannot mutate prize inventory.
-const EVENT_PRIZE_OPERATOR_ROLES: readonly AppRole[] = [
-  AppRole.EVENT_MANAGER,
-  AppRole.FRONT_DESK,
-  AppRole.ADMIN,
-  AppRole.SUPER_ADMIN,
-];
-
 const MATCH_STATUSES_ACCEPTING_SCORE: readonly MatchStatus[] = [
   MatchStatus.PENDING,
   MatchStatus.IN_PROGRESS,
   MatchStatus.SUBMITTED,
 ];
-
-export const EVENT_PAYMENT_RESERVATION_MINUTES = 15;
 export const EVENT_PARTNER_INVITE_TTL_MINUTES = 15;
 
 const eventPartnerInviteHash = (value: string): string =>
@@ -248,13 +198,6 @@ const ASSISTED_EVENT_REGISTRATION_ROLES: readonly AppRole[] = [
   AppRole.EVENT_MANAGER,
   AppRole.ADMIN,
   AppRole.SUPER_ADMIN,
-];
-
-const EVENT_SEAT_STATUSES: readonly RegistrationStatus[] = [
-  RegistrationStatus.REGISTERED,
-  RegistrationStatus.PAID,
-  RegistrationStatus.CHECKED_IN,
-  RegistrationStatus.COMPLETED,
 ];
 
 const EVENT_CANCELLABLE_STATUSES: readonly EventStatus[] = [
@@ -280,9 +223,6 @@ const EVENT_COMPLETED_ORDER_STATUSES: ReadonlySet<OrderStatus> = new Set(
   EVENT_NO_SHOW_ORDER_STATUSES,
 );
 
-const normaliseText = (value: unknown): string =>
-  typeof value === 'string' ? value.trim() : '';
-
 export const eventPointRecipientIds = (team: {
   captainId: string;
   captainPlays?: boolean;
@@ -298,11 +238,6 @@ export const eventPointRecipientIds = (team: {
   ),
 ];
 
-const normaliseOptionalText = (value: unknown): string | undefined => {
-  const text = normaliseText(value);
-  return text || undefined;
-};
-
 const parseDate = (value: unknown, field: string): Date => {
   const date = new Date(String(value));
   if (Number.isNaN(date.getTime())) {
@@ -310,285 +245,6 @@ const parseDate = (value: unknown, field: string): Date => {
   }
   return date;
 };
-
-const eventPaymentDueAt = (
-  registrationEndsAt: Date,
-  startsAt: Date,
-  now: Date,
-): Date =>
-  new Date(
-    Math.min(
-      now.getTime() + EVENT_PAYMENT_RESERVATION_MINUTES * 60_000,
-      registrationEndsAt.getTime(),
-      startsAt.getTime(),
-    ),
-  );
-
-/**
- * Release expired unpaid event reservations inside the caller's serializable
- * transaction.  Each row is claimed with a conditional update; a payment
- * worker that already moved the team to PAID therefore wins cleanly.
- */
-async function expireEventReservations(
-  tx: Prisma.TransactionClient,
-  eventId: string,
-  actorId: string | undefined,
-  actorRole: AppRole | undefined,
-  now: Date,
-) {
-  const expired = await tx.eventTeam.findMany({
-    where: {
-      eventId,
-      status: RegistrationStatus.REGISTERED,
-      paymentDueAt: { lte: now },
-      // An in-flight WeChat payment must be remotely closed by OrdersService
-      // before releasing its seat. A domain-only transaction cannot close it.
-      order: { status: OrderStatus.PENDING, payments: { none: { channel: PaymentChannel.WECHAT, status: PaymentStatus.PROCESSING } } },
-    },
-    select: { id: true, orderId: true, paymentDueAt: true },
-    orderBy: [{ paymentDueAt: 'asc' }, { id: 'asc' }],
-  });
-  let released = 0;
-  for (const team of expired) {
-    const claimed = await tx.eventTeam.updateMany({
-      where: {
-        id: team.id,
-        status: RegistrationStatus.REGISTERED,
-        paymentDueAt: { lte: now },
-      },
-      data: {
-        status: RegistrationStatus.CANCELLED,
-        paymentDueAt: null,
-        cancelledAt: now,
-      },
-    });
-    if (claimed.count !== 1) continue;
-    if (team.orderId) {
-      await requireOrderTransition(tx, 'CANCEL_UNPAID', {
-        where: { id: team.orderId, status: OrderStatus.PENDING },
-        data: { status: OrderStatus.CANCELLED, cancelledAt: now },
-      });
-      await tx.payment.updateMany({
-        where: {
-          orderId: team.orderId,
-          status: {
-            in: [
-              PaymentStatus.CREATED,
-              PaymentStatus.PROCESSING,
-              PaymentStatus.FAILED,
-            ],
-          },
-        },
-        data: { status: PaymentStatus.CLOSED },
-      });
-    }
-    released += 1;
-    await tx.auditLog.create({
-      data: {
-        actorId,
-        actorRole,
-        action: 'EVENT_PAYMENT_RESERVATION_EXPIRED',
-        objectType: 'EventTeam',
-        objectId: team.id,
-        oldValue: {
-          status: RegistrationStatus.REGISTERED,
-          paymentDueAt: team.paymentDueAt?.toISOString(),
-        } as never,
-        newValue: {
-          status: RegistrationStatus.CANCELLED,
-          orderId: team.orderId,
-        } as never,
-        reason: '报名支付保留期届满',
-      },
-    });
-  }
-  return released;
-}
-
-/**
- * Fill every currently available event-team seat from the persistent FIFO
- * queue.  It is shared by operations, timeout cleanup and refund finalisers.
- */
-export async function promoteNextEventWaitlist(
-  tx: Prisma.TransactionClient,
-  eventId: string,
-  actorId: string | undefined,
-  actorRole: AppRole | undefined,
-  now = new Date(),
-) {
-  const event = await tx.event.findUnique({
-    where: { id: eventId },
-    select: {
-      id: true,
-      name: true,
-      status: true,
-      capacityPeople: true,
-      registrationEndsAt: true,
-      startsAt: true,
-    },
-  });
-  if (
-    !event ||
-    (event.status !== EventStatus.OPEN && event.status !== EventStatus.FULL)
-  ) {
-    return { expiredCount: 0, promotions: [] };
-  }
-
-  const expiredCount = await expireEventReservations(
-    tx,
-    eventId,
-    actorId,
-    actorRole,
-    now,
-  );
-  if (event.registrationEndsAt <= now || event.startsAt <= now) {
-    return { expiredCount, promotions: [] };
-  }
-  const capacityTeams = Math.floor(event.capacityPeople / 2);
-  let seated = await tx.eventTeam.count({
-    where: { eventId, status: { in: [...EVENT_SEAT_STATUSES] } },
-  });
-  const promotions: Array<{
-    order: { id: string };
-    registration: { id: string };
-  }> = [];
-
-  while (seated < capacityTeams) {
-    const next = await tx.eventTeam.findFirst({
-      where: {
-        eventId,
-        status: RegistrationStatus.WAITLISTED,
-        orderId: null,
-      },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    });
-    if (!next) break;
-    const paymentDueAt = eventPaymentDueAt(
-      event.registrationEndsAt,
-      event.startsAt,
-      now,
-    );
-    const payableCents = next.payableCents ?? 0;
-    const listAmountCents = next.listAmountCents ?? payableCents;
-    const promotionOrderKey = `SYSTEM:EVENT_WAITLIST:${next.id}`;
-    const operatingShare = await resolveOperatingShareSnapshot(
-      tx,
-      BusinessType.EVENT,
-      now,
-    );
-    const order = await tx.order.upsert({
-      where: { creationIdempotencyKey: promotionOrderKey },
-      update: {},
-      create: {
-        creationIdempotencyKey: promotionOrderKey,
-        creationCommandHash: orderCreationCommandHash({
-          kind: 'EVENT_WAITLIST_PROMOTION',
-          eventId,
-          teamId: next.id,
-          captainId: next.captainId,
-        }),
-        orderNo: serial('EV'),
-        memberId: next.captainId,
-        createdById: actorId,
-        businessType: BusinessType.EVENT,
-        subjectAccount: SubjectAccount.VENUE,
-        sourceChannel: next.sourceChannel ?? SourceChannel.MINI_PROGRAM,
-        status: OrderStatus.PENDING,
-        title: `${event.name} 报名`,
-        listAmountCents,
-        discountCents: Math.max(0, listAmountCents - payableCents),
-        payableCents,
-        parameterSnapshot: {
-          eventId,
-          eventTeamId: next.id,
-          promotedFromWaitlist: true,
-          paymentDueAt: paymentDueAt.toISOString(),
-          memberFeeApplied: next.memberFeeApplied,
-          operatingShare,
-        },
-        items: {
-          create: {
-            itemType: 'EVENT_REGISTRATION',
-            itemId: eventId,
-            name: event.name,
-            unitPriceCents: payableCents,
-            amountCents: payableCents,
-          },
-        },
-      },
-    });
-    // The database deliberately rejects a REGISTERED row without both its
-    // order and payment deadline.  Bind all reservation fields in the same
-    // CAS update so neither readers nor constraints can observe a half-
-    // promoted team.
-    const claimed = await tx.eventTeam.updateMany({
-      where: {
-        id: next.id,
-        status: RegistrationStatus.WAITLISTED,
-        orderId: null,
-      },
-      data: {
-        status: RegistrationStatus.REGISTERED,
-        orderId: order.id,
-        promotedAt: now,
-        paymentDueAt,
-      },
-    });
-    if (claimed.count !== 1) {
-      const latest = await tx.eventTeam.findUnique({
-        where: { id: next.id },
-        select: { status: true, orderId: true },
-      });
-      // A concurrent retry may already have attached this deterministic
-      // order. Treat that as a completed promotion; any genuinely conflicting
-      // snapshot is left for the serializable transaction to retry safely.
-      if (
-        latest?.status === RegistrationStatus.REGISTERED &&
-        latest.orderId === order.id
-      ) {
-        seated += 1;
-        continue;
-      }
-      throw new ConflictException('候补晋级状态已变化，请重试');
-    }
-    const registration = {
-      ...next,
-      status: RegistrationStatus.REGISTERED,
-      orderId: order.id,
-      promotedAt: now,
-      paymentDueAt,
-    };
-    seated += 1;
-    promotions.push({ order, registration });
-    await tx.auditLog.create({
-      data: {
-        actorId,
-        actorRole,
-        action: 'EVENT_WAITLIST_PROMOTED',
-        objectType: 'EventTeam',
-        objectId: registration.id,
-        oldValue: { status: RegistrationStatus.WAITLISTED } as never,
-        newValue: {
-          status: RegistrationStatus.REGISTERED,
-          eventId,
-          orderId: order.id,
-          paymentDueAt: paymentDueAt.toISOString(),
-        } as never,
-      },
-    });
-  }
-
-  await tx.event.updateMany({
-    where: {
-      id: eventId,
-      status: { in: [EventStatus.OPEN, EventStatus.FULL] },
-    },
-    data: {
-      status: seated >= capacityTeams ? EventStatus.FULL : EventStatus.OPEN,
-    },
-  });
-  return { expiredCount, promotions };
-}
 
 @Injectable()
 export class EventsService {
@@ -1655,215 +1311,11 @@ export class EventsService {
   }
 
   async listPrizeAwards(eventId: string) {
-    const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
-      select: { id: true },
-    });
-    if (!event) throw new NotFoundException('赛事不存在');
-    const awards = await this.prisma.eventPrizeAward.findMany({
-      where: { eventId },
-      include: {
-        team: { select: { id: true, name: true, finalRank: true } },
-        inventoryItem: { select: { id: true, sku: true, name: true } },
-        operator: { select: { id: true, displayName: true } },
-        signedBy: { select: { id: true, displayName: true } },
-      },
-      orderBy: [{ finalRank: 'asc' }, { issuedAt: 'asc' }],
-    });
-    return awards.map(prizeAwardResponse);
+    return listPrizeAwards(this.prisma, eventId);
   }
 
   async issuePrize(eventId: string, dto: IssueEventPrizeDto, actor: AuthUser) {
-    this.assertPrizeOperator(actor);
-    const idempotencyKey = normaliseText(dto.idempotencyKey);
-    const awardName = normaliseText(dto.awardName);
-    const teamId = normaliseText(dto.teamId);
-    const inventoryItemId = normaliseText(dto.inventoryItemId);
-    const note = normaliseOptionalText(dto.note);
-    if (!awardName) throw new BadRequestException('奖项名称不能为空');
-    if (!teamId || !inventoryItemId)
-      throw new BadRequestException('获奖队伍和库存商品不能为空');
-    this.assertCommandKey(idempotencyKey, '奖品发放幂等键');
-    if (
-      !Number.isSafeInteger(dto.quantity) ||
-      dto.quantity < 1 ||
-      dto.quantity > 999
-    ) {
-      throw new BadRequestException('奖品数量必须为1-999的整数');
-    }
-
-    const existing = await this.prisma.eventPrizeAward.findUnique({
-      where: { idempotencyKey },
-      include: {
-        team: true,
-        inventoryItem: true,
-        operator: true,
-        signedBy: true,
-      },
-    });
-    if (existing) {
-      this.assertPrizeReplay(existing, eventId, dto, awardName, note);
-      return prizeAwardResponse(existing);
-    }
-
-    try {
-      return await this.prisma.$transaction(
-        async (tx) => {
-          const duplicate = await tx.eventPrizeAward.findUnique({
-            where: { idempotencyKey },
-          });
-          if (duplicate) {
-            this.assertPrizeReplay(duplicate, eventId, dto, awardName, note);
-            return prizeAwardResponse(duplicate);
-          }
-
-          const event = await tx.event.findUnique({
-            where: { id: eventId },
-            select: { id: true, name: true, status: true, prizePool: true },
-          });
-          if (!event) throw new NotFoundException('赛事不存在');
-          if (event.status !== EventStatus.COMPLETED) {
-            throw new ConflictException('赛事尚未完赛，不能发放奖品');
-          }
-          const team = await tx.eventTeam.findFirst({
-            where: { id: teamId, eventId },
-            select: {
-              id: true,
-              name: true,
-              status: true,
-              finalRank: true,
-              playerAName: true,
-              playerBName: true,
-            },
-          });
-          if (!team) throw new NotFoundException('获奖队伍不存在');
-          if (
-            team.status !== RegistrationStatus.COMPLETED ||
-            !team.finalRank ||
-            team.finalRank < 1
-          ) {
-            throw new ConflictException('获奖队伍尚未生成有效最终名次');
-          }
-          const recipientNames = this.prizeRecipients(team, dto.recipientNames);
-
-          const item = await tx.inventoryItem.findUnique({
-            where: { id: inventoryItemId },
-          });
-          if (!item?.enabled)
-            throw new NotFoundException('奖品库存商品不存在或已停用');
-          if (item.stock < dto.quantity)
-            throw new BadRequestException('奖品库存不足');
-          const { stockAfter } = await applyInventoryDelta(
-            tx,
-            item,
-            -dto.quantity,
-          );
-
-          const stockTransaction = await tx.inventoryTransaction.create({
-            data: {
-              itemId: item.id,
-              type: InventoryTxnType.EVENT_USAGE,
-              quantity: -dto.quantity,
-              stockBefore: item.stock,
-              stockAfter,
-              unitCostCents: item.purchasePriceCents,
-              operatorId: actor.sub,
-              reason: `${event.name} · ${awardName} · ${team.name}`,
-              idempotencyKey: `EVENT_PRIZE:${idempotencyKey}`,
-              metadata: {
-                referenceType: 'EventPrizeAward',
-                eventId,
-                teamId: team.id,
-                finalRank: team.finalRank,
-                awardName,
-                recipientNames,
-                prizeIssueIdempotencyKey: idempotencyKey,
-              } as never,
-            },
-          });
-          const award = await tx.eventPrizeAward.create({
-            data: {
-              eventId,
-              teamId: team.id,
-              awardName,
-              finalRank: team.finalRank,
-              recipientNames,
-              inventoryItemId: item.id,
-              quantity: dto.quantity,
-              operatorId: actor.sub,
-              inventoryTransactionId: stockTransaction.id,
-              idempotencyKey,
-              note,
-              prizePoolSnapshot: event.prizePool as never,
-            },
-            include: {
-              team: true,
-              inventoryItem: true,
-              operator: true,
-              signedBy: true,
-            },
-          });
-          await tx.auditLog.create({
-            data: {
-              actorId: actor.sub,
-              actorRole: actor.roles[0],
-              action: 'EVENT_PRIZE_ISSUED',
-              objectType: 'EventPrizeAward',
-              objectId: award.id,
-              oldValue: { stock: item.stock } as never,
-              newValue: {
-                eventId,
-                teamId: team.id,
-                finalRank: team.finalRank,
-                awardName,
-                recipientNames,
-                inventoryItemId: item.id,
-                quantity: dto.quantity,
-                stockAfter,
-                inventoryTransactionId: stockTransaction.id,
-                status: EventPrizeStatus.ISSUED,
-              } as never,
-              reason: note,
-            },
-          });
-          return prizeAwardResponse(award);
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-      );
-    } catch (error) {
-      if (
-        isPrismaErrorCode(error, 'P2002') ||
-        isPrismaErrorCode(error, 'P2034')
-      ) {
-        const replay = await this.prisma.eventPrizeAward.findUnique({
-          where: { idempotencyKey },
-          include: {
-            team: true,
-            inventoryItem: true,
-            operator: true,
-            signedBy: true,
-          },
-        });
-        if (replay) {
-          this.assertPrizeReplay(replay, eventId, dto, awardName, note);
-          return prizeAwardResponse(replay);
-        }
-        const sameAward = await this.prisma.eventPrizeAward.findUnique({
-          where: {
-            eventId_teamId_awardName_inventoryItemId: {
-              eventId,
-              teamId,
-              awardName,
-              inventoryItemId,
-            },
-          },
-        });
-        if (sameAward)
-          throw new ConflictException('该队伍的同一奖项和SKU已经发放');
-        throw new ConflictException('奖品发放发生并发冲突，请刷新后重试');
-      }
-      throw error;
-    }
+    return issuePrize(this.prisma, eventId, dto, actor);
   }
 
   async receivePrize(
@@ -1872,109 +1324,7 @@ export class EventsService {
     dto: ReceiveEventPrizeDto,
     actor: AuthUser,
   ) {
-    this.assertPrizeOperator(actor);
-    const receivedByName = normaliseText(dto.receivedByName);
-    const receiptIdempotencyKey = normaliseText(dto.idempotencyKey);
-    const receiptNote = normaliseOptionalText(dto.note);
-    if (!receivedByName) throw new BadRequestException('签收人不能为空');
-    this.assertCommandKey(receiptIdempotencyKey, '奖品签收幂等键');
-
-    try {
-      return await this.prisma.$transaction(
-        async (tx) => {
-          const current = await tx.eventPrizeAward.findFirst({
-            where: { id: awardId, eventId },
-          });
-          if (!current) throw new NotFoundException('赛事奖品发放记录不存在');
-          if (current.status === EventPrizeStatus.RECEIVED) {
-            this.assertReceiptReplay(
-              current,
-              receivedByName,
-              receiptIdempotencyKey,
-              receiptNote,
-            );
-            return prizeAwardResponse(current);
-          }
-          const receivedAt = new Date();
-          const changed = await tx.eventPrizeAward.updateMany({
-            where: { id: awardId, eventId, status: EventPrizeStatus.ISSUED },
-            data: {
-              status: EventPrizeStatus.RECEIVED,
-              receivedByName,
-              signedById: actor.sub,
-              receiptNote,
-              receiptIdempotencyKey,
-              receivedAt,
-            },
-          });
-          if (changed.count !== 1) {
-            const latest = await tx.eventPrizeAward.findFirst({
-              where: { id: awardId, eventId },
-            });
-            if (latest?.status === EventPrizeStatus.RECEIVED) {
-              this.assertReceiptReplay(
-                latest,
-                receivedByName,
-                receiptIdempotencyKey,
-                receiptNote,
-              );
-              return prizeAwardResponse(latest);
-            }
-            throw new ConflictException(
-              '奖品签收状态已被其他操作更新，请刷新后重试',
-            );
-          }
-          const received = await tx.eventPrizeAward.findUniqueOrThrow({
-            where: { id: awardId },
-          });
-          await tx.auditLog.create({
-            data: {
-              actorId: actor.sub,
-              actorRole: actor.roles[0],
-              action: 'EVENT_PRIZE_RECEIVED',
-              objectType: 'EventPrizeAward',
-              objectId: awardId,
-              oldValue: { status: current.status } as never,
-              newValue: {
-                status: EventPrizeStatus.RECEIVED,
-                receivedByName,
-                signedById: actor.sub,
-                receivedAt: receivedAt.toISOString(),
-              } as never,
-              reason: receiptNote,
-            },
-          });
-          return prizeAwardResponse(received);
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-      );
-    } catch (error) {
-      if (
-        isPrismaErrorCode(error, 'P2002') ||
-        isPrismaErrorCode(error, 'P2034')
-      ) {
-        const latest = await this.prisma.eventPrizeAward.findFirst({
-          where: { id: awardId, eventId },
-        });
-        if (latest?.status === EventPrizeStatus.RECEIVED) {
-          this.assertReceiptReplay(
-            latest,
-            receivedByName,
-            receiptIdempotencyKey,
-            receiptNote,
-          );
-          return prizeAwardResponse(latest);
-        }
-        const duplicateReceipt = await this.prisma.eventPrizeAward.findUnique({
-          where: { receiptIdempotencyKey },
-        });
-        if (duplicateReceipt && duplicateReceipt.id !== awardId) {
-          throw new ConflictException('奖品签收幂等键已用于其他发放记录');
-        }
-        throw new ConflictException('奖品签收发生并发冲突，请刷新后重试');
-      }
-      throw error;
-    }
+    return receivePrize(this.prisma, eventId, awardId, dto, actor);
   }
 
   create(dto: CreateEventDto, actor: AuthUser) {
@@ -2211,7 +1561,7 @@ export class EventsService {
     );
     if (creationIdempotencyKey) {
       if (creationIdempotencyKey.startsWith('SYSTEM:')) throw new BadRequestException('此幂等键前缀仅供系统使用');
-      this.assertCommandKey(creationIdempotencyKey, '赛事报名幂等键');
+      assertCommandKey(creationIdempotencyKey, '赛事报名幂等键');
     }
     const commandHash = orderCreationCommandHash({
       kind: 'EVENT_REGISTRATION',
@@ -2698,7 +2048,7 @@ export class EventsService {
     if (reason.length < 2) {
       throw new BadRequestException('退出原因至少2个字符');
     }
-    this.assertCommandKey(idempotencyKey, '参赛退出幂等键');
+    assertCommandKey(idempotencyKey, '参赛退出幂等键');
     const commandHashFor = (teamId: string) =>
       orderCreationCommandHash({
         kind: 'EVENT_REGISTRATION_CANCEL',
@@ -3067,7 +2417,7 @@ export class EventsService {
     const reason = normaliseText(dto.reason);
     const idempotencyKey = normaliseText(dto.idempotencyKey);
     if (reason.length < 2) throw new BadRequestException('取消原因至少2个字符');
-    this.assertCommandKey(idempotencyKey, '赛事取消幂等键');
+    assertCommandKey(idempotencyKey, '赛事取消幂等键');
     const commandHash = orderCreationCommandHash({
       kind: 'EVENT_CANCEL',
       eventId,
@@ -3621,7 +2971,7 @@ export class EventsService {
       throw new BadRequestException('人工调整配对必须填写至少2个字的原因');
     }
     const idempotencyKey = normaliseText(dto.idempotencyKey);
-    this.assertCommandKey(idempotencyKey, '配对调整幂等键');
+    assertCommandKey(idempotencyKey, '配对调整幂等键');
     const pairings = dto.pairings.map((pairing, index) => ({
       pairAId: normaliseText(pairing.teamAId),
       pairBId: normaliseOptionalText(pairing.teamBId) ?? null,
@@ -4368,106 +3718,9 @@ export class EventsService {
     return { noShowTeamIds, expiredTeamIds };
   }
 
-  private assertPrizeOperator(actor: AuthUser): void {
-    if (
-      !actor.roles.some((role) => EVENT_PRIZE_OPERATOR_ROLES.includes(role))
-    ) {
-      throw new ForbiddenException('当前角色无权发放或签收赛事奖品');
-    }
-  }
-
   private assertEventManager(actor: AuthUser): void {
     if (!actor.roles.some((role) => EVENT_MANAGER_ROLES.includes(role))) {
       throw new ForbiddenException('仅赛事管理员或管理员可创建、发布赛事');
-    }
-  }
-
-  private assertCommandKey(value: string, label: string): void {
-    if (value.length < 8 || value.length > 100) {
-      throw new BadRequestException(`${label}长度必须为8-100个字符`);
-    }
-  }
-
-  private prizeRecipients(
-    team: { playerAName: string; playerBName: string },
-    requested: string[] | undefined,
-  ): string[] {
-    const available = [
-      normaliseText(team.playerAName),
-      normaliseText(team.playerBName),
-    ];
-    const byNormalized = new Map(
-      available.map((name) => [name.toLocaleLowerCase(), name]),
-    );
-    const supplied = requested?.map(normaliseText).filter(Boolean);
-    if (!supplied?.length) return [...new Set(available)];
-    if (
-      new Set(supplied.map((name) => name.toLocaleLowerCase())).size !==
-      supplied.length
-    ) {
-      throw new BadRequestException('奖品领取人不能重复');
-    }
-    return supplied.map((name) => {
-      const canonical = byNormalized.get(name.toLocaleLowerCase());
-      if (!canonical)
-        throw new BadRequestException('奖品领取人必须属于获奖队伍');
-      return canonical;
-    });
-  }
-
-  private assertPrizeReplay(
-    existing: {
-      eventId: string;
-      teamId: string;
-      awardName: string;
-      recipientNames: string[];
-      inventoryItemId: string;
-      quantity: number;
-      note: string | null;
-    },
-    eventId: string,
-    dto: IssueEventPrizeDto,
-    awardName: string,
-    note: string | undefined,
-  ): void {
-    const requestedRecipients = dto.recipientNames
-      ?.map(normaliseText)
-      .filter(Boolean);
-    const recipientsConflict = requestedRecipients?.length
-      ? requestedRecipients.length !== existing.recipientNames.length ||
-        requestedRecipients.some(
-          (name, index) => name !== existing.recipientNames[index],
-        )
-      : false;
-    if (
-      existing.eventId !== eventId ||
-      existing.teamId !== normaliseText(dto.teamId) ||
-      existing.awardName !== awardName ||
-      existing.inventoryItemId !== normaliseText(dto.inventoryItemId) ||
-      existing.quantity !== dto.quantity ||
-      existing.note !== (note ?? null) ||
-      recipientsConflict
-    ) {
-      throw new ConflictException('幂等键已用于其他赛事奖品指令，请更换幂等键');
-    }
-  }
-
-  private assertReceiptReplay(
-    existing: {
-      receivedByName: string | null;
-      receiptIdempotencyKey: string | null;
-      receiptNote: string | null;
-    },
-    receivedByName: string,
-    receiptIdempotencyKey: string,
-    receiptNote: string | undefined,
-  ): void {
-    if (
-      existing.receivedByName !== receivedByName ||
-      existing.receiptIdempotencyKey !== receiptIdempotencyKey ||
-      existing.receiptNote !== (receiptNote ?? null)
-    ) {
-      throw new ConflictException('奖品已经签收，签收信息与本次请求不一致');
     }
   }
 

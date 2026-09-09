@@ -1,4 +1,8 @@
+import { RegistrationStatus } from '../generated/prisma/enums.js';
 import { PURCHASE_HOLD_MS } from '../orders/pending-order-policy.js'
+
+export const GAME_CAPACITY_MIN = 4
+export const GAME_CAPACITY_MAX = 6
 
 type GameWindow = {
   status: string
@@ -36,3 +40,16 @@ export function gamePaymentUnavailable(
     return '球局支付保留期已过，请重新报名'
   return ''
 }
+
+// A registration occupies a seat from the moment a pending order is created
+// until it is cancelled/refunded.  WAITLISTED is deliberately excluded: it
+// has no order and must never make the game look full by itself.
+export const GAME_SEAT_STATUSES: readonly RegistrationStatus[] = [
+  RegistrationStatus.REGISTERED,
+  RegistrationStatus.PAID,
+  RegistrationStatus.CHECKED_IN,
+  RegistrationStatus.COMPLETED,
+]
+
+export const isValidGameCapacity = (capacity: number) =>
+  Number.isInteger(capacity) && capacity >= GAME_CAPACITY_MIN && capacity <= GAME_CAPACITY_MAX

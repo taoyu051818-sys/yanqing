@@ -45,10 +45,8 @@ import type {
 } from './orders.dto.js';
 import { OrderFinalizerService } from '../payments/order-finalizer.service.js';
 import { WechatPayService } from '../payments/wechat-pay.service.js';
-import {
-  eventTeamCancellationRefundKey,
-  promoteNextEventWaitlist,
-} from '../events/events.service.js';
+import { eventTeamCancellationRefundKey } from '../events/event-registration-policy.js';
+import { promoteNextEventWaitlist } from '../events/event-waitlist.js';
 import {
   auditAdminShiftBypass,
   requireOpenFrontDeskShift,

@@ -16,8 +16,7 @@ import {
 
 import { GameLevel, SourceChannel } from '../generated/prisma/enums.js'
 
-export const GAME_CAPACITY_MIN = 4
-export const GAME_CAPACITY_MAX = 6
+import { GAME_CAPACITY_MIN, GAME_CAPACITY_MAX } from './game-registration-policy.js'
 
 export class ReviewHostDto {
   @IsOptional()

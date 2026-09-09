@@ -11,8 +11,8 @@ import {
   type EventTeam,
 } from '../generated/prisma/client.js';
 import { releaseBookingCoupon } from './booking-coupon.js';
-import { promoteNextGameWaitlist } from '../games/games.service.js';
-import { promoteNextEventWaitlist } from '../events/events.service.js';
+import { promoteNextGameWaitlist } from '../games/game-waitlist.js';
+import { promoteNextEventWaitlist } from '../events/event-waitlist.js';
 
 type PendingResources = Parameters<typeof releaseBookingCoupon>[1] & {
   gameRegistration?: Pick<GameRegistration, 'id' | 'status' | 'gameId'> | null;

@@ -1,3 +1,10 @@
+import { promoteNextGameWaitlist } from './game-waitlist.js';
+import {
+  GAME_SEAT_STATUSES,
+  isValidGameCapacity,
+  GAME_CAPACITY_MIN,
+  GAME_CAPACITY_MAX,
+} from './game-registration-policy.js';
 import { transitionOrder, requireOrderTransition } from '../orders/order-transition.js';
 import { cancelZeroAmountActivityOrder, isZeroAmountConfirmedActivityOrder } from '../orders/zero-amount-activity-order.js';
 import { canManageGames } from '../common/auth/operation-scopes.js'
@@ -30,12 +37,9 @@ import {
   RegistrationStatus,
   RefundStatus,
   RewardStatus,
-  SourceChannel,
   SubjectAccount,
 } from '../generated/prisma/client.js'
 import {
-  GAME_CAPACITY_MAX,
-  GAME_CAPACITY_MIN,
   type CancelGameDto,
   type CreateGameDto,
   type GameCheckInDto,
@@ -134,9 +138,6 @@ const isPrismaErrorCode = (error: unknown, code: string): boolean =>
   'code' in error &&
   (error as { code?: unknown }).code === code
 
-const isValidGameCapacity = (capacity: number) =>
-  Number.isInteger(capacity) && capacity >= GAME_CAPACITY_MIN && capacity <= GAME_CAPACITY_MAX
-
 const DEFAULT_HOST_REWARD_OBSERVATION_DAYS = 7
 const HOST_REWARD_OBSERVATION_PARAMETER_KEYS = [
   'game.host_reward.refund_observation_days',
@@ -197,16 +198,6 @@ const ORDER_STATUSES_WITHOUT_NO_SHOW: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.CANCELLED,
 ])
 
-// A registration occupies a seat from the moment a pending order is created
-// until it is cancelled/refunded.  WAITLISTED is deliberately excluded: it
-// has no order and must never make the game look full by itself.
-const GAME_SEAT_STATUSES: readonly RegistrationStatus[] = [
-  RegistrationStatus.REGISTERED,
-  RegistrationStatus.PAID,
-  RegistrationStatus.CHECKED_IN,
-  RegistrationStatus.COMPLETED,
-]
-
 const GAME_DETAIL_STATUSES = [GameStatus.OPEN, GameStatus.FULL, GameStatus.IN_PROGRESS, GameStatus.COMPLETED, GameStatus.CANCELLED]
 
 const FINANCIAL_ROLES: readonly AppRole[] = [
@@ -239,110 +230,6 @@ type RewardEligibility = {
   excludedRefunded: RegistrationForReward[]
   pendingRefund: RegistrationForReward[]
   excludedSelf: RegistrationForReward[]
-}
-
-/**
- * Claim the oldest waiting member when a paid seat is released.  This helper
- * is exported so the refund workflow can use the same state transition as an
- * operations operator.  It deliberately creates a fresh pending order (the
- * member still has to pay); no balance or reward is touched here.
- */
-export async function promoteNextGameWaitlist(
-  tx: Prisma.TransactionClient,
-  gameId: string,
-  actorId: string | undefined,
-  actorRole: AppRole | undefined,
-) {
-  const game = await tx.game.findUnique({
-    where: { id: gameId },
-    select: { id: true, title: true, hostId: true, feeCents: true, capacity: true, status: true, startsAt: true, endsAt: true },
-  })
-  if (!game || (game.status !== GameStatus.OPEN && game.status !== GameStatus.FULL)) return null
-  if (!isValidGameCapacity(game.capacity)) return null
-  if (!gameRegistrationOpen(game)) return null
-
-  const seated = await tx.gameRegistration.count({
-    where: { gameId, status: { in: [...GAME_SEAT_STATUSES] } },
-  })
-  if (seated >= game.capacity) return null
-  const next = await tx.gameRegistration.findFirst({
-    where: { gameId, status: RegistrationStatus.WAITLISTED, orderId: null },
-    orderBy: [{ waitlistedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-    select: { id: true, userId: true, waitlistVersion: true },
-  })
-  if (!next) {
-    if (game.status === GameStatus.FULL) {
-      await tx.game.updateMany({ where: { id: gameId, status: GameStatus.FULL }, data: { status: GameStatus.OPEN } })
-    }
-    return null
-  }
-
-  // Claim the row before creating the order.  The conditional update is the
-  // compare-and-set boundary that prevents two refund workers from creating
-  // two orders for the same waiting member.
-  const claimed = await tx.gameRegistration.updateMany({
-    where: { id: next.id, status: RegistrationStatus.WAITLISTED, orderId: null, waitlistVersion: next.waitlistVersion },
-    data: { status: RegistrationStatus.REGISTERED },
-  })
-  if (claimed.count !== 1) return null
-  const operatingShare = await resolveOperatingShareSnapshot(
-    tx,
-    BusinessType.GAME,
-  )
-
-  const order = await tx.order.create({
-    data: {
-      creationIdempotencyKey: `SYSTEM:GAME_WAITLIST:${next.id}:${next.waitlistVersion}`,
-      creationCommandHash: orderCreationCommandHash({
-        kind: 'GAME_WAITLIST_PROMOTION', gameId, registrationId: next.id, memberId: next.userId, waitlistVersion: next.waitlistVersion,
-      }),
-      orderNo: serial('GO'),
-      memberId: next.userId,
-      businessType: BusinessType.GAME,
-      subjectAccount: SubjectAccount.VENUE,
-      sourceChannel: SourceChannel.MINI_PROGRAM,
-      status: OrderStatus.PENDING,
-      title: game.title,
-      listAmountCents: game.feeCents,
-      payableCents: game.feeCents,
-      parameterSnapshot: {
-        gameId,
-        hostId: game.hostId,
-        promotedFromWaitlist: true,
-        waitlistVersion: next.waitlistVersion,
-        gameStartsAt: game.startsAt.toISOString(),
-        operatingShare,
-      },
-      items: {
-        create: {
-          itemType: 'GAME_REGISTRATION',
-          itemId: gameId,
-          name: game.title,
-          unitPriceCents: game.feeCents,
-          amountCents: game.feeCents,
-        },
-      },
-    },
-  })
-  const registration = await tx.gameRegistration.update({
-    where: { id: next.id },
-    data: { orderId: order.id },
-  })
-  await tx.game.updateMany({
-    where: { id: gameId, status: { in: [GameStatus.OPEN, GameStatus.FULL] } },
-    data: { status: seated + 1 >= game.capacity ? GameStatus.FULL : GameStatus.OPEN },
-  })
-  await tx.auditLog.create({
-    data: {
-      actorId,
-      actorRole,
-      action: 'GAME_WAITLIST_PROMOTED',
-      objectType: 'GameRegistration',
-      objectId: registration.id,
-      newValue: { gameId, orderId: order.id, userId: next.userId } as never,
-    },
-  })
-  return { order, registration }
 }
 
 @Injectable()
