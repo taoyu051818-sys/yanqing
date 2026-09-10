@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import type { TrainingCorrectionView } from "../../../../../types/training-operations";
 import { toRefs } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import { money } from "../../../../../utils/format";
 import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
 
 const props = defineProps<{
-  corrections: any[];
+  corrections: TrainingCorrectionView[];
   focusedRecord: string;
   correctionStudentName: (correction: any) => any;
   attendanceLabel: (status: string) => string;

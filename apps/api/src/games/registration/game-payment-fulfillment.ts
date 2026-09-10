@@ -1,13 +1,27 @@
+import type { Prisma } from '../../generated/prisma/client.js';
 import { gamePaymentUnavailable } from '../game-registration-policy.js';
 import { ConflictException } from '@nestjs/common';
 import { BusinessType } from '../../generated/prisma/client.js';
-import { PaidOrderContext } from '../../orders/paid-order-context.js';
+import type { PaidOrderContext } from '../../orders/paid-order-context.js';
+
+type GamePaymentContext = Pick<PaidOrderContext, 'now'> & {
+  readonly tx: {
+    gameRegistration: Pick<
+      Prisma.TransactionClient['gameRegistration'],
+      'findUnique' | 'updateMany'
+    >;
+  };
+  readonly order: Pick<
+    PaidOrderContext['order'],
+    'id' | 'businessType' | 'createdAt'
+  >;
+};
 
 export async function assertGamePaymentReady({
   tx,
   order,
   now,
-}: PaidOrderContext): Promise<void> {
+}: GamePaymentContext): Promise<void> {
   if (order.businessType === BusinessType.GAME) {
     const registration = await tx.gameRegistration.findUnique({
       where: { orderId: order.id },
@@ -25,7 +39,7 @@ export async function assertGamePaymentReady({
 export async function confirmPaidGameRegistration({
   tx,
   order,
-}: PaidOrderContext): Promise<void> {
+}: GamePaymentContext): Promise<void> {
   const paidGameRegistration = await tx.gameRegistration.updateMany({
     where: { orderId: order.id, status: 'REGISTERED' },
     data: { status: 'PAID' },

@@ -1,10 +1,4 @@
 <script setup lang="ts">
-import type {
-  TrainingEnrollmentView,
-  TrainingProductView,
-  TrainingSessionView,
-} from "@yanqing/shared";
-
 import { useCoachViewModel } from "./actions/projection.js";
 
 import { useTrainingProductForm } from "./forms/product-form";
@@ -13,6 +7,12 @@ import { useTrainingSessionForm } from "./forms/session-form";
 import { useTrainingTrialForm } from "./forms/trial-form";
 import { useYouthRuleForm } from "./forms/rule-form";
 
+import { useCoachTeachingData } from "./data/teaching";
+import { useCoachCatalogData } from "./data/catalog";
+import { useCoachTrialData } from "./data/trials";
+import { useCoachYouthRuleData } from "./data/youth-rules";
+import { useCoachCourtData } from "./data/courts";
+import { useCoachNavigation } from "./actions/navigation";
 import { useCoachLoadingActions } from "./actions/loading.js";
 
 import TrialAppointments from "./sections/TrialAppointments.vue";
@@ -23,30 +23,13 @@ import TrainingSchedule from "./sections/TrainingSchedule.vue";
 import LessonAttendance from "./sections/LessonAttendance.vue";
 import ConsumptionCorrections from "./sections/ConsumptionCorrections.vue";
 
-import { computed, nextTick, ref } from "vue";
+import { onUnmounted, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../components/OperationsFrame.vue";
 import OperationTask from "../../components/OperationTask.vue";
-import { useOperationTask, reasonField } from "../../components/operation-task";
+import { useOperationTask } from "../../components/operation-task";
 import MetricCard from "../../../../components/MetricCard.vue";
-import StatusBadge from "../../../../components/StatusBadge.vue";
-import { hasOperationsAccess } from "../../../../config/operations";
-import { endpoints } from "../../../../services/api";
 import { useSessionStore } from "../../../../stores/session";
-import type { CourtAvailability } from "../../../../types/domain";
-import {
-  idempotencyKey,
-  money,
-  shortDate,
-  today as shanghaiDate,
-} from "../../../../utils/format";
-import { withPendingCreationKey } from "../../../../utils/pending-creation-key";
-import {
-  findOpsDeepLinkRecord,
-  opsDeepLinkDomId,
-  parseOpsDeepLinkQuery,
-  type OpsDeepLinkQuery,
-} from "../../../../utils/work-item-deep-link";
 import { useCoachCatalogActions } from "./actions/catalog.js";
 import { useCoachScheduleActions } from "./actions/schedule.js";
 import { useCoachTrialsActions } from "./actions/trials.js";
@@ -57,47 +40,27 @@ const task = useOperationTask();
 
 const session = useSessionStore();
 
-const lessons = ref<TrainingSessionView[]>([]);
-
-const enrollments = ref<TrainingEnrollmentView[]>([]);
-
-const corrections = ref<any[]>([]);
-
-const products = ref<TrainingProductView[]>([]);
-
-const courtAvailability = ref<CourtAvailability | null>(null);
-
-const trials = ref<any[]>([]);
-
-const leads = ref<any[]>([]);
-
-const trialStudents = ref<any[]>([]);
-
-const trialMembers = ref<any[]>([]);
-
-const staffUsers = ref<any[]>([]);
-
-const youthRules = ref<any[]>([]);
-
-const activeYouthRule = ref<any | null>(null);
-
-const loading = ref(false);
+const dataScope = () =>
+  `${session.user?.id || ""}:${[...session.roles].sort().join(",")}`;
+const teaching = useCoachTeachingData(dataScope);
+const catalog = useCoachCatalogData(dataScope);
+const trialData = useCoachTrialData(dataScope);
+const rulesData = useCoachYouthRuleData(dataScope);
+const { lessons, enrollments, corrections } = teaching;
+const { products, staffUsers } = catalog;
+const { trials, leads, trialStudents, trialMembers } = trialData;
+const { activeYouthRule, youthRules } = rulesData;
+const navigation = useCoachNavigation({
+  lessons,
+  enrollments,
+  corrections,
+  trials,
+});
+const { focusedRecord } = navigation;
 
 const actionKey = ref("");
 
 const actionMessage = ref("");
-
-const errorMessage = ref("");
-
-const deepLinkQuery = ref<OpsDeepLinkQuery>({});
-
-const deepLinkHandled = ref(false);
-
-const focusedRecord = ref("");
-
-const managementView = ref("");
-
-const managementViewHandled = ref(false);
 
 const {
   productCode,
@@ -142,6 +105,9 @@ const {
   sessionNote,
   sessionReason,
 } = useTrainingSessionForm();
+
+const courtData = useCoachCourtData(dataScope, sessionDate, selectedCourtIds);
+const { courtAvailability } = courtData;
 
 const {
   trialSubjectOptions,
@@ -226,6 +192,49 @@ const {
   trials,
 });
 
+async function loadCourtAvailability() {
+  await courtData.refresh();
+  if (courtData.error.value) errorMessage.value = courtData.error.value;
+}
+
+const { loading, errorMessage, load, dispose } = useCoachLoadingActions({
+  session,
+  mayViewTraining,
+  async refreshData() {
+    await Promise.all([
+      teaching.refresh(),
+      catalog.refresh(canConfigureTraining.value),
+      trialData.refresh(canManageTrials.value),
+      rulesData.refresh(canConfigureTraining.value),
+    ]);
+    return (
+      teaching.error.value ||
+      catalog.error.value ||
+      trialData.error.value ||
+      rulesData.error.value
+    );
+  },
+  resetData() {
+    teaching.reset();
+    catalog.reset();
+    trialData.reset();
+    rulesData.reset();
+    courtData.reset();
+  },
+  async afterRefresh(isCurrent) {
+    if (classProductIndex.value >= activeProducts.value.length)
+      classProductIndex.value = 0;
+    if (sessionClassIndex.value >= sessionClasses.value.length)
+      sessionClassIndex.value = 0;
+    if (trialSessionIndex.value >= schedulableTrialSessions.value.length)
+      trialSessionIndex.value = 0;
+    if (selectedTrialClass.value?.coachId)
+      trialCoachId.value = selectedTrialClass.value.coachId;
+    if (canCreateSession.value) await loadCourtAvailability();
+    if (isCurrent()) await navigation.apply();
+  },
+});
+
 function coachDisplayName(
   coachId?: string | null,
   fallback = "班级教练待配置",
@@ -239,42 +248,6 @@ function coachDisplayName(
     (item) => item.coachId === coachId && item.coach?.displayName,
   );
   return trial?.coach?.displayName || "已配置教练";
-}
-
-function requiredReason(value: string) {
-  const reason = value.trim();
-  if (reason.length < 2 || reason.length > 300) {
-    throw new Error("操作原因必须填写 2-300 个字符。");
-  }
-  return reason;
-}
-
-function positiveInteger(value: string, label: string, min = 1, max?: number) {
-  const parsed = Number(value);
-  if (
-    !Number.isInteger(parsed) ||
-    parsed < min ||
-    (max !== undefined && parsed > max)
-  ) {
-    throw new Error(
-      max === undefined
-        ? `${label}必须为不小于 ${min} 的整数。`
-        : `${label}必须为 ${min}-${max} 的整数。`,
-    );
-  }
-  return parsed;
-}
-
-function yuanToCents(value: string, label: string, positive = false) {
-  const normalized = value.trim();
-  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {
-    throw new Error(`${label}必须为非负金额，最多两位小数。`);
-  }
-  const cents = Math.round(Number(normalized) * 100);
-  if (!Number.isSafeInteger(cents) || cents < (positive ? 1 : 0)) {
-    throw new Error(`${label}${positive ? "必须大于 0" : "不能为负数"}。`);
-  }
-  return cents;
 }
 
 async function runCreation(
@@ -316,17 +289,11 @@ const {
   errorMessage,
   productCode,
   productName,
-  requiredReason: (...args: Parameters<typeof requiredReason>) =>
-    requiredReason(...args),
   productReason,
   audienceOptions,
   productAudienceIndex,
-  positiveInteger: (...args: Parameters<typeof positiveInteger>) =>
-    positiveInteger(...args),
   productTotalSessions,
   productValidityDays,
-  yuanToCents: (...args: Parameters<typeof yuanToCents>) =>
-    yuanToCents(...args),
   productPriceYuan,
   runCreation: (...args: Parameters<typeof runCreation>) =>
     runCreation(...args),
@@ -373,8 +340,6 @@ const {
   selectedSessionClass,
   sessionStartsAt,
   sessionEndsAt,
-  requiredReason: (...args: Parameters<typeof requiredReason>) =>
-    requiredReason(...args),
   sessionReason,
   sessionNote,
   sessionCourts,
@@ -402,8 +367,6 @@ const {
   selectedTrialSession,
   selectedTrialProduct,
   selectedTrialSubject,
-  requiredReason: (...args: Parameters<typeof requiredReason>) =>
-    requiredReason(...args),
   trialReason,
   trialSubjectIndex,
   trialSourceOptions,
@@ -429,15 +392,9 @@ const { setRuleHardBlock, createYouthRule, decideYouthRule } =
     ruleHardBlock,
     canDraftYouthRule,
     actionKey,
-    requiredReason: (...args: Parameters<typeof requiredReason>) =>
-      requiredReason(...args),
     ruleReason,
-    positiveInteger: (...args: Parameters<typeof positiveInteger>) =>
-      positiveInteger(...args),
     ruleMaxSessions,
     ruleMaxValidityDays,
-    yuanToCents: (...args: Parameters<typeof yuanToCents>) =>
-      yuanToCents(...args),
     ruleMaxAmountYuan,
     ruleWarningDays,
     ruleEffectiveDate,
@@ -496,51 +453,9 @@ const {
   errorMessage,
 });
 
-const { load, applyCoachDeepLink, loadCourtAvailability } =
-  useCoachLoadingActions({
-    session,
-    mayViewTraining,
-    errorMessage,
-    loading,
-    canManageTrials,
-    canConfigureTraining,
-    lessons,
-    enrollments,
-    corrections,
-    products,
-    trials,
-    leads,
-    trialStudents,
-    trialMembers,
-    activeYouthRule,
-    youthRules,
-    staffUsers,
-    classProductIndex,
-    activeProducts,
-    sessionClassIndex,
-    sessionClasses,
-    trialSessionIndex,
-    schedulableTrialSessions,
-    selectedTrialClass,
-    trialCoachId,
-    canCreateSession,
-    managementView,
-    managementViewHandled,
-    deepLinkHandled,
-    deepLinkQuery,
-    focusedRecord,
-    courtAvailability,
-    sessionDate,
-    selectedCourtIds,
-    sessionCourts,
-  });
-
-onLoad((options) => {
-  deepLinkQuery.value = parseOpsDeepLinkQuery(options);
-  managementView.value = typeof options?.view === "string" ? options.view : "";
-});
-
+onLoad(navigation.setQuery);
 onShow(load);
+onUnmounted(dispose);
 </script>
 
 <template>

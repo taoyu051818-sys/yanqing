@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import type {
+  TrainingTrialView,
+  TrainingLeadSummary,
+  TrainingStudentSummary,
+} from "../../../../../types/training-operations";
 import type { TrainingSessionView } from "@yanqing/shared";
 
 import { toRefs, computed } from "vue";
@@ -7,16 +12,16 @@ import { shortDate } from "../../../../../utils/format";
 import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
 
 const props = defineProps<{
-  trials: any[];
+  trials: TrainingTrialView[];
   canManageTrials: boolean;
   trialSubjectOptions: string[];
   trialSubjectIndex: number;
   trialMembers: any[];
   trialMemberIndex: number;
   selectedTrialSubject: any;
-  leads: any[];
+  leads: TrainingLeadSummary[];
   trialLeadIndex: number;
-  trialStudents: any[];
+  trialStudents: TrainingStudentSummary[];
   trialStudentIndex: number;
   trialLinkLead: boolean;
   setTrialLinkLead: (event: any) => void;

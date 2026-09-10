@@ -1,3 +1,4 @@
+import { requiredReason, positiveInteger, yuanToCents } from "./validation";
 import type { TrainingProductView } from "@yanqing/shared";
 import type { Ref, ComputedRef } from "vue";
 import {
@@ -14,19 +15,11 @@ interface ActionContext {
   errorMessage: Ref<string, string>;
   productCode: Ref<string, string>;
   productName: Ref<string, string>;
-  requiredReason: (value: string) => string;
   productReason: Ref<string, string>;
   audienceOptions: { label: string; value: string }[];
   productAudienceIndex: Ref<number, number>;
-  positiveInteger: (
-    value: string,
-    label: string,
-    min?: number,
-    max?: number,
-  ) => number;
   productTotalSessions: Ref<string, string>;
   productValidityDays: Ref<string, string>;
-  yuanToCents: (value: string, label: string, positive?: boolean) => number;
   productPriceYuan: Ref<string, string>;
   runCreation: (
     key: string,
@@ -65,14 +58,11 @@ export function useCoachCatalogActions({
   errorMessage,
   productCode,
   productName,
-  requiredReason,
   productReason,
   audienceOptions,
   productAudienceIndex,
-  positiveInteger,
   productTotalSessions,
   productValidityDays,
-  yuanToCents,
   productPriceYuan,
   runCreation,
   editingProductId,

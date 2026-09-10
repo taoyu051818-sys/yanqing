@@ -1,12 +1,27 @@
+import type { Prisma } from '../../generated/prisma/client.js';
 import { ConflictException } from '@nestjs/common';
-import { PaidOrderContext } from '../../orders/paid-order-context.js';
+import type { PaidOrderContext } from '../../orders/paid-order-context.js';
+
+type CouponPaymentContext = Pick<PaidOrderContext, 'now' | 'paymentActorId'> & {
+  readonly tx: {
+    couponCode: Pick<
+      Prisma.TransactionClient['couponCode'],
+      'findUnique' | 'updateMany'
+    >;
+    couponTemplate: Pick<Prisma.TransactionClient['couponTemplate'], 'update'>;
+  };
+  readonly order: Pick<
+    PaidOrderContext['order'],
+    'id' | 'consumedCouponCode' | 'payableCents'
+  >;
+};
 
 export async function redeemPaidOrderCoupon({
   tx,
   order,
   paymentActorId,
   now,
-}: PaidOrderContext): Promise<void> {
+}: CouponPaymentContext): Promise<void> {
   if (order.consumedCouponCode) {
     const coupon = await tx.couponCode.findUnique({
       where: { code: order.consumedCouponCode },

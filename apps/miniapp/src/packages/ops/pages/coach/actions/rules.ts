@@ -1,3 +1,4 @@
+import { requiredReason, positiveInteger, yuanToCents } from "./validation";
 import type { Ref, ComputedRef } from "vue";
 import {
   useOperationTask,
@@ -11,17 +12,9 @@ interface ActionContext {
   ruleHardBlock: Ref<boolean, boolean>;
   canDraftYouthRule: ComputedRef<boolean>;
   actionKey: Ref<string, string>;
-  requiredReason: (value: string) => string;
   ruleReason: Ref<string, string>;
-  positiveInteger: (
-    value: string,
-    label: string,
-    min?: number,
-    max?: number,
-  ) => number;
   ruleMaxSessions: Ref<string, string>;
   ruleMaxValidityDays: Ref<string, string>;
-  yuanToCents: (value: string, label: string, positive?: boolean) => number;
   ruleMaxAmountYuan: Ref<string, string>;
   ruleWarningDays: Ref<string, string>;
   ruleEffectiveDate: Ref<string, string>;
@@ -41,12 +34,9 @@ export function useCoachRulesActions({
   ruleHardBlock,
   canDraftYouthRule,
   actionKey,
-  requiredReason,
   ruleReason,
-  positiveInteger,
   ruleMaxSessions,
   ruleMaxValidityDays,
-  yuanToCents,
   ruleMaxAmountYuan,
   ruleWarningDays,
   ruleEffectiveDate,

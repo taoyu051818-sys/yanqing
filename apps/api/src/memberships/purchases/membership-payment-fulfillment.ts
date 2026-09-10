@@ -1,5 +1,26 @@
+import type { Prisma } from '../../generated/prisma/client.js';
 import { activateMembership } from '../membership-entitlements.js';
-import { PaidOrderContext } from '../../orders/paid-order-context.js';
+import type { PaidOrderContext } from '../../orders/paid-order-context.js';
+
+type MembershipPaymentContext = Pick<
+  PaidOrderContext,
+  'now' | 'paymentActorId' | 'actorRole'
+> & {
+  readonly tx: {
+    memberSubscription: Pick<
+      Prisma.TransactionClient['memberSubscription'],
+      'findFirst' | 'findMany' | 'findUniqueOrThrow' | 'update'
+    >;
+    memberProfile: Pick<
+      Prisma.TransactionClient['memberProfile'],
+      'findUnique' | 'update'
+    >;
+    auditLog: Pick<Prisma.TransactionClient['auditLog'], 'create'>;
+  };
+  readonly order: Pick<PaidOrderContext['order'], 'parameterSnapshot'> & {
+    membership: Parameters<typeof activateMembership>[1]['membership'] | null;
+  };
+};
 
 export async function activatePaidMembership({
   tx,
@@ -7,7 +28,7 @@ export async function activatePaidMembership({
   paymentActorId,
   actorRole,
   now,
-}: PaidOrderContext): Promise<void> {
+}: MembershipPaymentContext): Promise<void> {
   if (order.membership) {
     const entitlement = await activateMembership(
       tx,

@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type {
+  YouthTrainingRuleView,
+  YouthTrainingRuleManagementView,
+} from "../../../../../types/training-operations";
 import { toRefs, computed } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import {
@@ -9,7 +13,7 @@ import {
 
 const props = defineProps<{
   canConfigureTraining: boolean;
-  activeYouthRule: any;
+  activeYouthRule: YouthTrainingRuleView | null;
   canDraftYouthRule: boolean;
   ruleMaxSessions: string;
   ruleMaxValidityDays: string;
@@ -23,7 +27,7 @@ const props = defineProps<{
   actionKey: string;
   loading: boolean;
   createYouthRule: () => Promise<void>;
-  youthRules: any[];
+  youthRules: YouthTrainingRuleManagementView[];
   canReviewYouthRule: boolean;
   decideYouthRule: (rule: any, decision: "publish" | "reject") => void;
 }>();

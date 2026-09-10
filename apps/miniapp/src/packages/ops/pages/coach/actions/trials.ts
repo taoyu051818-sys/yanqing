@@ -1,3 +1,4 @@
+import { requiredReason } from "./validation";
 import type { TrainingEnrollmentView } from "@yanqing/shared";
 import type { Ref, ComputedRef } from "vue";
 import {
@@ -18,7 +19,6 @@ interface ActionContext {
   selectedTrialSession: ComputedRef<any>;
   selectedTrialProduct: ComputedRef<any>;
   selectedTrialSubject: ComputedRef<any>;
-  requiredReason: (value: string) => string;
   trialReason: Ref<string, string>;
   trialSubjectIndex: Ref<number, number>;
   trialSourceOptions: { value: string; label: string }[];
@@ -57,7 +57,6 @@ export function useCoachTrialsActions({
   selectedTrialSession,
   selectedTrialProduct,
   selectedTrialSubject,
-  requiredReason,
   trialReason,
   trialSubjectIndex,
   trialSourceOptions,

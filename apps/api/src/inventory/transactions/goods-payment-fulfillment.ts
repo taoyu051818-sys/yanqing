@@ -1,17 +1,45 @@
+import type { Prisma } from '../../generated/prisma/client.js';
 import { NotFoundException } from '@nestjs/common';
 import {
   BusinessType,
   InventoryTxnType,
 } from '../../generated/prisma/client.js';
 import { applyGoodsSale } from '../goods-stock.js';
-import { PaidOrderContext } from '../../orders/paid-order-context.js';
+import type { PaidOrderContext } from '../../orders/paid-order-context.js';
+
+type GoodsPaymentContext = Pick<PaidOrderContext, 'paymentActorId'> & {
+  readonly tx: {
+    inventoryItem: Pick<
+      Prisma.TransactionClient['inventoryItem'],
+      'findUnique' | 'updateMany'
+    >;
+    inventoryTransaction: Pick<
+      Prisma.TransactionClient['inventoryTransaction'],
+      'findUnique' | 'create'
+    >;
+    inventoryStockBalance: Pick<
+      Prisma.TransactionClient['inventoryStockBalance'],
+      'findMany' | 'updateMany'
+    >;
+  };
+  readonly order: Pick<
+    PaidOrderContext['order'],
+    'businessType' | 'orderNo'
+  > & {
+    items: Pick<
+      PaidOrderContext['order']['items'][number],
+      'id' | 'itemId' | 'name' | 'quantity'
+    >[];
+  };
+  readonly payment: Pick<PaidOrderContext['payment'], 'id'>;
+};
 
 export async function issuePaidGoods({
   tx,
   order,
   payment,
   paymentActorId,
-}: PaidOrderContext): Promise<void> {
+}: GoodsPaymentContext): Promise<void> {
   if (order.businessType === BusinessType.GOODS) {
     for (const item of order.items) {
       if (!item.itemId) continue;

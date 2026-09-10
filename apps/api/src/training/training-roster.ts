@@ -14,7 +14,10 @@ type Session = { startsAt: Date; endsAt: Date };
 
 /** Partially refunded is a money status; an exhausted contract has no seat. */
 export function trainingActiveSeatWhere(): Prisma.TrainingEnrollmentWhereInput {
-  return { status: { in: ['ACTIVE', 'PARTIALLY_REFUNDED'] }, prepaidBalanceCents: { gt: 0 } };
+  return {
+    status: { in: ['ACTIVE', 'PARTIALLY_REFUNDED'] },
+    prepaidBalanceCents: { gt: 0 },
+  };
 }
 
 export function trainingEnrollmentCoversSession(
@@ -36,7 +39,16 @@ export function trainingEnrollmentCoversSession(
  * activation/scheduling cycle aborts one command for an idempotent retry.
  */
 export async function syncTrainingEnrollmentRoster(
-  tx: Prisma.TransactionClient,
+  tx: {
+    trainingSession: Pick<
+      Prisma.TransactionClient['trainingSession'],
+      'findMany'
+    >;
+    trainingAttendance: Pick<
+      Prisma.TransactionClient['trainingAttendance'],
+      'createMany'
+    >;
+  },
   enrollment: Enrollment,
   now: Date,
 ) {

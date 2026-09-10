@@ -1,3 +1,4 @@
+import { requiredReason } from "./validation";
 import type { Ref, ComputedRef } from "vue";
 import { endpoints } from "../../../../../services/api";
 import { withPendingCreationKey } from "../../../../../utils/pending-creation-key";
@@ -13,7 +14,6 @@ interface ActionContext {
   selectedSessionClass: ComputedRef<any>;
   sessionStartsAt: ComputedRef<string>;
   sessionEndsAt: ComputedRef<string>;
-  requiredReason: (value: string) => string;
   sessionReason: Ref<string, string>;
   sessionNote: Ref<string, string>;
   sessionCourts: ComputedRef<
@@ -39,7 +39,6 @@ export function useCoachScheduleActions({
   selectedSessionClass,
   sessionStartsAt,
   sessionEndsAt,
-  requiredReason,
   sessionReason,
   sessionNote,
   sessionCourts,

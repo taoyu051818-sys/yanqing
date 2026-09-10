@@ -1,10 +1,16 @@
 import { ConflictException } from '@nestjs/common';
 import { MemberLevel, type Prisma } from '../generated/prisma/client.js';
 
-type Client = Pick<
-  Prisma.TransactionClient,
-  'memberSubscription' | 'memberProfile'
->;
+type Client = {
+  memberSubscription: Pick<
+    Prisma.TransactionClient['memberSubscription'],
+    'findFirst' | 'findMany' | 'findUniqueOrThrow' | 'update'
+  >;
+  memberProfile: Pick<
+    Prisma.TransactionClient['memberProfile'],
+    'findUnique' | 'update'
+  >;
+};
 type Entitlement = {
   startsAt: Date;
   endsAt: Date;

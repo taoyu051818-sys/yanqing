@@ -20,6 +20,7 @@ function initializePage(path: string) {
   });
   const vue = {
     ref: (value: unknown) => ({ value }),
+    shallowRef: (value: unknown) => ({ value }),
     reactive: (value: unknown) => value,
     computed: (read: () => unknown) => ({
       get value() {

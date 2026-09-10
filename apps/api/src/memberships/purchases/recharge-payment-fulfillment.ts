@@ -1,17 +1,36 @@
+import type { Prisma } from '../../generated/prisma/client.js';
 import { ConflictException } from '@nestjs/common';
 import {
   AccountTxnKind,
   AccountType,
   BusinessType,
 } from '../../generated/prisma/client.js';
-import { PaidOrderContext } from '../../orders/paid-order-context.js';
+import type { PaidOrderContext } from '../../orders/paid-order-context.js';
+
+type RechargePaymentContext = Pick<PaidOrderContext, 'paymentActorId'> & {
+  readonly tx: {
+    account: Pick<
+      Prisma.TransactionClient['account'],
+      'findUniqueOrThrow' | 'updateMany'
+    >;
+    accountTransaction: Pick<
+      Prisma.TransactionClient['accountTransaction'],
+      'findUnique' | 'create'
+    >;
+  };
+  readonly order: Pick<
+    PaidOrderContext['order'],
+    'id' | 'businessType' | 'parameterSnapshot' | 'memberId' | 'title'
+  >;
+  readonly payment: Pick<PaidOrderContext['payment'], 'id'>;
+};
 
 export async function creditPaidRecharge({
   tx,
   order,
   payment,
   paymentActorId,
-}: PaidOrderContext): Promise<void> {
+}: RechargePaymentContext): Promise<void> {
   if (order.businessType === BusinessType.RECHARGE) {
     const snapshot = order.parameterSnapshot as {
       principalCents?: number;

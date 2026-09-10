@@ -18,7 +18,12 @@ type Allocation = {
 };
 
 async function stockBalances(
-  tx: Prisma.TransactionClient,
+  tx: {
+    inventoryStockBalance: Pick<
+      Prisma.TransactionClient['inventoryStockBalance'],
+      'findMany'
+    >;
+  },
   item: { id: string; stock: number },
 ) {
   const balances = await tx.inventoryStockBalance.findMany({
@@ -98,7 +103,16 @@ export async function assertGoodsStockAvailable(
 }
 
 export async function applyGoodsSale(
-  tx: Prisma.TransactionClient,
+  tx: {
+    inventoryStockBalance: Pick<
+      Prisma.TransactionClient['inventoryStockBalance'],
+      'findMany' | 'updateMany'
+    >;
+    inventoryItem: Pick<
+      Prisma.TransactionClient['inventoryItem'],
+      'updateMany'
+    >;
+  },
   item: StockItem,
   quantity: number,
 ) {

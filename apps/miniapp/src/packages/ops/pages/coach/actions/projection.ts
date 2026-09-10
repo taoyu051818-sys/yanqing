@@ -1,3 +1,11 @@
+import type { MemberDirectoryItem } from "../../../../../types/domain";
+import type {
+  TrainingStaffSummary,
+  TrainingCorrectionView,
+  TrainingLeadSummary,
+  TrainingStudentSummary,
+  TrainingTrialView,
+} from "../../../../../types/training-operations";
 import type {
   TrainingEnrollmentView,
   TrainingProductView,
@@ -11,26 +19,26 @@ import type { CourtAvailability } from "../../../../../types/domain";
 
 interface ActionContext {
   session: ReturnType<typeof useSessionStore>;
-  staffUsers: Ref<any[], any[]>;
-  corrections: Ref<any[], any[]>;
+  staffUsers: Ref<TrainingStaffSummary[]>;
+  corrections: Ref<TrainingCorrectionView[]>;
   products: Ref<TrainingProductView[]>;
   classProductIndex: Ref<number, number>;
   sessionClassIndex: Ref<number, number>;
   lessons: Ref<TrainingSessionView[]>;
   trialSessionIndex: Ref<number, number>;
   trialSubjectIndex: Ref<number, number>;
-  leads: Ref<any[], any[]>;
+  leads: Ref<TrainingLeadSummary[]>;
   trialLeadIndex: Ref<number, number>;
-  trialStudents: Ref<any[], any[]>;
+  trialStudents: Ref<TrainingStudentSummary[]>;
   trialStudentIndex: Ref<number, number>;
-  trialMembers: Ref<any[], any[]>;
+  trialMembers: Ref<MemberDirectoryItem[]>;
   trialMemberIndex: Ref<number, number>;
   courtAvailability: Ref<CourtAvailability | null>;
   sessionDate: Ref<string, string>;
   sessionStartTime: Ref<string, string>;
   sessionEndTime: Ref<string, string>;
   enrollments: Ref<TrainingEnrollmentView[]>;
-  trials: Ref<any[], any[]>;
+  trials: Ref<TrainingTrialView[]>;
 }
 
 export function useCoachViewModel({
@@ -127,7 +135,7 @@ export function useCoachViewModel({
     staffUsers.value.filter((user) => {
       const roles = [
         user.primaryRole,
-        ...(user.roles || []).map((item: any) =>
+        ...(user.roles || []).map((item) =>
           typeof item === "string" ? item : item.role,
         ),
       ];

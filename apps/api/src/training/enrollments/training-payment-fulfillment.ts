@@ -1,16 +1,35 @@
+import type { Prisma } from '../../generated/prisma/client.js';
 import {
   syncTrainingEnrollmentRoster,
   trainingActiveSeatWhere,
 } from '../training-roster.js';
 import { ConflictException } from '@nestjs/common';
 import { TrainingEnrollmentStatus } from '../../generated/prisma/client.js';
-import { PaidOrderContext } from '../../orders/paid-order-context.js';
+import type { PaidOrderContext } from '../../orders/paid-order-context.js';
+
+type TrainingPaymentContext = Pick<PaidOrderContext, 'now'> & {
+  readonly tx: {
+    trainingEnrollment: Pick<
+      Prisma.TransactionClient['trainingEnrollment'],
+      'findUnique' | 'count' | 'update'
+    >;
+    trainingSession: Pick<
+      Prisma.TransactionClient['trainingSession'],
+      'findMany'
+    >;
+    trainingAttendance: Pick<
+      Prisma.TransactionClient['trainingAttendance'],
+      'createMany'
+    >;
+  };
+  readonly order: Pick<PaidOrderContext['order'], 'id'>;
+};
 
 export async function activatePaidTrainingEnrollment({
   tx,
   order,
   now,
-}: PaidOrderContext): Promise<void> {
+}: TrainingPaymentContext): Promise<void> {
   const enrollment = await tx.trainingEnrollment.findUnique({
     where: { orderId: order.id },
     include: { class: true },

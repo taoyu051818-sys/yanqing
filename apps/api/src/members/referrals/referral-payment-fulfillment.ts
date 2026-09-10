@@ -1,5 +1,23 @@
+import type { Prisma } from '../../generated/prisma/client.js';
 import { OrderStatus, RewardStatus } from '../../generated/prisma/client.js';
-import { PaidOrderContext } from '../../orders/paid-order-context.js';
+import type { PaidOrderContext } from '../../orders/paid-order-context.js';
+
+type ReferralPaymentContext = Pick<
+  PaidOrderContext,
+  'now' | 'paymentActorId' | 'actorRole'
+> & {
+  readonly tx: {
+    user: Pick<Prisma.TransactionClient['user'], 'findUnique'>;
+    order: Pick<Prisma.TransactionClient['order'], 'count'>;
+    systemParameter: Pick<
+      Prisma.TransactionClient['systemParameter'],
+      'findFirst'
+    >;
+    referralReward: Pick<Prisma.TransactionClient['referralReward'], 'upsert'>;
+    auditLog: Pick<Prisma.TransactionClient['auditLog'], 'create'>;
+  };
+  readonly order: Pick<PaidOrderContext['order'], 'id' | 'memberId'>;
+};
 
 export async function scheduleFirstPaymentRewards({
   tx,
@@ -7,7 +25,7 @@ export async function scheduleFirstPaymentRewards({
   paymentActorId,
   actorRole,
   now,
-}: PaidOrderContext): Promise<void> {
+}: ReferralPaymentContext): Promise<void> {
   const member = await tx.user.findUnique({
     where: { id: order.memberId },
     select: { referrerId: true },

@@ -1,4 +1,13 @@
 import type {
+  TrainingCorrectionView,
+  TrainingTrialView,
+  TrainingStudentSummary,
+  TrainingStaffSummary,
+  TrainingLeadSummary,
+  YouthTrainingRuleView,
+  YouthTrainingRuleManagementView,
+} from "../types/training-operations";
+import type {
   OrderView,
   OrderPage,
   PaymentQuote,
@@ -230,7 +239,7 @@ export const endpoints = {
   createTrainingClass: (data: object) => api.post("/training/classes", data),
   trainingStudents: () => api.get<any[]>("/training/students"),
   adminTrainingStudents: (guardianId?: string) =>
-    api.get<any[]>(
+    api.get<TrainingStudentSummary[]>(
       "/training/admin/students",
       guardianId ? { guardianId } : {},
     ),
@@ -241,7 +250,7 @@ export const endpoints = {
   purchaseTraining: (data: object) => api.post("/training/purchase", data),
   createTrainingSession: (data: object) => api.post("/training/sessions", data),
   trainingTrials: (params: Record<string, any> = {}) =>
-    api.get<any[]>("/training/trials", params),
+    api.get<TrainingTrialView[]>("/training/trials", params),
   myTrainingTrials: (params: Record<string, any> = {}) =>
     api.get<any[]>("/training/trials/mine", params),
   createTrainingTrial: (data: object) => api.post("/training/trials", data),
@@ -257,9 +266,10 @@ export const endpoints = {
     api.post(`/training/trials/${id}/lost`, data),
   cancelTrainingTrial: (id: string, data: object) =>
     api.post(`/training/trials/${id}/cancel`, data),
-  activeYouthTrainingRule: () => api.get<any>("/training/youth-rules/active"),
+  activeYouthTrainingRule: () =>
+    api.get<YouthTrainingRuleView | null>("/training/youth-rules/active"),
   youthTrainingRules: (params: Record<string, any> = {}) =>
-    api.get<any[]>("/training/youth-rules", params),
+    api.get<YouthTrainingRuleManagementView[]>("/training/youth-rules", params),
   createYouthTrainingRule: (data: object) =>
     api.post("/training/youth-rules", data),
   publishYouthTrainingRule: (id: string, data: object) =>
@@ -415,7 +425,12 @@ export const endpoints = {
   leadOwners: (params: Record<string, any> = {}) =>
     api.get<any>("/members/leads/owners", params),
   customerLeads: (params: Record<string, any> = {}) =>
-    api.get<any>("/members/leads", params),
+    api.get<{
+      items: TrainingLeadSummary[];
+      total: number;
+      page: number;
+      pageSize: number;
+    }>("/members/leads", params),
   createCustomerLead: (data: object) => api.post("/members/leads", data),
   claimCustomerLead: (id: string) => api.post(`/members/leads/${id}/claim`),
   assignCustomerLead: (id: string, ownerId: string) =>
@@ -457,7 +472,7 @@ export const endpoints = {
   confirmTrainingConsume: (sessionId: string, data: object) =>
     api.post(`/training/sessions/${sessionId}/consume/confirm`, data),
   trainingConsumeCorrections: () =>
-    api.get<any[]>("/training/consume-corrections"),
+    api.get<TrainingCorrectionView[]>("/training/consume-corrections"),
   requestTrainingConsumeCorrection: (data: object) =>
     api.post("/training/consume-corrections", data),
   approveTrainingConsumeCorrection: (id: string, data: object) =>
@@ -523,7 +538,12 @@ export const endpoints = {
   auditLogs: (params: Record<string, any> = {}) =>
     api.get<any>("/audit-logs", params),
   governanceUsers: (params: Record<string, any> = {}) =>
-    api.get<any>("/governance/users", params),
+    api.get<{
+      items: TrainingStaffSummary[];
+      total: number;
+      page: number;
+      pageSize: number;
+    }>("/governance/users", params),
   setGovernanceUserRoles: (id: string, data: object) =>
     api.post(`/governance/users/${id}/roles`, data),
   setGovernanceUserStatus: (id: string, data: object) =>

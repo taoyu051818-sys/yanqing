@@ -80,6 +80,147 @@ describe('core architecture regression boundaries', () => {
       inspect(ast);
     }
   });
+  it('limits payment effects to their declared database operations and order inputs', () => {
+    // These are dependency budgets, not snapshots of function bodies. Broadening
+    // a port requires reviewing the business boundary before changing this list.
+    const budgets = {
+      'venues/fulfillment/venue-payment-fulfillment.ts': {
+        order: ['id'],
+        stores: { courtBooking: ['updateMany'] },
+      },
+      'games/registration/game-payment-fulfillment.ts': {
+        order: ['id', 'businessType', 'createdAt'],
+        stores: { gameRegistration: ['findUnique', 'updateMany'] },
+      },
+      'events/registration/event-payment-fulfillment.ts': {
+        order: ['id', 'businessType'],
+        stores: { eventTeam: ['findUnique', 'updateMany'] },
+      },
+      'training/enrollments/training-payment-fulfillment.ts': {
+        order: ['id'],
+        stores: {
+          trainingEnrollment: ['findUnique', 'count', 'update'],
+          trainingSession: ['findMany'],
+          trainingAttendance: ['createMany'],
+        },
+      },
+      'memberships/purchases/membership-payment-fulfillment.ts': {
+        order: ['parameterSnapshot', 'membership'],
+        stores: {
+          memberSubscription: [
+            'findFirst',
+            'findMany',
+            'findUniqueOrThrow',
+            'update',
+          ],
+          memberProfile: ['findUnique', 'update'],
+          auditLog: ['create'],
+        },
+      },
+      'memberships/purchases/recharge-payment-fulfillment.ts': {
+        order: ['id', 'businessType', 'parameterSnapshot', 'memberId', 'title'],
+        stores: {
+          account: ['findUniqueOrThrow', 'updateMany'],
+          accountTransaction: ['findUnique', 'create'],
+        },
+      },
+      'inventory/transactions/goods-payment-fulfillment.ts': {
+        order: ['businessType', 'orderNo', 'items'],
+        stores: {
+          inventoryItem: ['findUnique', 'updateMany'],
+          inventoryTransaction: ['findUnique', 'create'],
+          inventoryStockBalance: ['findMany', 'updateMany'],
+        },
+      },
+      'members/referrals/referral-payment-fulfillment.ts': {
+        order: ['id', 'memberId'],
+        stores: {
+          user: ['findUnique'],
+          order: ['count'],
+          systemParameter: ['findFirst'],
+          referralReward: ['upsert'],
+          auditLog: ['create'],
+        },
+      },
+      'alliance/coupons/coupon-payment-fulfillment.ts': {
+        order: ['id', 'consumedCouponCode', 'payableCents'],
+        stores: {
+          couponCode: ['findUnique', 'updateMany'],
+          couponTemplate: ['update'],
+        },
+      },
+    } satisfies Record<
+      string,
+      { order: string[]; stores: Record<string, string[]> }
+    >;
+    const config = ts.readConfigFile(
+      resolve(root, 'tsconfig.json'),
+      ts.sys.readFile,
+    );
+    const { options } = ts.parseJsonConfigFileContent(
+      config.config,
+      ts.sys,
+      root,
+    );
+    const program = ts.createProgram(
+      Object.keys(budgets).map((path) => resolve(root, 'src', path)),
+      options,
+    );
+    const checker = program.getTypeChecker();
+    for (const [path, budget] of Object.entries(budgets)) {
+      const file = program.getSourceFile(resolve(root, 'src', path))!;
+      for (const node of file.statements) {
+        if (
+          !ts.isFunctionDeclaration(node) ||
+          !node.modifiers?.some(
+            (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+          )
+        )
+          continue;
+        const input = node.parameters[0];
+        const context = checker.getTypeAtLocation(input);
+        const fieldType = (type: ts.Type, name: string) =>
+          checker.getTypeOfSymbolAtLocation(type.getProperty(name)!, input);
+        const allowedKeys = (type: ts.Type, allowed: string[]) => {
+          expect(
+            type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown),
+            `${path}: opaque dependency`,
+          ).toBe(0);
+          for (const key of type
+            .getProperties()
+            .map((property) => property.name))
+            expect(allowed, `${path}: unexpected dependency ${key}`).toContain(
+              key,
+            );
+        };
+        const tx = fieldType(context, 'tx');
+        allowedKeys(tx, Object.keys(budget.stores));
+        for (const [store, methods] of Object.entries(budget.stores))
+          if (tx.getProperty(store)) allowedKeys(fieldType(tx, store), methods);
+        const order = fieldType(context, 'order');
+        allowedKeys(order, budget.order);
+        if (context.getProperty('payment'))
+          allowedKeys(fieldType(context, 'payment'), ['id']);
+        if (order.getProperty('membership')) {
+          const membership = checker.getNonNullableType(
+            fieldType(order, 'membership'),
+          );
+          allowedKeys(membership, ['id', 'memberId', 'product']);
+          allowedKeys(fieldType(membership, 'product'), [
+            'durationDays',
+            'level',
+          ]);
+        }
+        if (order.getProperty('items')) {
+          const item = checker.getIndexTypeOfType(
+            fieldType(order, 'items'),
+            ts.IndexKind.Number,
+          )!;
+          allowedKeys(item, ['id', 'itemId', 'name', 'quantity']);
+        }
+      }
+    }
+  }, 30_000);
   it('keeps the remaining retired services out of production', () => {
     expect(
       existsSync(

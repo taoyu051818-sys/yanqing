@@ -1,16 +1,27 @@
+import type { Prisma } from '../../generated/prisma/client.js';
 import { ConflictException } from '@nestjs/common';
 import {
   BusinessType,
   EventStatus,
   RegistrationStatus,
 } from '../../generated/prisma/client.js';
-import { PaidOrderContext } from '../../orders/paid-order-context.js';
+import type { PaidOrderContext } from '../../orders/paid-order-context.js';
+
+type EventPaymentContext = Pick<PaidOrderContext, 'now'> & {
+  readonly tx: {
+    eventTeam: Pick<
+      Prisma.TransactionClient['eventTeam'],
+      'findUnique' | 'updateMany'
+    >;
+  };
+  readonly order: Pick<PaidOrderContext['order'], 'id' | 'businessType'>;
+};
 
 export async function assertEventPaymentReady({
   tx,
   order,
   now,
-}: PaidOrderContext): Promise<void> {
+}: EventPaymentContext): Promise<void> {
   if (order.businessType === BusinessType.EVENT) {
     const eventTeam = await tx.eventTeam.findUnique({
       where: { orderId: order.id },
@@ -37,7 +48,7 @@ export async function confirmPaidEventTeam({
   tx,
   order,
   now,
-}: PaidOrderContext): Promise<void> {
+}: EventPaymentContext): Promise<void> {
   if (order.businessType === BusinessType.EVENT) {
     const paidTeam = await tx.eventTeam.updateMany({
       where: {
