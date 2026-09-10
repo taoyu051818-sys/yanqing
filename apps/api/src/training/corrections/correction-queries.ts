@@ -1,3 +1,4 @@
+import type { TrainingCorrectionView } from '@yanqing/shared';
 import { ForbiddenException } from '@nestjs/common';
 import type { AuthUser } from '../../common/auth/auth-user.js';
 import type { PrismaService } from '../../database/prisma.service.js';
@@ -8,7 +9,7 @@ import { isCoachOnly } from './correction-policy.js';
 export async function listConsumeCorrections(
   prisma: PrismaService,
   actor: AuthUser,
-) {
+): Promise<TrainingCorrectionView<Date>[]> {
   const allowed = [
     AppRole.COACH,
     AppRole.FRONT_DESK,

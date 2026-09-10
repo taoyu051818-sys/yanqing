@@ -1,20 +1,33 @@
-type RuleRecord = Record<string, any>;
+import type {
+  YouthTrainingRuleView,
+  YouthTrainingRuleManagementView,
+} from '@yanqing/shared';
 
-const record = (value: unknown): RuleRecord =>
-  value && typeof value === 'object' ? (value as RuleRecord) : {};
-
-const displayNameView = (value: unknown, fallback?: string | null) => {
-  const person = record(value);
-  const displayName =
-    typeof person.displayName === 'string' && person.displayName.trim()
-      ? person.displayName
-      : fallback;
+// A structural projection input: persistence secrets are not part of this contract.
+type ManagementRuleSource = YouthTrainingRuleView<Date> & {
+  requestReason: string;
+  reviewReason: string | null;
+  reviewedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  requestedById: string;
+  requestedBy?: { displayName: string } | null;
+  reviewedBy?: { displayName: string } | null;
+};
+const displayNameView = (
+  person?: { displayName: string } | null,
+  fallback?: string | null,
+) => {
+  const displayName = person?.displayName?.trim()
+    ? person.displayName
+    : fallback;
   return displayName ? { displayName } : null;
 };
 
 /** Public policy fields needed to explain and enforce the active rule. */
-export const youthTrainingRulePublicResponse = (value: unknown) => {
-  const rule = record(value);
+export const youthTrainingRulePublicResponse = (
+  rule: YouthTrainingRuleView<Date>,
+): YouthTrainingRuleView<Date> => {
   return {
     id: rule.id,
     version: rule.version,
@@ -34,14 +47,13 @@ export const youthTrainingRulePublicResponse = (value: unknown) => {
  * command hashes and persistence user ids intentionally never leave the API.
  */
 export const youthTrainingRuleManagementResponse = (
-  value: unknown,
+  rule: ManagementRuleSource,
   context: {
     actorId: string;
     requestedByDisplayName?: string | null;
     reviewedByDisplayName?: string | null;
   },
-) => {
-  const rule = record(value);
+): YouthTrainingRuleManagementView<Date> => {
   return {
     ...youthTrainingRulePublicResponse(rule),
     requestReason: rule.requestReason,

@@ -11,7 +11,7 @@ const pagesRoot = resolve(sourceRoot, "packages/ops/pages");
 const pages = readdirSync(pagesRoot).map(
   (name) => `packages/ops/pages/${name}/index.vue`,
 );
-pages.push("pages/workspace/index.vue");
+pages.push("pages/workspace/index.vue", "pages/order/index.vue");
 function initializePage(path: string) {
   const context = vm.createContext({
     Intl: undefined,
@@ -57,6 +57,8 @@ function initializePage(path: string) {
           onLoad() {},
           onShow() {},
           onHide() {},
+          onUnload() {},
+          onPullDownRefresh() {},
           onShareAppMessage() {},
         };
       if (id.endsWith(".vue")) return { default: {} };

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { OrderView, PaymentQuote } from "@yanqing/shared";
-import { computed, ref, watch } from "vue";
+import { watch } from "vue";
+import type { OrderView } from "@yanqing/shared";
 import {
   onHide,
   onLoad,
@@ -12,251 +12,74 @@ import AppIcon from "../../components/AppIcon.vue";
 import SectionEmpty from "../../components/SectionEmpty.vue";
 import ReasonForm from "../../components/ReasonForm.vue";
 import StatusBadge from "../../components/StatusBadge.vue";
-import { endpoints } from "../../services/api";
-import { isMockMode } from "../../services/http";
-import {
-  captureAuthSession,
-  isAuthSessionCurrent,
-} from "../../services/auth-session";
-import {
-  createPaymentConfirmation,
-  canCancelFreeVenue,
-} from "../../utils/payment-confirmation";
-import { apiFeedback } from "../../services/api-feedback";
-import { withPendingCreationKey } from "../../utils/pending-creation-key";
-import {
-  dateTimeRange,
-  idempotencyKey,
-  money,
-  shortDate,
-} from "../../utils/format";
+import { money } from "../../utils/format";
 import { useSessionStore } from "../../stores/session";
 import {
   openMemberPage,
   openMemberRecord,
-  requestMemberLogin,
 } from "../../utils/member-navigation";
 import { gameDetailPath } from "../../utils/game-detail";
+import { canCancelFreeVenue } from "../../utils/payment-confirmation";
+import {
+  businessTypeIcon,
+  displayBusinessType,
+  orderTimeLabel,
+  refundableAmount,
+  canRequestOrderRefund,
+  refundStatusLabels,
+} from "./order-presentation";
+import { useOrderList, orderFilters as filters } from "./use-order-list";
+import { useOrderActionScope } from "./order-action-scope";
+import { useOrderPayment } from "./use-order-payment";
+import { useOrderAftersales } from "./use-order-aftersales";
+import { useOrderClock } from "./use-order-clock";
 
 const session = useSessionStore();
-const orders = ref<OrderView[]>([]);
-const focusedId = ref("");
-const statusFilter = ref("");
-const page = ref(1);
-const total = ref(0);
-const filters = [
-  { label: "全部", status: "" },
-  { label: "待付款", status: "PENDING" },
-  { label: "待使用", status: "PAID" },
-  { label: "售后中", status: "REFUND_PENDING" },
-];
-let loadGeneration = 0;
-const loading = ref(false);
-const error = ref("");
-const actionKey = ref("");
-const payingId = ref("");
-const paymentChannel = ref("WECHAT");
-const paymentError = ref("");
-const paymentQuote = ref<PaymentQuote | null>(null);
-const balanceLoading = ref(false);
-const refundingId = ref("");
-const refundError = ref("");
-const confirmation = createPaymentConfirmation(
-  endpoints.order,
-  async (order) => {
-    orders.value = orders.value.map((item) =>
-      item.id === order.id ? order : item,
-    );
-    await load();
-    await session.hydrate();
-  },
+const list = useOrderList(session);
+const {
+  orders,
+  focusedId,
+  statusFilter,
+  total,
+  loading,
+  error,
+  load,
+  filterOrders,
+} = list;
+const actions = useOrderActionScope();
+const { actionKey } = actions;
+const clock = useOrderClock(orders, load);
+const { nowMs, deadlineExpired, paymentCountdown } = clock;
+const payment = useOrderPayment(actions, list, session, deadlineExpired);
+const {
+  payingId,
+  paymentChannel,
+  paymentError,
+  paymentQuote,
+  balanceLoading,
+  freeConfirmation,
+  paymentChoices,
+  confirmation,
+  paymentConfirmation,
+  preparePay,
+  pay,
+} = payment;
+const aftersales = useOrderAftersales(
+  actions,
+  load,
+  (id) => paymentConfirmation.value?.orderId === id,
 );
-const paymentConfirmation = confirmation.state;
+const { refundingId, refundError, cancelPending, refund } = aftersales;
 watch(
   [() => session.isAuthenticated, () => session.user?.id],
-  () => confirmation.stop(),
+  () => {
+    actions.reset();
+    list.reset();
+    payment.reset();
+    aftersales.reset();
+  },
   { flush: "sync" },
 );
-let canWechatPay = isMockMode;
-// #ifdef MP-WEIXIN
-canWechatPay = true;
-// #endif
-const freeConfirmation = computed(() => paymentQuote.value?.payableCents === 0);
-const paymentChoices = computed<
-  Array<{
-    channel: string;
-    label: string;
-    note: string;
-    disabled: boolean;
-    debitAmount: number;
-  }>
->(() =>
-  (paymentQuote.value?.options || []).map((option) => {
-    if (freeConfirmation.value)
-      return {
-        channel: option.channel,
-        debitAmount: 0,
-        label: "免费确认",
-        note: option.reason || "本订单无需付款，确认后即可生效",
-        disabled: !option.enabled,
-      };
-    const coin = option.unit === "COIN";
-    const wechat = option.channel === "WECHAT";
-    const balance = coin
-      ? option.availableBalance + " 币"
-      : money(option.availableBalance);
-    const amount = coin
-      ? option.debitAmount + " 币"
-      : money(option.debitAmount);
-    return {
-      channel: option.channel,
-      debitAmount: option.debitAmount,
-      label: (
-        {
-          WECHAT: isMockMode ? "微信支付（模拟）" : "微信支付",
-          CASH_PRINCIPAL: "充值余额",
-          GIFT_BALANCE: "赠送余额",
-          BADMINTON_COIN: "羽毛球币",
-        } as any
-      )[option.channel],
-      note:
-        option.reason ||
-        (wechat
-          ? isMockMode
-            ? "仅演示，不扣真实资金"
-            : canWechatPay
-              ? "确认后调起微信支付"
-              : "请在微信小程序内完成微信支付"
-          : "可用 " + balance + " · 本次扣除 " + amount),
-      disabled: !option.enabled || (wechat && !canWechatPay),
-    };
-  }),
-);
-const refundableAmount = (order: OrderView) =>
-  Math.max(
-    0,
-    Number(order.paidCents ?? order.payableCents ?? 0) -
-      Number(order.refundedCents || 0),
-  );
-async function preparePay(order: OrderView) {
-  if (
-    actionKey.value ||
-    balanceLoading.value ||
-    paymentConfirmation.value?.orderId === order.id
-  )
-    return;
-  payingId.value = order.id;
-  paymentChannel.value = "WECHAT";
-  paymentError.value = "";
-  paymentQuote.value = null;
-  balanceLoading.value = true;
-  try {
-    const quote = await endpoints.paymentOptions(order.id);
-    if (payingId.value !== order.id) return;
-    paymentQuote.value = quote;
-    paymentChannel.value =
-      paymentChoices.value.find((item) => !item.disabled)?.channel || "";
-  } catch (cause: any) {
-    paymentError.value = apiFeedback(cause?.message, cause?.statusCode || 0);
-  } finally {
-    balanceLoading.value = false;
-  }
-}
-const nowMs = ref(Date.now());
-let countdownTimer: ReturnType<typeof setInterval> | undefined;
-let expiryRefreshPending = false;
-const businessTypeLabel: Record<string, string> = {
-  VENUE: "场地预订",
-  GAME: "拼场球局",
-  EVENT: "赛事报名",
-  TRAINING: "培训课程",
-  MEMBERSHIP: "会员开通",
-  RECHARGE: "账户充值",
-  GOODS: "商品购买",
-  COUPON: "卡券权益",
-};
-const businessTypeIcon: Record<string, string> = {
-  VENUE: "venue",
-  GAME: "sport",
-  EVENT: "event",
-  TRAINING: "training",
-  MEMBERSHIP: "members",
-  RECHARGE: "finance",
-  GOODS: "shop",
-  COUPON: "ticket",
-};
-const displayBusinessType = (value?: string) =>
-  businessTypeLabel[value || ""] || "其他消费";
-const paymentDeadline = (order: OrderView) =>
-  order.paymentExpiresAt || order.eventTeam?.paymentDueAt || null;
-const deadlineExpired = (order: OrderView) => {
-  const deadline = paymentDeadline(order);
-  return Boolean(deadline && new Date(deadline).getTime() <= nowMs.value);
-};
-function paymentCountdown(order: OrderView) {
-  const deadline = paymentDeadline(order);
-  if (!deadline)
-    return order.payableCents === 0 ? "请尽快确认订单" : "请尽快完成支付";
-  const remainingSeconds = Math.max(
-    0,
-    Math.ceil((new Date(deadline).getTime() - nowMs.value) / 1000),
-  );
-  if (!remainingSeconds) return "保留时间已到，正在同步订单状态";
-  const minutes = Math.floor(remainingSeconds / 60);
-  const seconds = String(remainingSeconds % 60).padStart(2, "0");
-  return `${order.payableCents === 0 ? "确认" : "支付"}剩余 ${minutes}:${seconds}`;
-}
-function orderTimeLabel(order: OrderView) {
-  const booking = order.bookings?.[0];
-  const game = order.gameRegistration?.game;
-  const event = order.eventTeam?.event;
-  const start = booking?.startsAt || game?.startsAt || event?.startsAt;
-  const end = booking?.endsAt || game?.endsAt;
-  if (!start) return `下单 ${shortDate(order.createdAt)}`;
-  return `使用时间 ${dateTimeRange(start, end)}`;
-}
-async function load(more = false) {
-  if (!session.isAuthenticated)
-    return requestMemberLogin(
-      focusedId.value
-        ? `/pages/order/index?id=${encodeURIComponent(focusedId.value)}`
-        : `/pages/order/index${statusFilter.value ? `?status=${statusFilter.value}` : ""}`,
-    );
-  const run = ++loadGeneration;
-  const requestedPage = more ? page.value + 1 : 1;
-  loading.value = true;
-  error.value = "";
-  try {
-    const result = focusedId.value
-      ? { items: [await endpoints.order(focusedId.value)], total: 1 }
-      : await endpoints.orders({
-          page: requestedPage,
-          pageSize: 20,
-          ...(statusFilter.value ? { status: statusFilter.value } : {}),
-        });
-    if (run !== loadGeneration) return;
-    orders.value = more ? [...orders.value, ...result.items] : result.items;
-    total.value = result.total;
-    page.value = requestedPage;
-  } catch (cause: any) {
-    if (run === loadGeneration)
-      error.value =
-        cause?.statusCode === 400
-          ? "订单筛选未成功，请重试"
-          : cause?.message || "订单加载失败，请稍后重试";
-  } finally {
-    if (run === loadGeneration) loading.value = false;
-    uni.stopPullDownRefresh();
-  }
-}
-function filterOrders(status: string) {
-  focusedId.value = "";
-  statusFilter.value = status;
-  orders.value = [];
-  total.value = 0;
-  page.value = 1;
-  void load();
-}
 function openRelated(order: OrderView) {
   if (order.businessType === "GAME")
     return openMemberRecord(
@@ -271,190 +94,23 @@ function openRelated(order: OrderView) {
   if (order.businessType === "TRAINING")
     return openMemberPage("/pages/training/index?tab=mine");
 }
-onLoad((query) => {
-  focusedId.value = typeof query?.id === "string" ? query.id : "";
-  if (filters.some((item) => item.status === query?.status))
-    statusFilter.value = String(query?.status || "");
-});
-async function pay(order: OrderView) {
-  if (
-    actionKey.value ||
-    paymentConfirmation.value?.orderId === order.id ||
-    deadlineExpired(order) ||
-    order.status !== "PENDING"
-  )
-    return;
-  const owner = captureAuthSession();
-  let nativePaymentStarted = false;
-  const channel = paymentChannel.value;
-  if (
-    !paymentChoices.value.some(
-      (item) => item.channel === channel && !item.disabled,
-    )
-  )
-    return;
-  paymentError.value = "";
-  actionKey.value = `pay:${order.id}`;
-  try {
-    const payment = await withPendingCreationKey(
-      "order.payment",
-      {
-        orderId: order.id,
-        channel,
-        expectedDebitAmount: paymentQuote.value?.options.find(
-          (item) => item.channel === channel,
-        )?.debitAmount,
-      },
-      (idempotencyKey) =>
-        endpoints.payOrder(order.id, {
-          channel,
-          idempotencyKey,
-          expectedDebitAmount: paymentQuote.value?.options.find(
-            (item) => item.channel === channel,
-          )?.debitAmount,
-        }),
-    );
-    if (!isAuthSessionCurrent(owner)) return;
-    const wechatPay = payment.wechatPay;
-    if (!isMockMode && channel === "WECHAT" && wechatPay) {
-      nativePaymentStarted = true;
-      await uni.requestPayment({ provider: "wxpay", ...wechatPay });
-      if (!isAuthSessionCurrent(owner)) return;
-      uni.showToast({ title: "支付结果确认中", icon: "success" });
-    } else {
-      uni.showToast({
-        title:
-          payment.status === "SUCCEEDED"
-            ? order.payableCents === 0
-              ? "订单确认成功"
-              : "支付成功"
-            : "正在同步支付结果",
-        icon: "none",
-      });
-    }
-    payingId.value = "";
-    if (
-      !isMockMode &&
-      channel === "WECHAT" &&
-      payment.status === "PROCESSING"
-    ) {
-      confirmation.start(order.id);
-      return;
-    }
-    await load();
-    await session.hydrate();
-  } catch (cause: any) {
-    if (!isAuthSessionCurrent(owner)) return;
-    if (nativePaymentStarted && !/cancel/.test(cause?.errMsg || "")) {
-      payingId.value = "";
-      confirmation.start(order.id);
-    }
-    paymentError.value = /cancel/.test(cause?.errMsg || "")
-      ? "你已取消付款，订单仍保留，可稍后重试。"
-      : apiFeedback(cause?.message, cause?.statusCode || 0);
-  } finally {
-    actionKey.value = "";
-  }
-}
-async function cancelPending(order: OrderView) {
-  if (actionKey.value || paymentConfirmation.value?.orderId === order.id)
-    return;
-  const owner = captureAuthSession();
-  const free = canCancelFreeVenue(order);
-  if (order.status !== "PENDING" && !free) return;
-  const result = await uni.showModal({
-    title: free ? "取消免费预约" : "取消待支付订单",
-    content: free
-      ? "取消后立即释放场地，不产生退款。使用的优惠券将退回，已过期的券无法继续使用。"
-      : order.businessType === "GAME"
-        ? `取消“${order.title}”后将释放你的报名名额，有候补时按顺序晋级。不会取消整场球局。`
-        : order.businessType === "VENUE"
-          ? `取消“${order.title}”后将立即释放场地。`
-          : order.businessType === "TRAINING"
-            ? "取消后释放班级预留名额，不产生消课或退款。"
-            : `取消“${order.title}”不扣款，不会发放会员权益、充值余额或扣减库存。`,
-    confirmText: "确认取消",
-    confirmColor: "#a52626",
-  });
-  if (!result.confirm || actionKey.value || !isAuthSessionCurrent(owner))
-    return;
-  actionKey.value = `cancel:${order.id}`;
-  try {
-    await endpoints.cancelPendingOrder(order.id, {
-      reason: free ? "会员主动取消免费场地预约" : "会员主动取消待支付订单",
-      idempotencyKey: idempotencyKey(`cancel-${order.id}`),
-    });
-    uni.showToast({
-      title: free ? "免费预约已取消" : "待付款订单已取消",
-      icon: "success",
-    });
-    await load();
-  } catch (cause: any) {
-    uni.showToast({ title: cause?.message || "取消订单失败", icon: "none" });
-  } finally {
-    actionKey.value = "";
-  }
-}
-async function refund(order: any, reason: string) {
-  if (actionKey.value || refundableAmount(order) <= 0) return;
-  actionKey.value = "refund:" + order.id;
-  refundError.value = "";
-  try {
-    const command = {
-      orderId: order.id,
-      amountCents: refundableAmount(order),
-      reason,
-    };
-    await withPendingCreationKey("order.refund", command, (idempotencyKey) =>
-      endpoints.refundOrder(order.id, {
-        amountCents: command.amountCents,
-        reason,
-        idempotencyKey,
-      }),
-    );
-    refundingId.value = "";
-    uni.showToast({ title: "申请已提交", icon: "success" });
-    await load();
-  } catch (cause: any) {
-    refundError.value = cause.message || "申请失败，请重试";
-  } finally {
-    actionKey.value = "";
-  }
-}
-function startCountdown() {
-  if (countdownTimer) clearInterval(countdownTimer);
-  nowMs.value = Date.now();
-  countdownTimer = setInterval(() => {
-    nowMs.value = Date.now();
-    if (
-      !expiryRefreshPending &&
-      orders.value.some(
-        (order) => order.status === "PENDING" && deadlineExpired(order),
-      )
-    ) {
-      expiryRefreshPending = true;
-      void load().finally(() => {
-        expiryRefreshPending = false;
-      });
-    }
-  }, 1000);
-}
-function stopCountdown() {
-  if (countdownTimer) clearInterval(countdownTimer);
-  countdownTimer = undefined;
-}
+
+onLoad(list.configure);
 onShow(() => {
-  startCountdown();
+  clock.start();
   confirmation.resume();
   void load();
 });
 onHide(() => {
-  stopCountdown();
+  clock.stop();
   confirmation.pause();
 });
 onUnload(() => {
-  stopCountdown();
-  confirmation.stop();
+  clock.stop();
+  actions.dispose();
+  list.dispose();
+  payment.reset();
+  aftersales.reset();
 });
 onPullDownRefresh(() => load());
 </script>
@@ -513,7 +169,7 @@ onPullDownRefresh(() => load());
         ><text class="money">{{ money(order.payableCents) }}</text></view
       >
       <text
-        v-if="order.bookings?.some((booking: any) => booking.operatorOverride)"
+        v-if="order.bookings?.some((booking) => booking.operatorOverride)"
         class="use-note"
         >特殊代订 · 场次已由工作人员协调，请核对日期和时间后付款。</text
       >
@@ -558,20 +214,7 @@ onPullDownRefresh(() => load());
       <view v-if="order.refunds?.length" class="refund-history"
         ><text v-for="item in order.refunds" :key="item.id"
           >退款 {{ money(item.amountCents) }} ·
-          {{
-            (
-              {
-                REQUESTED: "待审核",
-                PENDING: "待审核",
-                APPROVED: "已通过",
-                PROCESSING: "处理中",
-                SUCCEEDED: "已退款",
-                REJECTED: "未通过",
-                FAILED: "处理失败",
-                CANCELLED: "已撤回",
-              } as any
-            )[item.status] || "处理中"
-          }}</text
+          {{ refundStatusLabels[item.status] || "处理中" }}</text
         ></view
       >
       <view
@@ -731,15 +374,7 @@ onPullDownRefresh(() => load());
               : "查看球局安排"
         }}
       </button>
-      <view
-        v-if="
-          !['EVENT', 'TRAINING'].includes(order.businessType) &&
-          ['PAID', 'CHECKED_IN', 'COMPLETED', 'PARTIALLY_REFUNDED'].includes(
-            order.status,
-          ) &&
-          refundableAmount(order) > 0
-        "
-        class="actions"
+      <view v-if="canRequestOrderRefund(order)" class="actions"
         ><button
           class="secondary small"
           :disabled="Boolean(actionKey)"
@@ -752,14 +387,7 @@ onPullDownRefresh(() => load());
         </button></view
       >
       <ReasonForm
-        v-if="
-          refundingId === order.id &&
-          !['EVENT', 'TRAINING'].includes(order.businessType) &&
-          ['PAID', 'CHECKED_IN', 'COMPLETED', 'PARTIALLY_REFUNDED'].includes(
-            order.status,
-          ) &&
-          refundableAmount(order) > 0
-        "
+        v-if="refundingId === order.id && canRequestOrderRefund(order)"
         :key="order.id"
         title="申请退款"
         :description="
@@ -798,204 +426,4 @@ onPullDownRefresh(() => load());
     </button>
   </view>
 </template>
-<style scoped>
-.payment-selection {
-  display: grid;
-  gap: 18rpx;
-  padding: 22rpx;
-  margin-top: 20rpx;
-  background: var(--color-surface-subtle);
-  border-radius: 20rpx;
-}
-.payment-selection button {
-  width: 100%;
-  margin: 0;
-  padding: 18rpx 12rpx;
-  font-size: 26rpx;
-}
-.payment-choice {
-  flex-direction: column;
-  align-items: flex-start !important;
-  gap: 8rpx;
-  text-align: left;
-  border: 1rpx solid var(--color-border);
-  background: #fff;
-}
-.payment-choice[aria-pressed="true"] {
-  border-color: var(--color-primary);
-  background: var(--color-primary-soft);
-}
-.payment-choice .muted {
-  font-size: 24rpx;
-  line-height: 1.6;
-}
-.payment-error {
-  color: var(--color-danger);
-  line-height: 1.6;
-}
-
-.order-meta-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 6rpx;
-  flex: 1 1 260rpx;
-  min-width: 0;
-  line-height: 1.5;
-}
-.order-filters {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6rpx;
-  padding: 6rpx;
-  margin-bottom: 24rpx;
-  background: var(--color-primary-soft);
-  border-radius: 20rpx;
-}
-.order-filters button {
-  width: 100%;
-  padding: 12rpx 4rpx;
-  margin: 0;
-  font-size: 24rpx;
-  color: var(--color-muted);
-  background: transparent;
-}
-.order-filters .selected {
-  color: var(--color-primary);
-  background: var(--color-surface);
-}
-.all-orders,
-.related-order {
-  width: 100%;
-  margin: 0 0 24rpx;
-}
-.related-order {
-  margin: 24rpx 0 0;
-}
-.use-note {
-  display: block;
-  margin: 20rpx 0;
-  font-size: 25rpx;
-  color: var(--color-muted);
-  line-height: 1.6;
-}
-.refund-history {
-  display: grid;
-  gap: 8rpx;
-  padding: 18rpx;
-  margin-top: 20rpx;
-  background: var(--color-surface-subtle);
-  border-radius: 16rpx;
-  font-size: 24rpx;
-}
-.order-head,
-.order-meta {
-  flex-wrap: wrap;
-}
-.order-identity {
-  display: flex;
-  flex: 1 1 300rpx;
-  align-items: center;
-  min-width: 0;
-  gap: 12rpx;
-}
-.order-icon {
-  display: grid;
-  flex: 0 0 auto;
-  place-items: center;
-  width: 50rpx;
-  height: 50rpx;
-  background: #e7f4eb;
-  border-radius: 15rpx;
-}
-.order-no {
-  min-width: 0;
-  color: #69736c;
-  font-size: 22rpx;
-  overflow-wrap: anywhere;
-}
-.title {
-  display: block;
-  margin: 26rpx 0 18rpx;
-  font-size: 31rpx;
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-.order-meta .muted {
-  min-width: 0;
-}
-.order-meta .money {
-  flex: 0 0 auto;
-}
-.pending-panel {
-  margin-top: 22rpx;
-  padding-top: 20rpx;
-  border-top: 1rpx solid #edf0ed;
-}
-.payment-window {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  margin-bottom: 16rpx;
-  color: #7a5a16;
-  font-size: 23rpx;
-  font-weight: 700;
-}
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 14rpx;
-}
-.small {
-  flex: 1 1 220rpx;
-  min-width: 0;
-  margin: 0;
-  padding: 14rpx 22rpx;
-}
-.load-error {
-  display: flex;
-  align-items: center;
-  gap: 18rpx;
-  color: var(--color-danger);
-  background: var(--color-danger-soft);
-}
-.load-error text {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-.retry {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  min-height: 88rpx;
-  margin: 0;
-  padding: 12rpx 22rpx;
-  line-height: 1.2;
-  font-size: 25rpx;
-}
-.loading-stack {
-  display: grid;
-  gap: 14rpx;
-}
-.order-skeleton {
-  min-height: 220rpx;
-}
-@media (max-width: 360px) {
-  .load-error {
-    align-items: stretch;
-    flex-wrap: wrap;
-  }
-  .load-error .retry {
-    width: 100%;
-  }
-  .actions {
-    align-items: stretch;
-    flex-wrap: wrap;
-  }
-  .actions .small {
-    width: 100%;
-  }
-}
-</style>
+<style scoped src="./page.css"></style>

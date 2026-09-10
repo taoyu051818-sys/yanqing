@@ -58,62 +58,8 @@ export interface TrainingTrialView {
     createdAt: string;
   }>;
 }
-export interface TrainingCorrectionView {
-  id: string;
-  status: string;
-  reason: string;
-  reviewReason: string | null;
-  requestedAt: string;
-  reviewedAt: string | null;
-  recognitionId: string;
-  recognition: {
-    id: string;
-    type: string;
-    sequence: number;
-    effectiveRevenueCents: number;
-    createdAt: string;
-  };
-  reversalRecognition: TrainingCorrectionView["recognition"] | null;
-  attendance: {
-    id: string;
-    status: string;
-    consumedSessions: number;
-    confirmedRevenueCents: number;
-    growthPointsAwarded: number;
-    feedback: string | null;
-    session: {
-      id: string;
-      startsAt: string;
-      endsAt: string;
-      status: string;
-      class: { id: string; name: string };
-    };
-    enrollment: {
-      id: string;
-      status: string;
-      student: PersonSummary | null;
-      buyer: PersonSummary;
-    };
-  };
-  requestedBy: PersonSummary;
-  reviewedBy: PersonSummary | null;
-}
-export interface YouthTrainingRuleView {
-  id: string;
-  version: string;
-  status: string;
-  maxTotalSessions: number;
-  maxValidityDays: number;
-  maxContractAmountCents: number;
-  warningThresholdDays: number;
-  hardBlock: boolean;
-  effectiveFrom: string;
-  effectiveTo: string | null;
-}
-export interface YouthTrainingRuleManagementView extends YouthTrainingRuleView {
-  requestReason: string;
-  reviewReason: string | null;
-  isOwnRequester: boolean;
-  requestedBy: { displayName: string } | null;
-  reviewedBy: { displayName: string } | null;
-}
+export type {
+  TrainingCorrectionView,
+  YouthTrainingRuleView,
+  YouthTrainingRuleManagementView,
+} from "@yanqing/shared";
