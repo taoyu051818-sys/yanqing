@@ -37,6 +37,7 @@ jobs:
       - run: pnpm --dir apps/api db:deploy
       - run: pnpm --dir packages/shared build
       - run: pnpm lint
+      - run: pnpm test:ops
       - run: pnpm test:shared && pnpm test:api && pnpm test:miniapp && pnpm test:admin
       - run: pnpm --dir apps/api test:e2e
       - name: Core lifecycle acceptance matrix

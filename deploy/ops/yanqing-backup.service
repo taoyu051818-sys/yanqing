@@ -1,0 +1,11 @@
+[Unit]
+Description=Yanqing database backup and isolated restore verification
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+UMask=0077
+ExecStart=/bin/bash /home/ubuntu/yanqing-domain/ops/run.sh backup
+TimeoutStartSec=10min

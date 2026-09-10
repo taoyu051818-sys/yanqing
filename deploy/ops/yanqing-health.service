@@ -1,0 +1,12 @@
+[Unit]
+Description=Yanqing readiness, public HTTPS, backup age and disk checks
+After=network-online.target yanqing-api.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+UMask=0077
+ExecStart=/bin/bash /home/ubuntu/yanqing-domain/ops/run.sh monitor
+TimeoutStartSec=30
+NoNewPrivileges=true

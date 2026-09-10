@@ -1,95 +1,117 @@
-# 部署与微信小程序发布
+# 生产部署、健康检查与恢复
 
-当前 API release 与积分赛分享见 [2026-09-06 积分赛分享直达详情](releases/2026-09-06-event-share.md)。此前订场修复见 [2026-09-06 订场与固定结算栏](releases/2026-09-06-booking-checkout.md)。PC 桌面版本见 [2026-09-06 独立 PC 后台发布记录](releases/2026-09-06-pc-admin.md)，累计 34 个迁移。管理入口为 `https://api.yutechhn.cn/admin/`，API 仍为 `/api/v1`。真实微信账号 `TY` 已获超级管理员授权，开发登录和旧测试会话已关闭；旧会话需重新微信登录。旧公开 H5 已下线，不能按下文历史模板重新启用。API 当前通过 systemd WorkingDirectory 指向独立 release，PC 静态文件通过 Nginx `/admin/` 提供；下文 Compose/旧 source 路径均为模板，更新前先核对实际服务目录。
+本文是当前生产操作入口。历史 Compose/H5 模板与旧迁移数字移至 [历史部署参考](deployment-history.md)，不作为当前上线依据。
 
-## 环境变量
+## 当前部署结构
 
-复制 `apps/api/.env.example` 并设置：
+- 服务器：`ubuntu@42.193.229.164`；项目根目录 `/home/ubuntu/yanqing-domain`。
+- API：systemd `yanqing-api`，监听 `127.0.0.1:33200`；Nginx 提供 `https://api.yutechhn.cn/api/v1`。
+- 实际版本：`systemctl show yanqing-api -p WorkingDirectory --value` 指向的目录及其中 `RELEASE.json`。不要把 GitHub 最新提交、旧文档或 `/source` 当作线上版本。
+- 数据库：宿主机 PostgreSQL 16，生产迁移以目标库与发布清单逐一校验为准；CI 使用 PostgreSQL 17，服务器恢复验收额外验证实际版本。
+- API 环境文件 `.env.api`，老板摘要配置 `.env.boss`；不复制进发布包、不输出内容。开发登录必须关闭。
+- PC 后台继续使用 `/var/www/yanqing-admin/current`，入口 `/admin/`；本流程只切换 API。旧公开 H5 保持下线。
+- 小程序是独立发布物；更新服务器不会自动更新微信客户端。
 
-- `DATABASE_URL`：PostgreSQL 连接串。
-- `JWT_SECRET`：不少于 32 个随机字符，生产环境使用密钥管理服务。
-- `DEV_LOGIN_ENABLED`：默认 `false`。只可在隔离测试库的 `development/test/staging` 显式设为 `true`；线上保持关闭。关闭时缺少来源标记的旧令牌也失效，用户需重新微信登录。
-- `CORS_ORIGINS`：仅列出确需浏览器访问 API 的受信调试或运维来源；微信小程序 request 合法域名仍在微信公众平台单独配置。
-- `WECHAT_APP_ID`、`WECHAT_APP_SECRET`：微信小程序登录凭据。
-- `PAYMENT_PROVIDER`：默认 `mock` 用于联调；正式收费设置为 `wechat`。
-- `WECHAT_PAY_*`：微信支付商户号、证书序列号、商户私钥、微信支付公钥 ID/公钥、API v3 Key 与支付/退款通知地址。部署时优先使用 `*_PATH` 从权限受控的文件读取 PEM，不把私钥写入仓库或镜像。系统保留平台证书验签兼容模式，但新接入推荐微信支付公钥模式。真实模式已实现 JSAPI 下单、小程序 RSA 调起参数、微信响应及通知验签、AES-GCM 解密、金额校验、幂等入账、退款申请和退款成功通知回账；上线仍须用实际商户资料完成微信侧验收。
+## 合并与验证
 
-真实商户配置完成后，可执行不创建订单、不扣款的官方安全回显测试：
-
-```bash
-node --env-file=/path/to/api.env apps/api/scripts/wechat-pay-security-echo.mjs
-```
-
-该测试验证商户号、商户 API 证书私钥/序列号和微信支付公钥 ID/公钥之间的签名链；配置 `WECHAT_PAY_NOTIFY_URL` 时还会请求微信发送加密安全回显通知，可结合回调的 200 访问日志验证公网回调、通知验签和 API v3 Key 解密。
-
-如需额外验证 AppID、商户号和当前小程序用户 `openid` 的绑定关系，可仅在受控验收环境临时注入 `WECHAT_PAY_TEST_OPEN_ID`。脚本会创建 1 分钱的未支付预下单，拿到 `prepay_id` 后立即关单，不会调起用户支付：
+工作分支提交 → GitHub `Verify production applications / verify` 通过 → 合并主分支 → 主分支同一提交检查通过 → 构建该提交的发布包。
 
 ```bash
-WECHAT_PAY_TEST_OPEN_ID='<测试用户openid>' pnpm --dir apps/api wechat-pay:verify
+pnpm install --frozen-lockfile
+pnpm --dir apps/api prisma:generate
+pnpm lint
+pnpm verify
+TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/yanqing_test pnpm test:core-lifecycle
 ```
 
-小程序通过 `apps/miniapp/.env` 设置：
+数据库矩阵只连接明确指定的本机 `_test` 库。CI 同时执行共享包、API、小程序、PC、HTTP、运维回滚测试及生产构建。不能把跳过数据库测试记为通过；不能用其他提交的 CI 代替目标提交。测试数量不代表覆盖率。
 
-```dotenv
-VITE_API_BASE_URL=https://api.example.com/api/v1
-```
+## 打包与准备
 
-## 数据库
+当前脚本只支持**数据库结构和 API 依赖不变**的发布。有新迁移或服务端依赖变化会拒绝准备，需先制定对应迁移/依赖安装与兼容回退方案。客户端 importer 的独立变化允许通过，所有包解析结果与 API/shared importer 必须一致。
+
+在干净、已提交的工作树执行：
 
 ```bash
-docker compose up -d postgres
-pnpm --dir apps/api db:deploy
-pnpm --dir apps/api db:seed
+python3 scripts/prepare-api-release.py /absolute/new/output-directory
 ```
 
-种子数据包含 20 片场地、17 个一小时时段（07:00–24:00）、会员产品、成人/青少年课包、主理人球局、48 人瑞士制赛事、联盟商户/券和采购/寄售库存。开发登录账号按角色取最早的一条种子用户：管理员 `13800000001`、前台 `...002`、教练 `...003`、主理人 `...004`、会员 `...005`、商户 `...006`、财务复核 `...007`、超级管理员 `...008`；开发登录不校验手机号，只按角色选择。
+脚本重新构建 API/shared，生成 `release.tgz`、SHA-256、完整 Git 提交编号、文件校验清单、Schema 与各迁移校验和。用户未跟踪的文档不打包；密钥和 node_modules 不打包。
 
-上述开发登录需要在隔离环境显式开启 `DEV_LOGIN_ENABLED=true`，不再因 `NODE_ENV=staging` 自动可用。首次真实管理员初始化使用受控 CLI，具体预览、按用户编号执行及审计要求见 [登录收口记录](releases/2026-09-05-auth-closeout.md)。
-
-2026-09-04 域名验收环境基线为 30/30 个 Prisma 迁移；目标库 `migrate status` 最新、Schema diff 为空，种子化验收库已完成真实 HTTP/数据库回放。代码门禁数字随目标提交变化，生产部署签字必须引用该提交的 `pnpm verify`、目标库 30/30 `migrate status`、备份/恢复记录、种子或基线检查和 Schema diff 日志，不能只引用本文。
-
-### 从旧 17 迁移版本升级到 27
-
-旧交付数据库不得直接替换或手工改表。升级步骤为：停止写入并记录停机点；创建可恢复备份并实际验证恢复；在备份副本演练 `db:deploy`；确认新增 10 个迁移按目录顺序应用；运行种子只限全新测试库，生产库不重复灌种；执行 `migrate status` 和 Schema diff；最后回放会员产品/充值计划/价格规则、推荐双边奖励、退款互锁、履约、试听监管和寄售结算关键旅程。
-
-`20260830200000_consignment_settlements` 之后的寄售订单要求 `OrderItem.metadata.inventorySnapshotVersion=1`。迁移本身不能猜测旧订单当时的供应商合同和佣金，正式切换前必须执行并归档 [寄售应付快照 cutover 审计](consignment-cutover.md)：记录首个版本 1 快照的部署时间，导出旧交易差异清单及 SHA-256，由财务和管理员双人签字；有证据的历史差异走受审批修复方案，无证据项目保持异常披露，禁止按当前佣金批量回填。
-
-## 小程序发布
-
-1. 仓库配置的小程序 AppID 为 `wx25610460bc96894b`。开发版上传、体验版或正式发布前，必须确认当前微信号具有该 AppID 的开发者权限，重新构建，并确认产物 `project.config.json` 的 `compileType` 为 `miniprogram`。本文不声称仅凭配置 AppID 就已经完成上传或真机验收。
-2. 将正式 HTTPS API 域名加入微信公众平台“request 合法域名”；证书链必须完整。
-3. 设置 API 的同一 `WECHAT_APP_ID` 和 `WECHAT_APP_SECRET`。
-4. 将 `apps/miniapp/.env` 设为 `VITE_DATA_MODE=remote` 和正式 HTTPS `VITE_API_BASE_URL` 后执行 `pnpm build:miniapp`；保留 `mock` 的构建只能本地演示，不能上传体验版。
-5. 微信开发者工具导入 `apps/miniapp/dist/build/mp-weixin`，检查隐私指引、用户信息和扫码权限声明。
-6. 使用体验版分别验证会员、员工、主理人、商户和管理员账号，再上传审核。
-
-开发者工具的本地 mock、远端联调、测试身份切换、真机预览和上传步骤见 [docs/wechat-devtools.md](wechat-devtools.md)。预览/正式 AppID 均需管理员授权对应微信号；测试号不可当作生产凭据，Secret 绝不能写入小程序包。
-
-## API 容器
+把发布包与仓库 `deploy/ops/release.sh` 传到服务器的新收件目录。下列 `COMMIT` 和 `SHA256` 分别替换为本次完整提交编号和包摘要：
 
 ```bash
-docker compose up -d --build
-curl http://127.0.0.1:3200/api/v1/health
+bash /absolute/inbox/release.sh prepare /absolute/inbox/release.tgz SHA256 COMMIT
 ```
 
-容器启动会先执行 `prisma migrate deploy`。上线应配置反向代理 HTTPS、每日数据库快照、7/30/180 天备份层级、日志脱敏和可观测性告警。
+准备阶段互斥执行：校验文件 → 新建独立 release → 校验 API 依赖及目标库全部迁移 → 备份生产库 → 实际恢复到新建隔离库 → 用新版编译产物执行订场支付退款与权限验收 → 注入隔离数据库断连并验证 503/恢复 → 删除隔离库。生产业务数据不参与写入验收。
 
-ICP备案完成前的香港裸 IP H5 联调环境使用独立 Compose 文件、隔离测试库和显式测试身份，详见 [香港裸 IP H5 联调环境](staging-raw-ip.md)。该环境不承载真实数据，也不能替代微信小程序合法域名和 HTTPS 真机验收。
+证据保存在 `ops/receipts/COMMIT/` 与 `backups/verified/时间戳/`。只有备份、恢复、业务验收全部成功，才写入可激活标记。准备失败时线上版本保持原状；不手工补标记。
 
-ICP备案完成后的域名验收环境使用 `deploy/docker-compose.domain.yml`。默认将 H5 发布到 `https://yutechhn.cn/badminton/`，API 独立发布到 `https://api.yutechhn.cn/api/v1`，容器端口仅绑定宿主机回环地址，PostgreSQL 不映射宿主机端口。先为 `api.yutechhn.cn` 添加指向服务器公网 IP 的 A 记录，再用 `deploy/nginx-api.yutechhn.cn.bootstrap.conf` 完成 HTTP/ACME 验证；证书签发后切换为 `deploy/nginx-api.yutechhn.cn.conf`。该环境仍使用隔离演示库、开发身份和 mock 支付，不能录入真实经营或支付数据；接入正式 AppID、微信支付和生产库前必须关闭开发登录并按上线闸门重新验收。
+## 激活与核对
 
-若服务器无法访问 ACME 服务或验证节点无法访问服务器 80 端口，应从可信运维机改用 DNS-01 签发证书，将证书私钥以 `0600 root:root` 安装到服务器，并在验证后删除临时 TXT 记录。手工 DNS 证书不会自动续期，必须监控到期日并在到期前至少 30 天重复签发、安装和 HTTPS 回归。
+```bash
+bash /absolute/inbox/release.sh activate COMMIT
+systemctl show yanqing-api -p WorkingDirectory -p ActiveState -p NRestarts
+curl --fail --max-time 5 https://api.yutechhn.cn/api/v1/health/ready
+```
 
-若目标服务器无法访问 Docker Hub，可复用宿主机 PostgreSQL 的独立数据库，并用 `deploy/yanqing-api.service` 将 API 仅监听 `127.0.0.1`，H5 构建产物交由宿主机 Nginx 发布。该降级方式不得复用其他业务数据库或角色，仍须执行迁移状态、Schema diff、种子数据清点、逻辑备份和公网 HTTPS 回放。
+激活再次校验备份摘要、验收时间、源版本、配置文件与候选文件；切换后检查本机及公网数据库就绪状态和完整提交编号。失败自动恢复原 systemd 覆盖配置并重启原版本。应用回滚不恢复数据库。
 
-## 上线闸门
+- `/health`：进程存活检查，兼容旧监控，不代表数据库正常。
+- `/health/ready`：数据库 `SELECT 1` 成功返回 200，失败/超过 2 秒返回 503。并发探测共享未结束的查询，避免故障时不断占用连接。
+- 健康响应禁止缓存；只公开服务名、状态、提交编号和时间，不公开连接地址、凭据或数据库错误。
 
-- 将 `NODE_ENV` 设为 `production`，确认开发登录返回 401。
-- 关闭 `PAYMENT_PROVIDER=mock` 前，完成微信支付下单、签名、通知验签、退款和日对账验收。
-- 抽查培训结算：合同分成为有效收入 20%，场地费和场馆应付款均为 0。
-- 抽查商业主数据：会员产品、充值计划和价格规则只通过新版本/启停变更，当前目录只暴露有效版本，历史订单快照不变。
-- 抽查退款互锁：系统取消退款不可驳回，`REFUND_PENDING` 不能继续履约/消课；充值退款余额不足时退款终态不回滚且风险短款金额可追溯。
-- 抽查寄售：订单版本 1 快照、销售应付、整单退款反冲、maker/checker 结算和付款凭证能从订单追到供应商。
-- 抽查日结：待退款/支付、开放班次、现金差异和未履约源业务阻断；培训、联盟、寄售周期结算仅预警，能在历史营业日锁定后继续流转。
-- 对重复券核销、余额不足、库存不足、并发订场和重复支付做压力重试。
-- 备份恢复演练成功后才开放真实用户。
+## 应用回滚
+
+```bash
+bash /absolute/inbox/release.sh rollback COMMIT
+```
+
+`COMMIT` 是要撤回的当前发布编号。脚本要求当前目录和配置仍匹配该发布，恢复记录中的原配置，核验原服务和未变更的数据库。旧版本没有 readiness 接口时采用进程检查加数据库迁移检查。只有复核通过才记为回滚成功；失败必须查看 `journalctl -u yanqing-api` 与 receipt。
+
+不得用恢复旧数据库作为普通回滚，否则会覆盖发布后的新订单和支付。数据库灾难恢复需先停止写入、确认损失时间窗口，在新库完成恢复和账务核对后再制定切换操作。备份是每日快照，不能承诺零数据丢失。
+
+## 定时备份与运维检查
+
+安装与升级工具时，将本次 release 的 `deploy/ops/run.sh` 复制到 `ops/run.sh`，把本次工具 release 的绝对路径写入 `ops/tooling-release`，安装 `deploy/ops/yanqing-{backup,health}.{service,timer}` 到 `/etc/systemd/system/`，执行：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now yanqing-backup.timer yanqing-health.timer
+sudo systemctl start yanqing-backup.service
+sudo systemctl start yanqing-health.service
+systemctl list-timers yanqing-backup.timer yanqing-health.timer
+```
+
+- 每日服务器时间 03:30 加最多 5 分钟随机延迟：生成受限权限备份，并恢复到临时库验证全部迁移；成功后才更新 `backups/verified/latest-verified.json`。发布和备份使用同一把锁。
+- 每分钟：核对本机/公网 readiness 与实际提交、最近成功备份不超过 32 小时、磁盘至少剩余 1 GiB 且不少于 10%。异常令检查服务失败；状态变化写入 journal，结果保存在 `ops/health.json`。
+- 工具目录独立于运行版本选择，应用回滚仍可执行备份；回退到不提供 readiness 的历史版本时，健康检查会提示异常。
+- 这些是服务器内的检测与记录，尚不等于短信、微信或独立外部探活告警。监控与业务同机也无法报告整机失联。
+- 当前备份保留在本机，不自动删除历史备份。异地加密副本及保留策略尚需配置；本机备份无法覆盖整机磁盘损坏。
+
+人工核对入口：
+
+```bash
+cat /home/ubuntu/yanqing-domain/ops/health.json
+cat /home/ubuntu/yanqing-domain/backups/verified/latest-verified.json
+journalctl -u yanqing-health -u yanqing-backup --since today --no-pager
+```
+
+## 微信小程序与现场验收
+
+正式构建必须指定远端模式和 HTTPS 地址：
+
+```bash
+VITE_DATA_MODE=remote VITE_API_BASE_URL=https://api.yutechhn.cn/api/v1 pnpm build:miniapp
+```
+
+使用微信开发者工具导入 `apps/miniapp/dist/build/mp-weixin`，确认 AppID、开发者授权和合法域名后上传体验版。实际上传及审核方式见 [微信开发者工具说明](wechat-devtools.md)。任何本地/H5/服务端测试都不能替代真机验收。
+
+现场至少分别使用会员、前台/管理员与好友账号测试：订场并真实微信支付、退出不支付和超时释放、重复下单、取消/退款、管理员代订后会员付款、管理员/前台特殊代订、球局与积分赛分享直达/报名付款、双方订单状态和老板摘要一致。记录订单号、微信交易状态与验收时间，不在公开文档记录个人资料或凭据。
+
+## 环境变量与全新测试库
+
+配置字段以 `apps/api/.env.example` 和启动校验为准。正式收费使用真实微信商户配置，`JWT_SECRET`、微信/LLM 凭据仅保存在服务器受限文件。`DEV_LOGIN_ENABLED=true` 仅允许隔离开发/测试环境。
+
+全新隔离测试库可运行 `db:deploy`、`db:seed`。生产库禁止重复灌种或手工改表。迁移历史、寄售旧单切换等历史约束见 [历史参考](deployment-history.md) 和 [寄售切换审计](consignment-cutover.md)。

@@ -12,6 +12,7 @@ import { ConfigurationModule } from './configuration/configuration.module.js'
 import { validateEnvironment } from './configuration/env.validation.js'
 import { DatabaseModule } from './database/database.module.js'
 import { HealthController } from './health/health.controller.js'
+import { HealthService } from './health/health.service.js'
 import { MembersModule } from './members/members.module.js'
 import { OrdersModule } from './orders/orders.module.js'
 import { OperationsModule } from './operations/operations.module.js'
@@ -66,6 +67,7 @@ import { PrivacyModule } from './privacy/privacy.module.js'
   ],
   controllers: [HealthController],
   providers: [
+    HealthService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],

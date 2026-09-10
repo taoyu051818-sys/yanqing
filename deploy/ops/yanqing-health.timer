@@ -1,0 +1,9 @@
+[Unit]
+Description=Check Yanqing operational health every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
