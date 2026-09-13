@@ -1,4 +1,4 @@
-import { Transform, Type } from 'class-transformer'
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
@@ -14,79 +14,80 @@ import {
   MinLength,
   Min,
   ValidateNested,
-} from 'class-validator'
+} from 'class-validator';
 
 import {
   BookingStatus,
   CourtClosureStatus,
   CourtUsage,
   SourceChannel,
-} from '../generated/prisma/enums.js'
+} from '../generated/prisma/enums.js';
 
 export const VENUE_FULFILLMENT_OUTCOMES = [
   BookingStatus.COMPLETED,
   BookingStatus.NO_SHOW,
-] as const
+] as const;
 
 export const VENUE_FULFILLMENT_EVIDENCE_SOURCES = [
   'FRONT_DESK_ROLL_CALL',
   'ACCESS_CONTROL_LOG',
   'COURT_INSPECTION',
-] as const
+] as const;
 
 export class VenueFulfillmentEvidenceDto {
   /** A controlled source code only; no member name, phone or raw media. */
   @IsIn(VENUE_FULFILLMENT_EVIDENCE_SOURCES)
-  source: (typeof VENUE_FULFILLMENT_EVIDENCE_SOURCES)[number]
+  source: (typeof VENUE_FULFILLMENT_EVIDENCE_SOURCES)[number];
 
   @IsDateString()
-  observedAt: string
+  observedAt: string;
 }
 
 export class CompleteVenueBookingDto {
   @IsIn(VENUE_FULFILLMENT_OUTCOMES)
-  outcome: (typeof VENUE_FULFILLMENT_OUTCOMES)[number]
+  outcome: (typeof VENUE_FULFILLMENT_OUTCOMES)[number];
 
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason: string
+  reason: string;
 
   @IsDefined()
   @ValidateNested()
   @Type(() => VenueFulfillmentEvidenceDto)
-  evidence: VenueFulfillmentEvidenceDto
+  evidence: VenueFulfillmentEvidenceDto;
 
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  idempotencyKey: string
+  idempotencyKey: string;
 }
 
 export class VenueCheckInDto {
   @IsOptional()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  overrideReason?: string
+  overrideReason?: string;
 }
 
 export class AvailabilityQueryDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
-  date: string
+  @IsDateString({ strict: true })
+  date: string;
 }
 
 export class CreateVenueBookingDto {
   /** Explicit, audited exception; only an administrator booking for a member. */
   @IsOptional()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  overrideReason?: string
+  overrideReason?: string;
 
   /**
    * Target customer for an operator-assisted booking.  Member requests may
@@ -94,208 +95,209 @@ export class CreateVenueBookingDto {
    * program omit it; assisted/store bookings must select an active member.
    */
   @IsOptional()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(1)
   @MaxLength(100)
-  memberId?: string
+  memberId?: string;
 
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
-  date: string
+  @IsDateString({ strict: true })
+  date: string;
 
   @IsString()
-  courtId: string
+  courtId: string;
 
   @IsString()
-  slotId: string
+  slotId: string;
 
   @IsEnum(SourceChannel)
-  sourceChannel: SourceChannel = SourceChannel.MINI_PROGRAM
+  sourceChannel: SourceChannel = SourceChannel.MINI_PROGRAM;
 
   @IsOptional()
   @IsString()
   @MaxLength(80)
-  couponCode?: string
+  couponCode?: string;
 
   @IsOptional()
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  creationIdempotencyKey?: string
+  creationIdempotencyKey?: string;
 }
 
 export class UpdateCourtDto {
   @IsOptional()
   @IsEnum(CourtUsage)
-  usage?: CourtUsage
+  usage?: CourtUsage;
 
   @IsOptional()
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
-  enabled?: boolean
+  enabled?: boolean;
 }
 
 export class CreatePriceRuleDto {
   @IsString()
   @Matches(/^[A-Z0-9][A-Z0-9_-]{1,39}$/)
-  code: string
+  code: string;
 
   @IsString()
   @MinLength(2)
   @MaxLength(80)
-  name: string
+  name: string;
 
   @IsOptional()
   @IsString()
-  timeSlotId?: string
+  timeSlotId?: string;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(127)
-  weekdayMask = 127
+  weekdayMask = 127;
 
   @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(10_000_000)
-  priceCents: number
+  priceCents: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(10_000_000)
-  newcomerPriceCents?: number
+  newcomerPriceCents?: number;
 
   @IsDateString({ strict: true })
-  effectiveFrom: string
+  effectiveFrom: string;
 
   @IsOptional()
   @IsDateString({ strict: true })
-  effectiveTo?: string
+  effectiveTo?: string;
 
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason: string
+  reason: string;
 
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  idempotencyKey: string
+  idempotencyKey: string;
 }
 
 export class CreatePriceRuleVersionDto {
   @IsString()
   @MinLength(2)
   @MaxLength(80)
-  name: string
+  name: string;
 
   @IsOptional()
   @IsString()
-  timeSlotId?: string
+  timeSlotId?: string;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(127)
-  weekdayMask = 127
+  weekdayMask = 127;
 
   @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(10_000_000)
-  priceCents: number
+  priceCents: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(10_000_000)
-  newcomerPriceCents?: number
+  newcomerPriceCents?: number;
 
   @IsDateString({ strict: true })
-  effectiveFrom: string
+  effectiveFrom: string;
 
   @IsOptional()
   @IsDateString({ strict: true })
-  effectiveTo?: string
+  effectiveTo?: string;
 
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason: string
+  reason: string;
 
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  idempotencyKey: string
+  idempotencyKey: string;
 }
 
 export class SetPriceRuleStatusDto {
   @IsBoolean()
-  enabled: boolean
+  enabled: boolean;
 
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason: string
+  reason: string;
 
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  idempotencyKey: string
+  idempotencyKey: string;
 }
 
 export class ListCourtClosuresQueryDto {
   @IsOptional()
   @IsString()
-  courtId?: string
+  courtId?: string;
 
   @IsOptional()
   @IsEnum(CourtClosureStatus)
-  status?: CourtClosureStatus
+  status?: CourtClosureStatus;
 
   @IsOptional()
   @IsDateString()
-  from?: string
+  from?: string;
 
   @IsOptional()
   @IsDateString()
-  to?: string
+  to?: string;
 }
 
 export class CreateCourtClosureDto {
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(1)
   @MaxLength(100)
-  courtId: string
+  courtId: string;
 
   @IsDateString()
-  startsAt: string
+  startsAt: string;
 
   @IsDateString()
-  endsAt: string
+  endsAt: string;
 
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason: string
+  reason: string;
 
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  creationIdempotencyKey: string
+  creationIdempotencyKey: string;
 }
 
 export class CancelCourtClosureDto {
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason: string
+  reason: string;
 }

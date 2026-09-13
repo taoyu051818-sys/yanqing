@@ -257,7 +257,9 @@ export async function update(
           mutable.defaultLocationId !== current.defaultLocationId) ||
           (mutable.batchCode !== undefined &&
             mutable.batchCode !== (current.batchCode || 'DEFAULT')) ||
-          mutable.expiresAt !== undefined)
+          (mutable.expiresAt !== undefined &&
+            (mutable.expiresAt?.getTime() ?? null) !==
+              (current.expiresAt?.getTime() ?? null)))
       ) {
         throw new ConflictException(
           '有库存时不能变更默认库位、批次或效期，请先清零',
@@ -320,21 +322,42 @@ export async function update(
           mutable.batchCode !== undefined ||
           mutable.expiresAt !== undefined)
       ) {
-        await tx.inventoryStockBalance.deleteMany({
-          where: { itemId: id, quantity: 0 },
-        });
-        await tx.inventoryStockBalance.create({
-          data: {
-            itemId: id,
-            locationId: nextLocationId,
-            batchCode: mutable.batchCode ?? current.batchCode ?? 'DEFAULT',
-            expiresAt:
-              mutable.expiresAt === undefined
-                ? current.expiresAt
-                : mutable.expiresAt,
-            quantity: 0,
+        // Zero balances remain the original destination of historical sale
+        // allocations. Never delete or repurpose them when changing defaults.
+        const batchCode = mutable.batchCode ?? current.batchCode ?? 'DEFAULT';
+        const expiresAt =
+          mutable.expiresAt === undefined
+            ? current.expiresAt
+            : mutable.expiresAt;
+        const balance = await tx.inventoryStockBalance.findUnique({
+          where: {
+            itemId_locationId_batchCode: {
+              itemId: id,
+              locationId: nextLocationId,
+              batchCode,
+            },
           },
         });
+        if (
+          balance &&
+          (balance.expiresAt?.getTime() ?? null) !==
+            (expiresAt?.getTime() ?? null)
+        ) {
+          throw new ConflictException(
+            '历史批次效期不能变更，请使用新的批次编码',
+          );
+        }
+        if (!balance) {
+          await tx.inventoryStockBalance.create({
+            data: {
+              itemId: id,
+              locationId: nextLocationId,
+              batchCode,
+              expiresAt,
+              quantity: 0,
+            },
+          });
+        }
       }
       const updated = await tx.inventoryItem.findUniqueOrThrow({
         where: { id },

@@ -558,6 +558,7 @@ model User {
   deletedAt                           DateTime?
 
   @@index([referrerId])
+  @@index([avatarUrl])
   @@index([primaryRole, status])
 }
 
@@ -1183,6 +1184,8 @@ model Refund {
   originalOrderStatus OrderStatus
   // Server-owned evidence: payment arrived after cancellation, no benefits were granted.
   compensationOnly    Boolean                   @default(false)
+  // Whole-activity cancellation makes this refund an obligation, even if requested earlier.
+  cancellationRequired Boolean                   @default(false)
   status              RefundStatus              @default(REQUESTED)
   providerRefundNo    String?                   @unique
   requestedAt         DateTime                  @default(now())
@@ -2425,4 +2428,19 @@ model BossBriefing {
   attemptedAt   DateTime?
   leaseUntil    DateTime?
   updatedAt     DateTime @updatedAt
+}
+
+// Committed erasures enqueue generated local avatars; filesystem retries never
+// happen inside the transaction that anonymizes business records.
+model AvatarDeletionTask {
+  id            String    @id @default(cuid())
+  filename      String    @unique
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  completedAt   DateTime?
+  lastErrorCode String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([completedAt, nextAttemptAt])
 }

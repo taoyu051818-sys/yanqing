@@ -1,3 +1,4 @@
+import { requireActivityCancellationRefunds } from '../../common/finance/activity-cancellation-refunds.js';
 import { assertEventManager } from '../competition/event-competition-policy.js';
 import {
   serial,
@@ -121,6 +122,12 @@ export class EventCancellationService {
             include: { order: { include: { refunds: true } } },
             orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           });
+          await requireActivityCancellationRefunds(
+            tx,
+            teams.map((row) => row.order),
+            actor,
+            { kind: 'EVENT', id: eventId, reason },
+          );
           const refundPlans = teams.flatMap((team) => {
             const order = team.order;
             if (!order || order.paidCents <= order.refundedCents) return [];
@@ -282,6 +289,7 @@ export class EventCancellationService {
                   reason: refundReason,
                   status: RefundStatus.REQUESTED,
                   originalOrderStatus: plan.originalOrderStatus,
+                  cancellationRequired: true,
                 },
               }));
             // A whole-activity cancellation can top up an existing refund request.

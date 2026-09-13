@@ -137,7 +137,7 @@ async function load() {
 
 function openRoute(route: string) { uni.navigateTo({ url: route }) }
 function openWorkItem(item: WorkItem) {
-  const destination = resolveWorkItemDestination(item)
+  const destination = resolveWorkItemDestination(item, session.roles)
   if (!destination) {
     uni.showToast({ title: '该待办缺少处理入口', icon: 'none' })
     return

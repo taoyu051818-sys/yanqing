@@ -100,6 +100,14 @@ export async function list(
       orderBy: { createdAt: 'desc' as const },
     },
     guardianStudents: {
+      where: {
+        enrollments: {
+          some: {
+            status: { in: activeTrainingStatuses },
+            class: { OR: [{ coachId: actor.sub }, { assistantId: actor.sub }] },
+          },
+        },
+      },
       select: {
         id: true,
         displayName: true,

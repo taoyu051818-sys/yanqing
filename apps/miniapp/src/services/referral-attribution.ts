@@ -7,6 +7,7 @@ const MAX_INVITE_CODE_LENGTH = 128
 const INVITE_CODE_PATTERN = /^[A-Za-z0-9_-]+$/
 
 export type ReferralLaunchOptions = {
+  path?: string
   query?: Record<string, unknown>
   scene?: unknown
 }
@@ -22,24 +23,31 @@ const normalizedInviteCode = (value: unknown): string | null => {
   return normalized
 }
 
+// Dedicated referral parameters avoid collisions with event partner invitations.
+const legacyReferralCode = (value: unknown) => {
+  const code = normalizedInviteCode(value)
+  // Current referral tokens are32 chars; EP partner tokens are27/35 chars.
+  return code?.startsWith('EP_') && code.length !== 32 ? null : code
+}
 const inviteFromScene = (scene: unknown): string | null => {
   if (typeof scene !== 'string' || !scene) return null
   let decoded = scene
   try { decoded = decodeURIComponent(scene) } catch { return null }
-  const match = decoded.match(/(?:^|[?&])invite=([^&]+)/)
+  const match = decoded.match(/(?:^|[?&])(referralInvite|invite)=([^&]+)/)
   if (!match) return null
-  try { return normalizedInviteCode(decodeURIComponent(match[1])) }
-  catch { return null }
+  try {
+    const value = decodeURIComponent(match[2])
+    return match[1] === 'referralInvite' ? normalizedInviteCode(value) : legacyReferralCode(value)
+  } catch { return null }
 }
 
-export const referralInviteFromLaunchOptions = (
-  options?: ReferralLaunchOptions,
-): string | null =>
-  normalizedInviteCode(options?.query?.invite)
-  // Parameters carried by a mini-program QR code arrive as query.scene;
-  // options.scene is the numeric WeChat launch code, but is kept as a safe
-  // fallback for test clients that pass the encoded value at the top level.
-  ?? inviteFromScene(options?.query?.scene ?? options?.scene)
+export const referralInviteFromLaunchOptions = (options?: ReferralLaunchOptions): string | null => {
+  const explicit = normalizedInviteCode(options?.query?.referralInvite)
+  if (explicit) return explicit
+  if (String(options?.path || '').replace(/^\//, '') === 'pages/event-signup/index') return null
+  return legacyReferralCode(options?.query?.invite)
+    ?? inviteFromScene(options?.query?.scene ?? options?.scene)
+}
 
 export const captureReferralAttribution = (
   options?: ReferralLaunchOptions,
@@ -62,7 +70,7 @@ export const clearPendingReferral = (expectedInvite?: string) => {
 }
 
 export const referralShareQuery = (inviteCode: string) =>
-  `invite=${encodeURIComponent(inviteCode)}`
+  `referralInvite=${encodeURIComponent(inviteCode)}`
 
 export const referralSharePath = (inviteCode: string) =>
   `/pages/home/index?${referralShareQuery(inviteCode)}`

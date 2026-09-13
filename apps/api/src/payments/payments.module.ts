@@ -3,11 +3,12 @@ import { InventoryModule } from '../inventory/inventory.module.js';
 import { OrderFinalizerService } from './order-finalizer.service.js';
 import { PaymentsController } from './payments.controller.js';
 import { WechatPayService } from './wechat-pay.service.js';
+import { RefundDispatchService } from './refund-dispatch.service.js';
 
 @Module({
   imports: [InventoryModule],
   controllers: [PaymentsController],
-  providers: [OrderFinalizerService, WechatPayService],
+  providers: [OrderFinalizerService, WechatPayService, RefundDispatchService],
   exports: [OrderFinalizerService, WechatPayService],
 })
 export class PaymentsModule {}

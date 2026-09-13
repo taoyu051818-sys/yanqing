@@ -1,10 +1,23 @@
+import { BadRequestException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { AppRole, Prisma, SlotPeriod } from '../../generated/prisma/client.js';
 
 export const orderNo = () =>
   `VN${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomBytes(3).toString('hex').toUpperCase()}`;
 
+export const assertVenueDate = (date: string): void => {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+    !Number.isFinite(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== date
+  ) {
+    throw new BadRequestException('订场日期必须是有效的 YYYY-MM-DD 日历日期');
+  }
+};
+
 export const atMinutes = (date: string, minutes: number): Date => {
+  assertVenueDate(date);
   return new Date(
     new Date(`${date}T00:00:00+08:00`).getTime() + minutes * 60_000,
   );

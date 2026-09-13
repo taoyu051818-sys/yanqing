@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import OperationsFrame from '../../components/OperationsFrame.vue'
 import OperationTask from '../../components/OperationTask.vue'
@@ -10,6 +10,7 @@ import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
 import type { Member360View, MemberDirectoryItem } from '../../../../types/domain'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
+import { usePagedList } from '../../utils/paged-list'
 import { money } from '../../../../utils/format'
 import {
   findOpsDeepLinkRecord,
@@ -20,13 +21,14 @@ import {
 
 const task = useOperationTask()
 const session = useSessionStore()
-const members = ref<MemberDirectoryItem[]>([])
+const query = ref('')
+const memberQueue = usePagedList<MemberDirectoryItem>((page, pageSize) => endpoints.members({ page, pageSize, keyword: query.value.trim() }), 20, () => query.value.trim())
+const members = memberQueue.items
 const leads = ref<any[]>([])
 const hostApplications = ref<any[]>([])
 const rechargePlans = ref<any[]>([])
 const membershipProducts = ref<any[]>([])
 const customer = ref<Member360View | null>(null)
-const query = ref('')
 const loading = ref(false)
 const loadError = ref('')
 const membersLoaded = ref(false)
@@ -92,18 +94,14 @@ const canRequestAdjustments = computed(() => session.roles.some((role) => ['FINA
 const canManageRechargePlans = computed(() => session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
 const canViewMembershipProducts = computed(() => session.roles.some((role) => ['FRONT_DESK', 'ADMIN', 'SUPER_ADMIN'].includes(role)))
 const canManageMembershipProducts = computed(() => session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
-const filteredMembers = computed(() => {
-  const keyword = query.value.trim().toLowerCase()
-  if (!keyword) return members.value
-  return members.value.filter((member) => `${member.displayName || ''}${member.phone || ''}`.toLowerCase().includes(keyword))
-})
+const filteredMembers = computed(() => members.value)
 const filteredLeads = computed(() => {
   const keyword = query.value.trim().toLowerCase()
   if (!keyword) return leads.value
   return leads.value.filter((lead) => `${lead.displayName || ''}${lead.phone || ''}${lead.campaign || ''}`.toLowerCase().includes(keyword))
 })
 const metrics = computed(() => [
-  ['会员总数', String(members.value.length), '当前服务范围'],
+  ['匹配会员', String(memberQueue.total.value), '当前查询范围'],
   ['活跃线索', String(leads.value.filter((lead) => !['CONVERTED', 'LOST', 'ARCHIVED'].includes(lead.status)).length), '待持续推进'],
   ['SLA逾期', String(leads.value.filter((lead) => !['CONVERTED', 'LOST', 'ARCHIVED'].includes(lead.status) && new Date(lead.slaDueAt).getTime() < Date.now()).length), '优先处理'],
   ['客户360', selectedId.value ? '已载入' : '待选择', '角色数据隔离'],
@@ -120,7 +118,7 @@ async function load() {
   rechargePlansLoaded.value = false
   membershipProductError.value = ''
   const results = await Promise.allSettled([
-    endpoints.members(),
+    memberQueue.load(),
     canViewLeads.value ? endpoints.customerLeads() : Promise.resolve({ items: [] }),
     canReviewHosts.value ? endpoints.hostApplications() : Promise.resolve([]),
     canManageRechargePlans.value ? endpoints.manageRechargePlans() : Promise.resolve([]),
@@ -128,7 +126,6 @@ async function load() {
   ])
   const [memberResult, leadResult, hostResult, rechargePlanResult, membershipProductResult] = results
   if (memberResult.status === 'fulfilled') {
-    members.value = memberResult.value.items || []
     membersLoaded.value = true
   }
   if (leadResult.status === 'fulfilled') {
@@ -175,6 +172,10 @@ async function applyMemberDeepLink() {
   } else if (focus === 'member') {
     tab.value = 'members'
     record = findOpsDeepLinkRecord(members.value as any[], deepLinkQuery.value, ['id'])
+    if (!record && deepLinkQuery.value.id) {
+      try { const detail = await endpoints.member360(deepLinkQuery.value.id); record = detail.member; members.value = [record, ...members.value.filter(item => item.id !== record.id)] }
+      catch { uni.showToast({ title: '待办会员未同步，请重试', icon: 'none' }); return }
+    }
     prefix = 'member'
     label = '会员'
     if (record) await selectMember(record)
@@ -193,13 +194,24 @@ async function applyMemberDeepLink() {
   uni.pageScrollTo({ selector: `#${opsDeepLinkDomId(prefix, record.id)}`, duration: 250 })
 }
 
+const customerLoading = ref(false)
+let customerGeneration = 0
+watch(() => session.user?.id, () => { customerGeneration++; customer.value = null; selectedId.value = ''; customerLoading.value = false }, { flush: 'sync' })
 async function selectMember(member: MemberDirectoryItem) {
+  const generation = ++customerGeneration, actorId = session.user?.id
   selectedId.value = member.id
+  customer.value = null
+  customerLoading.value = true
+  const current = () => generation === customerGeneration && selectedId.value === member.id && session.user?.id === actorId
   uni.setStorageSync('yanqing_selected_member', member)
   try {
-    customer.value = await endpoints.member360(member.id)
+    const detail = await endpoints.member360(member.id)
+    if (!current()) return
+    if (detail.member.id !== member.id) throw new Error('会员信息不一致，请重新选择')
+    customer.value = detail
     uni.showToast({ title: `已载入 ${member.displayName}`, icon: 'success' })
-  } catch (cause: any) { uni.showToast({ title: cause.message || '客户全景加载失败', icon: 'none' }) }
+  } catch (cause: any) { if (current()) uni.showToast({ title: cause.message || '客户全景加载失败', icon: 'none' }) }
+  finally { if (current()) customerLoading.value = false }
 }
 
 async function createLead() {
@@ -275,16 +287,19 @@ function reviewHost(application: any, approved: boolean) {
 }
 
 function requestAccountAdjustment() {
-  const accounts = customer.value?.accounts || []
-  const memberId = selectedId.value
-  if (!memberId || !accounts.length) return
-  task.start({ title: '申请账户调整', description: (customer.value?.member?.displayName || '当前会员') + ' · 提交不会立即改变余额，必须由另一名财务或管理员复核。', confirmText: '提交独立复核',
+  const snapshot = customer.value
+  if (customerLoading.value || !snapshot || snapshot.member.id !== selectedId.value || !canRequestAdjustments.value) return
+  const accounts = snapshot.accounts || []
+  const memberId = snapshot.member.id
+  if (!accounts.length) return
+  task.start({ title: '申请账户调整', description: (snapshot.member.displayName || '当前会员') + ' · 提交不会立即改变余额，必须由另一名财务或管理员复核。', confirmText: '提交独立复核',
     fields: [
       { key: 'accountType', label: '调整账户', kind: 'choices', options: accounts.map((account: any) => ({ value: account.type, label: accountLabel(account.type), description: '当前 ' + accountBalance(account) })) },
       { key: 'amount', label: '增减数额', hint: '金额账户填元，其余账户填整数；扣减带负号，例如 -20。' },
       reasonField('调整依据'),
     ],
     submit: async ({ accountType, amount: raw, reason }) => {
+      if (customer.value?.member.id !== memberId || selectedId.value !== memberId || customerLoading.value) throw new Error('会员选择已变化，请关闭后重新申请')
       const isMoney = ['CASH_PRINCIPAL','GIFT_BALANCE'].includes(accountType)
       if (isMoney ? !/^-?\d+(\.\d{1,2})?$/.test(raw) : !/^-?\d+$/.test(raw)) throw new Error('调整数额格式不正确')
       const amount = isMoney ? Math.round(Number(raw) * 100) : Number(raw)
@@ -499,7 +514,7 @@ onShow(load)
     <view class="metric-grid"><MetricCard v-for="item in metrics" :key="item[0]" :label="item[0]" :value="item[1]" :note="item[2]" /></view>
     <view v-if="loadError" class="card load-error"><view><text class="member-name">客户数据未完整同步</text><text class="muted block">{{ loadError }}</text></view><button class="secondary retry-button" :disabled="loading" @tap="load">重新加载</button></view>
     <view class="tabs card"><button class="tab" :class="{ active: tab === 'members' }" @tap="tab = 'members'">会员360</button><button v-if="canViewLeads" class="tab" :class="{ active: tab === 'leads' }" @tap="tab = 'leads'">客户线索</button><button v-if="canViewMembershipProducts" class="tab" :class="{ active: tab === 'membershipProducts' }" @tap="tab = 'membershipProducts'">会员产品</button><button v-if="canManageRechargePlans" class="tab" :class="{ active: tab === 'rechargePlans' }" @tap="tab = 'rechargePlans'">充值计划</button></view>
-    <view v-if="tab === 'members' || tab === 'leads'" class="search-card card"><input v-model="query" class="input" :placeholder="tab === 'members' ? '输入姓名或手机号后四位查询会员' : '搜索姓名、来源活动'" confirm-type="search" /></view>
+    <view v-if="tab === 'members' || tab === 'leads'" class="search-card card"><input v-model="query" class="input" :placeholder="tab === 'members' ? '输入姓名或手机号后四位查询会员' : '搜索姓名、来源活动'" confirm-type="search" maxlength="50" @confirm="tab === 'members' && memberQueue.refresh()" /><button v-if="tab === 'members'" class="secondary" :disabled="memberQueue.loading.value" @tap="memberQueue.refresh()">查询</button></view>
 
     <template v-if="tab === 'members'">
       <view v-if="canReviewHosts" class="card host-queue">
@@ -510,9 +525,11 @@ onShow(load)
         </view>
         <text v-if="!loading && hostApplicationsLoaded && !hostApplications.length" class="muted">当前没有待审批主理人申请</text>
       </view>
-      <view class="section-title">会员列表 <text class="section-note">{{ loading ? '同步中' : membersLoaded ? `${filteredMembers.length} 人` : '未同步' }}</text></view>
+      <view class="section-title">会员列表 <text class="section-note">{{ loading ? '同步中' : membersLoaded ? `${memberQueue.total.value} 人 · 已加载 ${members.length} 人` : '未同步' }}</text></view>
       <view v-for="member in filteredMembers" :id="opsDeepLinkDomId('member', member.id)" :key="member.id" class="card member-row" :class="{ selected: selectedId === member.id, 'deep-link-target': focusedRecord === `member:${member.id}` }" @tap="selectMember(member)"><view><text class="member-name">{{ member.displayName || '未命名会员' }}</text><text class="muted">{{ member.phone || '联系方式按角色隐藏' }} · {{ memberLevelLabel(member.level || member.memberProfile?.level) }}</text></view><text class="select-mark">{{ selectedId === member.id ? '已载入' : '查看360' }}</text></view>
       <view v-if="!loading && membersLoaded && !filteredMembers.length" class="card empty">{{ query.trim() ? '没有匹配的会员' : '当前服务范围内暂无会员' }}</view>
+      <text v-if="memberQueue.error.value" class="muted block">{{ memberQueue.error.value }}</text>
+      <button v-if="members.length < memberQueue.total.value" class="secondary" :loading="memberQueue.loading.value" :disabled="memberQueue.loading.value" @tap="memberQueue.more()">加载更多会员</button>
       <view v-if="customer" class="card customer-card">
         <view class="section-title">{{ customer.member?.displayName }} · 客户360</view>
         <text class="muted">订单 {{ customer.recentOrders?.length || 0 }} · 培训 {{ customer.recentTraining?.length || 0 }} · 球局 {{ customer.recentGames?.length || 0 }} · 赛事 {{ customer.recentEvents?.length || 0 }} · 券 {{ customer.recentCoupons?.length || 0 }}</text>

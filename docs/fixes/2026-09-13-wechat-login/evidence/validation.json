@@ -1,0 +1,53 @@
+{
+  "date": "2026-09-13",
+  "scope": "WeChat review: voluntary consent and guest activity browsing",
+  "environment": "local only; no production data/payment or deployment",
+  "miniapp_full_suite": {
+    "files": 70,
+    "passed": 415,
+    "log": "miniapp-all.log"
+  },
+  "miniapp_final_targeted_after_two_additional_cases": {
+    "files": 3,
+    "passed": 42,
+    "log": "final-targeted.log"
+  },
+  "api_activity_domains": {
+    "files": 24,
+    "passed": 180,
+    "log": "api-domains.log"
+  },
+  "api_http_routes_and_guest_access": {
+    "files": 3,
+    "passed": 17,
+    "log": "api-tests.log"
+  },
+  "miniapp_typecheck": "passed",
+  "api_build": "passed",
+  "h5_remote_build": "passed",
+  "wechat_remote_build": "passed",
+  "wechat_package_checks": "passed; no mock files or package problems",
+  "manual_h5_mock_ui": {
+    "viewport_sizes": [
+      "375x667",
+      "320x568"
+    ],
+    "checked": [
+      "guest game/event list and detail",
+      "unchecked consent",
+      "no auth request when unchecked",
+      "readable scrollable privacy dialog",
+      "reject and return without repeated login",
+      "cancel from game detail returns same game",
+      "cancel visible without scrolling",
+      "cancel from My registrations returns Find activities after fresh preview restart"
+    ]
+  },
+  "pending": [
+    "deploy backend before new client",
+    "upload a new WeChat mini-program package",
+    "verify operator/contact and WeChat privacy-guide configuration",
+    "fresh-install WeChat device login/refusal/share tests",
+    "review resubmission"
+  ]
+}

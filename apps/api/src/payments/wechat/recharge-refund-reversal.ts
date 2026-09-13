@@ -1,9 +1,9 @@
 import {
   AccountTxnKind,
-  AccountType,
   Prisma,
 } from '../../generated/prisma/client.js';
 import { RechargeRefundRecovery } from './wechat-notice-types.js';
+import { rechargeRefundDebits } from '../recharge-refund-policy.js';
 
 export async function reverseRechargeBalance(
   tx: Prisma.TransactionClient,
@@ -17,28 +17,14 @@ export async function reverseRechargeBalance(
     order: { memberId: string; parameterSnapshot: Prisma.JsonValue };
   },
   paidCents: number,
+  cumulativeRefundedCents: number,
 ): Promise<RechargeRefundRecovery[]> {
-  const snapshot = refund.order.parameterSnapshot as {
-    principalCents?: number;
-    giftCents?: number;
-  };
-  const debits: Array<[AccountType, number]> = [
-    [
-      AccountType.CASH_PRINCIPAL,
-      Math.round(
-        (Math.max(0, Number(snapshot.principalCents) || 0) *
-          refund.amountCents) /
-          paidCents,
-      ),
-    ],
-    [
-      AccountType.GIFT_BALANCE,
-      Math.round(
-        (Math.max(0, Number(snapshot.giftCents) || 0) * refund.amountCents) /
-          paidCents,
-      ),
-    ],
-  ];
+  const debits = await rechargeRefundDebits(
+    tx,
+    refund,
+    paidCents,
+    cumulativeRefundedCents,
+  );
   const recovery: RechargeRefundRecovery[] = [];
   for (const [type, amount] of debits) {
     if (!amount) continue;

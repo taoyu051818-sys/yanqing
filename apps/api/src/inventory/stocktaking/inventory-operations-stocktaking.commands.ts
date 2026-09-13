@@ -28,7 +28,14 @@ import {
   batch,
   requireRole,
   audit,
+  documentTransaction,
 } from '../shared/inventory-operations-policy.js';
+
+async function lockStocktake(tx: Prisma.TransactionClient, id: string) {
+  // All workflow writers share the parent lock before reading state/lines.
+  // A delayed count cannot change a line after submission freezes the sheet.
+  await tx.$queryRaw`SELECT id FROM "Stocktake" WHERE id = ${id} FOR UPDATE`;
+}
 
 export function stocktakes(prisma: PrismaService, actor: AuthUser) {
   requireRole(actor, READ_ROLES);
@@ -68,84 +75,83 @@ export function startStocktake(
   actor: AuthUser,
 ) {
   requireRole(actor, FRONT_ROLES);
-  return prisma
-    .$transaction(async (tx) => {
-      const stocktake = await tx.stocktake.findUnique({
-        where: { id },
-        include: { location: true },
-      });
-      if (!stocktake) throw new NotFoundException('盘点单不存在');
-      if (stocktake.location?.enabled === false)
-        throw new ConflictException('盘点库位已停用');
-      if (stocktake.status === StocktakeStatus.COUNTING) return stocktake;
-      if (stocktake.status !== StocktakeStatus.DRAFT)
-        throw new ConflictException('当前盘点单不能开始盘点');
-      const items = await tx.inventoryItem.findMany({
-        where: { enabled: true },
-      });
-      for (const item of items.filter(
-        (entry) => entry.defaultLocationId === stocktake.locationId,
-      )) {
-        await reconciledBalance(
-          tx,
-          item,
-          stocktake.locationId,
-          batch(item.batchCode),
-          item.expiresAt,
-        );
-      }
-      let balances = await tx.inventoryStockBalance.findMany({
-        where: { locationId: stocktake.locationId, item: { enabled: true } },
+  return documentTransaction(prisma, async (tx) => {
+    await lockStocktake(tx, id);
+    const stocktake = await tx.stocktake.findUnique({
+      where: { id },
+      include: { location: true },
+    });
+    if (!stocktake) throw new NotFoundException('盘点单不存在');
+    if (stocktake.location?.enabled === false)
+      throw new ConflictException('盘点库位已停用');
+    if (stocktake.status === StocktakeStatus.COUNTING) return stocktake;
+    if (stocktake.status !== StocktakeStatus.DRAFT)
+      throw new ConflictException('当前盘点单不能开始盘点');
+    const items = await tx.inventoryItem.findMany({
+      where: { enabled: true },
+    });
+    for (const item of items.filter(
+      (entry) => entry.defaultLocationId === stocktake.locationId,
+    )) {
+      await reconciledBalance(
+        tx,
+        item,
+        stocktake.locationId,
+        batch(item.batchCode),
+        item.expiresAt,
+      );
+    }
+    let balances = await tx.inventoryStockBalance.findMany({
+      where: { locationId: stocktake.locationId, item: { enabled: true } },
+      include: { item: true },
+    });
+    const itemIdsWithBalance = new Set(
+      balances.map((balance) => balance.itemId),
+    );
+    for (const item of items.filter(
+      (entry) => !itemIdsWithBalance.has(entry.id),
+    )) {
+      const balance = await tx.inventoryStockBalance.create({
+        data: {
+          itemId: item.id,
+          locationId: stocktake.locationId,
+          batchCode: 'DEFAULT',
+          quantity: 0,
+        },
         include: { item: true },
       });
-      const itemIdsWithBalance = new Set(
-        balances.map((balance) => balance.itemId),
-      );
-      for (const item of items.filter(
-        (entry) => !itemIdsWithBalance.has(entry.id),
-      )) {
-        const balance = await tx.inventoryStockBalance.create({
-          data: {
-            itemId: item.id,
-            locationId: stocktake.locationId,
-            batchCode: 'DEFAULT',
-            quantity: 0,
-          },
-          include: { item: true },
-        });
-        balances.push(balance);
-      }
-      for (const balance of balances) {
-        await tx.stocktakeLine.create({
-          data: {
-            stocktakeId: id,
-            itemId: balance.itemId,
-            batchCode: balance.batchCode,
-            expiresAt: balance.expiresAt,
-            bookQuantity: balance.quantity,
-          },
-        });
-      }
-      await tx.stocktake.update({
-        where: { id },
-        data: { status: StocktakeStatus.COUNTING, startedAt: new Date() },
+      balances.push(balance);
+    }
+    for (const balance of balances) {
+      await tx.stocktakeLine.create({
+        data: {
+          stocktakeId: id,
+          itemId: balance.itemId,
+          batchCode: balance.batchCode,
+          expiresAt: balance.expiresAt,
+          bookQuantity: balance.quantity,
+        },
       });
-      await audit(
-        tx,
-        actor,
-        'STOCKTAKE_STARTED',
-        'Stocktake',
-        id,
-        StocktakeStatus.DRAFT,
-        StocktakeStatus.COUNTING,
-        stocktake.reason,
-      );
-      return tx.stocktake.findUniqueOrThrow({
-        where: { id },
-        include: { location: true, lines: { include: { item: true } } },
-      });
-    })
-    .then(stocktakeResponse);
+    }
+    await tx.stocktake.update({
+      where: { id },
+      data: { status: StocktakeStatus.COUNTING, startedAt: new Date() },
+    });
+    await audit(
+      tx,
+      actor,
+      'STOCKTAKE_STARTED',
+      'Stocktake',
+      id,
+      StocktakeStatus.DRAFT,
+      StocktakeStatus.COUNTING,
+      stocktake.reason,
+    );
+    return tx.stocktake.findUniqueOrThrow({
+      where: { id },
+      include: { location: true, lines: { include: { item: true } } },
+    });
+  }).then(stocktakeResponse);
 }
 
 export function countStocktakeLine(
@@ -156,7 +162,8 @@ export function countStocktakeLine(
   actor: AuthUser,
 ) {
   requireRole(actor, FRONT_ROLES);
-  return prisma.$transaction(async (tx) => {
+  return documentTransaction(prisma, async (tx) => {
+    await lockStocktake(tx, id);
     const stocktake = await tx.stocktake.findUnique({ where: { id } });
     if (!stocktake || stocktake.status !== StocktakeStatus.COUNTING) {
       throw new ConflictException('盘点单不在录数状态');
@@ -194,46 +201,45 @@ export function submitStocktake(
   actor: AuthUser,
 ) {
   requireRole(actor, FRONT_ROLES);
-  return prisma
-    .$transaction(async (tx) => {
-      const stocktake = await tx.stocktake.findUnique({
-        where: { id },
-        include: { lines: true },
-      });
-      if (!stocktake) throw new NotFoundException('盘点单不存在');
-      if (stocktake.status === StocktakeStatus.REVIEW) return stocktake;
-      if (stocktake.status !== StocktakeStatus.COUNTING)
-        throw new ConflictException('盘点单不在录数状态');
-      if (
-        !stocktake.lines.length ||
-        stocktake.lines.some((line) => line.countedQuantity === null)
-      ) {
-        throw new ConflictException('仍有盘点明细未录入实盘数量');
-      }
-      await tx.stocktake.update({
-        where: { id },
-        data: {
-          status: StocktakeStatus.REVIEW,
-          submittedById: actor.sub,
-          submittedAt: new Date(),
-        },
-      });
-      await audit(
-        tx,
-        actor,
-        'STOCKTAKE_SUBMITTED',
-        'Stocktake',
-        id,
-        StocktakeStatus.COUNTING,
-        StocktakeStatus.REVIEW,
-        stocktake.reason,
-      );
-      return tx.stocktake.findUniqueOrThrow({
-        where: { id },
-        include: { location: true, lines: { include: { item: true } } },
-      });
-    })
-    .then(stocktakeResponse);
+  return documentTransaction(prisma, async (tx) => {
+    await lockStocktake(tx, id);
+    const stocktake = await tx.stocktake.findUnique({
+      where: { id },
+      include: { lines: true },
+    });
+    if (!stocktake) throw new NotFoundException('盘点单不存在');
+    if (stocktake.status === StocktakeStatus.REVIEW) return stocktake;
+    if (stocktake.status !== StocktakeStatus.COUNTING)
+      throw new ConflictException('盘点单不在录数状态');
+    if (
+      !stocktake.lines.length ||
+      stocktake.lines.some((line) => line.countedQuantity === null)
+    ) {
+      throw new ConflictException('仍有盘点明细未录入实盘数量');
+    }
+    await tx.stocktake.update({
+      where: { id },
+      data: {
+        status: StocktakeStatus.REVIEW,
+        submittedById: actor.sub,
+        submittedAt: new Date(),
+      },
+    });
+    await audit(
+      tx,
+      actor,
+      'STOCKTAKE_SUBMITTED',
+      'Stocktake',
+      id,
+      StocktakeStatus.COUNTING,
+      StocktakeStatus.REVIEW,
+      stocktake.reason,
+    );
+    return tx.stocktake.findUniqueOrThrow({
+      where: { id },
+      include: { location: true, lines: { include: { item: true } } },
+    });
+  }).then(stocktakeResponse);
 }
 
 export async function postStocktake(
@@ -243,8 +249,10 @@ export async function postStocktake(
   actor: AuthUser,
 ) {
   requireRole(actor, ADMIN_ROLES);
-  return prisma.$transaction(
+  return documentTransaction(
+    prisma,
     async (tx) => {
+      await lockStocktake(tx, id);
       const stocktake = await tx.stocktake.findUnique({
         where: { id },
         include: { lines: { include: { item: true } } },

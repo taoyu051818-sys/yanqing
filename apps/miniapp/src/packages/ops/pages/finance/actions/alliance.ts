@@ -1,3 +1,4 @@
+import { withPendingCreationKey } from "../../../../../utils/pending-creation-key";
 import type { Ref, ComputedRef } from "vue";
 import {
   useOperationTask,
@@ -61,6 +62,25 @@ export function useFinanceAllianceActions({
         });
         await load();
         return "联盟结算草稿已生成，可提交商户核对。";
+      },
+    });
+  }
+
+  function reviseSettlement(settlement: any) {
+    if (!canFinanceAction.value || settlement.status !== "DRAFT") return;
+    task.start({
+      title: "更正联盟结算草稿",
+      description: `${settlementMerchant(settlement)} · ${settlementPeriod(settlement)}。原归因毛利 ${money(settlement.attributedGrossProfitCents)}；本次更正保留前后版本和理由，核销证据与服务费不变。`,
+      confirmText: "保存更正草稿",
+      fields: [{ key: "profit", label: "更正后的归因毛利（元）", kind: "money", initial: String(Number(settlement.attributedGrossProfitCents || 0) / 100) }, reasonField("更正依据与原因")],
+      submit: async ({ profit, reason }) => {
+        if (!/^\d+(?:\.\d{1,2})?$/.test(String(profit).trim())) throw new Error("请填写非负金额，最多两位小数");
+        const attributedGrossProfitCents = Math.round(Number(profit) * 100);
+        if (!Number.isSafeInteger(attributedGrossProfitCents)) throw new Error("金额超出可用范围");
+        const command = { attributedGrossProfitCents, reason: String(reason).trim() };
+        await withPendingCreationKey(`alliance.revise.${settlement.id}`, command, idempotencyKey => endpoints.reviseAllianceSettlement(settlement.id, { ...command, idempotencyKey }));
+        await load();
+        return "更正已保存，可重新提交商户确认。";
       },
     });
   }
@@ -191,6 +211,7 @@ export function useFinanceAllianceActions({
     );
   }
   return {
+    reviseSettlement,
     createSettlement,
     submitSettlement,
     confirmSettlement,

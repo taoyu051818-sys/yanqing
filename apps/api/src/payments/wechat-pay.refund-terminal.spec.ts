@@ -57,6 +57,7 @@ describe('WechatPayService refund terminal handling', () => {
       courtBooking: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       referralReward: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
+      riskEvent: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     };
     const refundPrisma = {
       refund: { findUnique: vi.fn().mockResolvedValue(refund) },
@@ -200,6 +201,8 @@ describe('WechatPayService refund terminal handling', () => {
         }),
       },
       accountTransaction: {
+        findMany: vi.fn(async () => [...ledger.values()].map(row => ({ ...row,
+          account: { type: [...accounts.values()].find(a => a.id === row.accountId)?.type } }))),
         findUnique: vi
           .fn()
           .mockImplementation(
@@ -212,6 +215,8 @@ describe('WechatPayService refund terminal handling', () => {
         }),
       },
       riskEvent: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findMany: vi.fn(async ({ where }) => risks.filter(r => r.objectId !== where.objectId.not)),
         findFirst: vi
           .fn()
           .mockImplementation(

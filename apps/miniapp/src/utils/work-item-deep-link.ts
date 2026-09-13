@@ -1,6 +1,9 @@
+import { hasOperationsAccess, type OperationsAccessScope } from "../config/operations";
+import type { AppRole } from "../types/domain";
 import type { WorkItem } from "../services/api";
 
 export type OpsPage =
+  | "merchant"
   | "members"
   | "finance"
   | "coach"
@@ -33,6 +36,7 @@ const pagePath = (page: OpsPage) =>
   `/packages/ops/pages/${page}/index`;
 
 const defaultFocusByPage: Record<OpsPage, string> = {
+  merchant: "alliance-settlement",
   members: "member",
   finance: "reconciliation",
   coach: "session",
@@ -93,7 +97,7 @@ const safePageAction = (action?: string) => {
   if (!action) return null;
   const [path, rawQuery = ""] = action.trim().split("?", 2);
   const matched = path.match(
-    /^\/packages\/ops\/pages\/(members|finance|coach|event|host|frontdesk|inventory|governance)\/index$/,
+    /^\/packages\/ops\/pages\/(merchant|members|finance|coach|event|host|frontdesk|inventory|governance)\/index$/,
   );
   if (!matched) return null;
   const page = matched[1] as OpsPage;
@@ -192,13 +196,13 @@ const urlFor = (path: string, query: OpsDeepLinkQuery) => {
 /** Resolve a queue record into an allow-listed operations-page deep link. */
 export function resolveWorkItemDestination(
   item: WorkItem,
+  roles?: AppRole[],
 ): WorkItemDestination | null {
   const direct = safePageAction(item.action) || legacyActionPlan(item.action);
   const plan = kindPlan[normalize(item.kind)];
   if (!direct && !plan) return null;
 
-  const page = direct?.page || plan!.page;
-  const path = direct?.path || pagePath(page);
+  let page = direct?.page || plan!.page;
   const metadata = metadataQuery(item);
   const query: OpsDeepLinkQuery = {
     focus: plan?.focus || direct?.query.focus || defaultFocusByPage[page],
@@ -215,6 +219,18 @@ export function resolveWorkItemDestination(
   if (page === "host" && !query.gameId) {
     query.gameId = text(metadata.gameId) || text(item.objectId);
   }
+  if (normalize(item.kind) === "ORDER_FULFILLMENT") {
+    const businessType = normalize(item.metadata?.businessType);
+    if (businessType === "GAME") { page = "host"; query.focus = "game"; query.id = text(item.metadata?.gameId); query.gameId = query.id; }
+    else if (businessType === "EVENT") { page = "event"; query.focus = "team"; query.id = text(item.metadata?.fulfillmentObjectId); query.eventId = text(item.metadata?.eventId); }
+    else { page = "frontdesk"; query.focus = "order"; }
+  }
+  if (normalize(item.kind) === "ALLIANCE_SETTLEMENT" && roles && !hasOperationsAccess(roles, "finance") && hasOperationsAccess(roles, "alliance")) {
+    page = "merchant"; query.focus = "alliance-settlement";
+  }
+  const scopes: Record<OpsPage, OperationsAccessScope> = { members: "members", merchant: "alliance", finance: "finance", coach: "training", event: "events", host: "games", frontdesk: "today", inventory: "inventory", governance: "governance" };
+  if (roles && !hasOperationsAccess(roles, scopes[page])) return null;
+  const path = pagePath(page);
   return { page, path, query, url: urlFor(path, query) };
 }
 

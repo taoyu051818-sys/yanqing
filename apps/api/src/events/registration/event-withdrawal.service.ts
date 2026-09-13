@@ -1,3 +1,4 @@
+import { eventWithdrawalResponse } from '../shared/event-responses.js';
 import { EVENT_MANAGER_ROLES } from '../competition/event-competition-policy.js';
 import {
   serial,
@@ -41,6 +42,16 @@ export class EventWithdrawalService {
 
   /** Withdraw one fixed-doubles registration without bypassing finance. */
   async cancelRegistration(
+    eventId: string,
+    dto: CancelEventRegistrationDto,
+    actor: AuthUser,
+  ) {
+    return eventWithdrawalResponse(
+      await this.withdrawRegistration(eventId, dto, actor),
+    );
+  }
+
+  private async withdrawRegistration(
     eventId: string,
     dto: CancelEventRegistrationDto,
     actor: AuthUser,
@@ -256,6 +267,9 @@ export class EventWithdrawalService {
             );
             const registration = {
               ...team,
+              order: team.order
+                ? { ...team.order, status: OrderStatus.CANCELLED }
+                : null,
               ...evidence,
               status: RegistrationStatus.CANCELLED,
               paymentDueAt: null,
@@ -358,6 +372,7 @@ export class EventWithdrawalService {
           return {
             registration: {
               ...team,
+              order: { ...team.order, status: OrderStatus.REFUND_PENDING },
               ...evidence,
               cancellationPending: true,
               cancellationResolvedAt: null,

@@ -7,12 +7,15 @@ const props = defineProps<{
   errorMessage: string;
   tab: Tab;
   canOperate: boolean;
+  syncPurchaseBatch: () => void;
   openPurchaseForm: () => void;
   showPurchaseForm: boolean;
   supplierNames: string[];
   selectPurchaseSupplier: (index: number) => void;
   activeSuppliers: any[];
   purchaseForm: {
+    batchCode: string;
+    expiresAt: string;
     supplierId: string;
     itemId: string;
     locationId: string;
@@ -40,6 +43,7 @@ const {
   errorMessage,
   tab,
   canOperate,
+  syncPurchaseBatch,
   openPurchaseForm,
   supplierNames,
   selectPurchaseSupplier,
@@ -117,6 +121,9 @@ const showPurchaseForm = computed({
             )?.name || "请选择收货库位"
           }}</view></picker
         >
+        <text class="field-label">本批采购批次</text><input v-model="purchaseForm.batchCode" @blur="syncPurchaseBatch" class="field" maxlength="80" placeholder="核对实物批次" />
+        <text class="field-label">本批有效期（无效期可留空）</text><input v-model="purchaseForm.expiresAt" class="field" maxlength="10" placeholder="YYYY-MM-DD" />
+        <text class="muted">批次与效期会随采购收货入库，请以本批实物为准。</text>
         <text class="field-label">采购数量</text>
         <input
           v-model="purchaseForm.quantity"

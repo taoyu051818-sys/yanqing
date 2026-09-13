@@ -25,7 +25,7 @@ describe('WorkItemsService', () => {
       eventPrizeAward: { findMany: vi.fn().mockResolvedValue([]) },
       allianceSettlement: { findMany: vi.fn().mockResolvedValue([]) },
       trainingSettlement: { findMany: vi.fn().mockResolvedValue([]) },
-      inventoryItem: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
       order: { findMany: vi.fn().mockResolvedValue([]) },
       customerLead: { findMany: vi.fn().mockResolvedValue([]) },
       hostProfile: { findMany: vi.fn().mockResolvedValue([]) },
@@ -98,7 +98,7 @@ describe('WorkItemsService', () => {
       trainingSettlement: {
         findMany: vi.fn().mockResolvedValue([]),
       },
-      inventoryItem: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
       order: { findMany: vi.fn().mockResolvedValue([]) },
       accountAdjustmentRequest: {
         findMany: vi.fn().mockResolvedValue([
@@ -207,7 +207,7 @@ describe('WorkItemsService', () => {
       eventMatch: { findMany: vi.fn() },
       allianceSettlement: { findMany: vi.fn() },
       trainingSettlement: { findMany: vi.fn() },
-      inventoryItem: { findMany: vi.fn() },
+      $queryRaw: vi.fn(),
       order: { findMany: vi.fn() },
     };
     const result = await new WorkItemsService(prisma as never).list(
@@ -245,7 +245,7 @@ describe('WorkItemsService', () => {
       eventPrizeAward: { findMany: vi.fn().mockResolvedValue([]) },
       allianceSettlement: { findMany: vi.fn().mockResolvedValue([]) },
       trainingSettlement: { findMany: vi.fn().mockResolvedValue([]) },
-      inventoryItem: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
       order: { findMany: vi.fn().mockResolvedValue([]) },
       customerLead: { findMany: vi.fn().mockResolvedValue([]) },
       hostProfile: { findMany: vi.fn().mockResolvedValue([]) },
@@ -300,7 +300,7 @@ describe('WorkItemsService', () => {
       },
       allianceSettlement: { findMany: vi.fn() },
       trainingSettlement: { findMany: vi.fn() },
-      inventoryItem: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
       order: { findMany: vi.fn().mockResolvedValue([]) },
       customerLead: { findMany: vi.fn().mockResolvedValue([]) },
     };
@@ -333,7 +333,7 @@ describe('WorkItemsService', () => {
       eventPrizeAward: { findMany: vi.fn().mockResolvedValue([]) },
       allianceSettlement: { findMany: vi.fn().mockResolvedValue([]) },
       trainingSettlement: { findMany: vi.fn().mockResolvedValue([]) },
-      inventoryItem: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
       order: { findMany: vi.fn().mockResolvedValue([]) },
       customerLead: {
         findMany: vi.fn().mockResolvedValue([
@@ -399,7 +399,7 @@ describe('WorkItemsService', () => {
       eventPrizeAward: { findMany: vi.fn().mockResolvedValue([]) },
       allianceSettlement: { findMany: vi.fn().mockResolvedValue([]) },
       trainingSettlement: { findMany: vi.fn().mockResolvedValue([]) },
-      inventoryItem: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
       order: { findMany: vi.fn().mockResolvedValue([]) },
       customerLead: { findMany: vi.fn().mockResolvedValue([]) },
       hostProfile: { findMany: vi.fn().mockResolvedValue([]) },

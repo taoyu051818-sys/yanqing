@@ -5,7 +5,7 @@ const TAB_KEY = 'yanqing_member_tab_intent'
 const MAX_AGE = 15 * 60_000
 const tabRoutes = ['/pages/home/index', '/pages/booking/index', '/pages/community/index', '/pages/profile/index']
 const memberRoutes = [...tabRoutes, ...['order', 'wallet', 'training', 'coupon', 'membership', 'shop', 'settings', 'invite', 'game-detail', 'event-detail', 'event-signup'].map((name) => `/pages/${name}/index`)]
-const publicRoutes = [...tabRoutes.filter((route) => route !== '/pages/community/index'), '/pages/game-detail/index', '/pages/event-detail/index', '/pages/event-signup/index']
+const publicRoutes = [...tabRoutes, '/pages/game-detail/index', '/pages/event-detail/index', '/pages/event-signup/index']
 
 export function safeMemberRoute(url: unknown): string | null {
   if (typeof url !== 'string' || url.length > 1000 || /[\r\n#]/.test(url)) return null
@@ -77,6 +77,21 @@ function consumeTabIntent(path: string, keys: string[]): Record<string, string> 
 
 export const consumeCommunityIntent = () => consumeTabIntent('/pages/community/index', ['tab', 'gameId', 'eventId', 'view'])
 export const consumeBookingIntent = () => consumeTabIntent('/pages/booking/index', ['couponId', 'memberId', 'mode'])
+
+export function cancelMemberLogin() {
+  uni.removeStorageSync(RETURN_KEY)
+  uni.removeStorageSync(TAB_KEY)
+  const pages = getCurrentPages()
+  const previous = pages[pages.length - 2]
+  // Returning to a protected page would immediately trigger its login guard again.
+  if (previous && publicRoutes.includes(`/${previous.route}`)) {
+    if (previous.route === 'pages/community/index') {
+      uni.setStorageSync(TAB_KEY, { url: '/pages/community/index?view=browse', at: Date.now() })
+    }
+    return uni.navigateBack({ fail: () => uni.switchTab({ url: '/pages/home/index' }) })
+  }
+  return uni.switchTab({ url: '/pages/home/index' })
+}
 
 export function finishMemberLogin() {
   const target = consumeLoginReturn() || '/pages/home/index'

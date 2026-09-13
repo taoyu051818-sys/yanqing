@@ -182,4 +182,81 @@ describe('WechatPayService', () => {
     expect(result).toEqual({ refundId: 'R1', status: 'PROCESSING' });
     expect(fetchMock.mock.calls[0][0]).toContain('/v3/refund/domestic/refunds');
   });
+
+  it('recovers a refund with a bodyless GET and validates its order and amounts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      signedWechatResponse({
+        refund_id: 'WXRF1',
+        out_refund_no: 'RF 1',
+        out_trade_no: 'O1',
+        status: 'SUCCESS',
+        amount: { refund: 1000, total: 6800 },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    expect(
+      await service.queryRefund('RF 1', {
+        orderNo: 'O1',
+        refundCents: 1000,
+        totalCents: 6800,
+      }),
+    ).toEqual({ refundId: 'WXRF1', status: 'SUCCESS' });
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/RF%201$/);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: 'GET',
+      body: undefined,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it.each([
+    { out_refund_no: 'different' },
+    { out_trade_no: 'different' },
+    { amount: { refund: 999, total: 6800 } },
+    { amount: { refund: 1000, total: 6801 } },
+  ])('rejects a mismatched refund query result %j', async (override) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        signedWechatResponse({
+          refund_id: 'WXRF1',
+          out_refund_no: 'RF1',
+          out_trade_no: 'O1',
+          status: 'SUCCESS',
+          amount: { refund: 1000, total: 6800 },
+          ...override,
+        }),
+      ),
+    );
+    await expect(
+      service.queryRefund('RF1', {
+        orderNo: 'O1',
+        refundCents: 1000,
+        totalCents: 6800,
+      }),
+    ).rejects.toThrow('与本地订单不一致');
+  });
+
+  it('distinguishes an unknown refund from an unavailable provider', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ code: 'RESOURCE_NOT_EXISTS' }), {
+            status: 404,
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ message: 'temporarily unavailable' }), {
+            status: 503,
+          }),
+        ),
+    );
+    const expected = { orderNo: 'O1', refundCents: 1000, totalCents: 6800 };
+    expect(await service.queryRefund('RF1', expected)).toBeNull();
+    await expect(service.queryRefund('RF1', expected)).rejects.toThrow(
+      'temporarily unavailable',
+    );
+  });
 });

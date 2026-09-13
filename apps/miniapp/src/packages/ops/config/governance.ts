@@ -274,6 +274,7 @@ export type BusinessParameterEditorValue = {
 };
 
 function nonNegativeInteger(raw: string, label: string, maximum?: number) {
+  if (!raw.trim()) throw new Error(`请填写${label}`);
   const value = Number(raw);
   if (
     !Number.isInteger(value) ||
@@ -309,6 +310,7 @@ export function parseBusinessParameterValue(
     return periods;
   }
   if (definition.kind === "RATE_BPS") {
+    if (!editor.scalar.trim()) throw new Error("请填写比例，停用时明确输入0");
     const rate = Number(editor.scalar);
     if (!Number.isFinite(rate) || rate < 0 || rate > 100)
       throw new Error("比例必须在 0%-100% 之间");

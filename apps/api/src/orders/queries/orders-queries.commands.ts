@@ -15,6 +15,29 @@ export async function list(
     memberId: all ? undefined : actor.sub,
     businessType: query.businessType,
     status: query.status,
+    ...(query.keyword
+      ? {
+          OR: [
+            {
+              orderNo: {
+                contains: query.keyword,
+                mode: 'insensitive' as const,
+              },
+            },
+            {
+              title: { contains: query.keyword, mode: 'insensitive' as const },
+            },
+            {
+              member: {
+                displayName: {
+                  contains: query.keyword,
+                  mode: 'insensitive' as const,
+                },
+              },
+            },
+          ],
+        }
+      : {}),
   };
   const [items, total] = await prisma.$transaction([
     prisma.order.findMany({
@@ -29,7 +52,7 @@ export async function list(
         eventTeam: { include: { event: true } },
         trainingEnrollment: { include: { product: true, student: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       skip: (query.page - 1) * query.pageSize,
       take: query.pageSize,
     }),

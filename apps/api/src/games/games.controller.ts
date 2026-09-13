@@ -45,6 +45,12 @@ export class GamesController {
     return this.gamesGameCatalog.list(actor);
   }
 
+  @Public()
+  @Get('public')
+  publicList() {
+    return this.gamesGameCatalog.publicList();
+  }
+
   @Get('managed')
   @Roles(...GAME_MANAGEMENT_ROLES)
   managed(@CurrentUser() actor: AuthUser) {

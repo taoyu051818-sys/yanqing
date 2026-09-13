@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { usePagedList } from "../../utils/paged-list";
 import { useFinanceLoadingActions } from "./actions/loading.js";
 
 import ReconciliationSummary from "./sections/ReconciliationSummary.vue";
@@ -48,7 +49,9 @@ const session = useSessionStore();
 
 const dashboard = ref<Record<string, any> | null>(null);
 
-const orders = ref<any[]>([]);
+const refundKeyword = ref("");
+const refundQueue = usePagedList<any>((page, pageSize) => endpoints.adminOrders({ page, pageSize, status: "REFUND_PENDING", keyword: refundKeyword.value.trim() || undefined }), 20, () => refundKeyword.value.trim());
+const orders = refundQueue.items;
 
 const training = ref<Record<string, any> | null>(null);
 
@@ -400,6 +403,7 @@ const {
 });
 
 const {
+  reviseSettlement,
   createSettlement,
   submitSettlement,
   confirmSettlement,
@@ -448,6 +452,7 @@ const { sourceError, load, applyFinanceDeepLink } = useFinanceLoadingActions({
   trainingSettlementStatusIndex,
   dashboard,
   orders,
+  loadRefundOrders: refundQueue.load,
   training,
   merchants,
   settlements,
@@ -550,6 +555,7 @@ onShow(() => {
       :loadErrors="loadErrors"
     />
 
+    <view class="card"><view class="section-title">退款队列查询 · 共 {{ refundQueue.total.value }} 单</view><input v-model="refundKeyword" class="input" maxlength="50" placeholder="订单号、会员姓名或订单标题" confirm-type="search" @confirm="refundQueue.refresh()" /><button class="secondary" :disabled="refundQueue.loading.value" @tap="refundQueue.refresh()">查询待退款订单</button><text v-if="refundQueue.error.value" class="muted">{{ refundQueue.error.value }}</text></view>
     <RefundReview
       :loading="loading"
       :reviewRefunds="reviewRefunds"
@@ -564,6 +570,8 @@ onShow(() => {
       :isForcedSystemRefund="isForcedSystemRefund"
       :rejectRefund="rejectRefund"
     />
+
+    <button v-if="orders.length < refundQueue.total.value" class="secondary" :loading="refundQueue.loading.value" :disabled="refundQueue.loading.value" @tap="refundQueue.more()">加载更多待退款订单（已加载 {{ orders.length }}）</button>
 
     <AccountAdjustments
       v-if="canFinanceAction"
@@ -695,6 +703,7 @@ onShow(() => {
       :canFinanceAction="canFinanceAction"
       :actionKey="actionKey"
       :submitSettlement="submitSettlement"
+      :reviseSettlement="reviseSettlement"
       :acting="acting"
       :canMerchantAction="canMerchantAction"
       :confirmSettlement="confirmSettlement"

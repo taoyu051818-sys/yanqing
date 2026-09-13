@@ -16,6 +16,7 @@ import {
   TrainingConsumeCorrectionStatus,
   TrainingEnrollmentStatus,
   TrainingRecognitionType,
+  TrainingSessionStatus,
 } from '../../generated/prisma/client.js';
 import type { DecideTrainingConsumeCorrectionDto } from '../training.dto.js';
 import { transitionOrder } from '../../orders/order-transition.js';
@@ -61,7 +62,7 @@ export async function approveConsumeCorrection(
         attendance: {
           include: {
             session: {
-              select: { startsAt: true, endsAt: true },
+              select: { id: true, status: true, startsAt: true, endsAt: true },
             },
             enrollment: {
               include: {
@@ -193,6 +194,36 @@ export async function approveConsumeCorrection(
     });
     if (attendanceChanged.count !== 1)
       throw new ConflictException('考勤消课状态已变化，请重试');
+    // The restored attendance must be able to follow the normal propose/confirm
+    // workflow. Reopen only through this approved, ledger-unlocked correction.
+    if (attendance.session.status === TrainingSessionStatus.COMPLETED) {
+      const reopened = await tx.trainingSession.updateMany({
+        where: {
+          id: attendance.session.id,
+          status: TrainingSessionStatus.COMPLETED,
+        },
+        data: { status: TrainingSessionStatus.SCHEDULED },
+      });
+      if (reopened.count !== 1)
+        throw new ConflictException('课次状态已变化，请刷新后重试');
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.sub,
+          actorRole: actor.roles[0],
+          action: 'TRAINING_SESSION_REOPENED',
+          objectType: 'TrainingSession',
+          objectId: attendance.session.id,
+          reason: reviewReason,
+          oldValue: { status: TrainingSessionStatus.COMPLETED },
+          newValue: {
+            status: TrainingSessionStatus.SCHEDULED,
+            correctionId: correction.id,
+            attendanceId: attendance.id,
+          },
+          requestId: dto.idempotencyKey,
+        },
+      });
+    }
     if (
       enrollment.product.audience === TrainingAudience.YOUTH &&
       attendance.growthPointsAwarded > 0

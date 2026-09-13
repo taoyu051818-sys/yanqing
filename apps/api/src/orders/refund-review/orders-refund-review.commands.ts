@@ -13,7 +13,6 @@ import type { AuthUser } from '../../common/auth/auth-user.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import {
   AccountTxnKind,
-  AccountType,
   AppRole,
   BusinessType,
   OrderStatus,
@@ -34,6 +33,8 @@ import {
   refundCommandResponse,
 } from '../shared/orders-support.js';
 import { assertRefundOriginIsConsistent } from '../shared/orders-refund-policy.js';
+import { dispatchWechatRefund } from '../../payments/wechat/refund-dispatch.js';
+import { rechargeRefundDebits } from '../../payments/recharge-refund-policy.js';
 
 export async function rejectRefund(
   prisma: PrismaService,
@@ -54,6 +55,7 @@ export async function rejectRefund(
       throw new ConflictException('退款申请已处理');
     if (
       refund.compensationOnly ||
+      refund.cancellationRequired ||
       NON_REJECTABLE_SYSTEM_REFUND_PREFIXES.some((prefix) =>
         refund.idempotencyKey?.startsWith(prefix),
       )
@@ -63,14 +65,20 @@ export async function rejectRefund(
     if (refund.requestedById === actor.sub)
       throw new ForbiddenException('退款申请人与审批人不能是同一账号');
 
-    const rejected = await tx.refund.update({
-      where: { id: refund.id },
+    const rejected = await tx.refund.updateMany({
+      where: {
+        id: refund.id,
+        status: RefundStatus.REQUESTED,
+        cancellationRequired: false,
+      },
       data: {
         status: RefundStatus.REJECTED,
         approvedById: actor.sub,
         approvedAt: new Date(),
       },
     });
+    if (rejected.count !== 1)
+      throw new ConflictException('退款状态已变化，请刷新后重试');
     const otherPending = await tx.refund.aggregate({
       where: {
         orderId: refund.orderId,
@@ -141,7 +149,7 @@ export async function rejectRefund(
         } as never,
       },
     });
-    return rejected;
+    return tx.refund.findUniqueOrThrow({ where: { id: refund.id } });
   });
   return refundCommandResponse(result);
 }
@@ -180,7 +188,8 @@ export async function approveRefund(
           if (refund.status !== RefundStatus.REQUESTED) {
             if (
               refund.approvedById === actor.sub &&
-              (refund.status === RefundStatus.PROCESSING ||
+              (refund.status === RefundStatus.APPROVED ||
+                refund.status === RefundStatus.PROCESSING ||
                 refund.status === RefundStatus.SUCCEEDED)
             ) {
               return refund;
@@ -217,6 +226,40 @@ export async function approveRefund(
                 '当前未消课预收余额不足；请先驳回本申请或完成消课冲正后重提',
               );
             }
+          }
+
+          // Commit the approval before any irreversible provider request. The
+          // APPROVED row is also the durable retry queue after a process crash.
+          const isWechatProviderRefund =
+            payment.channel === PaymentChannel.WECHAT &&
+            config.get<string>('PAYMENT_PROVIDER', 'mock') === 'wechat';
+          if (isWechatProviderRefund) {
+            const claimed = await tx.refund.updateMany({
+              where: { id: refund.id, status: RefundStatus.REQUESTED },
+              data: {
+                status: RefundStatus.APPROVED,
+                approvedById: actor.sub,
+                approvedAt: new Date(),
+              },
+            });
+            if (claimed.count !== 1)
+              throw new ConflictException('退款申请已处理');
+            await tx.auditLog.create({
+              data: {
+                actorId: actor.sub,
+                actorRole: actor.roles[0],
+                action: 'REFUND_APPROVED_FOR_DISPATCH',
+                objectType: 'Refund',
+                objectId: refund.id,
+                reason: dto.reason,
+                oldValue: { status: RefundStatus.REQUESTED },
+                newValue: {
+                  status: RefundStatus.APPROVED,
+                  amountCents: refund.amountCents,
+                },
+              },
+            });
+            return tx.refund.findUniqueOrThrow({ where: { id: refund.id } });
           }
 
           const accountType = ACCOUNT_CHANNELS[payment.channel];
@@ -296,41 +339,13 @@ export async function approveRefund(
             });
           }
 
-          // A real WeChat refund is asynchronous.  Do not reverse a recharge
-          // balance (or any other business side effect) until the signed
-          // REFUND.SUCCESS notification arrives; otherwise a PROCESSING refund
-          // would make the member's balance spendable before money is actually
-          // returned by the provider.
-          const isWechatProviderRefund =
-            payment.channel === PaymentChannel.WECHAT &&
-            config.get<string>('PAYMENT_PROVIDER', 'mock') === 'wechat';
-
-          if (
-            refund.order.businessType === BusinessType.RECHARGE &&
-            !isWechatProviderRefund
-          ) {
-            const snapshot = refund.order.parameterSnapshot as {
-              principalCents?: number;
-              giftCents?: number;
-            };
-            const debits: Array<[AccountType, number]> = [
-              [
-                AccountType.CASH_PRINCIPAL,
-                Math.round(
-                  (Math.max(0, Number(snapshot.principalCents) || 0) *
-                    refund.amountCents) /
-                    payment.amountCents,
-                ),
-              ],
-              [
-                AccountType.GIFT_BALANCE,
-                Math.round(
-                  (Math.max(0, Number(snapshot.giftCents) || 0) *
-                    refund.amountCents) /
-                    payment.amountCents,
-                ),
-              ],
-            ];
+          if (refund.order.businessType === BusinessType.RECHARGE) {
+            const debits = await rechargeRefundDebits(
+              tx,
+              refund,
+              payment.amountCents,
+              refund.order.refundedCents + refund.amountCents,
+            );
             for (const [type, amount] of debits) {
               if (!amount) continue;
               const account = await tx.account.findUniqueOrThrow({
@@ -338,7 +353,7 @@ export async function approveRefund(
                   userId_type: { userId: refund.order.memberId, type },
                 },
               });
-              if (account.balance < amount)
+              if (account.balance - account.frozenBalance < amount)
                 throw new ConflictException(
                   `${type} 余额不足，充值款已消费，需人工审核处理`,
                 );
@@ -366,46 +381,11 @@ export async function approveRefund(
             }
           }
 
-          if (isWechatProviderRefund) {
-            const provider = await wechatPay.createRefund({
-              orderNo: refund.order.orderNo,
-              refundNo: refund.refundNo,
-              refundCents: refund.amountCents,
-              totalCents: refund.order.paidCents,
-              reason: dto.reason,
-            });
-            const processing = await tx.refund.update({
-              where: { id: refund.id },
-              data: {
-                status: RefundStatus.PROCESSING,
-                approvedById: actor.sub,
-                approvedAt: new Date(),
-                providerRefundNo: provider.refundId,
-              },
-            });
-            await tx.auditLog.create({
-              data: {
-                actorId: actor.sub,
-                actorRole: actor.roles[0],
-                action: 'WECHAT_REFUND_REQUESTED',
-                objectType: 'Refund',
-                objectId: refund.id,
-                reason: dto.reason,
-                newValue: {
-                  amountCents: refund.amountCents,
-                  providerRefundId: provider.refundId,
-                  providerStatus: provider.status,
-                } as never,
-              },
-            });
-            return processing;
-          }
-
           const refundedCents = refund.order.refundedCents + refund.amountCents;
           const fullyRefunded = refundedCents >= refund.order.paidCents;
           const completedAt = new Date();
-          await tx.refund.update({
-            where: { id: refund.id },
+          const settled = await tx.refund.updateMany({
+            where: { id: refund.id, status: RefundStatus.REQUESTED },
             data: {
               status: RefundStatus.SUCCEEDED,
               approvedById: actor.sub,
@@ -413,6 +393,8 @@ export async function approveRefund(
               completedAt,
             },
           });
+          if (settled.count !== 1)
+            throw new ConflictException('退款申请已处理');
           await requireOrderTransition(tx, 'REFUND_SUCCEEDED', {
             where: { id: refund.orderId, status: refund.order.status },
             data: {
@@ -460,6 +442,16 @@ export async function approveRefund(
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
+      if (
+        result.status === RefundStatus.APPROVED ||
+        result.status === RefundStatus.PROCESSING
+      ) {
+        // A timeout leaves the durable approved decision intact. The dispatcher
+        // resumes it, and another reviewer cannot turn it back into a rejection.
+        return refundCommandResponse(
+          await dispatchWechatRefund(prisma, wechatPay, finalizer, result.id),
+        );
+      }
       return refundCommandResponse(result);
     } catch (error) {
       if (
@@ -471,7 +463,8 @@ export async function approveRefund(
         });
         if (
           completed?.approvedById === actor.sub &&
-          (completed.status === RefundStatus.PROCESSING ||
+          (completed.status === RefundStatus.APPROVED ||
+            completed.status === RefundStatus.PROCESSING ||
             completed.status === RefundStatus.SUCCEEDED)
         ) {
           return refundCommandResponse(completed);

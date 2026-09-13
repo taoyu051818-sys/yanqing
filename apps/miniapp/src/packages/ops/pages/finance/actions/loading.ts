@@ -65,6 +65,7 @@ interface ActionContext {
   trainingSettlementStatusIndex: Ref<number, number>;
   dashboard: Ref<Record<string, any> | null, Record<string, any> | null>;
   orders: Ref<any[], any[]>;
+  loadRefundOrders: () => Promise<void>;
   training: Ref<Record<string, any> | null, Record<string, any> | null>;
   merchants: Ref<any[], any[]>;
   settlements: Ref<any[], any[]>;
@@ -150,6 +151,7 @@ export function useFinanceLoadingActions({
   trainingSettlementStatusIndex,
   dashboard,
   orders,
+  loadRefundOrders,
   training,
   merchants,
   settlements,
@@ -202,7 +204,7 @@ export function useFinanceLoadingActions({
       const closePeriod = closeBusinessPeriod();
       const result = await Promise.allSettled([
         endpoints.dashboard(),
-        endpoints.adminOrders(),
+        loadRefundOrders(),
         endpoints.trainingFinancials(period.periodStart, period.periodEnd),
         endpoints.merchants(),
         endpoints.allianceSettlements(),
@@ -242,9 +244,7 @@ export function useFinanceLoadingActions({
       else
         loadErrors.value.dashboard = sourceError("dashboard", result[0].reason);
 
-      if (result[1].status === "fulfilled")
-        orders.value = result[1].value?.items || [];
-      else loadErrors.value.refunds = sourceError("refunds", result[1].reason);
+      if (result[1].status === "rejected") loadErrors.value.refunds = sourceError("refunds", result[1].reason);
 
       if (result[2].status === "fulfilled") training.value = result[2].value;
       else
@@ -346,6 +346,13 @@ export function useFinanceLoadingActions({
         deepLinkQuery.value,
         ["id", "orderId"],
       );
+      if (!record && deepLinkQuery.value.orderId) {
+        try {
+          const order = await endpoints.order(deepLinkQuery.value.orderId);
+          orders.value = [order, ...orders.value.filter(item => item.id !== order.id)];
+          record = findOpsDeepLinkRecord(activeRefunds.value, deepLinkQuery.value, ["id"]);
+        } catch { uni.showToast({ title: "待办退款未同步，请重试", icon: "none" }); return; }
+      }
       prefix = "finance-refund";
       label = "退款申请";
     } else if (focus === "account-adjustment") {

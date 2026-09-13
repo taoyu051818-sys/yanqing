@@ -125,6 +125,8 @@ export function mapOrdersWorkItems(
         businessType: order.businessType,
         fulfillmentObjectId,
         fulfillmentStatus,
+        gameId: registration?.game.id,
+        eventId: team?.event.id,
         dueAt: dueAt?.toISOString(),
       },
     };

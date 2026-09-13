@@ -207,6 +207,20 @@
   },
   {
     "controller": "AllianceController",
+    "method": "reviseSettlement",
+    "verb": "POST",
+    "path": "/api/v1/alliance/settlements/:id/revise",
+    "roles": [
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "AllianceSettlementsService",
+    "serviceMethod": "reviseSettlement"
+  },
+  {
+    "controller": "AllianceController",
     "method": "settleSettlement",
     "verb": "POST",
     "path": "/api/v1/alliance/settlements/:id/settle",
@@ -228,6 +242,16 @@
     "isPublic": false,
     "provider": "GameCatalogService",
     "serviceMethod": "list"
+  },
+  {
+    "controller": "GamesController",
+    "method": "publicList",
+    "verb": "GET",
+    "path": "/api/v1/games/public",
+    "roles": [],
+    "isPublic": true,
+    "provider": "GameCatalogService",
+    "serviceMethod": "publicList"
   },
   {
     "controller": "GamesController",

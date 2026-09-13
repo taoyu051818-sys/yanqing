@@ -60,6 +60,23 @@ describe("miniapp mock acceptance journeys", () => {
     await login("MEMBER");
   });
 
+  it("keeps the anonymous game list free of the current member registration", async () => {
+    const games = getGames();
+    const member = await login("MEMBER");
+    const game = games.find((item: any) => item.status === "OPEN")!;
+    game.registrations = [{ id: "private-registration", userId: member.user.id, status: "PAID" }];
+    saveGames(games);
+    const personal = await request<any[]>("GET", "/games");
+    expect(personal.find(item => item.id === game.id).myRegistration.id).toBe("private-registration");
+    storage.delete("yanqing_access_token"); storage.delete("yanqing_actor_id");
+    const publicList = await request<any[]>("GET", "/games/public");
+    expect(publicList.length).toBeGreaterThan(0);
+    expect(publicList.every(item => item.myRegistration === null)).toBe(true);
+    expect(JSON.stringify(publicList)).not.toContain("private-registration");
+    const events = await request<any[]>("GET", "/events");
+    expect(Array.isArray(events)).toBe(true);
+  });
+
   it("keeps public goods and order responses free of inventory cost and rule snapshots", async () => {
     const products = await request<any[]>("GET", "/goods");
     expect(products.length).toBeGreaterThan(0);

@@ -1,3 +1,4 @@
+import { publicGameList } from './public-game-list.query.js';
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuthUser } from '../../common/auth/auth-user.js';
 import { PrismaService } from '../../database/prisma.service.js';
@@ -19,6 +20,9 @@ export class GameCatalogService {
   }
   async participants(id: string, actor: AuthUser) {
     return participants(this.prisma, id, actor);
+  }
+  async publicList() {
+    return publicGameList(this.prisma);
   }
   async list(actor: AuthUser) {
     return list(this.prisma, actor);

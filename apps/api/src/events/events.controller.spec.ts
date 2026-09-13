@@ -93,12 +93,12 @@ const actor: AuthUser = {
 };
 
 describe('EventsController publish command', () => {
-  it('allows shared event details without opening registration or management routes', () => {
+  it('allows public event browsing without opening registration or management routes', () => {
     expect(Reflect.getMetadata(IS_PUBLIC_KEY, controllerMethods.detail)).toBe(
       true,
     );
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, controllerMethods.list)).toBe(true);
     for (const method of [
-      'list',
       'myRegistration',
       'register',
       'managedList',

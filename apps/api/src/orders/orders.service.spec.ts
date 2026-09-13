@@ -99,9 +99,12 @@ describe('OrdersService refund controls', () => {
     const tx = {
       refund: {
         findUnique: vi.fn().mockResolvedValue(refund),
-        update: vi
-          .fn()
-          .mockResolvedValue({ ...refund, status: RefundStatus.REJECTED }),
+        updateMany: vi.fn(async ({ where, data }) => {
+          if (refund.status !== where.status) return { count: 0 };
+          Object.assign(refund, data);
+          return { count: 1 };
+        }),
+        findUniqueOrThrow: vi.fn(async () => refund),
         aggregate: vi.fn().mockResolvedValue({ _sum: { amountCents: 0 } }),
       },
       order: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },

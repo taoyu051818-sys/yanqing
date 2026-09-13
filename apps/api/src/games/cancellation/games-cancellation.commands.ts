@@ -1,3 +1,4 @@
+import { requireActivityCancellationRefunds } from '../../common/finance/activity-cancellation-refunds.js';
 import {
   transitionOrder,
   requireOrderTransition,
@@ -127,6 +128,12 @@ export async function cancel(
           include: { order: { include: { refunds: true } } },
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         });
+        await requireActivityCancellationRefunds(
+          tx,
+          registrations.map((row) => row.order),
+          actor,
+          { kind: 'GAME', id: gameId, reason },
+        );
         const refundPlans = registrations.flatMap((registration) => {
           const order = registration.order;
           if (!order || order.paidCents <= order.refundedCents) return [];
@@ -286,6 +293,7 @@ export async function cancel(
                 reason: refundReason,
                 status: RefundStatus.REQUESTED,
                 originalOrderStatus: plan.originalOrderStatus,
+                cancellationRequired: true,
               },
             }));
           // A whole-activity cancellation can top up an existing refund request.

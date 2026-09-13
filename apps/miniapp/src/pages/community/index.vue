@@ -3,7 +3,8 @@ import GameListings from "./sections/GameListings.vue";
 import EventRegistrations from "./sections/EventRegistrations.vue";
 import HostApplication from "./sections/HostApplication.vue";
 
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
+import type { GameListItem } from "../../types/game";
 import {
   onLoad,
   onShareAppMessage,
@@ -16,6 +17,7 @@ import SectionEmpty from "../../components/SectionEmpty.vue";
 import ReasonForm from "../../components/ReasonForm.vue";
 import StatusBadge from "../../components/StatusBadge.vue";
 import { endpoints } from "../../services/api";
+import { captureAuthSession, isAuthSessionCurrent, useAccessToken } from "../../services/auth-session";
 import { useSessionStore } from "../../stores/session";
 import { money, shortDate } from "../../utils/format";
 import { withPendingCreationKey } from "../../utils/pending-creation-key";
@@ -37,7 +39,7 @@ const view = ref<"browse" | "mine">("browse");
 const showPast = ref(false);
 const showHostApplication = ref(false);
 const expanded = ref<Record<string, boolean>>({});
-const games = ref<any[]>([]);
+const games = ref<GameListItem[]>([]);
 const events = ref<any[]>([]);
 const eventRegistrations = ref<Record<string, any>>({});
 const loading = ref(false);
@@ -66,8 +68,8 @@ const targetGameId = ref("");
 const targetEventId = ref("");
 const activeShare = ref<{ type: "event"; id: string } | null>(null);
 
-const isMember = computed(() => session.roles.includes("MEMBER"));
-const isHost = computed(() => session.roles.includes("HOST"));
+const isMember = computed(() => session.isAuthenticated && session.roles.includes("MEMBER"));
+const isHost = computed(() => session.isAuthenticated && session.roles.includes("HOST"));
 const visibleGames = computed(() =>
   games.value.filter((game) =>
     view.value === "mine"
@@ -98,6 +100,7 @@ const registrationStatusLabel: Record<string, string> = {
   REGISTERED: "已报名，待支付",
   PAID: "已支付",
   CHECKED_IN: "已签到",
+  NO_SHOW: "未到场",
   COMPLETED: "已完成",
   CANCELLED: "已取消",
   REFUNDED: "已退款",
@@ -125,102 +128,95 @@ function displayRefundStatus(status?: string) {
   return refundStatusLabel[status || ""] || "状态更新中";
 }
 
+let loadGeneration = 0;
+function clearPrivateState() {
+  loadGeneration++;
+  games.value = games.value.map(game => ({ ...game, myRegistration: null }));
+  eventRegistrations.value = {};
+  hostApplication.value = null;
+  cancellingEventId.value = "";
+  cancelError.value = "";
+  actionKey.value = "";
+  errorMessage.value = "";
+  loading.value = false;
+}
+watch(useAccessToken(), clearPrivateState, { flush: "sync" });
+watch(() => session.user?.id, (id, previous) => {
+  if (previous && id !== previous) clearPrivateState();
+}, { flush: "sync" });
+
 async function load() {
-  if (!session.isAuthenticated)
-    return requestMemberLogin(
-      "/pages/community/index?tab=" +
-        tab.value +
-        "&view=" +
-        view.value +
-        (targetEventId.value
-          ? "&eventId=" + encodeURIComponent(targetEventId.value)
-          : ""),
-    );
-  const ready = await session.hydrate();
-  if (!ready) {
-    errorMessage.value = "活动暂未同步，请重试。";
-    return;
-  }
+  const run = ++loadGeneration;
+  const owner = captureAuthSession();
+  const current = () => run === loadGeneration && isAuthSessionCurrent(owner);
   loading.value = true;
   errorMessage.value = "";
   try {
-    const [gameList, eventList] = await Promise.all([
-      endpoints.games(),
-      endpoints.events(),
-    ]);
-    games.value = (gameList as any[]).filter((game) =>
-      ["OPEN", "FULL", "IN_PROGRESS", "COMPLETED", "CANCELLED"].includes(
-        game.status,
-      ),
-    );
-    const visibleEvents = (eventList as any[]).filter((event) =>
-      ["OPEN", "FULL", "IN_PROGRESS", "COMPLETED", "CANCELLED"].includes(
-        event.status,
-      ),
-    );
-    const hydratedEvents = await Promise.all(
-      visibleEvents.map(async (event) => {
-        if (event.status !== "COMPLETED") return event;
-        try {
-          return await endpoints.event(event.id);
-        } catch {
-          return event;
-        }
-      }),
-    );
-    events.value = targetEventId.value
-      ? [...hydratedEvents].sort((left, right) => {
-          if (left.id === targetEventId.value) return -1;
-          if (right.id === targetEventId.value) return 1;
-          return 0;
-        })
-      : hydratedEvents;
-    if (isMember.value) {
-      const registrations = await Promise.all(
-        visibleEvents.map(async (event) => {
-          try {
-            return [
-              event.id,
-              await endpoints.myEventRegistration(event.id),
-            ] as const;
-          } catch {
-            return [event.id, null] as const;
-          }
-        }),
-      );
-      eventRegistrations.value = Object.fromEntries(registrations);
-    } else {
-      eventRegistrations.value = {};
-    }
-  } catch (cause: any) {
-    errorMessage.value = cause?.message || "活动列表加载失败，请稍后重试。";
-  } finally {
+    // Public content must render even when there is no account or an old login expired.
+    const [gameList, eventList] = await Promise.all([endpoints.publicGames(), endpoints.events()]);
+    if (!current()) return;
+    games.value = gameList;
+    const visible = eventList.filter(event =>
+      ["OPEN", "FULL", "IN_PROGRESS", "COMPLETED", "CANCELLED"].includes(event.status));
+    events.value = targetEventId.value ? [...visible].sort((left, right) =>
+      left.id === targetEventId.value ? -1 : right.id === targetEventId.value ? 1 : 0) : visible;
+    eventRegistrations.value = {};
     loading.value = false;
+    if (!session.isAuthenticated) return;
+    const ready = await session.hydrate();
+    if (!current()) return;
+    if (!ready) { errorMessage.value = "个人报名暂未同步，可继续浏览活动或稍后重试。"; return; }
+    const [personalGames, hydratedEvents, registrations] = await Promise.all([
+      endpoints.games(),
+      Promise.all(events.value.map(async event => {
+        if (event.status !== "COMPLETED") return event;
+        try { return await endpoints.event(event.id); } catch { return event; }
+      })),
+      isMember.value ? Promise.all(visible.map(async event => {
+        try { return [event.id, await endpoints.myEventRegistration(event.id)] as const; }
+        catch { return [event.id, null] as const; }
+      })) : Promise.resolve([]),
+    ]);
+    if (!current()) return;
+    games.value = personalGames;
+    events.value = hydratedEvents;
+    eventRegistrations.value = Object.fromEntries(registrations);
+  } catch (cause: any) {
+    if (current()) errorMessage.value = cause?.message || "活动列表加载失败，请稍后重试。";
+  } finally {
+    if (current()) loading.value = false;
   }
+}
+
+function loginForRegistrations() {
+  requestMemberLogin("/pages/community/index?tab=" + tab.value + "&view=mine");
 }
 
 async function applyHost() {
   if (!isMember.value || actionKey.value) return;
+  const owner = captureAuthSession();
   const confirmed = await uni.showModal({
     title: "申请成为球局主理人",
     content:
       "提交后由管理员审核服务记录。审核通过前不能创建或发布球局，是否继续？",
     confirmText: "提交申请",
   });
-  if (!confirmed.confirm) return;
+  if (!confirmed.confirm || !isAuthSessionCurrent(owner)) return;
   actionKey.value = "host-apply";
   errorMessage.value = "";
   try {
-    hostApplication.value = await endpoints.applyHost();
+    const application = await endpoints.applyHost();
+    if (!isAuthSessionCurrent(owner)) return;
+    hostApplication.value = application;
     uni.showModal({
       title: "申请已提交",
       content: "当前状态：待审核。重复提交不会生成第二条申请。",
       showCancel: false,
     });
   } catch (cause: any) {
-    errorMessage.value = cause?.message || "主理人申请提交失败。";
+    if (isAuthSessionCurrent(owner)) errorMessage.value = cause?.message || "主理人申请提交失败。";
   } finally {
-    actionKey.value = "";
+    if (isAuthSessionCurrent(owner)) actionKey.value = "";
   }
 }
 
@@ -269,6 +265,7 @@ async function cancelEventRegistration(event: any, reason: string) {
   if (!canCancelEventRegistration(event) || actionKey.value) return;
   const registration = eventRegistration(event.id)?.registration;
   if (reason.trim().length < 2) return;
+  const owner = captureAuthSession();
   cancelError.value = "";
   actionKey.value = `event-cancel-registration:${event.id}`;
   errorMessage.value = "";
@@ -283,6 +280,7 @@ async function cancelEventRegistration(event: any, reason: string) {
           idempotencyKey,
         }),
     );
+    if (!isAuthSessionCurrent(owner)) return;
     cancellingEventId.value = "";
     uni.showToast({
       title:
@@ -293,9 +291,9 @@ async function cancelEventRegistration(event: any, reason: string) {
     });
     await load();
   } catch (cause: any) {
-    cancelError.value = cause?.message || "退出赛事报名失败，请重试。";
+    if (isAuthSessionCurrent(owner)) cancelError.value = cause?.message || "退出赛事报名失败，请重试。";
   } finally {
-    actionKey.value = "";
+    if (isAuthSessionCurrent(owner)) actionKey.value = "";
   }
 }
 
@@ -472,7 +470,13 @@ onShow(() => {
       </button>
     </view>
 
-    <view v-if="loading" class="loading-stack"
+    <view v-if="view === 'mine' && !session.isAuthenticated" class="card guest-registration">
+      <text class="guest-title">登录后查看我的报名</text>
+      <text class="muted">你可以先浏览球局和赛事，报名时再登录。</text>
+      <button class="primary" @tap="loginForRegistrations">去登录</button>
+      <button class="secondary" @tap="changeView('browse')">继续找活动</button>
+    </view>
+    <view v-else-if="loading" class="loading-stack"
       ><view class="card activity-skeleton skeleton" /><view
         class="card activity-skeleton skeleton"
     /></view>

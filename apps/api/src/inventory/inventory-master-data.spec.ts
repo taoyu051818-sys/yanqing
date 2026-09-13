@@ -14,6 +14,7 @@ import {
 } from '../generated/prisma/client.js';
 import { InventoryOperationsService } from '../../test/support/inventory-operations-fixture.js';
 import { InventoryService } from '../../test/support/inventory-fixture.js';
+import { inventoryCommandHash } from './inventory-master-data.js';
 
 const admin: AuthUser = {
   sub: 'admin-1',
@@ -36,6 +37,20 @@ const runTransaction = (tx: Record<string, unknown>) =>
   vi.fn(async (work: (client: Record<string, unknown>) => unknown) => work(tx));
 
 describe('inventory master-data lifecycle', () => {
+  it('distinguishes expiry changes while treating equivalent instants as one command', () => {
+    const command = (expiresAt: Date) => ({
+      itemId: 'item-1',
+      mutable: { expiresAt },
+    });
+    expect(
+      inventoryCommandHash(command(new Date('2027-02-01T00:00:00Z'))),
+    ).toBe(
+      inventoryCommandHash(command(new Date('2027-02-01T08:00:00+08:00'))),
+    );
+    expect(
+      inventoryCommandHash(command(new Date('2027-02-01T00:00:00Z'))),
+    ).not.toBe(inventoryCommandHash(command(new Date('2027-03-01T00:00:00Z'))));
+  });
   it('rejects whitespace-only master fields and trims idempotency commands before opening a transaction', async () => {
     const transaction = vi.fn();
     const service = new InventoryOperationsService({

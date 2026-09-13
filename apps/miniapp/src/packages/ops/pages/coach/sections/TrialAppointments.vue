@@ -6,17 +6,20 @@ import type {
 } from "../../../../../types/training-operations";
 import type { TrainingSessionView } from "@yanqing/shared";
 
-import { toRefs, computed } from "vue";
+import BookingMemberPicker from "../../../../../components/BookingMemberPicker.vue";
+import { toRefs, computed, ref } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import { shortDate } from "../../../../../utils/format";
 import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
 
+const showMemberPicker = ref(false);
 const props = defineProps<{
   trials: TrainingTrialView[];
   canManageTrials: boolean;
   trialSubjectOptions: string[];
   trialSubjectIndex: number;
   trialMembers: any[];
+  selectTrialMember: (member: any) => void;
   trialMemberIndex: number;
   selectedTrialSubject: any;
   leads: TrainingLeadSummary[];
@@ -63,6 +66,7 @@ const {
   canManageTrials,
   trialSubjectOptions,
   trialMembers,
+  selectTrialMember,
   selectedTrialSubject,
   leads,
   trialStudents,
@@ -116,6 +120,7 @@ const trialReason = computed({
 
 <template>
   <view>
+    <BookingMemberPicker v-if="showMemberPicker" title="选择试听会员" note="请核对会员，试听预约将关联所选会员。" @close="showMemberPicker = false" @select="selectTrialMember($event); showMemberPicker = false" />
     <view class="section-title"
       >试听预约与测评漏斗
       <text class="section-note"
@@ -135,19 +140,7 @@ const trialReason = computed({
             ></view
           ></picker
         >
-        <picker
-          v-if="trialSubjectIndex === 0"
-          :range="trialMembers"
-          range-key="displayName"
-          :value="trialMemberIndex"
-          @change="trialMemberIndex = Number(($event.detail as any).value)"
-          ><view
-            ><text class="field-label">会员</text
-            ><view class="picker-value"
-              >{{ selectedTrialSubject?.displayName || "暂无可选会员" }} ›</view
-            ></view
-          ></picker
-        >
+        <view v-if="trialSubjectIndex === 0"><text class="field-label">会员</text><button class="picker-value" @tap="showMemberPicker = true">{{ selectedTrialSubject?.displayName || '请选择试听会员' }} ›</button></view>
         <picker
           v-else-if="trialSubjectIndex === 1"
           :range="leads"

@@ -33,6 +33,7 @@ import { resolveOperatingShareSnapshot } from '../../common/finance/operating-sh
 import {
   orderNo,
   atMinutes,
+  assertVenueDate,
   ASSISTED_BOOKING_ROLES,
   NEWCOMER_COUPON_PREFIX,
   NEWCOMER_ALLOWED_PERIODS_PARAMETER,
@@ -45,6 +46,7 @@ export async function createBooking(
   dto: CreateVenueBookingDto,
   actor: AuthUser,
 ) {
+  assertVenueDate(dto.date);
   const target = bookingTarget(dto, actor);
   if (dto.overrideReason !== undefined) {
     if (typeof dto.overrideReason !== 'string')

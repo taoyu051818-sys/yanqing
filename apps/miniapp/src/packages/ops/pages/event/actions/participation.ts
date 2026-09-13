@@ -65,18 +65,13 @@ export function useEventParticipationActions({
     );
   }
 
-  function checkIn(team: EventTeam) {
+  function canHistoricallyCheckIn(team: EventTeam) {
+    return canCheckInTeam(team) && hasAnyRole(["ADMIN", "SUPER_ADMIN"]);
+  }
+
+  function checkIn(team: EventTeam, historical = false) {
     const event = eventDetail.value;
-    if (!event || !canCheckInTeam(team)) return;
-    const start = new Date(event.startsAt || "").getTime(),
-      historical = Date.now() > start + 30 * 60000;
-    if (
-      Date.now() < start - 30 * 60000 ||
-      (historical && !hasAnyRole(["ADMIN", "SUPER_ADMIN"]))
-    ) {
-      errorMessage.value = "当前不在签到窗口，请核对时间或联系管理员。";
-      return;
-    }
+    if (!event || !canCheckInTeam(team) || (historical && !canHistoricallyCheckIn(team))) return;
     task.start({
       title: historical ? "历史补录队伍签到" : "确认队伍签到",
       description:
@@ -85,7 +80,7 @@ export function useEventParticipationActions({
         team.playerAName +
         " / " +
         team.playerBName +
-        "。请核对两名选手实际到场。",
+        (historical ? "。仅用于已过签到窗口的补录，服务器将核验权限和时间。" : "。请核对两名选手实际到场，签到时间按当前业务规则核验。"),
       confirmText: "确认队伍到场",
       fields: historical ? [reasonField("历史补录依据")] : [],
       submit: async ({ reason }) => {
@@ -99,5 +94,5 @@ export function useEventParticipationActions({
       },
     });
   }
-  return { promoteWaitlist, canCheckInTeam, checkIn };
+  return { promoteWaitlist, canCheckInTeam, canHistoricallyCheckIn, checkIn };
 }

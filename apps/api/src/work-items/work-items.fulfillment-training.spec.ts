@@ -25,7 +25,7 @@ const emptyPrisma = () => ({
   eventPrizeAward: { findMany: vi.fn().mockResolvedValue([]) },
   allianceSettlement: { findMany: vi.fn().mockResolvedValue([]) },
   trainingSettlement: { findMany: vi.fn().mockResolvedValue([]) },
-  inventoryItem: { findMany: vi.fn().mockResolvedValue([]) },
+  $queryRaw: vi.fn().mockResolvedValue([]),
   order: { findMany: vi.fn().mockResolvedValue([]) },
   customerLead: { findMany: vi.fn().mockResolvedValue([]) },
   hostProfile: { findMany: vi.fn().mockResolvedValue([]) },
@@ -42,7 +42,7 @@ const emptyPrisma = () => ({
 describe('WorkItemsService fulfillment and training handoffs', () => {
   it('shows low-stock handoffs only to front desk and administrators', async () => {
     const frontDeskPrisma = emptyPrisma();
-    frontDeskPrisma.inventoryItem.findMany.mockResolvedValue([
+    frontDeskPrisma.$queryRaw.mockResolvedValue([
       {
         id: 'item-low',
         name: '比赛用球',
@@ -71,18 +71,7 @@ describe('WorkItemsService fulfillment and training handoffs', () => {
           '/packages/ops/pages/inventory/index?focus=low-stock&id=item-low',
       }),
     );
-    expect(frontDeskPrisma.inventoryItem.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        select: {
-          id: true,
-          name: true,
-          sku: true,
-          stock: true,
-          safeStock: true,
-          updatedAt: true,
-        },
-      }),
-    );
+    expect(frontDeskPrisma.$queryRaw).toHaveBeenCalledOnce();
 
     for (const role of [
       AppRole.COACH,
@@ -100,7 +89,7 @@ describe('WorkItemsService fulfillment and training handoffs', () => {
         20,
       );
       expect(result.some((item) => item.kind === 'LOW_STOCK')).toBe(false);
-      expect(prisma.inventoryItem.findMany).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
     }
   });
 

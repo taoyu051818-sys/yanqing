@@ -36,6 +36,7 @@ import type {
   DataErasureRequestQueryDto,
   DecideDataErasureRequestDto,
 } from './privacy.dto.js'
+import { queueAvatarDeletion } from './avatar-storage.js'
 
 type PrivacyClient = Prisma.TransactionClient | PrismaService
 type DecisionAction = 'CANCEL' | 'REJECT' | 'COMPLETE'
@@ -459,7 +460,7 @@ export class PrivacyService {
   private async anonymizeUser(tx: Prisma.TransactionClient, userId: string) {
     const user = await tx.user.findUnique({
       where: { id: userId },
-      select: { id: true, displayName: true, updatedAt: true },
+      select: { id: true, displayName: true, avatarUrl: true, updatedAt: true },
     })
     if (!user) throw new NotFoundException('待匿名化账号不存在')
     const now = new Date()
@@ -558,6 +559,7 @@ export class PrivacyService {
       },
     })
     if (changed.count !== 1) throw new ConflictException('账号状态已发生变化，请重新检查注销条件')
+    await queueAvatarDeletion(tx, user.avatarUrl)
   }
 
   private async view(client: PrivacyClient, id: string) {

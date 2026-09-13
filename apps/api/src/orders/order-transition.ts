@@ -26,7 +26,9 @@ const edges: Record<
   CANCEL_FREE: (from, to) =>
     ['PAID', 'CHECKED_IN'].includes(from) && to === 'CANCELLED',
   PAY: (from, to) => from === 'PENDING' && to === 'PAID',
-  CHECK_IN: (from, to) => from === 'PAID' && to === 'CHECKED_IN',
+  CHECK_IN: (from, to) =>
+    (from === 'PAID' && to === 'CHECKED_IN') ||
+    (from === 'PARTIALLY_REFUNDED' && to === 'PARTIALLY_REFUNDED'),
   COMPLETE: (from, to) =>
     refundable.includes(from) &&
     to === (['PAID', 'CHECKED_IN'].includes(from) ? 'COMPLETED' : from),

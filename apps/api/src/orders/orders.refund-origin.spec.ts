@@ -74,9 +74,11 @@ describe('refund original order status evidence', () => {
     const tx = {
       refund: {
         findUnique: vi.fn().mockResolvedValue(refund),
-        update: vi
-          .fn()
-          .mockResolvedValue({ ...refund, status: RefundStatus.SUCCEEDED }),
+        updateMany: vi.fn(async ({ where, data }) => {
+          if (refund.status !== where.status) return { count: 0 };
+          Object.assign(refund, data);
+          return { count: 1 };
+        }),
         findUniqueOrThrow: vi
           .fn()
           .mockResolvedValue({ ...refund, status: RefundStatus.SUCCEEDED }),
@@ -230,9 +232,12 @@ describe('refund original order status evidence', () => {
       const tx = {
         refund: {
           findUnique: vi.fn().mockResolvedValue(refund),
-          update: vi
-            .fn()
-            .mockResolvedValue({ ...refund, status: RefundStatus.REJECTED }),
+          updateMany: vi.fn(async ({ where, data }) => {
+          if (refund.status !== where.status) return { count: 0 };
+          Object.assign(refund, data);
+          return { count: 1 };
+        }),
+        findUniqueOrThrow: vi.fn(async () => refund),
           aggregate: vi.fn().mockResolvedValue({ _sum: { amountCents: null } }),
         },
         order: { updateMany: orderUpdate },
@@ -279,9 +284,12 @@ describe('refund original order status evidence', () => {
     const tx = {
       refund: {
         findUnique: vi.fn().mockResolvedValue(refund),
-        update: vi
-          .fn()
-          .mockResolvedValue({ ...refund, status: RefundStatus.REJECTED }),
+        updateMany: vi.fn(async ({ where, data }) => {
+          if (refund.status !== where.status) return { count: 0 };
+          Object.assign(refund, data);
+          return { count: 1 };
+        }),
+        findUniqueOrThrow: vi.fn(async () => refund),
         aggregate: vi.fn().mockResolvedValue({ _sum: { amountCents: 0 } }),
       },
       order: { updateMany: orderUpdate },
@@ -321,9 +329,12 @@ describe('refund original order status evidence', () => {
     const tx = {
       refund: {
         findUnique: vi.fn().mockResolvedValue(refund),
-        update: vi
-          .fn()
-          .mockResolvedValue({ ...refund, status: RefundStatus.REJECTED }),
+        updateMany: vi.fn(async ({ where, data }) => {
+          if (refund.status !== where.status) return { count: 0 };
+          Object.assign(refund, data);
+          return { count: 1 };
+        }),
+        findUniqueOrThrow: vi.fn(async () => refund),
         aggregate: vi.fn().mockResolvedValue({ _sum: { amountCents: 500 } }),
       },
       order: { updateMany: orderUpdate },

@@ -2,24 +2,30 @@ import type { Ref, ComputedRef } from "vue";
 import { withPendingCreationKey } from "../../../../../utils/pending-creation-key";
 import type { useOperationTask } from "../../../components/operation-task";
 import { endpoints } from "../../../../../services/api";
-import { idempotencyKey } from "../../../../../utils/format";
+import { idempotencyKey, venueDateKey } from "../../../../../utils/format";
 
 interface ActionContext {
   purchaseForm: Ref<
     {
-      supplierId: string;
+      batchCode: string;
+    expiresAt: string;
+    supplierId: string;
       itemId: string;
       locationId: string;
       quantity: string;
     },
     | {
-        supplierId: string;
+        batchCode: string;
+    expiresAt: string;
+    supplierId: string;
         itemId: string;
         locationId: string;
         quantity: string;
       }
     | {
-        supplierId: string;
+        batchCode: string;
+    expiresAt: string;
+    supplierId: string;
         itemId: string;
         locationId: string;
         quantity: string;
@@ -54,6 +60,8 @@ export function useInventoryPurchasingActions({
 }: ActionContext) {
   function openPurchaseForm() {
     purchaseForm.value = {
+      batchCode: "",
+      expiresAt: "",
       supplierId: "",
       itemId: "",
       locationId: "",
@@ -65,14 +73,26 @@ export function useInventoryPurchasingActions({
   function selectPurchaseSupplier(index: number) {
     purchaseForm.value.supplierId = activeSuppliers.value[index]?.id || "";
     purchaseForm.value.itemId = "";
+    purchaseForm.value.batchCode = ""; purchaseForm.value.expiresAt = "";
   }
 
   function selectPurchaseItem(index: number) {
-    purchaseForm.value.itemId = purchaseItems.value[index]?.id || "";
+    const item = purchaseItems.value[index];
+    purchaseForm.value.itemId = item?.id || "";
+    purchaseForm.value.batchCode = item?.batchCode || "DEFAULT";
+    purchaseForm.value.expiresAt = item?.expiresAt ? venueDateKey(item.expiresAt) : "";
+    syncPurchaseBatch();
   }
 
   function selectPurchaseLocation(index: number) {
     purchaseForm.value.locationId = activeLocations.value[index]?.id || "";
+    syncPurchaseBatch();
+  }
+
+  function syncPurchaseBatch() {
+    const item = purchaseItems.value.find(entry => entry.id === purchaseForm.value.itemId);
+    const balance = (item?.stockBalances || []).find((entry: any) => entry.locationId === purchaseForm.value.locationId && entry.batchCode === purchaseForm.value.batchCode.trim());
+    if (balance) purchaseForm.value.expiresAt = balance.expiresAt ? venueDateKey(balance.expiresAt) : "";
   }
 
   async function submitPurchaseOrder() {
@@ -98,6 +118,15 @@ export function useInventoryPurchasingActions({
       "请输入采购数量",
     );
     if (!quantity) return;
+    if (!purchaseForm.value.batchCode.trim()) return validationError("请填写本批采购批次");
+    const expiry = purchaseForm.value.expiresAt;
+    if (expiry && (!/^\d{4}-\d{2}-\d{2}$/.test(expiry) || Number.isNaN(Date.parse(expiry)) || new Date(expiry).toISOString().slice(0, 10) !== expiry)) return validationError("请填写有效效期日期，格式 YYYY-MM-DD");
+    const batchCode = purchaseForm.value.batchCode.trim();
+    const existingBalance = (item.stockBalances || []).find((balance: any) => balance.locationId === location.id && balance.batchCode === batchCode);
+    if (existingBalance && expiry !== (existingBalance.expiresAt ? venueDateKey(existingBalance.expiresAt) : '')) return validationError("该库位的已有批次效期不能变更，请核对实物或使用新批次编码");
+    const expiresAt = existingBalance && expiry === (existingBalance.expiresAt ? venueDateKey(existingBalance.expiresAt) : '')
+      ? existingBalance.expiresAt || undefined
+      : expiry ? `${expiry}T23:59:59+08:00` : undefined;
     saving.value = true;
     const succeeded = await run(
       () =>
@@ -109,7 +138,8 @@ export function useInventoryPurchasingActions({
               locationId: location.id,
               orderedQuantity: quantity,
               unitCostCents: item.purchasePriceCents,
-              batchCode: item.batchCode || "DEFAULT",
+              batchCode,
+              ...(expiresAt ? { expiresAt } : {}),
             },
           ],
           remark: "小程序经营工作台制单",
@@ -192,6 +222,7 @@ export function useInventoryPurchasingActions({
     return "";
   }
   return {
+    syncPurchaseBatch,
     openPurchaseForm,
     selectPurchaseSupplier,
     selectPurchaseItem,

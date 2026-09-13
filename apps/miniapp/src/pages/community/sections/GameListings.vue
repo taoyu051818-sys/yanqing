@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { toRefs } from "vue";
+import type { GameListItem } from "../../../types/game";
 import AppIcon from "../../../components/AppIcon.vue";
 import SectionEmpty from "../../../components/SectionEmpty.vue";
 import StatusBadge from "../../../components/StatusBadge.vue";
@@ -12,7 +13,7 @@ import { openMemberPage } from "../../../utils/member-navigation";
 
 const props = defineProps<{
   tab: "games" | "events";
-  visibleGames: any[];
+  visibleGames: GameListItem[];
   displayRegistrationStatus: (status?: string) => string;
   errorMessage: string;
   view: "browse" | "mine";

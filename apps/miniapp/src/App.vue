@@ -17,7 +17,7 @@ export default {
 </script>
 
 <style>
-page {
+page, .dialog-overlay {
   --color-primary: #17653d;
   --color-primary-strong: #123f29;
   --color-primary-soft: #e7f4eb;
@@ -42,6 +42,8 @@ page {
   --shadow-md: 0 12rpx 36rpx rgba(26, 56, 38, .08);
   --motion-fast: 180ms;
   --motion-standard: 240ms;
+}
+page {
   min-height: 100%;
   color: var(--color-foreground);
   background: var(--color-background);

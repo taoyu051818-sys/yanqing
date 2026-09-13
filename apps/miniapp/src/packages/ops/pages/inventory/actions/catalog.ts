@@ -5,7 +5,7 @@ import {
   reasonField,
 } from "../../../components/operation-task";
 import { endpoints } from "../../../../../services/api";
-import { idempotencyKey } from "../../../../../utils/format";
+import { idempotencyKey, venueDateKey } from "../../../../../utils/format";
 import type { MasterType } from "../page-types.js";
 
 interface ActionContext {
@@ -87,7 +87,7 @@ export function useInventoryCatalogActions({
         safeStock: String(record?.safeStock ?? 0),
         batchCode: record?.batchCode || "DEFAULT",
         expiresAt: record?.expiresAt
-          ? new Date(record.expiresAt).toISOString().slice(0, 10)
+          ? venueDateKey(record.expiresAt)
           : "",
       };
     }
@@ -110,7 +110,7 @@ export function useInventoryCatalogActions({
     ) {
       throw new Error("进价、售价和安全库存必须为非负数");
     }
-    return {
+    const payload: Record<string, unknown> = {
       sku: form.sku,
       name: form.name,
       category: form.category,
@@ -127,6 +127,13 @@ export function useInventoryCatalogActions({
           ? null
           : undefined,
     };
+    const original = editingMaster.value;
+    if (original) {
+      for (const key of Object.keys(payload)) {
+        if (key === 'expiresAt' ? String(form.expiresAt || '') === (original.expiresAt ? venueDateKey(original.expiresAt) : '') : payload[key] === original[key]) delete payload[key];
+      }
+    }
+    return payload;
   }
 
   function supplierPayload(form: any) {

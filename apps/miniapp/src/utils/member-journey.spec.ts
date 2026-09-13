@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { accountAmount, relevantAccounts } from './member-wallet'
-import { consumeBookingIntent, consumeCommunityIntent, consumeLoginReturn, finishMemberLogin, openMemberPage, openMemberRecord, rememberLoginReturn, safeMemberRoute } from './member-navigation'
+import { cancelMemberLogin, consumeBookingIntent, consumeCommunityIntent, consumeLoginReturn, finishMemberLogin, openMemberPage, openMemberRecord, rememberLoginReturn, safeMemberRoute } from './member-navigation'
 import { saveAuthSession } from '../services/auth-session'
 
 const storage = new Map<string, any>()
@@ -40,6 +40,36 @@ describe('member journey navigation', () => {
     saveAuthSession('token', 'member')
     finishMemberLogin()
     expect(redirectTo).toHaveBeenCalledWith({ url: '/pages/training/index?tab=mine' })
+    expect(consumeLoginReturn()).toBeNull()
+  })
+  it('lets a visitor open the activities tab and retain a shared activity intent', () => {
+    openMemberPage('/pages/community/index?tab=events&eventId=shared')
+    expect(switchTab).toHaveBeenCalledWith({ url: '/pages/community/index' })
+    expect(navigateTo).not.toHaveBeenCalled()
+    expect(consumeCommunityIntent()).toEqual({ tab: 'events', eventId: 'shared' })
+  })
+  it('cancels login back to a public detail and discards the abandoned return intent', () => {
+    pages.mockReturnValue([{ route: 'pages/game-detail/index', options: { id: 'game' } }, { route: 'pages/login/index' }])
+    rememberLoginReturn('/pages/order/index?id=order')
+    cancelMemberLogin()
+    expect(navigateBack).toHaveBeenCalledOnce(); expect(consumeLoginReturn()).toBeNull()
+    expect(navigateTo).not.toHaveBeenCalled()
+  })
+  it.each([{ stack: [] }, { stack: [{ route: 'pages/wallet/index' }, { route: 'pages/login/index' }] }])('exits a root or protected-page login without retriggering its guard: %j', ({ stack }) => {
+    pages.mockReturnValue(stack)
+    rememberLoginReturn('/pages/wallet/index')
+    storage.set('yanqing_member_tab_intent', { url: '/pages/community/index?view=mine', at: Date.now() })
+    cancelMemberLogin()
+    expect(switchTab).toHaveBeenCalledWith({ url: '/pages/home/index' })
+    expect(navigateBack).not.toHaveBeenCalled(); expect(navigateTo).not.toHaveBeenCalled()
+    expect(consumeLoginReturn()).toBeNull(); expect(consumeCommunityIntent()).toBeNull()
+  })
+  it('returns to browsing activities after cancelling from My registrations', () => {
+    pages.mockReturnValue([{ route: 'pages/community/index' }, { route: 'pages/login/index' }])
+    rememberLoginReturn('/pages/community/index?view=mine')
+    cancelMemberLogin()
+    expect(navigateBack).toHaveBeenCalledOnce()
+    expect(consumeCommunityIntent()).toEqual({ view: 'browse' })
     expect(consumeLoginReturn()).toBeNull()
   })
   it('returns to the existing booking page so its selection survives', () => {

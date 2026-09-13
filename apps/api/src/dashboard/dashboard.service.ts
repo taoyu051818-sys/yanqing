@@ -2,6 +2,8 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service.js';
 import {
   BusinessType,
+  RegistrationStatus,
+  EventStatus,
   InventoryTxnType,
   SlotPeriod,
 } from '../generated/prisma/enums.js';
@@ -263,8 +265,18 @@ export class DashboardService {
       output.confirmedRevenueCents += recognition.effectiveRevenueCents;
     }
 
+    const effectiveEventTeams = eventTeams.filter(
+      (team) =>
+        [
+          RegistrationStatus.PAID,
+          RegistrationStatus.CHECKED_IN,
+          RegistrationStatus.COMPLETED,
+        ].includes(team.status as never) &&
+        !team.cancellationPending &&
+        team.event.status !== EventStatus.CANCELLED,
+    );
     const participantEvents = new Map<string, Set<string>>();
-    for (const team of eventTeams) {
+    for (const team of effectiveEventTeams) {
       const participantIds = new Set(
         [team.captainId, team.playerAUserId, team.playerBUserId].filter(
           (value): value is string => Boolean(value),
@@ -495,7 +507,22 @@ export class DashboardService {
         inactiveOver30Days: inactiveMembers,
       },
       events: {
-        registrations: eventTeams.length,
+        registrations: effectiveEventTeams.length,
+        createdRegistrations: eventTeams.length,
+        unpaidRegistrations: eventTeams.filter(
+          (team) => team.status === RegistrationStatus.REGISTERED,
+        ).length,
+        waitlistedRegistrations: eventTeams.filter(
+          (team) => team.status === RegistrationStatus.WAITLISTED,
+        ).length,
+        checkedInRegistrations: effectiveEventTeams.filter((team) =>
+          [
+            RegistrationStatus.CHECKED_IN,
+            RegistrationStatus.COMPLETED,
+          ].includes(team.status as never),
+        ).length,
+        metricBasis:
+          '按报名创建时间查询，按当前有效已支付/签到/完成状态统计；退出待退款和已取消赛事不计参与',
         participantCount: participantEvents.size,
         repeatedParticipantCount: repeatedEventParticipants,
         repeatParticipationRate: percentage(
@@ -555,12 +582,18 @@ export class DashboardService {
         costRateNote: '羽球币现金成本需按实际核销权益成本计量，不能按币值臆算',
       },
       alliance: {
-        issued: allianceSettlements._sum.issuedCount ?? 0,
-        claimed: allianceSettlements._sum.claimedCount ?? 0,
-        redeemed: allianceSettlements._sum.redeemedCount ?? 0,
-        effectiveNewCustomers:
-          allianceSettlements._sum.effectiveNewCustomers ?? 0,
-        attributedGmvCents: allianceSettlements._sum.attributedGmvCents ?? 0,
+        metricBasis: {
+          activity: '按发券/领券/核销实际发生时间',
+          settlement:
+            '仅按已结算单 settledAt 统计利润、费用和 ROI，不代表系统已执行资金转账',
+        },
+        settledAttributedGmvCents:
+          allianceSettlements._sum.attributedGmvCents ?? 0,
+        issued: couponIssued,
+        claimed: couponClaimed,
+        redeemed: couponRedeemed,
+        effectiveNewCustomers: allianceSettlements.effectiveNewCustomers,
+        attributedGmvCents: allianceSettlements.redeemedGmvCents,
         attributedGrossProfitCents: allianceGrossProfit,
         cooperationFeeCents: allianceFee,
         roi: allianceFee <= 0 ? null : allianceGrossProfit / allianceFee,

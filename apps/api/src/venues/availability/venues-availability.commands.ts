@@ -17,9 +17,9 @@ export async function availability(
   date: string,
   includeUnavailable = false,
 ): Promise<CourtAvailability<Date>> {
-  await releaseExpiredHolds(prisma);
   const dayStart = atMinutes(date, 0);
   const dayEnd = atMinutes(date, 24 * 60);
+  await releaseExpiredHolds(prisma);
   const [courts, slots, bookings, closures] = await Promise.all([
     prisma.court.findMany({
       where: includeUnavailable ? undefined : { enabled: true },

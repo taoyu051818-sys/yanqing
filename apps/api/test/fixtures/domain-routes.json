@@ -7,7 +7,7 @@
     "verb": "GET",
     "path": "/api/v1/events",
     "roles": [],
-    "isPublic": false,
+    "isPublic": true,
     "provider": "EventCatalogService",
     "serviceMethod": "list"
   },

@@ -59,6 +59,26 @@ describe('order transition preconditions', () => {
     }
     expect(tx.order.updateMany).not.toHaveBeenCalled();
   });
+  it('preserves partial-refund financial state while recording venue check-in', async () => {
+    const tx = fixture();
+    await transitionOrder(tx as never, 'CHECK_IN', {
+      where: { id: 'order', status: 'PARTIALLY_REFUNDED' },
+      data: { status: 'PARTIALLY_REFUNDED' },
+    });
+    for (const [from, to] of [
+      ['PARTIALLY_REFUNDED', 'CHECKED_IN'],
+      ['REFUNDED', 'CHECKED_IN'],
+      ['REFUND_PENDING', 'CHECKED_IN'],
+    ]) {
+      await expect(
+        transitionOrder(tx as never, 'CHECK_IN', {
+          where: { id: 'order', status: from },
+          data: { status: to },
+        } as never),
+      ).rejects.toThrow('不合法');
+    }
+    expect(tx.order.updateMany).toHaveBeenCalledTimes(1);
+  });
   it('turns a stale single-order write into an explicit conflict', async () => {
     const tx = fixture();
     tx.order.updateMany.mockResolvedValue({ count: 0 });

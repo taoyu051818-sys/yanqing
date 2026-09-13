@@ -24,6 +24,7 @@ const setup = (savedUser: ReturnType<typeof user> | null, configValues: Record<s
       findUniqueOrThrow: vi.fn().mockResolvedValue(savedUser),
       findFirst: vi.fn().mockResolvedValue(savedUser),
       update: vi.fn().mockResolvedValue(savedUser),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
   }
   const jwt = { signAsync: vi.fn().mockResolvedValue('signed-token') }
@@ -182,7 +183,8 @@ describe('AuthService login status checks', () => {
       const files = await readdir(join(uploadRoot, 'avatars'))
       expect(files).toHaveLength(1)
       expect(files[0]).toMatch(/^[0-9a-f-]+\.png$/)
-      expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      expect(prisma.user.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: savedUser.id, status: UserStatus.ACTIVE, deletedAt: null },
         data: { avatarUrl: expect.stringMatching(/^\/uploads\/avatars\/[0-9a-f-]+\.png$/) },
       }))
     } finally {

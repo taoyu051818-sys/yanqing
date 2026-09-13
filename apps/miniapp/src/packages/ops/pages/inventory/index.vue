@@ -83,6 +83,8 @@ const masterForm = ref<any>({});
 const showPurchaseForm = ref(false);
 
 const purchaseForm = ref({
+  batchCode: "",
+  expiresAt: "",
   supplierId: "",
   itemId: "",
   locationId: "",
@@ -98,6 +100,7 @@ const showMovementForm = ref(false);
 const movementType = ref<MovementType>("TRANSFER");
 
 const movementForm = ref({
+  balanceId: "",
   itemId: "",
   sourceLocationId: "",
   targetLocationId: "",
@@ -362,6 +365,7 @@ const {
 });
 
 const {
+  syncPurchaseBatch,
   openPurchaseForm,
   selectPurchaseSupplier,
   selectPurchaseItem,
@@ -404,6 +408,8 @@ const {
 });
 
 const {
+  movementBalances,
+  selectMovementBalance,
   openMovementForm,
   selectMovementItem,
   selectMovementSource,
@@ -536,6 +542,7 @@ onShow(load);
       :selectPurchaseSupplier="selectPurchaseSupplier"
       :activeSuppliers="activeSuppliers"
       :purchaseForm="purchaseForm"
+      :syncPurchaseBatch="syncPurchaseBatch"
       :purchaseItemNames="purchaseItemNames"
       :selectPurchaseItem="selectPurchaseItem"
       :purchaseItems="purchaseItems"
@@ -585,6 +592,8 @@ onShow(load);
       :selectMovementItem="selectMovementItem"
       :activeItems="activeItems"
       :movementForm="movementForm"
+      :movementBalances="movementBalances"
+      :selectMovementBalance="selectMovementBalance"
       :locationNames="locationNames"
       :selectMovementSource="selectMovementSource"
       :activeLocations="activeLocations"

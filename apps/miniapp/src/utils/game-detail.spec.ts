@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { GameDetail } from '../types/game'
+import type { GameDetail, GameParticipants } from '../types/game'
 import { gameAction, gameDetailPath, gameShareTitle, parseGameId } from './game-detail'
 
-const game = { id: 'game-1', title: '周末双打', capacity: 6, status: 'OPEN', startsAt: '2099-01-01T10:00:00+08:00', occupiedCount: 4, waitlistCount: 0 } as GameDetail
-const mine = (status: string, order: { id: string; status: string } | null = null) => ({ id: 'my-registration', status, order, waitlistPosition: null })
+const game: GameDetail = { level: 'MIXED', endsAt: null, feeCents: 0, newcomerOnly: false, description: null, host: null, courtNames: [], confirmedCount: 4, pendingCount: 0, id: 'game-1', title: '周末双打', capacity: 6, status: 'OPEN', startsAt: '2099-01-01T10:00:00+08:00', occupiedCount: 4, waitlistCount: 0 }
+type Registration = NonNullable<GameParticipants['myRegistration']>
+const mine = (status: Registration['status'], order: Registration['order'] = null): Registration => ({ id: 'my-registration', status, order, waitlistPosition: null })
 
 describe('game detail journey', () => {
   it('shares a canonical detail URL without account or payment identifiers', () => {
@@ -30,7 +31,7 @@ describe('game detail journey', () => {
     expect(gameAction(game, mine('CANCELLED', { id: 'old-order', status: 'CANCELLED' }), true).kind).toBe('join')
   })
   it('blocks closed and past games, while keeping an existing order accessible', () => {
-    for (const status of ['CANCELLED', 'IN_PROGRESS', 'COMPLETED']) expect(gameAction({ ...game, status }, null, true).kind).toBe('none')
+    for (const status of ['CANCELLED', 'IN_PROGRESS', 'COMPLETED'] as const) expect(gameAction({ ...game, status }, null, true).kind).toBe('none')
     expect(gameAction({ ...game, startsAt: '2000-01-01' }, null, true).kind).toBe('none')
     expect(gameAction({ ...game, status: 'CANCELLED' }, mine('CANCELLED', { id: 'order-1', status: 'REFUND_PENDING' }), true).kind).toBe('order')
   })

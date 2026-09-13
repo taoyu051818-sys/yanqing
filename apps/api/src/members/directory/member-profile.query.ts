@@ -93,6 +93,22 @@ export async function profile(
           orderBy: { createdAt: 'desc' },
         },
         guardianStudents: {
+          where: {
+            enrollments: {
+              some: {
+                status: {
+                  in: [
+                    TrainingEnrollmentStatus.ACTIVE,
+                    TrainingEnrollmentStatus.COMPLETED,
+                    TrainingEnrollmentStatus.PARTIALLY_REFUNDED,
+                  ],
+                },
+                class: {
+                  OR: [{ coachId: actor.sub }, { assistantId: actor.sub }],
+                },
+              },
+            },
+          },
           select: {
             id: true,
             displayName: true,
