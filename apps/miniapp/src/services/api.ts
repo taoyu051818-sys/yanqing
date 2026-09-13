@@ -17,7 +17,7 @@ import type {
   TrainingEnrollmentView,
 } from "@yanqing/shared";
 import { api, download, request, upload } from "./http";
-import type { GameDetail, GameParticipants } from "../types/game";
+import type { GameDetail, GameParticipants, GameListItem } from "../types/game";
 import type { TeamInviteView } from "../types/event-signup";
 import type {
   CourtAvailability,
@@ -103,7 +103,7 @@ export const endpoints = {
     api.post<{ accessToken: string; user: SessionUser }>("/auth/dev-login", {
       role,
     }),
-  me: () => api.get<SessionUser>("/auth/me"),
+  me: () => request<SessionUser>({ url: "/auth/me", method: "GET", redirectOnUnauthorized: false }),
   updateMyProfile: (displayName: string) =>
     api.patch<SessionUser>("/auth/profile", { displayName }),
   uploadMyAvatar: (filePath: string) =>
@@ -154,10 +154,11 @@ export const endpoints = {
   refundOrder: (id: string, data: object) =>
     api.post(`/orders/${id}/refunds`, data),
   approveRefund: (refundId: string, data: object) =>
-    api.post(`/orders/refunds/${refundId}/approve`, data),
+    api.post<{ status: string }>(`/orders/refunds/${refundId}/approve`, data),
   rejectRefund: (refundId: string, data: object = {}) =>
     api.post(`/orders/refunds/${refundId}/reject`, data),
-  games: () => api.get<any[]>("/games"),
+  publicGames: () => request<GameListItem[]>({ url: "/games/public", method: "GET", redirectOnUnauthorized: false }),
+  games: () => request<GameListItem[]>({ url: "/games", method: "GET", redirectOnUnauthorized: false }),
   game: (id: string) => api.get<GameDetail>(`/games/${encodeURIComponent(id)}`),
   gameParticipants: (id: string) =>
     request<GameParticipants>({
@@ -189,7 +190,7 @@ export const endpoints = {
   promoteGameWaitlist: (id: string) =>
     api.post(`/games/${id}/promote-waitlist`),
   grantMaturedGameRewards: () => api.post("/games/rewards/grant-matured"),
-  events: () => api.get<any[]>("/events"),
+  events: () => request<any[]>({ url: "/events", method: "GET", redirectOnUnauthorized: false }),
   event: (id: string) =>
     request<Record<string, any>>({
       url: `/events/${encodeURIComponent(id)}`,
@@ -309,6 +310,7 @@ export const endpoints = {
   createAllianceSettlement: (data: object) =>
     api.post("/alliance/settlements", data),
   allianceSettlements: () => api.get<any[]>("/alliance/settlements"),
+  reviseAllianceSettlement: (id: string, data: { attributedGrossProfitCents: number; reason: string; idempotencyKey: string }) => api.post<any>(`/alliance/settlements/${id}/revise`, data),
   submitAllianceSettlement: (id: string) =>
     api.post(`/alliance/settlements/${id}/submit`),
   confirmAllianceSettlement: (id: string) =>
@@ -399,7 +401,7 @@ export const endpoints = {
     api.post(`/inventory/operations/${id}/post`, { idempotencyKey }),
   cancelInventoryOperation: (id: string, reason: string) =>
     api.post(`/inventory/operations/${id}/cancel`, { reason }),
-  adminOrders: () => api.get<OrderPage>("/orders/admin/all"),
+  adminOrders: (params: { page?: number; pageSize?: number; status?: string; businessType?: string; keyword?: string } = {}) => api.get<OrderPage>("/orders/admin/all", params),
   currentFrontDeskShift: () => api.get<any>("/operations/shifts/current"),
   frontDeskShiftHistory: (params: Record<string, any> = {}) =>
     api.get<any[]>("/operations/shifts/history", params),

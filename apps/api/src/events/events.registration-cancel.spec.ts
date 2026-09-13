@@ -52,7 +52,10 @@ describe('event registration self-withdrawal', () => {
           .mockResolvedValueOnce(null),
         findMany: vi.fn().mockResolvedValue([]),
         count: vi.fn().mockResolvedValue(0),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        updateMany: vi.fn(async ({ data }: any) => {
+          replay = { ...queued, ...data };
+          return { count: 1 };
+        }),
       },
       order: { upsert: vi.fn(), updateMany: vi.fn() },
       payment: { updateMany: vi.fn() },
@@ -79,7 +82,6 @@ describe('event registration self-withdrawal', () => {
       dto,
       member,
     );
-    replay = first.registration;
     const second: any = await service.cancelRegistration(
       openEvent.id,
       dto,
@@ -155,6 +157,7 @@ describe('event registration self-withdrawal', () => {
       registration: {
         status: RegistrationStatus.PAID,
         cancellationPending: true,
+        order: { status: OrderStatus.REFUND_PENDING },
       },
       refund: { status: RefundStatus.REQUESTED, amountCents: 8_800 },
     });

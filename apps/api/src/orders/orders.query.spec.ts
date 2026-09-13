@@ -26,4 +26,10 @@ describe('order list query transport compatibility', () => {
     await expect(parse({ status: ['undefined', 'PAID'] })).rejects.toMatchObject({ status: 400 })
     await expect(parse({ memberId: 'another-member' })).rejects.toMatchObject({ status: 400 })
   })
+  it('normalizes keyword whitespace and rejects excessive or duplicate keywords', async () => {
+    expect(await parse({ keyword: '  会员甲  ' })).toMatchObject({ keyword: '会员甲' })
+    expect(await parse({ keyword: '   ' })).toMatchObject({ keyword: undefined })
+    await expect(parse({ keyword: 'a'.repeat(51) })).rejects.toMatchObject({ status: 400 })
+    await expect(parse({ keyword: ['甲', '乙'] })).rejects.toMatchObject({ status: 400 })
+  })
 })

@@ -4,6 +4,7 @@ import {
   AccountType,
   CouponStatus,
   RewardStatus,
+  SettlementStatus,
 } from '../../generated/prisma/enums.js';
 
 export function loadDirectReferralBindings(
@@ -80,21 +81,49 @@ export function loadCouponRedeemed(
   });
 }
 
-export function loadAllianceSettlements(
+export async function loadAllianceSettlements(
   prisma: PrismaService,
   start: Date,
   end: Date,
 ) {
-  return prisma.allianceSettlement.aggregate({
-    where: { periodStart: { lt: end }, periodEnd: { gt: start } },
-    _sum: {
-      attributedGmvCents: true,
-      attributedGrossProfitCents: true,
-      cooperationFeeCents: true,
-      issuedCount: true,
-      claimedCount: true,
-      redeemedCount: true,
-      effectiveNewCustomers: true,
-    },
-  });
+  const [settlements, redemptions] = await Promise.all([
+    prisma.allianceSettlement.aggregate({
+      where: {
+        status: SettlementStatus.SETTLED,
+        settledAt: { gte: start, lt: end },
+      },
+      _sum: {
+        attributedGmvCents: true,
+        attributedGrossProfitCents: true,
+        cooperationFeeCents: true,
+      },
+    }),
+    prisma.couponCode.findMany({
+      where: {
+        status: CouponStatus.REDEEMED,
+        redeemedAt: { gte: start, lt: end },
+      },
+      select: {
+        attributedAmountCents: true,
+        holderId: true,
+        holder: {
+          select: { memberProfile: { select: { isNewCustomer: true } } },
+        },
+      },
+    }),
+  ]);
+  return {
+    ...settlements,
+    redeemedGmvCents: redemptions.reduce(
+      (total, code) => total + code.attributedAmountCents,
+      0,
+    ),
+    effectiveNewCustomers: new Set(
+      redemptions
+        .filter(
+          (code) => code.holder?.memberProfile?.isNewCustomer && code.holderId,
+        )
+        .map((code) => code.holderId),
+    ).size,
+  };
 }

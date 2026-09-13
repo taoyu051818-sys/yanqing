@@ -9,10 +9,11 @@ import {
 } from "../../../components/operation-task";
 import { endpoints } from "../../../../../services/api";
 import type { useSessionStore } from "../../../../../stores/session";
-import { money } from "../../../../../utils/format";
+import { money, shortDate } from "../../../../../utils/format";
 
 interface ActionContext {
-  activeStudents: ComputedRef<TrainingEnrollmentView[]>;
+  enrollments: Ref<TrainingEnrollmentView[]>;
+  lessons: Ref<TrainingSessionView[]>;
   session: ReturnType<typeof useSessionStore>;
   task: ReturnType<typeof useOperationTask>;
   load: () => Promise<void>;
@@ -20,16 +21,20 @@ interface ActionContext {
 }
 
 export function useCoachAttendanceActions({
-  activeStudents,
+  enrollments,
+  lessons,
   session,
   task,
   load,
   errorMessage,
 }: ActionContext) {
+  function isActiveEnrollment(enrollment: TrainingEnrollmentView) {
+    return ["ACTIVE", "PARTIALLY_REFUNDED"].includes(enrollment.status);
+  }
+
   function studentsFor(lesson: TrainingSessionView) {
-    return activeStudents.value.filter(
-      (item) => item.classId === lesson.classId,
-    );
+    return enrollments.value.filter(item => item.classId === lesson.classId &&
+      (Boolean(attendanceFor(lesson, item)) || (isActiveEnrollment(item) && isConsumableLesson(lesson))));
   }
 
   function attendanceFor(
@@ -58,6 +63,7 @@ export function useCoachAttendanceActions({
       PENDING: "待点名",
       ATTENDED: "已到场",
       ABSENT: "缺席",
+      LEAVE: "请假待补课",
       MAKEUP_REQUIRED: "请假待补课",
       MADE_UP: "已安排补课",
       CANCELLED: "已取消",
@@ -179,11 +185,35 @@ export function useCoachAttendanceActions({
     throw new Error(options.label + "历史补录须填写核对原因（2-300字）");
   }
 
+  function canScheduleMakeup(lesson: TrainingSessionView, enrollment: TrainingEnrollmentView) {
+    return session.roles.some(role => ["COACH", "ADMIN", "SUPER_ADMIN"].includes(role)) &&
+      isConsumableLesson(lesson) && ["LEAVE", "MAKEUP_REQUIRED"].includes(attendanceStatus(lesson, enrollment));
+  }
+
+  function scheduleMakeup(lesson: TrainingSessionView, enrollment: TrainingEnrollmentView) {
+    if (!canScheduleMakeup(lesson, enrollment)) return;
+    const options = lessons.value.filter(target => target.id !== lesson.id && target.classId === lesson.classId &&
+      target.status === "SCHEDULED" && new Date(target.startsAt) > new Date(lesson.startsAt) &&
+      ["PENDING", "LEAVE"].includes(attendanceFor(target, enrollment)?.status || ""));
+    if (!options.length) { errorMessage.value = "暂无同班可补课课次，请先安排后续课次并确认学员名册。"; return; }
+    task.start({
+      title: "安排补课", description: `${enrollment.student?.displayName || enrollment.buyer?.displayName || "当前学员"} · 原课次 ${shortDate(lesson.startsAt)}。选择同班后续课次，原请假记录将保留补课去向。`, confirmText: "确认安排补课",
+      fields: [{ key: "makeupSessionId", label: "补课课次", kind: "choices", options: options.map(target => ({ value: target.id, label: shortDate(target.startsAt), description: target.class?.name || "同班课次" })) }, reasonField("补课安排依据")],
+      submit: async ({ makeupSessionId, reason }) => {
+        if (!options.some(target => target.id === makeupSessionId)) throw new Error("请选择同班可用补课课次");
+        await endpoints.scheduleTrainingMakeup(lesson.id, { enrollmentId: enrollment.id, makeupSessionId, reason });
+        await load();
+        return "补课已安排，原课次可在其余出勤处理完毕后结课。";
+      },
+    });
+  }
+
   function mark(
     lesson: TrainingSessionView,
     enrollment: TrainingEnrollmentView,
     status: "ATTENDED" | "ABSENT" | "LEAVE" | "CANCELLED",
   ) {
+    if (!isActiveEnrollment(enrollment)) return;
     const labels = {
       ATTENDED: "登记到场",
       ABSENT: "登记缺席",
@@ -234,6 +264,7 @@ export function useCoachAttendanceActions({
     lesson: TrainingSessionView,
     enrollment: TrainingEnrollmentView,
   ) {
+    if (!isActiveEnrollment(enrollment)) return;
     if (!isConsumableLesson(lesson)) {
       errorMessage.value = "已结束或取消的课次不能继续消课";
       return;
@@ -270,7 +301,7 @@ export function useCoachAttendanceActions({
     lesson: TrainingSessionView,
     enrollment: TrainingEnrollmentView,
   ) {
-    if (!isConsumableLesson(lesson)) return;
+    if (!isConsumableLesson(lesson) || !isActiveEnrollment(enrollment)) return;
     const attendance = attendanceFor(lesson, enrollment);
     if (!attendance?.operatorId || attendance.operatorId === session.user?.id) {
       errorMessage.value = "须由教练先提交建议，且提交人与确认人不同。";
@@ -343,6 +374,9 @@ export function useCoachAttendanceActions({
   }
   return {
     studentsFor,
+    isActiveEnrollment,
+    canScheduleMakeup,
+    scheduleMakeup,
     attendanceFor,
     attendanceStatus,
     isRefundPending,

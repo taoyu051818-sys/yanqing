@@ -66,3 +66,17 @@ describe("work item deep links", () => {
     expect(findOpsDeepLinkRecord([{ id: "refund-1" }], query)).toBeNull();
   });
 });
+
+it('routes merchant settlement confirmation to its permitted merchant workspace', () => {
+  const destination = resolveWorkItemDestination({ id: 'task', kind: 'ALLIANCE_SETTLEMENT', objectId: 'settlement', action: '/alliance/settlements/settlement/confirm' }, ['MERCHANT'])
+  expect(destination).toMatchObject({ page: 'merchant', query: { focus: 'alliance-settlement', id: 'settlement' } })
+})
+it.each([
+  ['GAME', 'HOST', 'host', 'game'], ['EVENT', 'EVENT_MANAGER', 'event', 'team'], ['VENUE', 'FRONT_DESK', 'frontdesk', 'order'],
+] as const)('routes %s fulfillment by domain and keeps its actual parent id', (businessType, role, page, focus) => {
+  const destination = resolveWorkItemDestination({ id: 'task', kind: 'ORDER_FULFILLMENT', objectType: 'Order', objectId: 'order', action: `/packages/ops/pages/${page}/index?focus=fulfillment&orderId=order`, metadata: { businessType, gameId: 'game', eventId: 'event', fulfillmentObjectId: 'registration' } }, [role])
+  expect(destination).toMatchObject({ page, query: { focus, orderId: 'order' } })
+  if (businessType === 'GAME') expect(destination?.query.gameId).toBe('game')
+  if (businessType === 'EVENT') expect(destination?.query).toMatchObject({ eventId: 'event', id: 'registration' })
+  expect(resolveWorkItemDestination({ id: 'forbidden', kind: 'ORDER_FULFILLMENT', metadata: { businessType: 'VENUE' } }, ['HOST'])).toBeNull()
+})

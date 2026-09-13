@@ -471,7 +471,7 @@ const { publishEvent, cancelEvent, createEvent } = useEventCatalogActions({
     causeMessage(...args),
 });
 
-const { promoteWaitlist, canCheckInTeam, checkIn } =
+const { promoteWaitlist, canCheckInTeam, canHistoricallyCheckIn, checkIn } =
   useEventParticipationActions({
     eventDetail,
     showPromoteWaitlist,
@@ -665,6 +665,7 @@ onShow(loadFromPage);
       :teams="teams"
       :showParticipantContacts="showParticipantContacts"
       :canCheckInTeam="canCheckInTeam"
+      :canHistoricallyCheckIn="canHistoricallyCheckIn"
       :checkIn="checkIn"
       :mayOperatePrizes="mayOperatePrizes"
       :prizeAwards="prizeAwards"

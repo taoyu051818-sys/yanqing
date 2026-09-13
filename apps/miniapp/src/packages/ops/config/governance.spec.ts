@@ -77,4 +77,12 @@ describe("governance presentation policy", () => {
       }),
     ).toEqual({ version: 1, earlyMinutes: 15, lateMinutes: 60 });
   });
+  it.each(businessParameterCatalog.filter(item => item.kind !== 'PERIODS'))('rejects empty numeric controls for $key while preserving explicit zero', definition => {
+    for (const blank of ['', '   ']) {
+      expect(() => parseBusinessParameterValue(definition, { scalar: blank, earlyMinutes: blank, lateMinutes: blank, periods: [] })).toThrow()
+    }
+    expect(parseBusinessParameterValue(definition, { scalar: '0', earlyMinutes: '0', lateMinutes: '0', periods: [] }))
+      .toEqual(definition.kind === 'WINDOW' ? { version: 1, earlyMinutes: 0, lateMinutes: 0 } : 0)
+  });
+
 });

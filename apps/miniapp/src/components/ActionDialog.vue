@@ -17,9 +17,7 @@ function measure() {
     // #ifdef H5
     prepareButtons()
     // #endif
-    const query = uni.createSelectorQuery().in(instance?.proxy)
-    for (const selector of ['.dialog-content', '.dialog-header', '.dialog-footer']) query.select(selector).boundingClientRect()
-    query.exec((rows: any[]) => {
+    function measured(rows: any[]) {
       measuring = false
       if (!alive || !rows?.[0]) return
       const info = uni.getSystemInfoSync()
@@ -27,7 +25,17 @@ function measure() {
       const limit = Math.max(80, available - (rows[1]?.height || 0) - (rows[2]?.height || 0))
       const height = Math.ceil(Math.min(rows[0].height, limit)) + 'px'
       if (bodyHeight.value !== height) bodyHeight.value = height
-    })
+    }
+    // #ifdef H5
+    // The teleported dialog is outside its page root; measure the live target.
+    const dialog = document.getElementById(dialogId)
+    measured(['.dialog-content', '.dialog-header', '.dialog-footer'].map(selector => dialog?.querySelector(selector)?.getBoundingClientRect()))
+    // #endif
+    // #ifndef H5
+    const query = uni.createSelectorQuery().in(instance?.proxy)
+    for (const selector of ['.dialog-content', '.dialog-header', '.dialog-footer']) query.select(selector).boundingClientRect()
+    query.exec(measured)
+    // #endif
   })
 }
 function keyboardChanged(event: { height: number }) { keyboardHeight.value = event.height; measure() }
@@ -91,6 +99,9 @@ onUnmounted(() => {
 })
 </script>
 <template>
+  <!-- #ifdef H5 -->
+  <Teleport to="body">
+  <!-- #endif -->
   <view class="dialog-overlay" :style="{ bottom: keyboardHeight + 'px' }" @touchmove.stop.prevent>
     <view class="dialog-mask" aria-hidden="true" />
     <view :id="dialogId" class="dialog-window" role="dialog" aria-modal="true" :aria-label="title" :aria-busy="busy" tabindex="-1" @tap.stop @touchmove.stop>
@@ -99,6 +110,9 @@ onUnmounted(() => {
       <view class="dialog-footer"><slot name="footer" /></view>
     </view>
   </view>
+  <!-- #ifdef H5 -->
+  </Teleport>
+  <!-- #endif -->
 </template>
 <style scoped>
 .dialog-overlay { position:fixed; inset:0; z-index:1200; display:flex; align-items:center; justify-content:center; padding:24px 20px; padding-top:calc(24px + env(safe-area-inset-top)); padding-bottom:calc(24px + env(safe-area-inset-bottom)); box-sizing:border-box; }

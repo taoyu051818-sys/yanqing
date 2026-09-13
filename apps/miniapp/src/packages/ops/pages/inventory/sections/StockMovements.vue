@@ -10,10 +10,13 @@ const props = defineProps<{
   openMovementForm: (type: MovementType) => void;
   showMovementForm: boolean;
   movementType: MovementType;
+  movementBalances: any[];
+  selectMovementBalance: (index: number) => void;
   activeItemNames: string[];
   selectMovementItem: (index: number) => void;
   activeItems: any[];
   movementForm: {
+    balanceId: string;
     itemId: string;
     sourceLocationId: string;
     targetLocationId: string;
@@ -44,6 +47,8 @@ const {
   canOperate,
   openMovementForm,
   movementType,
+  movementBalances,
+  selectMovementBalance,
   activeItemNames,
   selectMovementItem,
   activeItems,
@@ -116,6 +121,9 @@ const showMovementForm = computed({
             )?.name || "请选择来源库位"
           }}</view></picker
         >
+        <text class="field-label">来源批次与效期</text>
+        <picker :range="movementBalances" range-key="label" @change="selectMovementBalance(Number(($event as any).detail.value))"><view class="picker-field">{{ movementBalances.find(entry => entry.id === movementForm.balanceId)?.label || '请选择有库存的批次' }}</view></picker>
+        <text v-if="movementForm.itemId && movementForm.sourceLocationId && !movementBalances.length" class="muted">所选商品在该库位没有可操作库存</text>
         <template v-if="movementType === 'TRANSFER'">
           <text class="field-label">目标库位</text>
           <picker

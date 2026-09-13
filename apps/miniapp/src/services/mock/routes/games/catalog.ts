@@ -130,13 +130,13 @@ export async function handleGamesGet(
   data: any,
   options: MockRouteOptions,
 ): Promise<MockRouteResult> {
-  if (url === "/games" && method === "GET")
+  if (["/games", "/games/public"].includes(url) && method === "GET")
     return {
       handled: true,
       value: ok(
         getGames()
           .filter((game) => PUBLIC_GAME_STATUSES.includes(String(game.status)))
-          .map(publicGame),
+          .map(game => publicGame(game, url === "/games/public")),
       ),
     };
   return { handled: false };

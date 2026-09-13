@@ -59,11 +59,18 @@ function fixture(kind: string) {
       }),
       findUnique: vi.fn(async () => ({ ...refunds[0], order })),
       update: vi.fn(async ({ data }) => Object.assign(refunds[0], data)),
+      updateMany: vi.fn(async ({ where, data }) => {
+        const matches = typeof where.status === 'string' ? refunds[0].status === where.status : where.status.in.includes(refunds[0].status);
+        if (!matches) return { count: 0 };
+        Object.assign(refunds[0], data);
+        return { count: 1 };
+      }),
+      findUniqueOrThrow: vi.fn(async () => refunds[0]),
     },
-    riskEvent: { upsert: vi.fn().mockResolvedValue({}) },
+    riskEvent: { updateMany: vi.fn().mockResolvedValue({ count: 0 }), upsert: vi.fn().mockResolvedValue({}) },
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   };
-  const prisma = { $transaction: async (run: any) => run(tx) };
+  const prisma = { refund: tx.refund, riskEvent: tx.riskEvent, $transaction: async (run: any) => run(tx) };
   const config = {
     get: (key: string) => (key === 'PAYMENT_PROVIDER' ? 'wechat' : undefined),
   };

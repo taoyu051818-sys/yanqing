@@ -187,8 +187,8 @@ export const gameParticipants = (game: any) => {
   };
 };
 
-export const publicGame = (game: any) => {
-  const registration = (game.registrations || []).find(
+export const publicGame = (game: any, anonymous = false) => {
+  const registration = anonymous ? undefined : (game.registrations || []).find(
     (item: any) => item.userId === mockUser().id,
   );
   const order = registration?.orderId

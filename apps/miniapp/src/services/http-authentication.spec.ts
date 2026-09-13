@@ -57,6 +57,15 @@ describe('remote authentication transport', () => {
     expect(requestMock.mock.calls[0][0]).not.toHaveProperty('redirectOnUnauthorized')
   })
 
+  it.each(['me', 'games', 'publicGames', 'events'] as const)('does not force login when the optional/public %s request returns 401', async name => {
+    const auth = await import('./auth-session')
+    auth.saveAuthSession('expired', 'member')
+    requestMock.mockImplementation(options => options.success({ statusCode: 401, data: { code: 401 } }))
+    const { endpoints } = await import('./api')
+    await expect(endpoints[name]()).rejects.toMatchObject({ statusCode: 401 })
+    expect(reLaunchMock).not.toHaveBeenCalled(); expect(auth.getAccessToken()).toBe('')
+  })
+
   it('omits absent GET parameters before native query serialization without dropping 0 or false', async () => {
     requestMock.mockImplementation((options) => options.success({ statusCode: 200, data: { code: 0, data: {} } }))
     const { api } = await import('./http')

@@ -399,7 +399,7 @@ const auditObjectNames: Record<string, string> = {
                   <option value="">全部状态</option>
                   <option
                     v-for="s in [
-                      'PENDING_PAYMENT',
+                      'PENDING',
                       'PAID',
                       'COMPLETED',
                       'CANCELLED',
@@ -408,7 +408,7 @@ const auditObjectNames: Record<string, string> = {
                     ]"
                     :value="s"
                   >
-                    {{ statusNames[s] }}
+                    {{ s === 'PENDING' ? '待支付' : statusNames[s] }}
                   </option>
                 </select></label
               ><label v-else class="grow"

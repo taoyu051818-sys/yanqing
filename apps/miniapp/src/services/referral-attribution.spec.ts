@@ -40,6 +40,14 @@ describe('referral attribution capture', () => {
     expect(pendingReferralInvite()).toBe(inviteCode)
   })
 
+  it('preserves a referral when an event partner invitation opens on cold or hot launch', () => {
+    captureReferralAttribution({ query: { invite: inviteCode } })
+    const partner = 'EP_abcdefghijklmnopqrstuvwxyz_12345'
+    expect(captureReferralAttribution({ path: 'pages/event-signup/index', query: { id: 'event', invite: partner } })).toBeNull()
+    expect(captureReferralAttribution({ query: { scene: encodeURIComponent('invite=' + partner) } })).toBeNull()
+    expect(pendingReferralInvite()).toBe(inviteCode)
+  })
+
   it('clears a consumed attribution explicitly', () => {
     captureReferralAttribution({ query: { invite: inviteCode } })
     clearPendingReferral()
@@ -49,7 +57,7 @@ describe('referral attribution capture', () => {
   it('builds the synchronous share payload only from the cached opaque code', () => {
     expect(referralSharePayload(inviteCode, '小林')).toEqual({
       title: '小林邀请你使用延庆金羽小程序',
-      path: `/pages/home/index?invite=${inviteCode}`,
+      path: `/pages/home/index?referralInvite=${inviteCode}`,
       imageUrl: '/static/share/miniapp-card.jpg',
     })
     expect(referralSharePayload(inviteCode, '小林').path).not.toContain('referrerId')

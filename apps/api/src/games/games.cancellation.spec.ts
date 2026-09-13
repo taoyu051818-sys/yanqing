@@ -107,6 +107,7 @@ describe('GamesService cancellation', () => {
       order: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       payment: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       refund: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue(refund),
       },
@@ -223,6 +224,7 @@ describe('GamesService cancellation', () => {
       order: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       payment: { updateMany: vi.fn() },
       refund: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue(createdRefund),
       },

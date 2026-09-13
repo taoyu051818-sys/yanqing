@@ -8,6 +8,7 @@ import { SHARE_CARD_IMAGES } from '../../config/share'
 import { endpoints } from '../../services/api'
 import { clearAuthSession, getAccessToken, useAccessToken } from '../../services/auth-session'
 import { resolveApiAssetUrl } from '../../services/http'
+import type { GameRegistrationStatus } from '@yanqing/shared'
 import type { GameDetail, GameParticipants } from '../../types/game'
 import { dateTimeRange, money, venueDateLabel, venueTimeRange } from '../../utils/format'
 import { gameAction, gameDetailPath, gameLevelLabel, gameShareTitle, parseGameId } from '../../utils/game-detail'
@@ -37,10 +38,11 @@ const action = computed(() => game.value ? gameAction(game.value, mine.value, au
 const actionDisabled = computed(() => submitting.value || membersLoading.value || (authenticated.value && !members.value) || action.value.kind === 'none')
 const remaining = computed(() => Math.max(0, (game.value?.capacity || 0) - (game.value?.occupiedCount || 0)))
 const waitlisting = computed(() => game.value?.status === 'FULL' || remaining.value === 0 || Number(game.value?.waitlistCount) > 0)
-const myStatus = computed(() => ({
+const registrationLabels: Record<GameRegistrationStatus, string> = {
   REGISTERED: '已占位，待支付', PAID: '报名已确认', CHECKED_IN: '已到场签到',
-  COMPLETED: '本场已完成', WAITLISTED: '正在候补', CANCELLED: '报名已取消', REFUNDED: '报名已退款',
-}[mine.value?.status || ''] || '报名状态同步中'))
+  NO_SHOW: '未到场', COMPLETED: '本场已完成', WAITLISTED: '正在候补', CANCELLED: '报名已取消', REFUNDED: '报名已退款',
+}
+const myStatus = computed(() => mine.value ? registrationLabels[mine.value.status] || '报名状态同步中' : '报名状态同步中')
 const myDescription = computed(() => {
   if (mine.value?.status === 'WAITLISTED') return `当前候补第 ${mine.value.waitlistPosition || '—'} 位。候补不收费；有名额释放并按顺序晋级后，请回来查看并支付订单。`
   if (mine.value?.order?.status === 'PENDING') return '支付后才进入正式名单。你可以在订单中支付或取消；未付款不代表报名成功。'

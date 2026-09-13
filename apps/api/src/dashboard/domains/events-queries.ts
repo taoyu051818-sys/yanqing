@@ -5,6 +5,9 @@ export function loadEventTeams(prisma: PrismaService, start: Date, end: Date) {
     where: { createdAt: { gte: start, lt: end } },
     select: {
       eventId: true,
+      status: true,
+      cancellationPending: true,
+      event: { select: { status: true } },
       captainId: true,
       playerAUserId: true,
       playerBUserId: true,

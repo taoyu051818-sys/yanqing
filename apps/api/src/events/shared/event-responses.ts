@@ -67,3 +67,17 @@ export const eventTeamCommandResponse = (team: any) => ({
   cancellationPending: Boolean(team.cancellationPending),
   order: team.order ? { status: team.order.status } : undefined,
 });
+
+/** Member withdrawal never exposes another registration promoted as a side effect. */
+export const eventWithdrawalResponse = (value: any) => ({
+  registration: eventTeamCommandResponse(value.registration),
+  refund: value.refund
+    ? {
+        id: value.refund.id,
+        status: value.refund.status,
+        amountCents: value.refund.amountCents,
+      }
+    : null,
+  outcome: value.outcome,
+  idempotent: Boolean(value.idempotent),
+});

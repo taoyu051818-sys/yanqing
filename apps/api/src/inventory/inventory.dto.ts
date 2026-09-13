@@ -101,7 +101,7 @@ export class UpdateInventoryItemDto extends VersionedMasterDataCommandDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) salePriceCents?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) safeStock?: number;
   @IsOptional() @IsString() @MaxLength(80) batchCode?: string;
-  @IsOptional() @IsDateString() expiresAt?: string;
+  @IsOptional() @IsDateString() expiresAt?: string | null;
 }
 
 export class SetMasterDataStatusDto extends VersionedMasterDataCommandDto {

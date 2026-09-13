@@ -26,7 +26,7 @@ export function useCoachTrialData(scope: DataScope) {
         canManage ? await endpoints.adminTrainingStudents() : [],
       ),
       members.load(async () =>
-        canManage ? pageItems(await endpoints.members()) : [],
+        [],
       ),
     ]);
   }

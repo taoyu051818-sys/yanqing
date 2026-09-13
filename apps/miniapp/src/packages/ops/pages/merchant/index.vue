@@ -13,6 +13,10 @@ import { useSessionStore } from '../../../../stores/session'
 import { idempotencyKey, money, today as shanghaiDate, venueDateKey } from '../../../../utils/format'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
 
+import { parseOpsDeepLinkQuery, opsDeepLinkDomId, type OpsDeepLinkQuery } from '../../../../utils/work-item-deep-link'
+const deepLinkQuery = ref<OpsDeepLinkQuery>({})
+const focusedSettlementId = ref('')
+let deepLinkHandled = false
 const task = useOperationTask()
 const session = useSessionStore()
 const merchants = ref<any[]>([])
@@ -154,6 +158,12 @@ async function load() {
     selectedMerchantId.value = merchants.value[0]?.id || ''
   }
   loading.value = false
+  if (!deepLinkHandled && deepLinkQuery.value.focus === 'alliance-settlement' && results[2].status === 'fulfilled') {
+    const target = settlements.value.find(item => item.id === deepLinkQuery.value.id)
+    deepLinkHandled = true
+    if (target) { selectedMerchantId.value = target.merchantId; focusedSettlementId.value = target.id; await nextTick(); uni.pageScrollTo({ selector: `#${opsDeepLinkDomId('merchant-settlement', target.id)}`, duration: 250 }) }
+    else uni.showToast({ title: '未找到此结算单，可能已处理或无权查看', icon: 'none' })
+  }
   if (managementView.value === 'coupons' && !managementViewHandled.value) {
     managementViewHandled.value = true
     showTemplateForm.value = canCreateCampaign.value && merchantIsActive.value
@@ -386,6 +396,7 @@ function canIssueTemplate(item: any) {
 }
 
 onLoad((options) => {
+  deepLinkQuery.value = parseOpsDeepLinkQuery(options)
   managementView.value = typeof options?.view === 'string' ? options.view : ''
 })
 onShow(load)
@@ -413,7 +424,7 @@ onShow(load)
 
     <template v-if="canViewSettlements && merchant">
       <view class="section-title">商户结算单 <text class="section-note">{{ merchantSettlements.length }} 张</text></view>
-      <view v-for="item in merchantSettlements" :key="item.id" class="card settlement-card">
+      <view v-for="item in merchantSettlements" :id="opsDeepLinkDomId('merchant-settlement', item.id)" :key="item.id" class="card settlement-card" :class="{ 'deep-link-target': focusedSettlementId === item.id }">
         <view class="row"><view><text class="merchant-title">{{ displayPeriod(item) }}</text><text class="muted">发放 / 领取 / 核销：{{ item.issuedCount || 0 }} / {{ item.claimedCount || 0 }} / {{ item.redeemedCount || 0 }}</text></view><text class="status" :class="`state-${String(item.status).toLowerCase()}`">{{ settlementLabels[item.status] || item.status }}</text></view>
         <view class="amount-grid"><view><text class="field-label">归因 GMV</text><text class="amount">{{ money(item.attributedGmvCents) }}</text></view><view><text class="field-label">有效新客</text><text class="amount">{{ item.effectiveNewCustomers || 0 }} 人</text></view><view><text class="field-label">应结服务费</text><text class="amount highlight">{{ money(item.cooperationFeeCents) }}</text></view></view>
         <view v-if="item.status === 'PENDING_CONFIRMATION' && canDecideSettlement" class="action-row"><button class="primary compact" :disabled="Boolean(actionKey)" @tap="confirmSettlement(item)">确认账单</button><button class="danger compact" :disabled="Boolean(actionKey)" @tap="disputeSettlement(item)">提出争议</button></view>
@@ -483,6 +494,7 @@ onShow(load)
 </template>
 
 <style scoped>
+.deep-link-target { outline: 3rpx solid #b7a052; }
 .metric-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14rpx; margin-top:22rpx; }
 .merchant-selector,.merchant-card,.settlement-card,.template-card,.form-card,.lifecycle-card,.success,.error,.loading { margin-top:18rpx; }
 .merchant-selector { display:flex; align-items:center; justify-content:space-between; gap:20rpx; }

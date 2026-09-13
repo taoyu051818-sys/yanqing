@@ -178,3 +178,13 @@ export function workGroupKey(item: WorkItem): WorkGroupKey | null {
 export function isUrgentWorkItem(item: WorkItem) {
   return Number(item.priority || 0) >= 90;
 }
+
+/** Group landing pages must be usable by the role that sees the group. */
+export function workGroupRoute(group: WorkGroupDefinition, roles: AppRole[]) {
+  const has = (...allowed: AppRole[]) => roles.some(role => allowed.includes(role));
+  if (group.key === "fulfillment" && !has("FRONT_DESK", "ADMIN", "SUPER_ADMIN"))
+    return has("HOST") ? "/packages/ops/pages/host/index" : "/packages/ops/pages/event/index";
+  if (group.key === "reconciliation" && !has("FINANCE", "ADMIN", "SUPER_ADMIN"))
+    return "/packages/ops/pages/merchant/index";
+  return group.route;
+}

@@ -1,27 +1,32 @@
+import { withPendingCreationKey } from "../../../../../utils/pending-creation-key";
+import { computed } from "vue";
 import type { Ref, ComputedRef } from "vue";
 import { endpoints } from "../../../../../services/api";
-import { idempotencyKey } from "../../../../../utils/format";
+import { idempotencyKey, venueDateKey } from "../../../../../utils/format";
 import type { MovementType } from "../page-types.js";
 
 interface ActionContext {
   movementType: Ref<MovementType, MovementType>;
   movementForm: Ref<
     {
-      itemId: string;
+      balanceId: string;
+    itemId: string;
       sourceLocationId: string;
       targetLocationId: string;
       quantity: string;
       reason: string;
     },
     | {
-        itemId: string;
+        balanceId: string;
+    itemId: string;
         sourceLocationId: string;
         targetLocationId: string;
         quantity: string;
         reason: string;
       }
     | {
-        itemId: string;
+        balanceId: string;
+    itemId: string;
         sourceLocationId: string;
         targetLocationId: string;
         quantity: string;
@@ -55,6 +60,7 @@ export function useInventoryMovementsActions({
   function openMovementForm(type: MovementType) {
     movementType.value = type;
     movementForm.value = {
+      balanceId: "",
       itemId: "",
       sourceLocationId: "",
       targetLocationId: "",
@@ -66,18 +72,27 @@ export function useInventoryMovementsActions({
 
   function selectMovementItem(index: number) {
     movementForm.value.itemId = activeItems.value[index]?.id || "";
+    movementForm.value.balanceId = "";
   }
 
   function selectMovementSource(index: number) {
     movementForm.value.sourceLocationId =
       activeLocations.value[index]?.id || "";
     movementForm.value.targetLocationId = "";
+    movementForm.value.balanceId = "";
   }
 
   function selectMovementTarget(index: number) {
     movementForm.value.targetLocationId =
       movementTargetLocations.value[index]?.id || "";
   }
+
+  const movementBalances = computed(() => {
+    const item = activeItems.value.find(entry => entry.id === movementForm.value.itemId);
+    return (item?.stockBalances || []).filter((balance: any) => balance.locationId === movementForm.value.sourceLocationId && Number(balance.quantity) > 0)
+      .map((balance: any) => ({ ...balance, label: `${balance.batchCode || "DEFAULT"} · ${balance.expiresAt ? '效期 ' + venueDateKey(balance.expiresAt) : '无效期'} · 库存 ${balance.quantity}` }));
+  });
+  function selectMovementBalance(index: number) { movementForm.value.balanceId = movementBalances.value[index]?.id || ""; }
 
   async function submitMovement() {
     const item = activeItems.value.find(
@@ -98,8 +113,10 @@ export function useInventoryMovementsActions({
       `请输入${movementType.value === "TRANSFER" ? "调拨" : "报损"}数量`,
     );
     if (!quantity) return;
-    if (quantity > Number(item.stock || 0))
-      return validationError("操作数量不能超过当前库存");
+    const balance = movementBalances.value.find((entry: any) => entry.id === movementForm.value.balanceId);
+    if (!balance) return validationError("请选择来源批次与效期");
+    if (quantity > Number(balance.quantity || 0))
+      return validationError("操作数量不能超过所选批次在来源库位的库存");
     const reason = movementForm.value.reason.trim();
     if (!reason)
       return validationError(
@@ -116,7 +133,8 @@ export function useInventoryMovementsActions({
           ...(movementType.value === "TRANSFER"
             ? { targetLocationId: target?.id }
             : {}),
-          batchCode: item.batchCode || "DEFAULT",
+          batchCode: balance.batchCode || "DEFAULT",
+          ...(balance.expiresAt ? { expiresAt: balance.expiresAt } : {}),
           reason,
         }),
       `${movementType.value === "TRANSFER" ? "调拨" : "报损"}单已建立`,
@@ -139,10 +157,7 @@ export function useInventoryMovementsActions({
     if (document.status === "APPROVED")
       return run(
         () =>
-          endpoints.postInventoryOperation(
-            document.id,
-            idempotencyKey(`operation-${document.id}`),
-          ),
+          withPendingCreationKey(`inventory.post.${document.id}`, { documentId: document.id }, key => endpoints.postInventoryOperation(document.id, key)),
         "库存单据已过账",
       );
   }
@@ -154,6 +169,8 @@ export function useInventoryMovementsActions({
     return "";
   }
   return {
+    movementBalances,
+    selectMovementBalance,
     openMovementForm,
     selectMovementItem,
     selectMovementSource,

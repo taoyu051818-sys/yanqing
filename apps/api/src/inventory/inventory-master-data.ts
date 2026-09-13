@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 
 const canonicalize = (value: unknown): unknown => {
+  if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === 'object') {
     return Object.fromEntries(

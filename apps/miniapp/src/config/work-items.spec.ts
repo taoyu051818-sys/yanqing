@@ -40,3 +40,13 @@ describe("work item presentation", () => {
     expect(isUrgentWorkItem(item({ priority: 89 }))).toBe(false);
   });
 });
+
+import { workGroupDefinitions, workGroupRoute } from './work-items'
+import { hasOperationsAccess, type OperationsAccessScope } from './operations'
+it('gives every role a group landing page it can access', () => {
+  const scopes: Record<string, OperationsAccessScope> = { frontdesk: 'today', host: 'games', event: 'events', merchant: 'alliance', members: 'members', finance: 'finance', coach: 'training', inventory: 'inventory', governance: 'governance' }
+  for (const group of workGroupDefinitions) for (const role of group.roles) {
+    const page = workGroupRoute(group, [role]).split('/').at(-2)!
+    expect(hasOperationsAccess([role], scopes[page]), `${group.key}/${role}/${page}`).toBe(true)
+  }
+})

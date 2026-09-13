@@ -429,6 +429,9 @@ const {
 
 const {
   studentsFor,
+  isActiveEnrollment,
+  canScheduleMakeup,
+  scheduleMakeup,
   attendanceFor,
   attendanceStatus,
   isRefundPending,
@@ -446,7 +449,8 @@ const {
   confirm,
   complete,
 } = useCoachAttendanceActions({
-  activeStudents,
+  enrollments,
+  lessons,
   session,
   task,
   load: (...args: Parameters<typeof load>) => load(...args),
@@ -497,6 +501,7 @@ onUnmounted(dispose);
       :trialSubjectOptions="trialSubjectOptions"
       v-model:trialSubjectIndex="trialSubjectIndex"
       :trialMembers="trialMembers"
+      :selectTrialMember="(member) => { trialMembers = [member, ...trialMembers.filter(item => item.id !== member.id)]; trialMemberIndex = 0 }"
       v-model:trialMemberIndex="trialMemberIndex"
       :selectedTrialSubject="selectedTrialSubject"
       :leads="leads"
@@ -633,6 +638,9 @@ onUnmounted(dispose);
       :lessons="lessons"
       :focusedRecord="focusedRecord"
       :studentsFor="studentsFor"
+      :isActiveEnrollment="isActiveEnrollment"
+      :canScheduleMakeup="canScheduleMakeup"
+      :scheduleMakeup="scheduleMakeup"
       :attendanceStatus="attendanceStatus"
       :attendanceLabel="attendanceLabel"
       :recognitionTimeline="recognitionTimeline"

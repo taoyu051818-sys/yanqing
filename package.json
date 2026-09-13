@@ -26,7 +26,7 @@
     "build:admin": "pnpm --dir apps/admin build",
     "test:admin": "pnpm --dir apps/admin test",
     "test:core-lifecycle": "pnpm --dir apps/api test:core-lifecycle",
-    "test:ops": "node --test apps/api/scripts/ops/ops.test.mjs && bash -n deploy/ops/release.sh && bash -n deploy/ops/run.sh"
+    "test:ops": "node --test apps/api/scripts/ops/ops.test.mjs apps/api/scripts/ops/packaging.test.mjs && bash -n deploy/ops/release.sh && bash -n deploy/ops/run.sh"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

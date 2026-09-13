@@ -25,6 +25,7 @@ export class EventCatalogController {
     private readonly cancellation: EventCancellationService,
   ) {}
 
+  @Public()
   @Get()
   list() {
     return this.catalog.list();

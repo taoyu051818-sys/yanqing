@@ -33,9 +33,11 @@ export function useFinanceRefundsActions({
       confirmText: "确认批准退款",
       fields: [reasonField("复核依据")],
       submit: async ({ reason }) => {
-        await endpoints.approveRefund(refund.id, { reason });
+        const result = await endpoints.approveRefund(refund.id, { reason });
         await load();
-        return "退款已批准，后续以退款状态为准。";
+        return result.status === "SUCCEEDED"
+          ? "退款已完成，请核对退款记录。"
+          : "退款已批准，等待支付方同步；请以最终退款状态为准。";
       },
     });
   }

@@ -1,4 +1,4 @@
-import { Transform, Type } from 'class-transformer'
+import { Transform, Type } from 'class-transformer';
 import {
   IsEnum,
   IsInt,
@@ -8,36 +8,48 @@ import {
   MaxLength,
   Min,
   MinLength,
-} from 'class-validator'
+} from 'class-validator';
 
-import { BusinessType, OrderStatus, PaymentChannel } from '../generated/prisma/enums.js'
+import {
+  BusinessType,
+  OrderStatus,
+  PaymentChannel,
+} from '../generated/prisma/enums.js';
 
 // Older mini-program builds serialized an absent optional query as a literal
 // "undefined". Normalize only empty sentinels, never an unknown enum value.
 const optionalFilter = ({ value }: { value: unknown }) =>
-  value === '' || value === 'undefined' || value === 'null' ? undefined : value
+  value === '' || value === 'undefined' || value === 'null' ? undefined : value;
 
 export class OrderQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  page = 1
+  page = 1;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(100)
-  pageSize = 20
+  pageSize = 20;
 
   @Transform(optionalFilter)
   @IsOptional()
   @IsEnum(BusinessType, { message: '订单类型筛选无效，请重新选择' })
-  businessType?: BusinessType
+  businessType?: BusinessType;
 
   @Transform(optionalFilter)
   @IsOptional()
   @IsEnum(OrderStatus, { message: '订单状态筛选无效，请重新选择' })
-  status?: OrderStatus
+  status?: OrderStatus;
+
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || undefined : value,
+  )
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  keyword?: string;
 }
 
 export class PayOrderDto {
@@ -45,28 +57,28 @@ export class PayOrderDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  expectedDebitAmount?: number
+  expectedDebitAmount?: number;
 
   @IsEnum(PaymentChannel)
-  channel: PaymentChannel
+  channel: PaymentChannel;
 
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  idempotencyKey: string
+  idempotencyKey: string;
 }
 
 export class CancelPendingOrderDto {
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  idempotencyKey: string
+  idempotencyKey: string;
 
   @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason?: string
+  reason?: string;
 }
 
 export class RequestRefundDto {
@@ -80,22 +92,22 @@ export class RequestRefundDto {
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  idempotencyKey?: string
+  idempotencyKey?: string;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  amountCents: number
+  amountCents: number;
 
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason: string
+  reason: string;
 }
 
 export class ReviewRefundDto {
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason: string
+  reason: string;
 }

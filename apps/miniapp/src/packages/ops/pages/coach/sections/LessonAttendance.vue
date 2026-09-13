@@ -16,6 +16,9 @@ const props = defineProps<{
   lessons: TrainingSessionView[];
   focusedRecord: string;
   studentsFor: (lesson: TrainingSessionView) => any[];
+  isActiveEnrollment: (enrollment: TrainingEnrollmentView) => boolean;
+  canScheduleMakeup: (lesson: TrainingSessionView, enrollment: TrainingEnrollmentView) => boolean;
+  scheduleMakeup: (lesson: TrainingSessionView, enrollment: TrainingEnrollmentView) => void;
   attendanceStatus: (
     lesson: TrainingSessionView,
     enrollment: TrainingEnrollmentView,
@@ -86,6 +89,9 @@ const {
   lessons,
   focusedRecord,
   studentsFor,
+  isActiveEnrollment,
+  canScheduleMakeup,
+  scheduleMakeup,
   attendanceStatus,
   attendanceLabel,
   recognitionTimeline,
@@ -186,7 +192,7 @@ const {
           <view class="student-actions">
             <text
               v-if="
-                isConsumableLesson(lesson) &&
+                isConsumableLesson(lesson) && isActiveEnrollment(student) &&
                 canMarkAttendance &&
                 attendanceStatus(lesson, student) === 'PENDING' &&
                 !canUseLessonWindow(lesson, 'attendanceWindow')
@@ -196,7 +202,7 @@ const {
             >
             <template
               v-if="
-                isConsumableLesson(lesson) &&
+                isConsumableLesson(lesson) && isActiveEnrollment(student) &&
                 canMarkAttendance &&
                 attendanceStatus(lesson, student) === 'PENDING' &&
                 canUseLessonWindow(lesson, 'attendanceWindow')
@@ -223,7 +229,7 @@ const {
             </template>
             <button
               v-if="
-                isConsumableLesson(lesson) &&
+                isConsumableLesson(lesson) && isActiveEnrollment(student) &&
                 !isRefundPending(student) &&
                 canProposeConsume &&
                 attendanceStatus(lesson, student) === 'ATTENDED' &&
@@ -237,7 +243,7 @@ const {
             </button>
             <button
               v-if="
-                isConsumableLesson(lesson) &&
+                isConsumableLesson(lesson) && isActiveEnrollment(student) &&
                 !isRefundPending(student) &&
                 isChecker &&
                 hasPendingProposal(lesson, student)
@@ -257,7 +263,7 @@ const {
             >
             <text
               v-if="
-                isConsumableLesson(lesson) &&
+                isConsumableLesson(lesson) && isActiveEnrollment(student) &&
                 isChecker &&
                 hasPendingProposal(lesson, student) &&
                 attendanceFor(lesson, student)?.operatorId === session.user?.id
@@ -267,7 +273,7 @@ const {
             >
             <text
               v-if="
-                isConsumableLesson(lesson) &&
+                isConsumableLesson(lesson) && isActiveEnrollment(student) &&
                 hasPendingProposal(lesson, student) &&
                 !isChecker
               "
@@ -279,6 +285,7 @@ const {
               class="pending-text"
               >请安排补课</text
             >
+            <button v-if="canScheduleMakeup(lesson, student)" class="secondary inline" @tap="scheduleMakeup(lesson, student)">安排补课</button>
             <button
               v-if="
                 canRequestCorrection &&
@@ -302,7 +309,7 @@ const {
           </view>
         </view>
       </view>
-      <view v-else class="empty-line">本节没有可消课学员</view>
+      <view v-else class="empty-line">本节没有出勤记录或待上课学员</view>
       <button
         v-if="canCreateSession && isConsumableLesson(lesson)"
         class="primary finish"

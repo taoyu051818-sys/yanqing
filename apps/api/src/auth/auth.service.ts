@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, unlink, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 
 import { BadGatewayException, BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
@@ -10,6 +10,7 @@ import { PrismaService } from '../database/prisma.service.js'
 import { developmentLoginEnabled, type LoginMethod } from '../common/auth/login-policy.js'
 import { AccountType, AppRole, UserStatus } from '../generated/prisma/enums.js'
 import type { DevLoginDto, UpdateMyProfileDto, WechatLoginDto } from './auth.dto.js'
+import { generatedAvatarFilename } from '../privacy/avatar-storage.js'
 
 interface WechatSessionResponse {
   openid?: string
@@ -171,14 +172,16 @@ export class AuthService {
     })
     const avatarUrl = `/uploads/avatars/${filename}`
     try {
-      await this.prisma.user.update({ where: { id: userId }, data: { avatarUrl } })
+      const changed = await this.prisma.user.updateMany({
+        where: { id: userId, status: UserStatus.ACTIVE, deletedAt: null },
+        data: { avatarUrl },
+      })
+      if (changed.count !== 1) throw new UnauthorizedException('账号已停用或注销，不能修改头像')
     } catch (cause) {
       await unlink(join(avatarDirectory, filename)).catch(() => undefined)
       throw cause
     }
-    const oldName = current.avatarUrl?.startsWith('/uploads/avatars/')
-      ? basename(current.avatarUrl)
-      : ''
+    const oldName = generatedAvatarFilename(current.avatarUrl)
     if (oldName && oldName !== filename) {
       await unlink(join(avatarDirectory, oldName)).catch(() => undefined)
     }

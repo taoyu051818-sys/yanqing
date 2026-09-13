@@ -47,7 +47,7 @@ export async function createSettlement(
   const replay = (existing: { attributedGrossProfitCents: number }) => {
     if (existing.attributedGrossProfitCents !== dto.attributedGrossProfitCents)
       throw new ConflictException(
-        '该商户结算周期已生成，利润口径不同，请先提出调整申请',
+        '该商户结算周期已生成，利润口径不同，请在草稿结算单中执行更正',
       );
     return allianceSettlementResponse(existing);
   };

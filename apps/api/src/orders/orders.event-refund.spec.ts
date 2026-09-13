@@ -55,7 +55,11 @@ const harness = (amountCents: number) => {
   const tx = {
     refund: {
       findUnique: vi.fn().mockResolvedValue(fixture),
-      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn(async ({ where, data }) => {
+        if (fixture.status !== where.status) return { count: 0 };
+        Object.assign(fixture, data);
+        return { count: 1 };
+      }),
       findUniqueOrThrow: vi.fn().mockResolvedValue({
         ...fixture,
         status: RefundStatus.SUCCEEDED,
@@ -158,9 +162,12 @@ describe('whole event order refund releases its team seat', () => {
     const tx = {
       refund: {
         findUnique: vi.fn().mockResolvedValue(refund),
-        update: vi
-          .fn()
-          .mockResolvedValue({ ...refund, status: RefundStatus.REJECTED }),
+        updateMany: vi.fn(async ({ where, data }) => {
+          if (refund.status !== where.status) return { count: 0 };
+          Object.assign(refund, data);
+          return { count: 1 };
+        }),
+        findUniqueOrThrow: vi.fn(async () => refund),
         aggregate: vi.fn().mockResolvedValue({ _sum: { amountCents: null } }),
       },
       order: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },

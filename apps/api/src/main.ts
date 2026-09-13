@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
 
 import { ValidationPipe } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
@@ -14,6 +13,7 @@ import { AllExceptionsFilter } from './common/http/all-exceptions.filter.js'
 import { ApiResponseInterceptor } from './common/http/api-response.interceptor.js'
 import { HttpMutationAuditInterceptor } from './common/http/http-mutation-audit.interceptor.js'
 import { PrismaService } from './database/prisma.service.js'
+import { configureUploadAssets } from './privacy/avatar-storage.js'
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: false, rawBody: true })
@@ -25,10 +25,7 @@ async function bootstrap() {
     .map((origin) => origin.trim())
     .filter(Boolean)
 
-  const uploadRoot = config.get<string>('UPLOAD_DIR')
-    || config.get<string>('STORAGE_LOCAL_PATH')
-    || join(process.cwd(), 'uploads')
-  app.useStaticAssets(uploadRoot, { prefix: '/uploads/' })
+  configureUploadAssets(app, config, app.get(PrismaService))
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
   app.use((request: Request & { requestId?: string }, response: Response, next: NextFunction) => {
     request.requestId = String(request.headers['x-request-id'] ?? randomUUID())

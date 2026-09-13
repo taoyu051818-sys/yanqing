@@ -66,6 +66,15 @@ export const allianceSettlementResponse = (settlement: any) => {
     detail: {
       workflowState: detail.workflowState ?? settlement.status,
       workflowHistory,
+      revisionHistory: Array.isArray(detail.revisionHistory)
+        ? detail.revisionHistory.map((entry: any) => ({
+            version: entry.version,
+            reason: entry.reason,
+            at: entry.at,
+            before: entry.before,
+            after: entry.after,
+          }))
+        : [],
     },
   };
 };

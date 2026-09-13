@@ -325,9 +325,10 @@ async function createParameter() {
     uni.showToast({ title: "生效日期或时间不正确", icon: "none" });
     return;
   }
+  const reason = parameterForm.reason.trim(), locked = parameterForm.locked;
   const confirm = await uni.showModal({
     title: "发布参数版本",
-    content: "新版本将按生效时间接替旧版本，历史订单仍使用原快照。",
+    content: `${definition.label}：${formatBusinessParameterValue(definition.key, value)}。生效时间：${parameterForm.effectiveDate} ${parameterForm.effectiveTime}（北京时间）。新订单按此版本执行，历史订单保留原快照。`,
   });
   if (!confirm.confirm) return;
   acting.value = "parameter";
@@ -337,9 +338,9 @@ async function createParameter() {
       value,
       type: definition.type,
       description: definition.description,
-      reason: parameterForm.reason.trim(),
+      reason,
       effectiveFrom: effectiveFrom.toISOString(),
-      locked: parameterForm.locked,
+      locked,
     });
     parameterForm.scalar = "";
     parameterForm.earlyMinutes = "";

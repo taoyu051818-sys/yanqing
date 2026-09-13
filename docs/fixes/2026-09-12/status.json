@@ -1,0 +1,242 @@
+{
+  "date": "2026-09-12",
+  "baselineCommit": "21dd96e11b612ba2679fa2d7e2a889c76a9b29c1",
+  "scope": "32 confirmed functional audit findings; existing user changes preserved",
+  "deployed": false,
+  "githubPushed": false,
+  "productionDataChanged": false,
+  "items": [
+    {
+      "id": "PAY-001",
+      "priority": "P1",
+      "title": "退款先发往支付方、后保存审批状态，可能与驳回发生冲突",
+      "change": "审批先提交后出站；原退款号持久重试、主动查询补偿、成功关闭延期风险。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "DB-001",
+      "priority": "P1",
+      "title": "培训收入达到 ¥10,737.42 后，数据库20%分成校验整数溢出而阻断结算",
+      "change": "新增numeric分成约束迁移，保留财务CHECK。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "EVENT-001",
+      "priority": "P1",
+      "title": "退出赛事时返回其他候补队伍的联系方式和订单内部字段",
+      "change": "会员退出响应使用明确字段白名单，不返回其他候补队隐私。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "OPS-001",
+      "priority": "P2",
+      "title": "API 发布可把未提交的根构建脚本产物标记为已验证提交",
+      "change": "锁定打包提交并验证全部根构建输入，构建前后检查版本一致。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "PAY-002",
+      "priority": "P2",
+      "title": "充值分次退款逐笔取整，累计全退会残留赠送余额或多扣其他充值余额",
+      "change": "按累计退款金额计算本金/赠额应回收值，扣除已回收与已记录追缴义务。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "GAME-001",
+      "priority": "P2",
+      "title": "整场取消后，普通退款被驳回会留下应退金额缺口",
+      "change": "取消事务把已有活跃退款升级为不可驳回义务，保留原幂等号。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "VENUE-001",
+      "priority": "P2",
+      "title": "部分退款后仍有效的订场无法签到",
+      "change": "部分退款保留有效场地履约，签到与完成不覆盖部分退款财务状态。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MOPS-003",
+      "priority": "P2",
+      "title": "前台营业队列仅取最新20笔订单，较早待处理订单静默消失",
+      "change": "订单、会员与试听支持分页/搜索；待办优先按业务ID定位。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MOPS-005",
+      "priority": "P2",
+      "title": "客户360乱序响应使弹窗显示会员A却为会员B申请账户调整",
+      "change": "客户360采用会员ID和请求代际绑定，弹窗与提交共用已核验快照。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "INV-001",
+      "priority": "P2",
+      "title": "盘点录数请求可在过账完成后修改已冻结明细",
+      "change": "盘点录数、提交、过账共享父记录锁及状态检查。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "INV-002",
+      "priority": "P2",
+      "title": "售罄后修改库存资料删除零分账，使原订单无法退款回库",
+      "change": "保留销售引用的历史零分账，退款仍归还原批次。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "TRAINING-002",
+      "priority": "P2",
+      "title": "已结课课次允许消课冲正，但冲正后无法重新提交或确认该课次消课",
+      "change": "未结算的已结课课次可随合法冲正受控重开，保留审计和结算锁。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MOPS-001",
+      "priority": "P2",
+      "title": "课包结业后从全部课表移除学员，历史出勤与消课冲正入口消失",
+      "change": "历史出勤保留结业学员，当前候选与历史流水分别投影。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MOPS-002",
+      "priority": "P2",
+      "title": "请假进入待补课后，小程序没有安排补课入口且无法结课",
+      "change": "请假行提供同班后续课次补课入口。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MINI-001",
+      "priority": "P2",
+      "title": "活动 tab 未在换号时清空上一账号的报名缓存",
+      "change": "会话变化清除账号私有缓存，异步写回检查账号归属。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MINI-002",
+      "priority": "P2",
+      "title": "活动页并发刷新允许旧报名快照覆盖较新的结果",
+      "change": "活动刷新采用递增请求代际，阻止旧响应和旧finally覆盖。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MINI-003",
+      "priority": "P2",
+      "title": "订场请求在用户切走后仍强制跳转订单页",
+      "change": "订场完成后的导航受页面生命周期约束，离页不强制跳走。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MEVENT-001",
+      "priority": "P2",
+      "title": "搭档邀请被误当推荐码，覆盖并丢弃有效推荐归因",
+      "change": "赛事搭档邀请与推荐码分流，保留合法推荐归因。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MOPS-004",
+      "priority": "P2",
+      "title": "前台联盟券核销固定第一个商户，其他商户券全部被拒",
+      "change": "联盟券核销提供有权限的商户选择。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MOPS-006",
+      "priority": "P2",
+      "title": "待办路由把商户结算和主理人履约送入无权访问的工作台",
+      "change": "业务待办按角色和业务ID跳入可处理页面。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MOPS-007",
+      "priority": "P2",
+      "title": "业务规则空白数值被当作0发布，可能意外关闭经营分成",
+      "change": "空白数字不可发布；明确0合法；确认展示规则、值与生效时间。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MOPS-008",
+      "priority": "P2",
+      "title": "赛事签到在前端固定30分钟，扩大后的有效业务窗口仍被拦截",
+      "change": "普通赛事签到由后端有效规则判断，保留历史补录理由入口。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "MEMBER-001",
+      "priority": "P2",
+      "title": "教练查看已分配学员的家长时会拿到该家长其他未分配孩子的档案字段",
+      "change": "教练可见子女关系本身按本人任教/助教范围过滤。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "AUTH-001",
+      "priority": "P2",
+      "title": "完成注销后原上传头像仍可通过公开 URL 读取",
+      "change": "注销提交即撤销头像公开读取，物理清理使用持久可重试任务。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "INV-003",
+      "priority": "P2",
+      "title": "小程序编辑有库存 SKU 时连售价等普通字段也无法保存",
+      "change": "仅提交变化资料字段，后端按实际时间/null识别效期变化。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "INV-004",
+      "priority": "P2",
+      "title": "采购和调拨报损遗漏批次效期，带效期商品无法过账",
+      "change": "采购、调拨和报损使用真实批次与效期，过账复用幂等键。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "WORK-001",
+      "priority": "P2",
+      "title": "先截取库存候选再筛低库存，遗漏真正缺货商品",
+      "change": "先在数据库过滤低库存，再排序限制条数。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "DASH-001",
+      "priority": "P2",
+      "title": "驾驶舱按日查询重复计入整月联盟金额",
+      "change": "联盟核销与实收分别按实际发生日汇总，避免每天重复整月金额。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "DASH-002",
+      "priority": "P2",
+      "title": "已取消的赛事报名仍计入参赛和复参率",
+      "change": "报名量与有效参与分开，复参统计排除取消等无效状态。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "ALLIANCE-001",
+      "priority": "P2",
+      "title": "结算争议退回草稿后无法修订错误金额",
+      "change": "争议退回后的账单可带理由和幂等键修订，保留历史和核销关联。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "VENUE-002",
+      "priority": "P2",
+      "title": "不存在的日期被自动换成另一天并订场",
+      "change": "服务和DTO共同校验真实日历日期。",
+      "status": "verified_locally"
+    },
+    {
+      "id": "PC-001",
+      "priority": "P2",
+      "title": "PC 待支付筛选发送错误枚举，列表返回错误",
+      "change": "待支付筛选改用后端枚举PENDING，新增真实模板到DTO契约测试。",
+      "status": "verified_locally"
+    }
+  ],
+  "unconfirmed": [
+    "MINI-004"
+  ],
+  "completed": true,
+  "verificationBoundary": "Functional code fixes verified by local tests and builds; no deployment or production-data repair; real WeChat acceptance remains separate.",
+  "unconfirmedDetails": {
+    "MINI-004": "Full real A-dialog / route-B / confirm reachability remains unverified; not counted among confirmed fixes and not changed."
+  }
+}

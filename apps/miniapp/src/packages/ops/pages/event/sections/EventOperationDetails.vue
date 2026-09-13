@@ -41,7 +41,8 @@ const props = defineProps<{
   teams: EventTeam[];
   showParticipantContacts: (team: EventTeam) => void;
   canCheckInTeam: (team: EventTeam) => boolean;
-  checkIn: (team: EventTeam) => void;
+  canHistoricallyCheckIn: (team: EventTeam) => boolean;
+  checkIn: (team: EventTeam, historical?: boolean) => void;
   mayOperatePrizes: boolean;
   prizeAwards: EventPrizeAward[];
   pendingPrizeReceipts: number;
@@ -107,6 +108,7 @@ const {
   teams,
   showParticipantContacts,
   canCheckInTeam,
+  canHistoricallyCheckIn,
   checkIn,
   mayOperatePrizes,
   prizeAwards,
@@ -336,6 +338,7 @@ const pairingRightIndex = computed({
         >
           签到
         </button>
+        <button v-if="canHistoricallyCheckIn(team)" class="secondary inline" :disabled="loading || Boolean(actionKey)" @tap="checkIn(team, true)">历史补录</button>
       </view>
       <view v-if="!teams.length" class="empty card">该赛事尚无报名队伍</view>
 

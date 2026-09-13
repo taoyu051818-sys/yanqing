@@ -160,12 +160,18 @@ const makePrisma = () => {
     eventTeam: {
       findMany: vi.fn().mockResolvedValue([
         {
+          status: 'PAID',
+          event: { status: 'OPEN' },
+          cancellationPending: false,
           eventId: 'event-1',
           captainId: 'member-1',
           playerAUserId: 'member-1',
           playerBUserId: 'member-2',
         },
         {
+          status: 'PAID',
+          event: { status: 'OPEN' },
+          cancellationPending: false,
           eventId: 'event-2',
           captainId: 'member-1',
           playerAUserId: 'member-3',
@@ -217,6 +223,15 @@ const makePrisma = () => {
       aggregate: vi.fn().mockResolvedValue({ _sum: { amount: 100 } }),
     },
     couponCode: {
+      findMany: vi
+        .fn()
+        .mockResolvedValue([
+          {
+            attributedAmountCents: 20000,
+            holderId: 'member-1',
+            holder: { memberProfile: { isNewCustomer: true } },
+          },
+        ]),
       count: vi
         .fn()
         .mockResolvedValueOnce(10)

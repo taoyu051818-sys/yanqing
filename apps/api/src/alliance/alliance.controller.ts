@@ -11,6 +11,7 @@ import type { AuthUser } from '../common/auth/auth-user.js';
 import { AppRole } from '../generated/prisma/enums.js';
 import {
   AllianceSettlementDto,
+  ReviseAllianceSettlementDto,
   CreateCouponTemplateDto,
   CreateMerchantDto,
   GenerateCouponCodesDto,
@@ -155,6 +156,16 @@ export class AllianceController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.allianceAllianceSettlements.disputeSettlement(id, dto, actor);
+  }
+
+  @Post('settlements/:id/revise')
+  @Roles(AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  reviseSettlement(
+    @Param('id') id: string,
+    @Body() dto: ReviseAllianceSettlementDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.allianceAllianceSettlements.reviseSettlement(id, dto, actor);
   }
 
   @Post('settlements/:id/settle')

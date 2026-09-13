@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import OperationsFrame from '../../components/OperationsFrame.vue'
 import OperationTask from '../../components/OperationTask.vue'
 import { useOperationTask, reasonField } from '../../components/operation-task'
+import BookingMemberPicker from '../../../../components/BookingMemberPicker.vue'
+import { usePagedList } from '../../utils/paged-list'
 import ReasonForm from '../../../../components/ReasonForm.vue'
 import MetricCard from '../../../../components/MetricCard.vue'
 import StatusBadge from '../../../../components/StatusBadge.vue'
@@ -23,11 +25,15 @@ import {
 
 const task = useOperationTask()
 const session = useSessionStore()
-const orders = ref<any[]>([])
+const orderStatus = ref(''), orderKeyword = ref('')
+const orderStatuses = [{ value: 'PAID', label: '已支付' }, { value: 'CHECKED_IN', label: '已签到' }, { value: 'PENDING', label: '待支付' }, { value: 'REFUND_PENDING', label: '退款待审' }, { value: 'PARTIALLY_REFUNDED', label: '部分退款' }, { value: '', label: '全部场地单' }]
+const orderQueue = usePagedList<any>((page, pageSize) => endpoints.adminOrders({ page, pageSize, businessType: 'VENUE', status: orderStatus.value || undefined, keyword: orderKeyword.value.trim() || undefined }), 20, () => JSON.stringify([orderStatus.value, orderKeyword.value.trim()]))
+const orders = orderQueue.items
+const showMemberPicker = ref(false)
 const members = ref<MemberDirectoryItem[]>([])
-const merchants = ref<any[]>([])
 const availability = ref<any>(null)
 const selectedMemberId = ref('')
+watch(() => session.user?.id, () => { members.value = []; selectedMemberId.value = ''; showMemberPicker.value = false }, { flush: 'sync' })
 const loading = ref(false)
 const fulfillment = ref<{ orderId: string; outcome: 'COMPLETED' | 'NO_SHOW'; observedAt: string } | null>(null)
 const fulfilling = ref(false)
@@ -40,7 +46,6 @@ function prepareFulfillment(order: any, outcome: 'COMPLETED' | 'NO_SHOW') {
 const loadError = ref('')
 const shiftLoaded = ref(false)
 const ordersLoaded = ref(false)
-const membersLoaded = ref(false)
 const availabilityLoaded = ref(false)
 const shift = ref<any>(null)
 const deepLinkQuery = ref<OpsDeepLinkQuery>({})
@@ -59,27 +64,22 @@ const pendingOrders = computed(() => orders.value.filter((order) =>
   ['PENDING', 'PAID', 'CHECKED_IN', 'REFUNDING', 'REFUND_PENDING', 'PARTIALLY_REFUNDED'].includes(order.status),
 ))
 const venueOrders = computed(() => pendingOrders.value.filter((order) => order.businessType === 'VENUE'))
-const paidOrders = computed(() => venueOrders.value.filter((order) => order.status === 'PAID'))
+const paidOrders = computed(() => venueOrders.value.filter((order) => canCheckInBooking(order) && !bookingEnded(order)))
 const selectedMember = computed(() => members.value.find((member) => member.id === selectedMemberId.value) || null)
 const selectedMemberDetail = computed(() => {
   if (!selectedMember.value) return '未选择客户，不能创建现场场地订单'
   return `${selectedMember.value.displayName}${selectedMember.value.phone ? ` · ${selectedMember.value.phone}` : ''}`
 })
-const memberOptions = computed(() => members.value.map((member) => {
-  const level = member.memberProfile?.level || member.level
-  const phone = member.phone ? ` · ${String(member.phone).slice(-4)}` : ''
-  return `${member.displayName}${phone}${level ? ` · ${level}` : ''}`
-}))
 const freeCourts = computed(() => {
   if (!availability.value) return 0
   const booked = new Set((availability.value.bookings || []).map((item: any) => item.courtId))
   return (availability.value.courts || []).filter((court: any) => court.enabled && !booked.has(court.id)).length
 })
 const metrics = computed(() => [
-  ['待现场处理', String(venueOrders.value.length), '场地履约队列'],
-  ['待签到', String(paidOrders.value.length), '已支付场地单'],
+  ['本页现场单', String(venueOrders.value.length), '筛选后当前已加载'],
+  ['本页待签到', String(paidOrders.value.length), '已加载场地单'],
   ['可用场地', String(freeCourts.value), '今日资源'],
-  ['会员查询', String(members.value.length), '可服务会员'],
+  ['当前会员', selectedMember.value ? '已选择' : '待选择', '可搜索全部服务范围'],
 ])
 
 async function load() {
@@ -89,39 +89,26 @@ async function load() {
   loadError.value = ''
   shiftLoaded.value = false
   ordersLoaded.value = false
-  membersLoaded.value = false
   availabilityLoaded.value = false
   const result = await Promise.allSettled([
-    endpoints.currentFrontDeskShift(), endpoints.adminOrders(), endpoints.members(), endpoints.availability(today()), endpoints.merchants(),
+    endpoints.currentFrontDeskShift(), orderQueue.load(), endpoints.availability(today()),
   ])
-  const [shiftResult, orderResult, memberResult, availabilityResult, merchantResult] = result
+  const [shiftResult, orderResult, availabilityResult] = result
   if (shiftResult.status === 'fulfilled') {
     shift.value = shiftResult.value
     shiftLoaded.value = true
   }
   if (orderResult.status === 'fulfilled') {
-    orders.value = orderResult.value?.items || orderResult.value || []
     ordersLoaded.value = true
-  }
-  if (memberResult.status === 'fulfilled') {
-    const directory = memberResult.value?.items || []
-    members.value = directory.filter((member: any) => !member.status || member.status === 'ACTIVE')
-    membersLoaded.value = true
-  }
-  if (selectedMemberId.value && !members.value.some((member) => member.id === selectedMemberId.value)) {
-    selectedMemberId.value = ''
   }
   if (availabilityResult.status === 'fulfilled') {
     availability.value = availabilityResult.value
     availabilityLoaded.value = true
   }
-  if (merchantResult.status === 'fulfilled') merchants.value = merchantResult.value || []
   const failedSources = [
     shiftResult.status === 'rejected' ? '班次状态' : '',
     orderResult.status === 'rejected' ? '订单队列' : '',
-    memberResult.status === 'rejected' ? '会员目录' : '',
     availabilityResult.status === 'rejected' ? '场地资源' : '',
-    merchantResult.status === 'rejected' ? '联盟商户' : '',
   ].filter(Boolean)
   if (failedSources.length) loadError.value = `${failedSources.join('、')}加载失败；未同步区域不会按“暂无”处理。`
   loading.value = false
@@ -135,7 +122,12 @@ async function applyFrontDeskDeepLink() {
     uni.showToast({ title: `无法识别前台待办类型：${deepLinkQuery.value.focus}`, icon: 'none' })
     return
   }
-  const order = findOpsDeepLinkRecord(venueOrders.value, deepLinkQuery.value, ['id', 'orderId'])
+  let order = findOpsDeepLinkRecord(venueOrders.value, deepLinkQuery.value, ['id', 'orderId'])
+  const orderId = deepLinkQuery.value.orderId || deepLinkQuery.value.id
+  if (!order && orderId) {
+    try { const selected = await endpoints.order(orderId); if (selected.businessType === 'VENUE') { orders.value = [selected, ...orders.value.filter(item => item.id !== selected.id)]; order = selected } }
+    catch { uni.showToast({ title: '待办订单未同步，请重试', icon: 'none' }); deepLinkHandled.value = false; return }
+  }
   if (!order) {
     uni.showToast({ title: '未找到待办对应的场地订单，可能已履约或无权查看', icon: 'none' })
     return
@@ -145,9 +137,10 @@ async function applyFrontDeskDeepLink() {
   uni.pageScrollTo({ selector: `#${opsDeepLinkDomId('frontdesk-order', order.id)}`, duration: 250 })
 }
 
-function selectMember(event: any) {
-  const index = Number(event.detail.value)
-  selectedMemberId.value = members.value[index]?.id || ''
+function selectMember(member: MemberDirectoryItem) {
+  members.value = [member, ...members.value.filter(item => item.id !== member.id)]
+  selectedMemberId.value = member.id
+  showMemberPicker.value = false
 }
 
 function openShift() {
@@ -188,6 +181,7 @@ function manualOrder() {
 }
 
 function checkIn(order: any) {
+  if (!canCheckInBooking(order)) return
   if (!ensureShiftOpen()) return
   const booking = venueBooking(order), start = new Date(booking?.startsAt || 0).getTime()
   if (!Number.isFinite(start) || Date.now() < start - 30 * 60000) { uni.showToast({ title: '未到签到窗口', icon: 'none' }); return }
@@ -227,7 +221,13 @@ function checkInWindowState(order: any) {
   return 'OPEN'
 }
 
+function canCheckInBooking(order: any) {
+  return venueBooking(order)?.status === 'CONFIRMED' && (order.status === 'PAID' ||
+    (order.status === 'PARTIALLY_REFUNDED' && Number(order.paidCents) > Number(order.refundedCents || 0)))
+}
+
 function canOpenCheckIn(order: any) {
+  if (!canCheckInBooking(order)) return false
   const state = checkInWindowState(order)
   return state === 'OPEN' ||
     (state === 'LATE' && session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
@@ -316,16 +316,9 @@ async function requestRefund(order: any) {
   } catch (cause: any) { uni.showToast({ title: cause.message || '退款申请失败', icon: 'none' }) }
 }
 
-async function redeemCoupon() {
+function redeemCoupon() {
   if (!ensureShiftOpen()) return
-  try {
-    const result = await uni.scanCode({ scanType: ['qrCode', 'barCode'] })
-    const code = result.result.split('/').pop() || result.result
-    const merchantId = merchants.value[0]?.id
-    if (!merchantId) throw new Error('未配置联盟商户')
-    await endpoints.redeemCoupon({ code, merchantId, attributedAmountCents: 0, idempotencyKey: idempotencyKey(`venue-coupon-${code}`) })
-    uni.showToast({ title: '联盟券已核销', icon: 'success' })
-  } catch (cause: any) { uni.showToast({ title: cause.message || '核销失败', icon: 'none' }) }
+  uni.navigateTo({ url: '/packages/ops/pages/merchant/index?view=redeem' })
 }
 
 onLoad((options) => {
@@ -337,6 +330,7 @@ onShow(load)
 <template>
   <OperationsFrame access="today" icon="work" title="今日营业" eyebrow="TODAY OPERATIONS" role="前台 / 值班" :shift="shiftLabel" description="先开班，再按现场队列处理签到、订单、退款申请和联盟券核销。">
     <OperationTask :task="task" />
+    <BookingMemberPicker v-if="showMemberPicker" @select="selectMember" @close="showMemberPicker = false" />
     <view v-if="loadError" class="load-error card"><view><text class="load-error-title">前台数据未完整同步</text><text class="muted">{{ loadError }}</text></view><button class="secondary retry" :disabled="loading" @tap="load">重新加载</button></view>
     <view class="shift card">
       <view>
@@ -356,9 +350,7 @@ onShow(load)
         <text class="order-title">代客订场客户</text>
         <text class="muted">{{ selectedMemberDetail }}</text>
       </view>
-      <picker mode="selector" :range="memberOptions" :disabled="!onsiteAllowed || !memberOptions.length" @change="selectMember">
-        <view class="customer-picker">{{ selectedMember ? '更换会员' : !membersLoaded ? '目录未同步' : (memberOptions.length ? '选择会员' : '暂无会员') }}</view>
-      </picker>
+      <button class="secondary" :disabled="!onsiteAllowed" @tap="showMemberPicker = true">{{ selectedMember ? '更换会员' : '搜索并选择会员' }}</button>
     </view>
     <view class="action-grid">
       <button class="primary" :disabled="!onsiteAllowed" @tap="scanCheckIn">扫码签到</button>
@@ -366,13 +358,21 @@ onShow(load)
       <button class="secondary" :disabled="!onsiteAllowed" @tap="redeemCoupon">联盟券核销</button>
     </view>
 
-    <view class="section-title">订单队列 <text class="section-note">{{ loading ? '同步中' : ordersLoaded ? `共 ${pendingOrders.length} 笔` : '未同步' }}</text></view>
+    <view class="section-title">订单队列 <text class="section-note">筛选共 {{ orderQueue.total.value }} 笔 · 已加载 {{ orders.length }}</text></view>
+    <view class="card">
+      <text class="muted">按财务状态筛选或搜索订单号、会员姓名</text>
+      <picker :range="orderStatuses" range-key="label" :value="orderStatuses.findIndex(item => item.value === orderStatus)" @change="orderStatus = orderStatuses[Number(($event.detail as any).value)].value; orderQueue.refresh()"><view class="customer-picker">{{ orderStatuses.find(item => item.value === orderStatus)?.label }} ›</view></picker>
+      <input v-model="orderKeyword" class="input" placeholder="订单号、姓名或订单标题" maxlength="50" confirm-type="search" @confirm="orderQueue.refresh()" />
+      <button class="secondary" :disabled="loading || orderQueue.loading.value" @tap="orderQueue.refresh()">搜索订单</button>
+      <text v-if="orderQueue.error.value" class="muted" role="alert">{{ orderQueue.error.value }}</text>
+    </view>
     <view v-for="order in venueOrders" :id="opsDeepLinkDomId('frontdesk-order', order.id)" :key="order.id" class="card order-card" :class="{ 'deep-link-target': focusedRecord === `frontdesk-order:${order.id}` }">
       <view class="row"><view><text class="order-title">{{ order.title }}</text><text class="muted">{{ order.orderNo }} · {{ order.member?.displayName || '现场会员' }}</text><text class="muted">{{ bookingTimeLabel(order) }}</text></view><StatusBadge :value="order.status" /></view>
-      <view class="order-footer"><text class="money">{{ money(order.payableCents) }}</text><view class="order-actions"><button v-if="order.status === 'PENDING'" class="primary inline" :disabled="!onsiteAllowed" @tap="collectCash(order)">现金收款</button><button v-if="order.status === 'PAID' && !bookingEnded(order)" class="secondary inline" :disabled="!onsiteAllowed || !canOpenCheckIn(order)" @tap="checkIn(order)">{{ checkInActionLabel(order) }}</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CHECKED_IN' && bookingEnded(order)" class="primary inline" :disabled="!onsiteAllowed" @tap="prepareFulfillment(order, 'COMPLETED')">确认完成</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CONFIRMED' && bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="prepareFulfillment(order, 'NO_SHOW')">标记未到</button><button v-if="order.status === 'PAID' && !bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="requestRefund(order)">退款申请</button></view></view>
+      <view class="order-footer"><text class="money">{{ money(order.payableCents) }}</text><view class="order-actions"><button v-if="order.status === 'PENDING'" class="primary inline" :disabled="!onsiteAllowed" @tap="collectCash(order)">现金收款</button><button v-if="canCheckInBooking(order) && !bookingEnded(order)" class="secondary inline" :disabled="!onsiteAllowed || !canOpenCheckIn(order)" @tap="checkIn(order)">{{ checkInActionLabel(order) }}</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CHECKED_IN' && bookingEnded(order)" class="primary inline" :disabled="!onsiteAllowed" @tap="prepareFulfillment(order, 'COMPLETED')">确认完成</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CONFIRMED' && bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="prepareFulfillment(order, 'NO_SHOW')">标记未到</button><button v-if="order.status === 'PAID' && !bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="requestRefund(order)">退款申请</button></view></view>
       <ReasonForm v-if="fulfillment?.orderId === order.id" :key="order.id + fulfillment?.outcome" :title="fulfillment?.outcome === 'NO_SHOW' ? '确认会员未到场' : '确认场地使用完成'" :description="'订单：' + order.title + '。请根据现场核实结果选择；确认后将关单并记录操作日志。'" :reasons="fulfillment?.outcome === 'NO_SHOW' ? ['现场点名确认未到场', '联系会员确认未到场', '其他原因'] : ['巡场确认使用已结束', '会员已离场且已检查场地', '其他原因']" :busy="fulfilling" :error="fulfillmentError" confirm-text="确认并记录" @cancel="fulfillment = null" @submit="fulfill(order, $event)" />
     </view>
-    <view v-if="!loading && ordersLoaded && !venueOrders.length" class="empty card">当前没有待处理场地订单</view>
+    <view v-if="!loading && !orderQueue.loading.value && !orderQueue.error.value && ordersLoaded && !venueOrders.length" class="empty card">{{ orders.length < orderQueue.total.value ? '当前已加载订单没有待现场处理项，可继续加载或切换状态。' : '当前筛选没有待现场处理的场地订单。' }}</view>
+    <button v-if="orders.length < orderQueue.total.value" class="secondary" :loading="orderQueue.loading.value" :disabled="loading || orderQueue.loading.value" @tap="orderQueue.more()">加载更多订单</button>
 
     <view class="section-title">场馆资源</view>
     <view class="card resource-card">

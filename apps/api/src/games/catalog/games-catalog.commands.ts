@@ -1,3 +1,9 @@
+import { PUBLIC_GAME_LIST_SELECT } from './public-game-list.query.js';
+import type {
+  GameDetail,
+  GameListItem,
+  GameParticipants,
+} from '@yanqing/shared';
 import {
   GAME_SEAT_STATUSES,
   isValidGameCapacity,
@@ -35,7 +41,10 @@ import {
 } from '../shared/games-support.js';
 import { assertGameOperator } from '../shared/games-policy.js';
 
-export async function detail(prisma: PrismaService, id: string) {
+export async function detail(
+  prisma: PrismaService,
+  id: string,
+): Promise<GameDetail<Date>> {
   const game = await prisma.game.findFirst({
     where: { id, status: { in: GAME_DETAIL_STATUSES } },
     select: {
@@ -84,7 +93,7 @@ export async function participants(
   prisma: PrismaService,
   id: string,
   actor: AuthUser,
-) {
+): Promise<GameParticipants> {
   const confirmedStatuses = [
     RegistrationStatus.PAID,
     RegistrationStatus.CHECKED_IN,
@@ -158,7 +167,10 @@ export async function participants(
   };
 }
 
-export async function list(prisma: PrismaService, actor: AuthUser) {
+export async function list(
+  prisma: PrismaService,
+  actor: AuthUser,
+): Promise<GameListItem<Date>[]> {
   const games = await prisma.game.findMany({
     where: {
       status: {
@@ -171,22 +183,7 @@ export async function list(prisma: PrismaService, actor: AuthUser) {
       },
     },
     select: {
-      id: true,
-      title: true,
-      level: true,
-      status: true,
-      startsAt: true,
-      endsAt: true,
-      capacity: true,
-      feeCents: true,
-      newcomerOnly: true,
-      description: true,
-      host: { select: { displayName: true, avatarUrl: true } },
-      _count: {
-        select: {
-          registrations: { where: { status: { in: [...GAME_SEAT_STATUSES] } } },
-        },
-      },
+      ...PUBLIC_GAME_LIST_SELECT,
       registrations: {
         where: { userId: actor.sub },
         select: {

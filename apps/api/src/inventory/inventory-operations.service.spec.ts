@@ -210,6 +210,7 @@ describe('InventoryOperationsService', () => {
       },
     ];
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: 'stocktake-1' }]),
       stocktake: {
         findUnique: vi.fn().mockResolvedValue({
           id: 'stocktake-1',

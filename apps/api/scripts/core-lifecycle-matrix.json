@@ -22,21 +22,58 @@
   "training": {
     "purpose": "微信与余额退款后，课包余额、历史消课、未来名单和席位同步",
     "isolated": true,
-    "files": ["test/training-refund-roster.integration.spec.ts"]
+    "files": [
+      "test/training-refund-roster.integration.spec.ts"
+    ]
   },
   "reporting": {
     "purpose": "经营摘要、使用率、退款净额与实际订单一致",
     "isolated": true,
-    "files": ["test/reporting-boundaries.integration.spec.ts"]
+    "files": [
+      "test/reporting-boundaries.integration.spec.ts"
+    ]
   },
   "boss_events": {
     "purpose": "关键事件和老板摘要可见性、去重及权限",
     "isolated": true,
-    "files": ["test/boss-event-visibility.integration.spec.ts"]
+    "files": [
+      "test/boss-event-visibility.integration.spec.ts"
+    ]
   },
   "amounts": {
     "purpose": "支付金额、免费订单及混合现金赠送余额边界",
     "isolated": true,
-    "files": ["test/payment-amount-boundaries.integration.spec.ts"]
+    "files": [
+      "test/payment-amount-boundaries.integration.spec.ts"
+    ]
+  },
+  "refund_fixes": {
+    "purpose": "持久退款审批、出站重试、回调补偿及累计充值回收",
+    "isolated": true,
+    "files": [
+      "test/refund-review-fixes.integration.spec.ts"
+    ]
+  },
+  "activity_fixes": {
+    "purpose": "活动取消退款义务、会员退出响应、场地履约、联盟更正与摘要口径",
+    "isolated": true,
+    "files": [
+      "test/activity-cancellation-fixes.integration.spec.ts"
+    ]
+  },
+  "training_inventory_fixes": {
+    "purpose": "培训更正、分成计算、盘点并发、历史批次及低库存",
+    "isolated": true,
+    "files": [
+      "test/training-inventory-fixes.integration.spec.ts"
+    ]
+  },
+  "privacy_search_fixes": {
+    "purpose": "注销头像撤销与可重试清理、订单搜索范围及分页",
+    "isolated": true,
+    "files": [
+      "test/privacy-avatar.integration.spec.ts",
+      "test/order-search.integration.spec.ts"
+    ]
   }
 }

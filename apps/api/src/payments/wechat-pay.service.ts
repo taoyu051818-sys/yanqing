@@ -149,6 +149,38 @@ export class WechatPayService {
     return { closed: true };
   }
 
+  async queryRefund(
+    refundNo: string,
+    expected: { orderNo: string; refundCents: number; totalCents: number },
+  ) {
+    const response = await this.signedRequest(
+      'GET',
+      `/v3/refund/domestic/refunds/${encodeURIComponent(refundNo)}`,
+      '',
+    );
+    const result = await this.readWechatJson<{
+      refund_id?: string;
+      out_refund_no?: string;
+      out_trade_no?: string;
+      status?: string;
+      amount?: { refund: number; total: number };
+      code?: string;
+      message?: string;
+    }>(response);
+    if (response.status === 404 && result.code === 'RESOURCE_NOT_EXISTS')
+      return null;
+    if (!response.ok || !result.refund_id || !result.status)
+      throw new BadGatewayException(result.message || '微信退款查询失败');
+    if (
+      result.out_refund_no !== refundNo ||
+      result.out_trade_no !== expected.orderNo ||
+      result.amount?.refund !== expected.refundCents ||
+      result.amount?.total !== expected.totalCents
+    )
+      throw new BadGatewayException('微信退款查询结果与本地订单不一致');
+    return { refundId: result.refund_id, status: result.status };
+  }
+
   async handleNotification(
     rawBody: Buffer,
     headers: Record<string, string | string[] | undefined>,
@@ -237,7 +269,8 @@ export class WechatPayService {
         'user-agent': 'yanqing-badminton/1.0',
         ...this.wechatpaySerialHeader(),
       },
-      body,
+      body: method === 'GET' ? undefined : body,
+      signal: AbortSignal.timeout(10_000),
     });
   }
 

@@ -42,6 +42,7 @@ const props = defineProps<{
   settlementHasAction: (settlement: any) => boolean;
   canFinanceAction: boolean;
   actionKey: string;
+  reviseSettlement: (settlement: any) => void;
   submitSettlement: (settlement: any) => Promise<void>;
   acting: (key: string) => boolean;
   canMerchantAction: boolean;
@@ -64,6 +65,7 @@ const {
   settlementHasAction,
   canFinanceAction,
   actionKey,
+  reviseSettlement,
   submitSettlement,
   acting,
   canMerchantAction,
@@ -155,7 +157,9 @@ const {
           workflowNote(settlement)
         }}</text>
       </view>
+      <view v-if="settlement.detail?.revisionHistory?.length" class="state-guidance"><text v-for="revision in settlement.detail.revisionHistory" :key="revision.version" class="muted workflow-note">更正 v{{ revision.version }}：{{ money(revision.before?.attributedGrossProfitCents) }} → {{ money(revision.after?.attributedGrossProfitCents) }} · {{ revision.reason }}</text></view>
       <view v-if="settlementHasAction(settlement)" class="action-row">
+        <button v-if="settlement.status === 'DRAFT' && canFinanceAction" class="ghost action-button" :disabled="loading || Boolean(actionKey)" @tap="reviseSettlement(settlement)">更正草稿</button>
         <button
           v-if="settlement.status === 'DRAFT' && canFinanceAction"
           class="primary action-button"

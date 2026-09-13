@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onHide, onShow, onUnload } from '@dcloudio/uni-app'
 import AppIcon from '../../components/AppIcon.vue'
 import SectionEmpty from '../../components/SectionEmpty.vue'
 import ActionDialog from '../../components/ActionDialog.vue'
 import BookingMemberPicker from '../../components/BookingMemberPicker.vue'
 import { endpoints } from '../../services/api'
+import { captureAuthSession, isAuthSessionCurrent } from '../../services/auth-session'
 import { useSessionStore } from '../../stores/session'
 import type { CourtAvailability, MemberDirectoryItem } from '../../types/domain'
 import { money, today } from '../../utils/format'
@@ -134,6 +135,12 @@ function choose(courtId: string, slot: CourtAvailability['slots'][number]) {
   selected.value = { courtId, slotId: slot.id }; submissionError.value = ''
 }
 
+let pageGeneration = 0
+let pageVisible = true
+function leavePage() { pageVisible = false; pageGeneration++; showOverride.value = false }
+onHide(leavePage)
+onUnload(leavePage)
+
 async function submit(confirmedOverride = false) {
   if (loading.value || submitting.value || (!assisted.value && couponLoading.value)) return
   if (!session.isAuthenticated) return requestMemberLogin('/pages/booking/index')
@@ -144,6 +151,8 @@ async function submit(confirmedOverride = false) {
   const reason = needsOverride.value ? overrideReason.value.trim() : undefined
   submitting.value = true; submissionError.value = ''
   const isAssisted = assisted.value, customer = targetMember.value
+  const generation = pageGeneration, owner = captureAuthSession()
+  const current = () => pageVisible && generation === pageGeneration && isAuthSessionCurrent(owner)
   try {
     const command = {
       date: date.value, ...selected.value,
@@ -154,6 +163,7 @@ async function submit(confirmedOverride = false) {
     const order: any = await withPendingCreationKey(isAssisted ? 'venue.booking.assisted' : 'venue.booking.member', command, creationIdempotencyKey =>
       endpoints.createBooking({ ...command, creationIdempotencyKey }),
     )
+    if (!current()) return
     showOverride.value = false
     if (isAssisted) {
       assistedOrder.value = { id: order.id, memberName: customer!.displayName, payableCents: order.payableCents }
@@ -163,7 +173,7 @@ async function submit(confirmedOverride = false) {
       uni.showToast({ title: '已锁定10分钟', icon: 'success' })
       openMemberPage(`/pages/order/index${order?.id ? `?id=${encodeURIComponent(order.id)}` : ''}`)
     }
-  } catch (cause: any) { submissionError.value = cause.message || '预约未完成，请重试'; await load() }
+  } catch (cause: any) { if (current()) { submissionError.value = cause.message || '预约未完成，请重试'; await load() } }
   finally { submitting.value = false }
 }
 function openAssistedOrder() {
@@ -171,6 +181,7 @@ function openAssistedOrder() {
 }
 
 onShow(async () => {
+  pageVisible = true
   await session.hydrate()
   const intent = consumeBookingIntent()
   if (intent?.mode === 'ASSISTED' && canAssist.value) {

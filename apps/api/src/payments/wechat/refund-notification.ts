@@ -18,6 +18,22 @@ import {
 } from './wechat-notice-types.js';
 import { reverseRechargeBalance } from './recharge-refund-reversal.js';
 
+async function resolveDispatchRisk(
+  db: Pick<Prisma.TransactionClient, 'riskEvent'>,
+  refundId: string,
+  now = new Date(),
+) {
+  await db.riskEvent.updateMany({
+    where: {
+      ruleCode: 'WECHAT_REFUND_DISPATCH_DEFERRED',
+      objectType: 'Refund',
+      objectId: refundId,
+      status: { in: ['OPEN', 'REVIEWING'] },
+    },
+    data: { status: 'RESOLVED', resolvedAt: now },
+  });
+}
+
 export async function finalizeRefund(
   prisma: PrismaService,
   finalizer: OrderFinalizerService,
@@ -52,8 +68,10 @@ export async function finalizeRefund(
           ) {
             throw new BadRequestException('微信退款通知金额不一致');
           }
-          if (refund.status === RefundStatus.SUCCEEDED)
+          if (refund.status === RefundStatus.SUCCEEDED) {
+            await resolveDispatchRisk(tx, refund.id);
             return { accepted: true, idempotent: true };
+          }
           const refundedCents = refund.order.refundedCents + refund.amountCents;
           const fullyRefunded = refundedCents >= refund.order.paidCents;
           const now = new Date();
@@ -66,6 +84,7 @@ export async function finalizeRefund(
               completedAt: now,
             },
           });
+          await resolveDispatchRisk(tx, refund.id, now);
           await requireOrderTransition(tx, 'REFUND_SUCCEEDED', {
             where: { id: refund.orderId, status: refund.order.status },
             data: {
@@ -104,6 +123,7 @@ export async function finalizeRefund(
               tx,
               refund,
               payment?.amountCents || notice.amount.total,
+              refundedCents,
             );
             const outstandingRecoveryCents = rechargeRecovery.reduce(
               (sum, item) => sum + item.shortfallCents,
@@ -192,6 +212,7 @@ export async function finalizeRefund(
           where: { refundNo: notice.out_refund_no },
         });
         if (completed?.status === RefundStatus.SUCCEEDED) {
+          await resolveDispatchRisk(prisma, completed.id);
           return { accepted: true, idempotent: true };
         }
         if (attempt < 3) continue;

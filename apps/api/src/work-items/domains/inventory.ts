@@ -1,5 +1,5 @@
 import { PrismaService } from '../../database/prisma.service.js';
-import { AppRole } from '../../generated/prisma/client.js';
+import { AppRole, type InventoryItem } from '../../generated/prisma/client.js';
 import { WorkItem, WorkItemContext } from '../work-item-context.js';
 
 export function loadInventory(
@@ -8,19 +8,16 @@ export function loadInventory(
 ) {
   const { limit, canOperateInventory } = context;
   return canOperateInventory
-    ? prisma.inventoryItem.findMany({
-        where: { enabled: true },
-        select: {
-          id: true,
-          name: true,
-          sku: true,
-          stock: true,
-          safeStock: true,
-          updatedAt: true,
-        },
-        orderBy: { stock: 'asc' },
-        take: Math.min(limit * 2, 200),
-      })
+    ? prisma.$queryRaw<
+        Pick<
+          InventoryItem,
+          'id' | 'name' | 'sku' | 'stock' | 'safeStock' | 'updatedAt'
+        >[]
+      >`SELECT id, name, sku, stock, "safeStock", "updatedAt"
+        FROM "InventoryItem"
+        WHERE enabled = true AND stock <= "safeStock"
+        ORDER BY stock ASC, id ASC
+        LIMIT ${limit}`
     : Promise.resolve([]);
 }
 

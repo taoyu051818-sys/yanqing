@@ -45,99 +45,132 @@ export async function checkIn(
   ) {
     throw new ForbiddenException('仅前台或管理员可办理场地签到');
   }
-  const order = await prisma.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({
-      where: { id: orderId },
-      include: { bookings: true },
-    });
-    if (!order || order.businessType !== BusinessType.VENUE)
-      throw new NotFoundException('订场订单不存在');
-    // A scanner retry after a timeout is a safe no-op.  Returning the
-    // already checked-in order avoids duplicate audit records and lets the
-    // front desk continue the customer journey without a false 409.
-    if (order.status === OrderStatus.CHECKED_IN) return order;
-    if (order.status !== OrderStatus.PAID)
-      throw new ConflictException('订单未支付或状态不可签到');
-    const activeBookings = order.bookings.filter(
-      (booking) => booking.status !== BookingStatus.CANCELLED,
-    );
-    if (!activeBookings.length) {
-      throw new ConflictException('订单没有可履约的场地占用记录');
-    }
-    const checkInStatuses: BookingStatus[] = [
-      BookingStatus.CONFIRMED,
-      BookingStatus.CHECKED_IN,
-    ];
-    if (
-      activeBookings.some(
-        (booking) => !checkInStatuses.includes(booking.status),
-      )
-    ) {
-      throw new ConflictException('场地占用记录状态不可签到');
-    }
-    const scheduledStartsAt = new Date(
-      Math.min(...activeBookings.map((booking) => booking.startsAt.getTime())),
-    );
-    const timeWindowPolicy = await assertOperationTimeWindow(tx, {
-      actor,
-      parameterKey: VENUE_CHECK_IN_WINDOW_PARAMETER,
-      defaults: { earlyMinutes: 30, lateMinutes: 30 },
-      scheduledStartsAt,
-      scheduledEndsAt: scheduledStartsAt,
-      action: 'VENUE_CHECK_IN',
-      objectType: 'Order',
-      objectId: orderId,
-      overrideReason: dto.overrideReason,
-    });
-    const shiftAuthorization = await requireOpenFrontDeskShift(tx, actor);
-    await tx.courtBooking.updateMany({
-      where: { orderId, status: BookingStatus.CONFIRMED },
-      data: { status: BookingStatus.CHECKED_IN },
-    });
-    const changed = await transitionOrder(tx, 'CHECK_IN', {
-      where: { id: orderId, status: OrderStatus.PAID },
-      data: { status: OrderStatus.CHECKED_IN },
-    });
-    if (changed.count !== 1) {
-      const latest = await tx.order.findUnique({ where: { id: orderId } });
-      if (latest?.status === OrderStatus.CHECKED_IN) {
+  const order = await prisma
+    .$transaction(
+      async (tx) => {
+        const order = await tx.order.findUnique({
+          where: { id: orderId },
+          include: { bookings: true },
+        });
+        if (!order || order.businessType !== BusinessType.VENUE)
+          throw new NotFoundException('订场订单不存在');
+        // A scanner retry after a timeout is a safe no-op.  Returning the
+        // already checked-in order avoids duplicate audit records and lets the
+        // front desk continue the customer journey without a false 409.
+        if (order.status === OrderStatus.CHECKED_IN) return order;
+        if (
+          order.status !== OrderStatus.PAID &&
+          order.status !== OrderStatus.PARTIALLY_REFUNDED
+        )
+          throw new ConflictException('订单未支付或状态不可签到');
+        if (
+          order.status === OrderStatus.PARTIALLY_REFUNDED &&
+          order.paidCents <= order.refundedCents
+        )
+          throw new ConflictException('订单没有剩余已付金额，不可签到');
+        const activeBookings = order.bookings.filter(
+          (booking) => booking.status !== BookingStatus.CANCELLED,
+        );
+        if (!activeBookings.length) {
+          throw new ConflictException('订单没有可履约的场地占用记录');
+        }
+        if (
+          activeBookings.every(
+            (booking) => booking.status === BookingStatus.CHECKED_IN,
+          )
+        )
+          return order;
+        const checkInStatuses: BookingStatus[] = [
+          BookingStatus.CONFIRMED,
+          BookingStatus.CHECKED_IN,
+        ];
+        if (
+          activeBookings.some(
+            (booking) => !checkInStatuses.includes(booking.status),
+          )
+        ) {
+          throw new ConflictException('场地占用记录状态不可签到');
+        }
+        const scheduledStartsAt = new Date(
+          Math.min(
+            ...activeBookings.map((booking) => booking.startsAt.getTime()),
+          ),
+        );
+        const timeWindowPolicy = await assertOperationTimeWindow(tx, {
+          actor,
+          parameterKey: VENUE_CHECK_IN_WINDOW_PARAMETER,
+          defaults: { earlyMinutes: 30, lateMinutes: 30 },
+          scheduledStartsAt,
+          scheduledEndsAt: scheduledStartsAt,
+          action: 'VENUE_CHECK_IN',
+          objectType: 'Order',
+          objectId: orderId,
+          overrideReason: dto.overrideReason,
+        });
+        const shiftAuthorization = await requireOpenFrontDeskShift(tx, actor);
+        await tx.courtBooking.updateMany({
+          where: { orderId, status: BookingStatus.CONFIRMED },
+          data: { status: BookingStatus.CHECKED_IN },
+        });
+        const changed = await transitionOrder(tx, 'CHECK_IN', {
+          where: { id: orderId, status: order.status },
+          data: {
+            status:
+              order.status === OrderStatus.PARTIALLY_REFUNDED
+                ? OrderStatus.PARTIALLY_REFUNDED
+                : OrderStatus.CHECKED_IN,
+          },
+        });
+        if (changed.count !== 1) {
+          const latest = await tx.order.findUnique({ where: { id: orderId } });
+          if (latest?.status === OrderStatus.CHECKED_IN) {
+            return tx.order.findUniqueOrThrow({
+              where: { id: orderId },
+              include: { bookings: true },
+            });
+          }
+          throw new ConflictException('订单状态已被其他操作更新，请刷新后重试');
+        }
+        await auditAdminShiftBypass(
+          tx,
+          actor,
+          shiftAuthorization,
+          'VENUE_CHECK_IN',
+          'Order',
+          orderId,
+        );
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.sub,
+            actorRole: actor.roles[0],
+            action: 'VENUE_CHECK_IN',
+            objectType: 'Order',
+            objectId: orderId,
+            newValue: {
+              frontDeskShiftId:
+                shiftAuthorization.mode === 'OPEN_SHIFT'
+                  ? shiftAuthorization.shiftId
+                  : null,
+              adminEmergencyBypass: shiftAuthorization.mode === 'ADMIN_BYPASS',
+              timeWindowPolicy,
+            } as never,
+          },
+        });
         return tx.order.findUniqueOrThrow({
           where: { id: orderId },
           include: { bookings: true },
         });
-      }
-      throw new ConflictException('订单状态已被其他操作更新，请刷新后重试');
-    }
-    await auditAdminShiftBypass(
-      tx,
-      actor,
-      shiftAuthorization,
-      'VENUE_CHECK_IN',
-      'Order',
-      orderId,
-    );
-    await tx.auditLog.create({
-      data: {
-        actorId: actor.sub,
-        actorRole: actor.roles[0],
-        action: 'VENUE_CHECK_IN',
-        objectType: 'Order',
-        objectId: orderId,
-        newValue: {
-          frontDeskShiftId:
-            shiftAuthorization.mode === 'OPEN_SHIFT'
-              ? shiftAuthorization.shiftId
-              : null,
-          adminEmergencyBypass: shiftAuthorization.mode === 'ADMIN_BYPASS',
-          timeWindowPolicy,
-        } as never,
       },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    )
+    .catch((error: unknown) => {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2034'
+      )
+        throw new ConflictException('场地签到发生并发冲突，请刷新后重试');
+      throw error;
     });
-    return tx.order.findUniqueOrThrow({
-      where: { id: orderId },
-      include: { bookings: true },
-    });
-  });
   return orderResponse(order);
 }
 

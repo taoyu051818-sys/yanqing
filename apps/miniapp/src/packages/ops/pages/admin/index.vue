@@ -20,6 +20,7 @@ import { isMockMode } from "../../../../services/http";
 import { useSessionStore } from "../../../../stores/session";
 import type { AppRole } from "../../../../types/domain";
 import { money, shortDate } from "../../../../utils/format";
+import { workGroupRoute } from "../../../../config/work-items";
 import { resolveWorkItemDestination } from "../../../../utils/work-item-deep-link";
 
 const session = useSessionStore();
@@ -69,6 +70,7 @@ const groupedWorkItems = computed<DisplayWorkGroup[]>(() =>
     .filter((group) => canSee(group.roles))
     .map((group) => ({
       ...group,
+      route: workGroupRoute(group, session.roles),
       items: workItems.value.filter((item) => workGroupKey(item) === group.key),
     })),
 );
@@ -225,11 +227,11 @@ const decisionPanels = computed(() => [
       ["商品毛利率", percent(dashboard.value?.goods?.grossMarginRate)],
       ["低库存预警", String(dashboard.value?.goods?.lowStockCount || 0)],
       [
-        "联盟归因毛利 / 合作费",
+        "当期结算毛利 / 合作费",
         `${money(dashboard.value?.alliance?.attributedGrossProfitCents)} / ${money(dashboard.value?.alliance?.cooperationFeeCents)}`,
       ],
       [
-        "联盟 ROI",
+        "当期结算 ROI",
         dashboard.value?.alliance?.roi == null
           ? "—"
           : Number(dashboard.value.alliance.roi).toFixed(2),
@@ -352,7 +354,7 @@ function openGroup(group: DisplayWorkGroup) {
 }
 
 function openWorkItem(item: WorkItem) {
-  const destination = resolveWorkItemDestination(item);
+  const destination = resolveWorkItemDestination(item, session.roles);
   if (!destination) {
     uni.showToast({ title: "该待办缺少可识别的处理入口", icon: "none" });
     return;
