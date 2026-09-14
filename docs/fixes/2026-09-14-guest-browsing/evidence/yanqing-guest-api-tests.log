@@ -1,0 +1,14 @@
+$ vitest run
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+[Nest] 76060  - 09/14/2026, 7:57:34 AM    WARN [PendingOrdersService] 场地待支付订单 order-venue-pending 自动取消暂未完成：微信订单已支付，等待同步
+[Nest] 76095  - 09/14/2026, 7:57:37 AM    WARN [HttpMutationAuditInterceptor] request mutation audit could not be persisted: audit database unavailable
+[Nest] 76107  - 09/14/2026, 7:58:38 AM   ERROR [PendingOrdersService] Error: isolated temporary database failure
+
+ Test Files  118 passed | 23 skipped (141)
+      Tests  892 passed | 327 skipped (1219)
+   Start at  07:57:19
+   Duration  21.30s (transform 17.51s, setup 0ms, import 112.68s, tests 8.65s, environment 25ms)
+

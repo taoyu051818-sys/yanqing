@@ -1,0 +1,242 @@
+[
+  {
+    "route": "pages/home/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 162,
+    "preview": "延庆金羽\n延庆金羽羽毛球馆\n订场、约球、上课，都在这里\n今天，来打场球\n先找一片合适的场地\n选日期，看时段和价格，再决定预约。\n查看场地与价格\n还想怎么打？\n参加球局\n一个人也能约球\n找课程\n成人 · 青少年\n报名比赛\n查看赛事与赛程\n会员与充值\n羽球装备\n已经预约或报名？到“我的”查看订单与安排。\n首页\n订场\n活动\n我的"
+  },
+  {
+    "route": "pages/booking/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 2682,
+    "preview": "在线订场\n每格 1 小时，显示该小时费用。下单后保留 10 分钟，未付款自动取消并释放场地。\n预订日期\n2026-09-14\n左右滑动查看全部场地\n时段\n1号场\n2号场\n3号场\n4号场\n5号场\n6号场\n7号场\n8号场\n9号场\n10号场\n11号场\n12号场\n13号场\n14号场\n15号场\n16号场\n17号场\n18号场\n19号场\n20号场\n07"
+  },
+  {
+    "route": "pages/community/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 119,
+    "preview": "球局与赛事\n找活动\n我的报名\n日常球局\n金羽积分赛\n报名中\n09月16日 07:56\n周末进阶双打局\n主理人 周末主理人阿凯 · 进阶 · 4/6 人\n¥68.00 / 人\n查看球局详情\n查看往期活动\n我想组织球局\n首页\n订场\n活动\n我的"
+  },
+  {
+    "route": "pages/event-detail/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 45,
+    "preview": "积分赛详情\n暂时无法查看赛事\n分享链接不完整，请好友重新分享这场赛事。\n重新加载\n返回首页"
+  },
+  {
+    "route": "pages/event-signup/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 81,
+    "preview": "双打报名\n一个账号，即可报名两人\n登录后可代填两位选手资料，搭档不需要注册小程序。\n登录并填写报名\n缺少赛事信息，请从活动页面重新进入\n重新同步状态\n返回赛事列表"
+  },
+  {
+    "route": "pages/game-detail/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 56,
+    "preview": "球局详情\n暂时无法查看这场球局\n邀请链接无效，或球局尚未发布。可以请好友重新分享，或看看其他球局。\n查看其他球局"
+  },
+  {
+    "route": "pages/profile/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 123,
+    "preview": "个人中心\n登录，查看我的安排\n订单、课程和权益，登录后同步\n我的订单\n预约、付款与退款\n我的课程\n剩余课时、上课记录\n我的活动\n球局报名、比赛与成绩\n我的服务\n钱包与权益\n我的卡券\n邀请好友\n资料与设置\n开发验收工具 展开\n首页\n订场\n活动\n我的"
+  },
+  {
+    "route": "pages/login/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 113,
+    "preview": "延庆金羽羽毛球\n先浏览，再决定。登录用于预约、报名和查询个人订单。\n我已阅读并同意以下协议\n《用户服务协议》\n《隐私保护指引》\n微信一键登录\n暂不登录，继续浏览\n浏览场地和活动无需登录。头像、昵称可稍后自主完善。\n开发验收入口"
+  },
+  {
+    "route": "pages/order/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 68,
+    "preview": "订单\n游客浏览\n我的订单\n订场、活动和课程订单会在这里汇总，登录后可查看付款和使用进度。\n登录查看我的记录\n全部\n待付款\n待使用\n售后中"
+  },
+  {
+    "route": "pages/wallet/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 107,
+    "preview": "钱包与权益\n游客浏览\n钱包与权益\n这里汇总你的余额、奖励权益与收支记录。可以先查看余额使用说明和会员方案。\n登录查看我的钱包\n充值与会员\n我的卡券\n查看全部权益\n余额使用说明\n收支与变动记录\n全部记录 · 点击筛选"
+  },
+  {
+    "route": "pages/settings/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 58,
+    "preview": "资料与设置\n游客浏览\n资料与设置\n头像、昵称和账号设置由你自主完善，登录后可查看和编辑。\n登录管理个人资料\n个人资料"
+  },
+  {
+    "route": "pages/invite/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 64,
+    "preview": "邀请好友\n游客浏览\n邀请好友一起打球\n可以从球局或赛事详情分享活动。登录后还可生成个人邀请卡片、查看邀请奖励。\n登录生成邀请卡片"
+  },
+  {
+    "route": "pages/training/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 147,
+    "preview": "课程\n找到适合你的课程\n先选课程，再选择班级与报名学员。\n找课程\n我的课程\n全部\n成人课程\n青少年课程\n成人\n有效期 120 天\n成人进阶双打课包\n12次课\n1个可选班级\n¥1280.00\n选择报名\n青少年\n有效期 180 天\n青少年成长课包\n20次课\n1个可选班级\n¥1980.00\n选择报名"
+  },
+  {
+    "route": "pages/coupon/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 68,
+    "preview": "我的卡券\n游客浏览\n我的券包\n领取的优惠券会保存在这里，也可以先填写场馆提供的券码。\n登录查看我的卡券\n我的券包\n其他领券方式：输入券码"
+  },
+  {
+    "route": "pages/membership/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 357,
+    "preview": "会员权益\n金羽会员\n让每次到场更有价值\n充值金额与赠送权益均由场馆当前生效方案确定\n余额充值\n充值100元\n本金 ¥100.00 · 赠送 ¥0.00，分账到账\n¥100.00 · 下一步付款\n充值500元赠25元\n本金 ¥500.00 · 赠送 ¥25.00，分账到账\n¥500.00 · 下一步付款\n充值1000元赠100元\n本金 ¥1"
+  },
+  {
+    "route": "pages/shop/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 188,
+    "preview": "金羽小店\n金羽小店\n场馆好物，在线下单，到店领取\n羽毛\n金羽训练羽毛球\n现货 · 库存 36单价 ¥88.00\n−\n1\n＋\n合计 ¥88.00\n下单，下一步付款\n手胶\n专业吸汗手胶\n现货 · 库存 8单价 ¥15.00\n−\n1\n＋\n合计 ¥15.00\n下单，下一步付款\n饮品\n运动电解质饮料\n现货 · 库存 42单价 ¥8.00\n−\n1\n＋"
+  },
+  {
+    "route": "pages/workspace/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 55,
+    "preview": "经营工作台\n这里是员工经营入口\n当前账号没有经营角色，请从会员首页继续使用订场、活动和会员服务。\n返回会员首页"
+  },
+  {
+    "route": "packages/admin/pages/switch/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 295,
+    "preview": "管理员演示通道\nADMIN DEMO CHANNEL\n身份与端口切换\n当前为 会员端。模拟模式不会访问外部服务器，所有操作仅保存在本机微信缓存。\n选择体验端\n会员端\n会员 · 会员\n当前\n前台端\n前台 · 前台\n进入 ›\n教练端\n教练 · 教练\n进入 ›\n主理人端\n主理人 · 主理人\n进入 ›\n商户端\n联盟商户 · 联盟商户\n进入 ›\n财"
+  },
+  {
+    "route": "packages/ops/pages/frontdesk/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 121,
+    "preview": "前台运营\nTODAY OPERATIONS\n今日营业\n先开班，再按现场队列处理签到、订单、退款申请和联盟券核销。\n会员端\n无经营权限\n当前账号不具备此经营中心的访问权限，经营数据不会加载。请返回会员端继续使用订场、活动和会员服务。\n返回会员端"
+  },
+  {
+    "route": "packages/ops/pages/coach/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 129,
+    "preview": "教练运营\nTRAINING OPERATIONS\n培训运营\n以课表为主线，按点名、消课建议、主管确认和课后反馈完成培训账本闭环。\n会员端\n无经营权限\n当前账号不具备此经营中心的访问权限，经营数据不会加载。请返回会员端继续使用订场、活动和会员服务。\n返回会员端"
+  },
+  {
+    "route": "packages/ops/pages/host/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 129,
+    "preview": "主理人运营\nGAME OPERATIONS\n球局运营\n从草稿创建、发布报名、候补晋级、现场签到到结束结算，主理人仅操作本人球局。\n会员端\n无经营权限\n当前账号不具备此经营中心的访问权限，经营数据不会加载。请返回会员端继续使用订场、活动和会员服务。\n返回会员端"
+  },
+  {
+    "route": "packages/ops/pages/event/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 132,
+    "preview": "赛事运营\nEVENT OPERATIONS\n赛事运营\n按赛事状态和岗位权限推进发布、报名签到、五轮瑞士配对、比分确认、纠错和完赛归档。\n会员端\n无经营权限\n当前账号不具备此经营中心的访问权限，经营数据不会加载。请返回会员端继续使用订场、活动和会员服务。\n返回会员端"
+  },
+  {
+    "route": "packages/ops/pages/merchant/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 121,
+    "preview": "联盟运营\nALLIANCE MERCHANT\n联盟商户\n前台只代为核销匹配商户的券码，不维护合同、券活动或结算。\n会员端\n无经营权限\n当前账号不具备此经营中心的访问权限，经营数据不会加载。请返回会员端继续使用订场、活动和会员服务。\n返回会员端"
+  },
+  {
+    "route": "packages/ops/pages/admin/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 126,
+    "preview": "经营总览\nBUSINESS CONTROL\n经营总览\n待办与异常优先处理；经营指标独立查看，不让分析信息挤占现场工作入口。\n会员端\n无经营权限\n当前账号不具备此经营中心的访问权限，经营数据不会加载。请返回会员端继续使用订场、活动和会员服务。\n返回会员端"
+  },
+  {
+    "route": "packages/ops/pages/finance/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 153,
+    "preview": "财务结算\nFINANCE & RECONCILIATION\n财务结算\n以营业日期为边界核对收入、退款、培训分成、联盟结算和寄售供应商应付；每个财务动作都有状态、原因和复核责任。\n会员端\n无经营权限\n当前账号不具备此经营中心的访问权限，经营数据不会加载。请返回会员端继续使用订场、活动和会员服务。\n返回会员端"
+  },
+  {
+    "route": "packages/ops/pages/inventory/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 133,
+    "preview": "商品库存\nINVENTORY OPERATIONS\n库存作业中心\n前台仅查看低库存预警；完整库存、进价、供应商与采购作业仅向管理员开放。\n会员端\n无经营权限\n当前账号不具备此经营中心的访问权限，经营数据不会加载。请返回会员端继续使用订场、活动和会员服务。\n返回会员端"
+  },
+  {
+    "route": "packages/ops/pages/members/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 129,
+    "preview": "客户与会员\nCRM & MEMBER 360\n客户经营\n线索先进入责任队列，跟进记录只追加；转化后关联现有会员并进入客户360。\n会员端\n无经营权限\n当前账号不具备此经营中心的访问权限，经营数据不会加载。请返回会员端继续使用订场、活动和会员服务。\n返回会员端"
+  },
+  {
+    "route": "packages/ops/pages/venue/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 147,
+    "preview": "场馆维护日历\nVENUE AVAILABILITY CONTROL\n场馆维护日历\n先核对预约，再按真实起止时间封场；封场只改变可售资源，不会静默取消订单或触发退款。\n会员端\n无经营权限\n当前账号不具备此经营中心的访问权限，经营数据不会加载。请返回会员端继续使用订场、活动和会员服务。\n返回会员端"
+  },
+  {
+    "route": "packages/ops/pages/governance/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 129,
+    "preview": "治理与权限\nGOVERNANCE & CONTROL\n治理与审计\n管理员维护组织权限和业务规则；财务仅处理风险、审计与数据导出。\n会员端\n无经营权限\n当前账号不具备此经营中心的访问权限，经营数据不会加载。请返回会员端继续使用订场、活动和会员服务。\n返回会员端"
+  },
+  {
+    "route": "packages/ops/pages/pc-login/index",
+    "redirected": false,
+    "modals": 0,
+    "errors": [],
+    "chars": 60,
+    "preview": "电脑后台登录\n电脑后台登录\n在电脑打开管理后台，再用此处扫描登录二维码。\n当前为模拟模式，请使用连接正式服务器的小程序。"
+  }
+]

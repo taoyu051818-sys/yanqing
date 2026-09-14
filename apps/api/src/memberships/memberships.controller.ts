@@ -5,7 +5,7 @@ import { MembershipPurchasesService } from './purchases/memberships-purchases.se
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
-import { CurrentUser, Roles } from '../common/auth/auth.decorators.js';
+import { CurrentUser, Public, Roles } from '../common/auth/auth.decorators.js';
 import type { AuthUser } from '../common/auth/auth-user.js';
 import { AppRole } from '../generated/prisma/enums.js';
 import {
@@ -32,6 +32,7 @@ export class MembershipsController {
   ) {}
 
   @Get('products')
+  @Public()
   products() {
     return this.membershipsMembershipProducts.products();
   }
@@ -76,6 +77,7 @@ export class MembershipsController {
   }
 
   @Get('recharge-plans')
+  @Public()
   rechargePlans() {
     return this.membershipsMembershipRechargePlans.rechargePlans();
   }

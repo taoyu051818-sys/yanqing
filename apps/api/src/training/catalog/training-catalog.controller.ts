@@ -8,7 +8,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, Roles } from '../../common/auth/auth.decorators.js';
+import { CurrentUser, Public, Roles } from '../../common/auth/auth.decorators.js';
 import type { AuthUser } from '../../common/auth/auth-user.js';
 import { AppRole } from '../../generated/prisma/enums.js';
 import {
@@ -26,6 +26,12 @@ export class TrainingCatalogController {
     @Inject(TrainingCatalogService)
     private readonly catalog: TrainingCatalogService,
   ) {}
+
+  @Get('products/public')
+  @Public()
+  publicProducts() {
+    return this.catalog.listProducts();
+  }
 
   @Get('products')
   products(@CurrentUser() actor: AuthUser) {

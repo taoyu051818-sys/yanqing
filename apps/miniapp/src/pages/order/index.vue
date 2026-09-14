@@ -9,12 +9,14 @@ import {
   onUnload,
 } from "@dcloudio/uni-app";
 import AppIcon from "../../components/AppIcon.vue";
+import GuestState from "../../components/GuestState.vue";
 import SectionEmpty from "../../components/SectionEmpty.vue";
 import ReasonForm from "../../components/ReasonForm.vue";
 import StatusBadge from "../../components/StatusBadge.vue";
 import { money } from "../../utils/format";
 import { useSessionStore } from "../../stores/session";
 import {
+  requestMemberLogin,
   openMemberPage,
   openMemberRecord,
 } from "../../utils/member-navigation";
@@ -117,6 +119,7 @@ onPullDownRefresh(() => load());
 
 <template>
   <view class="page safe-bottom">
+    <GuestState v-if="!session.isAuthenticated" title="我的订单" description="订场、活动和课程订单会在这里汇总，登录后可查看付款和使用进度。" @login="requestMemberLogin(focusedId ? `/pages/order/index?id=${encodeURIComponent(focusedId)}` : `/pages/order/index?status=${statusFilter}`)" />
     <button
       v-if="focusedId"
       class="secondary all-orders"
@@ -412,13 +415,13 @@ onPullDownRefresh(() => load());
       加载更多订单
     </button>
     <SectionEmpty
-      v-if="!orders.length && !loading && !error"
+      v-if="session.isAuthenticated && !orders.length && !loading && !error"
       icon="receipt"
       :title="statusFilter ? '暂无这类订单' : '还没有订单'"
       description="已预约或报名的记录会保存在这里。"
     />
     <button
-      v-if="!orders.length && !loading && !error"
+      v-if="session.isAuthenticated && !orders.length && !loading && !error"
       class="secondary all-orders"
       @tap="openMemberPage('/pages/booking/index')"
     >

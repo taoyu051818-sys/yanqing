@@ -382,6 +382,18 @@
     "domain": "training",
     "controller": "TrainingCatalogController",
     "controllerFile": "training/catalog/training-catalog.controller.ts",
+    "method": "publicProducts",
+    "verb": "GET",
+    "path": "/api/v1/training/products/public",
+    "roles": [],
+    "isPublic": true,
+    "provider": "TrainingCatalogService",
+    "serviceMethod": "listProducts"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingCatalogController",
+    "controllerFile": "training/catalog/training-catalog.controller.ts",
     "method": "products",
     "verb": "GET",
     "path": "/api/v1/training/products",

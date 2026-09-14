@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import GuestState from '../../components/GuestState.vue'
+import { captureAuthSession, isAuthSessionCurrent, useAccessToken } from '../../services/auth-session'
 import { onShow } from '@dcloudio/uni-app'
 import ReasonForm from '../../components/ReasonForm.vue'
 import AppIcon from '../../components/AppIcon.vue'
@@ -33,6 +35,7 @@ function chooseProfileAvatar(event: any) {
 }
 
 async function saveProfile() {
+  if (!session.isAuthenticated) return requestMemberLogin('/pages/settings/index')
   const displayName = profileNickname.value.trim()
   if (!displayName) {
     profileError.value = '请选择或填写微信昵称'
@@ -54,12 +57,14 @@ async function loadPrivacyRequests() {
     erasureRequests.value = []
     return
   }
+  const owner = captureAuthSession()
   privacyLoading.value = true
   privacyError.value = ''
   try {
-    erasureRequests.value = await endpoints.myDataErasureRequests()
+    const result = await endpoints.myDataErasureRequests()
+    if (isAuthSessionCurrent(owner)) erasureRequests.value = result
   } catch (cause: any) {
-    privacyError.value = cause?.message || '注销申请状态暂时无法同步'
+    if (isAuthSessionCurrent(owner)) privacyError.value = cause?.message || '注销申请状态暂时无法同步'
   } finally {
     privacyLoading.value = false
   }
@@ -112,9 +117,14 @@ async function cancelErasure(reason: string) {
 
 
 let initializedUser = ''
+function clearPrivateState() { initializedUser = ''; erasureRequests.value = []; privacyForm.value = ''; profileNickname.value = ''; profileAvatarFile.value = ''; profileError.value = ''; privacyError.value = '' }
+watch(useAccessToken(), clearPrivateState, { flush: 'sync' })
 async function loadSettings() {
-  if (!session.isAuthenticated) return requestMemberLogin('/pages/settings/index')
-  if (!(await session.hydrate())) { profileError.value = '资料暂未同步，请稍后重试。'; return }
+  if (!session.isAuthenticated) { clearPrivateState(); return }
+  const owner = captureAuthSession()
+  const refreshed = await session.hydrate()
+  if (!isAuthSessionCurrent(owner)) return
+  if (!refreshed) { profileError.value = '资料暂未同步，请稍后重试。'; return }
   if (session.user && initializedUser !== session.user.id) { openProfileEditor(); initializedUser = session.user.id }
   await loadPrivacyRequests()
 }
@@ -122,7 +132,8 @@ onShow(loadSettings)
 </script>
 <template>
   <view class="page safe-bottom">
-    <text class="section-title">个人资料</text>
+    <GuestState v-if="!session.isAuthenticated" title="资料与设置" description="头像、昵称和账号设置由你自主完善，登录后可查看和编辑。" action-text="登录管理个人资料" @login="requestMemberLogin('/pages/settings/index')" />
+    <text v-if="session.isAuthenticated" class="section-title">个人资料</text>
     <view v-if="profileError && !session.user" class="card"><text class="profile-error">{{ profileError }}</text><button class="secondary" @tap="loadSettings">重试</button></view>
     <view v-if="session.user" class="profile-editor card">
       <view class="editor-heading"><view><text class="menu-title">微信头像与昵称</text><text class="muted">仅在你主动选择并确认后更新</text></view></view>

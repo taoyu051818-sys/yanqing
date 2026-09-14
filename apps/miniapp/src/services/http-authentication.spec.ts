@@ -43,7 +43,7 @@ describe('remote authentication transport', () => {
     expect(token.value).toBe('')
     expect(storage.has('yanqing_access_token')).toBe(false)
     expect(storage.has('yanqing_actor_id')).toBe(false)
-    expect(reLaunchMock).toHaveBeenCalledWith({ url: '/pages/login/index' })
+    expect(reLaunchMock).not.toHaveBeenCalled()
   })
 
   it('keeps a public detail page open when its optional roster session expires', async () => {
@@ -51,7 +51,7 @@ describe('remote authentication transport', () => {
     auth.saveAuthSession('expired-token', 'member-1')
     requestMock.mockImplementation((options: UniApp.RequestOptions) => options.success?.({ statusCode: 401, data: { code: 401, message: '登录已过期' }, header: {}, cookies: [] }))
     const { request } = await import('./http')
-    await expect(request({ url: '/games/game-1/participants', method: 'GET', redirectOnUnauthorized: false })).rejects.toMatchObject({ statusCode: 401 })
+    await expect(request({ url: '/games/game-1/participants', method: 'GET' })).rejects.toMatchObject({ statusCode: 401 })
     expect(auth.getAccessToken()).toBe('')
     expect(reLaunchMock).not.toHaveBeenCalled()
     expect(requestMock.mock.calls[0][0]).not.toHaveProperty('redirectOnUnauthorized')

@@ -44,11 +44,12 @@ export class TrainingCatalogService {
     private readonly youthRules?: YouthTrainingRulesService,
   ) {}
 
-  async listProducts(actor: AuthUser): Promise<TrainingProductView[]> {
-    const mayConfigureProducts = actor.roles.some(
+  async listProducts(actor?: AuthUser): Promise<TrainingProductView[]> {
+    const roles = actor?.roles || [];
+    const mayConfigureProducts = roles.some(
       (role) => role === AppRole.ADMIN || role === AppRole.SUPER_ADMIN,
     );
-    const mayViewClassAssignments = actor.roles.some(
+    const mayViewClassAssignments = roles.some(
       (role) =>
         role === AppRole.FRONT_DESK ||
         role === AppRole.COACH ||
@@ -56,8 +57,8 @@ export class TrainingCatalogService {
         role === AppRole.SUPER_ADMIN,
     );
     const coachOnly =
-      actor.roles.includes(AppRole.COACH) &&
-      !actor.roles.some(
+      roles.includes(AppRole.COACH) &&
+      !roles.some(
         (role) => role === AppRole.ADMIN || role === AppRole.SUPER_ADMIN,
       );
     const products = await this.prisma.trainingProduct.findMany({
@@ -67,7 +68,7 @@ export class TrainingCatalogService {
           where: {
             ...(mayConfigureProducts ? {} : { active: true }),
             ...(coachOnly
-              ? { OR: [{ coachId: actor.sub }, { assistantId: actor.sub }] }
+              ? { OR: [{ coachId: actor!.sub }, { assistantId: actor!.sub }] }
               : {}),
           },
         },

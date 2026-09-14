@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { accountAmount, relevantAccounts } from './member-wallet'
-import { cancelMemberLogin, consumeBookingIntent, consumeCommunityIntent, consumeLoginReturn, finishMemberLogin, openMemberPage, openMemberRecord, rememberLoginReturn, safeMemberRoute } from './member-navigation'
+import { cancelMemberLogin, consumeBookingIntent, consumeCommunityIntent, consumeLoginReturn, finishMemberLogin, openMemberPage, openMemberRecord, rememberLoginReturn, requestMemberLogin, safeMemberRoute } from './member-navigation'
 import { saveAuthSession } from '../services/auth-session'
 
 const storage = new Map<string, any>()
@@ -20,6 +20,18 @@ vi.stubGlobal('getCurrentPages', pages)
 
 describe('member journey navigation', () => {
   beforeEach(() => { storage.clear(); vi.clearAllMocks(); pages.mockReturnValue([]); setActivePinia(createPinia()) })
+  it.each(['order', 'wallet', 'training', 'coupon', 'membership', 'shop', 'settings', 'invite'])('opens %s for visitors and returns there after cancelling login', page => {
+    const route = `/pages/${page}/index`
+    openMemberPage(route)
+    expect(navigateTo).toHaveBeenCalledWith({ url: route })
+    expect(consumeLoginReturn()).toBeNull()
+    pages.mockReturnValue([{ route: route.slice(1) }, { route: 'pages/login/index' }])
+    requestMemberLogin(route)
+    cancelMemberLogin()
+    expect(navigateBack).toHaveBeenCalledOnce()
+    expect(switchTab).not.toHaveBeenCalled()
+    expect(consumeLoginReturn()).toBeNull()
+  })
   it('lets a visitor browse booking without login', () => {
     openMemberPage('/pages/booking/index')
     expect(switchTab).toHaveBeenCalledWith({ url: '/pages/booking/index' })
@@ -34,8 +46,8 @@ describe('member journey navigation', () => {
     finishMemberLogin()
     expect(redirectTo).toHaveBeenCalledWith({ url: route })
   })
-  it('remembers an exact protected destination instead of returning to the homepage', () => {
-    openMemberPage('/pages/training/index?tab=mine')
+  it('remembers the destination only after explicit login', () => {
+    requestMemberLogin('/pages/training/index?tab=mine')
     expect(navigateTo).toHaveBeenCalledWith({ url: '/pages/login/index' })
     saveAuthSession('token', 'member')
     finishMemberLogin()
@@ -55,7 +67,7 @@ describe('member journey navigation', () => {
     expect(navigateBack).toHaveBeenCalledOnce(); expect(consumeLoginReturn()).toBeNull()
     expect(navigateTo).not.toHaveBeenCalled()
   })
-  it.each([{ stack: [] }, { stack: [{ route: 'pages/wallet/index' }, { route: 'pages/login/index' }] }])('exits a root or protected-page login without retriggering its guard: %j', ({ stack }) => {
+  it.each([{ stack: [] }])('exits root login without retriggering a guard: %j', ({ stack }) => {
     pages.mockReturnValue(stack)
     rememberLoginReturn('/pages/wallet/index')
     storage.set('yanqing_member_tab_intent', { url: '/pages/community/index?view=mine', at: Date.now() })
@@ -64,12 +76,12 @@ describe('member journey navigation', () => {
     expect(navigateBack).not.toHaveBeenCalled(); expect(navigateTo).not.toHaveBeenCalled()
     expect(consumeLoginReturn()).toBeNull(); expect(consumeCommunityIntent()).toBeNull()
   })
-  it('returns to browsing activities after cancelling from My registrations', () => {
+  it('preserves the previous page after cancelling from My registrations', () => {
     pages.mockReturnValue([{ route: 'pages/community/index' }, { route: 'pages/login/index' }])
     rememberLoginReturn('/pages/community/index?view=mine')
     cancelMemberLogin()
     expect(navigateBack).toHaveBeenCalledOnce()
-    expect(consumeCommunityIntent()).toEqual({ view: 'browse' })
+    expect(consumeCommunityIntent()).toBeNull()
     expect(consumeLoginReturn()).toBeNull()
   })
   it('returns to the existing booking page so its selection survives', () => {
