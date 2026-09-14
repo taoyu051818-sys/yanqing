@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import GuestState from '../../components/GuestState.vue'
+import { captureAuthSession, isAuthSessionCurrent, useAccessToken } from '../../services/auth-session'
 import { onShow } from '@dcloudio/uni-app'
 import SectionEmpty from '../../components/SectionEmpty.vue'
 import { endpoints } from '../../services/api'
@@ -19,21 +21,27 @@ const groups = computed(() => ['场馆余额', '奖励权益', '运动记录'].m
 const recordTypes = computed(() => (session.user?.accounts || []).map((account) => ({ type: account.type, label: accountLabels[account.type] || '其他权益' })))
 const visibleTransactions = computed(() => transactions.value.filter((item) => !selectedType.value || item.account?.type === selectedType.value))
 function filterRecords(event: any) { selectedType.value = recordTypes.value[Number(event.detail.value) - 1]?.type || '' }
+function clearPrivateState() { transactions.value = []; selectedType.value = ''; error.value = '' }
+watch(useAccessToken(), clearPrivateState, { flush: 'sync' })
 async function load() {
-  if (!session.isAuthenticated) return requestMemberLogin('/pages/wallet/index')
+  if (!session.isAuthenticated) { clearPrivateState(); return }
+  const owner = captureAuthSession()
   loading.value = true
   error.value = ''
   try {
     const refreshed = await session.hydrate()
+    if (!isAuthSessionCurrent(owner)) return
     if (!refreshed) throw new Error('余额暂未同步，请重试；这不代表余额为零。')
-    transactions.value = await endpoints.accountTransactions()
-  } catch (cause: any) { error.value = cause?.message || '钱包暂未同步，请稍后重试' }
+    const result = await endpoints.accountTransactions()
+    if (isAuthSessionCurrent(owner)) transactions.value = result
+  } catch (cause: any) { if (isAuthSessionCurrent(owner)) error.value = cause?.message || '钱包暂未同步，请稍后重试' }
   finally { loading.value = false }
 }
 onShow(load)
 </script>
 <template>
   <view class="page safe-bottom">
+    <GuestState v-if="!session.isAuthenticated" title="钱包与权益" description="这里汇总你的余额、奖励权益与收支记录。可以先查看余额使用说明和会员方案。" action-text="登录查看我的钱包" @login="requestMemberLogin('/pages/wallet/index')" />
     <view v-if="error" class="card load-error"><text>{{ error }}</text><button class="secondary" @tap="load">重试</button></view>
     <view v-if="loading" class="muted">正在同步余额与记录…</view>
     <view v-for="group in groups" :key="group.title">
@@ -43,12 +51,14 @@ onShow(load)
       </view>
     </view>
     <view class="wallet-actions"><button class="secondary" @tap="openMemberPage('/pages/membership/index')">充值与会员</button><button class="secondary" @tap="openMemberPage('/pages/coupon/index')">我的卡券</button></view>
-    <view class="disclosures"><button @tap="showAll = !showAll">{{ showAll ? '收起未使用权益' : '查看全部权益' }}</button><button @tap="showRules = !showRules">{{ showRules ? '收起说明' : '余额使用说明' }}</button></view>
+    <view class="disclosures" :class="{ guest: !session.isAuthenticated }"><button v-if="session.isAuthenticated" @tap="showAll = !showAll">{{ showAll ? '收起未使用权益' : '查看全部权益' }}</button><button @tap="showRules = !showRules">{{ showRules ? '收起说明' : '余额使用说明' }}</button></view>
     <view v-if="showRules" class="card rules">充值余额与赠送余额分别记录，适用范围以支付页为准。羽毛球币和积分不是现金，不与余额合计。退款与暂不可用金额可在相关订单中查看。</view>
+    <template v-if="session.isAuthenticated">
     <text class="section-title">收支与变动记录</text>
     <picker :range="['全部记录', ...recordTypes.map(item => item.label)]" @change="filterRecords"><view class="record-filter">{{ accountLabels[selectedType] || '全部记录' }} · 点击筛选</view></picker>
     <view v-for="item in visibleTransactions" :key="item.id" class="transaction card"><view><text class="reason">{{ item.reason || '账户变动' }}</text><text class="muted">{{ accountLabels[item.account?.type] || '权益记录' }} · {{ shortDate(item.createdAt) }}</text></view><text class="amount">{{ item.amount >= 0 ? '+' : '' }}{{ accountAmount(item.account?.type, item.amount) }}</text></view>
-    <SectionEmpty v-if="!visibleTransactions.length && !loading && !error" title="暂无变动记录" description="充值、消费或获得奖励后，可以在这里查看明细。" />
+    <SectionEmpty v-if="session.isAuthenticated && !visibleTransactions.length && !loading && !error" title="暂无变动记录" description="充值、消费或获得奖励后，可以在这里查看明细。" />
+    </template>
   </view>
 </template>
 <style scoped>
@@ -59,8 +69,10 @@ onShow(load)
 .account-label { display:block; font-size:28rpx; }
 .balance-row .muted { display:block; margin-top:8rpx; font-size:23rpx; }
 .balance { font-size:34rpx; font-weight:800; color:var(--color-primary-strong); overflow-wrap:anywhere; }
-.wallet-actions,.disclosures { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; }
+.wallet-actions,.disclosures.guest { grid-template-columns:1fr; }
+.disclosures { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; }
 .wallet-actions button,.disclosures button { width:100%; margin:0; font-size:26rpx; }
+.disclosures.guest { grid-template-columns:1fr; }
 .disclosures { margin-top:18rpx; }
 .disclosures button { color:var(--color-muted); background:transparent; font-size:24rpx; }
 .rules { font-size:25rpx; line-height:1.7; color:var(--color-muted); }

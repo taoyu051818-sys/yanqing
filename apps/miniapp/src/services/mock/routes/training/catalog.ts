@@ -24,6 +24,13 @@ export async function handleTrainingProductsGet(
   data: any,
   options: MockRouteOptions,
 ): Promise<MockRouteResult> {
+  if (url === "/training/products/public" && method === "GET")
+    return {
+      handled: true,
+      value: ok(getTrainingProducts().filter(product => product.enabled !== false).map(product =>
+        mockTrainingProductView(product, { showAssignments: false, coachOnly: false }),
+      )),
+    };
   if (url === "/training/products" && method === "GET")
     return {
       handled: true,

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
 import { resetCatalogState } from '@miniapp/mock/state'
 import { isMockMode } from '../../../../services/http'
 import { useSessionStore } from '../../../../stores/session'
@@ -31,12 +30,8 @@ function localizedRoleDescription(description: string) {
     .join(' / ')
 }
 
-onShow(() => {
-  if (!canSwitchIdentity) {
-    uni.showToast({ title: '当前环境不开放身份切换', icon: 'none' })
-    setTimeout(() => uni.switchTab({ url: '/pages/home/index' }), 250)
-  }
-})
+
+function backHome() { uni.switchTab({ url: '/pages/home/index' }) }
 
 async function switchRole(role: AppRole) {
   if (!canSwitchIdentity || switching.value) return
@@ -68,6 +63,8 @@ async function resetDemo() {
 
 <template>
   <view class="page safe-bottom">
+    <view v-if="!canSwitchIdentity" class="card unavailable"><text class="title">演示工具未开放</text><text class="copy">这里仅用于开发验收。你可以返回首页继续浏览。</text><button class="secondary" @tap="backHome">返回首页</button></view>
+    <template v-else>
     <view class="hero">
       <text class="eyebrow">ADMIN DEMO CHANNEL</text>
       <text class="title">身份与端口切换</text>
@@ -85,10 +82,12 @@ async function resetDemo() {
     </view>
     <button v-if="isMockMode" class="secondary reset" @tap="resetDemo">重置本机演示数据</button>
     <view class="tip">正式环境默认关闭身份切换；如需验收，应仅向受授权的测试人员开放。</view>
+    </template>
   </view>
 </template>
 
 <style scoped>
+.unavailable .copy { display:block; color:var(--color-muted); margin-bottom:24rpx; }
 .hero { padding: 38rpx; color: #fff; background: linear-gradient(145deg,#172b21,#17653d); border-radius: 32rpx; }
 .eyebrow { opacity: .6; font-size: 19rpx; letter-spacing: 3rpx; }.title { display:block; margin: 22rpx 0 14rpx; font-size: 42rpx; font-weight: 800; }.copy { color: rgba(255,255,255,.75); font-size: 24rpx; line-height: 1.7; }
 .role-list { display: grid; gap: 16rpx; }.role { display:flex; align-items:center; justify-content:space-between; margin:0; border: 2rpx solid transparent; }.role.active { border-color:#c8a94f; background:#fffdf5; }.role-name { display:block; margin-bottom:8rpx; font-size:30rpx; font-weight:800; }.state { color:#17653d; font-weight:700; }.reset { width:100%; margin-top:30rpx; }.tip { margin-top:20rpx; padding:22rpx; color:#6d5a24; background:#fff4d8; border-radius:20rpx; font-size:22rpx; line-height:1.6; }

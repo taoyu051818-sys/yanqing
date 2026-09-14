@@ -26,7 +26,6 @@ function benefitText(key: string, value: unknown) {
   return `${label}：以场馆公示为准`
 }
 async function load() {
-  if (!session.isAuthenticated) return requestMemberLogin('/pages/membership/index')
   loading.value = true
   error.value = ''
   try {
@@ -41,6 +40,7 @@ async function load() {
   finally { loading.value = false }
 }
 async function purchase(product: any) {
+  if (!session.isAuthenticated) return requestMemberLogin('/pages/membership/index')
   if (busy.value) return
   busy.value = product.id
   actionError.value = ''
@@ -54,6 +54,7 @@ async function purchase(product: any) {
   finally { busy.value = '' }
 }
 async function recharge(plan: any) {
+  if (!session.isAuthenticated) return requestMemberLogin('/pages/membership/index')
   if (busy.value) return
   busy.value = plan.id
   actionError.value = ''

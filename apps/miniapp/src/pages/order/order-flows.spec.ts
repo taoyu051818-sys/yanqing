@@ -193,9 +193,9 @@ describe("order list ownership", () => {
     const list = useOrderList(session);
     list.configure({ id: "linked order" });
     await list.load();
-    expect(requestMemberLogin).toHaveBeenCalledWith(
-      "/pages/order/index?id=linked%20order",
-    );
+    expect(requestMemberLogin).not.toHaveBeenCalled();
+    expect(endpoints.order).not.toHaveBeenCalled();
+    expect(list.focusedId.value).toBe("linked order");
     session.isAuthenticated = true;
     vi.mocked(endpoints.order)
       .mockRejectedValueOnce(new Error("暂不可用"))

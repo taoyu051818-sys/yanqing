@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import GuestState from '../../components/GuestState.vue'
+import { captureAuthSession, isAuthSessionCurrent, useAccessToken } from '../../services/auth-session'
 import { onShareAppMessage, onShareTimeline, onShow } from '@dcloudio/uni-app'
 import AppIcon from '../../components/AppIcon.vue'
 import { useSessionStore } from '../../stores/session'
@@ -21,6 +23,7 @@ const showAllRewards = ref(false)
 const loadError = ref('')
 const referralStatusLabel: Record<string, string> = { PENDING_OBSERVATION: '核验中', AVAILABLE: '待发放', GRANTED: '已到账', REVERSED: '已撤销', REJECTED: '未发放' }
 function hasUsableReferralInvite() {
+  if (!session.isAuthenticated) return false
   const expiresAt = new Date(referralInviteExpiresAt.value).getTime()
   return Boolean(
     referralInviteCode.value &&
@@ -30,16 +33,19 @@ function hasUsableReferralInvite() {
 }
 
 async function ensureReferralInvite() {
+  const owner = captureAuthSession()
   if (!session.user || !hasMemberProfile.value) return ''
   if (hasUsableReferralInvite()) return referralInviteCode.value
   referralInviteLoading.value = true
   referralInviteError.value = ''
   try {
     const invite = await endpoints.createReferralInvite()
+    if (!isAuthSessionCurrent(owner)) return ''
     referralInviteCode.value = invite.inviteCode
     referralInviteExpiresAt.value = invite.expiresAt
     return invite.inviteCode
   } catch (cause: any) {
+    if (!isAuthSessionCurrent(owner)) return ''
     referralInviteCode.value = ''
     referralInviteExpiresAt.value = ''
     referralInviteError.value = cause?.message || '安全邀请码暂时无法生成'
@@ -122,21 +128,28 @@ async function loadReferralRewards() {
     referralRewards.value = []
     return
   }
-  try { referralRewards.value = await endpoints.referralRewards() }
-  catch { referralRewards.value = [] }
+  const owner = captureAuthSession()
+  try { const result = await endpoints.referralRewards(); if (isAuthSessionCurrent(owner)) referralRewards.value = result }
+  catch { if (isAuthSessionCurrent(owner)) referralRewards.value = [] }
 }
 
 
+function clearPrivateState() { referralRewards.value = []; referralInviteCode.value = ''; referralInviteExpiresAt.value = ''; loadError.value = ''; referralInviteError.value = ''; manualInviteCode.value = ''; showBinding.value = false }
+watch(useAccessToken(), clearPrivateState, { flush: 'sync' })
 async function loadInvite() {
-  if (!session.isAuthenticated) return requestMemberLogin('/pages/invite/index')
+  if (!session.isAuthenticated) { clearPrivateState(); return }
+  const owner = captureAuthSession()
   loadError.value = ''
-  if (!(await session.hydrate())) { loadError.value = '邀请信息暂未同步，请稍后重试。'; return }
+  const refreshed = await session.hydrate()
+  if (!isAuthSessionCurrent(owner)) return
+  if (!refreshed) { loadError.value = '邀请信息暂未同步，请稍后重试。'; return }
   if (!hasMemberProfile.value) { loadError.value = '当前账号暂无会员资料，请联系前台完善。'; return }
   await Promise.all([loadReferralRewards(), ensureReferralInvite()])
 }
 onShow(loadInvite)
 </script>
-<template><view class="page safe-bottom"><view v-if="loadError" class="card"><text class="invite-error">{{ loadError }}</text><button class="secondary" @tap="loadInvite">重试</button></view><view v-if="session.user && hasMemberProfile" class="referral card">
+<template><view class="page safe-bottom">
+    <GuestState v-if="!session.isAuthenticated" title="邀请好友一起打球" description="可以从球局或赛事详情分享活动。登录后还可生成个人邀请卡片、查看邀请奖励。" action-text="登录生成邀请卡片" @login="requestMemberLogin('/pages/invite/index')" /><view v-if="loadError" class="card"><text class="invite-error">{{ loadError }}</text><button class="secondary" @tap="loadInvite">重试</button></view><view v-if="session.user && hasMemberProfile" class="referral card">
       <view class="referral-head">
         <view class="referral-copy"><view class="referral-title-row"><view class="referral-icon"><AppIcon name="share" :size="32" /></view><view><text class="menu-title">邀请好友使用小程序</text></view></view><text class="muted">好友通过分享卡片首次使用并完成有效首单后，双方按规则获得奖励</text></view>
         <view class="referral-actions">

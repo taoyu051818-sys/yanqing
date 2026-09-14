@@ -1,0 +1,25 @@
+$ pnpm --dir apps/api lint && pnpm --dir packages/shared type-check && pnpm --dir apps/miniapp type-check
+$ oxlint src/ test/
+$ tsc --noEmit
+$ vue-tsc --noEmit
+src/packages/admin/pages/switch/index.vue(64,176): error TS2339: Property 'uni' does not exist on type '{ $: ComponentInternalInstance; $data: {}; $props: Partial<{}> & Omit<{} & VNodeProps & AllowedComponentProps & ComponentCustomProps, never>; ... 11 more ...; $watch<T extends string | ((...args: any) => any)>(source: T, cb: T extends (...args: any) => infer R ? (args_0: R, args_1: R, args_2: OnCleanup) => any : (ar...'.
+src/pages/guest-browsing.spec.ts(58,14): error TS2339: Property 'tab' does not exist on type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+src/pages/guest-browsing.spec.ts(59,7): error TS2339: Property 'preparePurchase' does not exist on type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+src/pages/guest-browsing.spec.ts(61,14): error TS2339: Property 'selectedProductId' does not exist on type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+src/pages/guest-browsing.spec.ts(65,11): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+  No index signature with a parameter of type 'string' was found on type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+src/pages/guest-browsing.spec.ts(71,5): error TS2322: Type 'Mock<[], Promise<false>>' is not assignable to type 'Mock<[], Promise<boolean>>'.
+  Types of property 'mockImplementation' are incompatible.
+    Types of parameters 'fn' and 'fn' are incompatible.
+      Type 'Promise<boolean>' is not assignable to type 'Promise<false>'.
+src/pages/guest-browsing.spec.ts(74,14): error TS2339: Property 'products' does not exist on type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+src/pages/guest-browsing.spec.ts(74,68): error TS2339: Property 'memberError' does not exist on type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+src/pages/guest-browsing.spec.ts(74,106): error TS2339: Property 'loading' does not exist on type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+src/pages/guest-browsing.spec.ts(81,5): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+  No index signature with a parameter of type 'string' was found on type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+src/pages/guest-browsing.spec.ts(84,12): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+  No index signature with a parameter of type 'string' was found on type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+src/pages/guest-browsing.spec.ts(86,12): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+  No index signature with a parameter of type 'string' was found on type '{ hooks: Record<string, Function>; endpoints: Record<string, any>; }'.
+[ELIFECYCLE] Command failed with exit code 2.
+[ELIFECYCLE] Command failed with exit code 2.

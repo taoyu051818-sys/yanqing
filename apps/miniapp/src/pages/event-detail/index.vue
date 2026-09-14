@@ -50,7 +50,7 @@ async function load() {
     if (!authenticated.value) return
     contextLoading.value = true
     try {
-      const result = await request<Record<string, any> | null>({ url: `/events/${encodeURIComponent(id.value)}/registration/me`, method: 'GET', redirectOnUnauthorized: false })
+      const result = await request<Record<string, any> | null>({ url: `/events/${encodeURIComponent(id.value)}/registration/me`, method: 'GET' })
       if (run === generation && authenticated.value) context.value = result
     } catch (cause: any) {
       if (run !== generation) return

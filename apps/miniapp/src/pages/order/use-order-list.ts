@@ -5,7 +5,6 @@ import {
   captureAuthSession,
   isAuthSessionCurrent,
 } from "../../services/auth-session";
-import { requestMemberLogin } from "../../utils/member-navigation";
 import { orderFailure } from "./order-errors";
 
 export const orderFilters = [
@@ -46,11 +45,7 @@ export function useOrderList(session: { readonly isAuthenticated: boolean }) {
     if (!session.isAuthenticated) {
       reset();
       uni.stopPullDownRefresh();
-      return requestMemberLogin(
-        focusedId.value
-          ? `/pages/order/index?id=${encodeURIComponent(focusedId.value)}`
-          : `/pages/order/index${statusFilter.value ? `?status=${statusFilter.value}` : ""}`,
-      );
+      return;
     }
     const run = ++generation;
     const owner = captureAuthSession();

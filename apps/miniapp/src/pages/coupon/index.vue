@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import GuestState from '../../components/GuestState.vue'
+import { captureAuthSession, isAuthSessionCurrent, useAccessToken } from '../../services/auth-session'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import SectionEmpty from '../../components/SectionEmpty.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
@@ -21,15 +23,19 @@ const claiming = ref(false)
 const claimError = ref('')
 
 
+function clearPrivateState() { coupons.value = []; shownCode.value = ''; error.value = ''; claimError.value = '' }
+watch(useAccessToken(), clearPrivateState, { flush: 'sync' })
 async function load() {
-  if (!session.isAuthenticated) return requestMemberLogin(claimCode.value ? couponClaimPath(claimCode.value) : '/pages/coupon/index')
+  if (!session.isAuthenticated) { clearPrivateState(); return }
+  const owner = captureAuthSession()
   loading.value = true
   error.value = ''
-  try { coupons.value = await endpoints.myCoupons() }
-  catch (cause: any) { error.value = cause?.message || '卡券暂未同步，请重试' }
+  try { const result = await endpoints.myCoupons(); if (isAuthSessionCurrent(owner)) coupons.value = result }
+  catch (cause: any) { if (isAuthSessionCurrent(owner)) error.value = cause?.message || '卡券暂未同步，请重试' }
   finally { loading.value = false }
 }
 async function claim() {
+  if (!session.isAuthenticated) return requestMemberLogin(claimCode.value ? couponClaimPath(claimCode.value) : '/pages/coupon/index')
   if (claiming.value || !claimCode.value.trim()) return
   claiming.value = true; claimError.value = ''
   try { await endpoints.claimCoupon(claimCode.value.trim()); claimCode.value = ''; showClaim.value = false; uni.showToast({ title: '领取成功', icon: 'success' }); await load() }
@@ -54,8 +60,9 @@ onShow(load)
 </script>
 <template>
   <view class="page safe-bottom">
+    <GuestState v-if="!session.isAuthenticated" title="我的券包" description="领取的优惠券会保存在这里，也可以先填写场馆提供的券码。" action-text="登录查看我的卡券" @login="requestMemberLogin(claimCode ? couponClaimPath(claimCode) : '/pages/coupon/index')" />
     <view v-if="error" class="card load-error"><text>{{ error }}</text><button class="secondary retry" @tap="load">重试</button></view>
-    <view class="section-title">我的券包</view>
+    <view v-if="session.isAuthenticated" class="section-title">我的券包</view>
     <view v-for="coupon in coupons" :key="coupon.id" class="coupon card">
       <view class="cut left"></view><view class="cut right"></view>
       <view class="row"><text class="merchant">{{ coupon.template?.merchant?.name }}</text><StatusBadge :value="coupon.status" /></view>
@@ -65,7 +72,7 @@ onShow(load)
       <button v-if="selectableBookingCoupons([coupon]).length" class="primary code-button" @tap="openMemberPage(`/pages/booking/index?couponId=${encodeURIComponent(coupon.id)}`)">选择场地，使用此券</button>
       <button v-if="coupon.status === 'CLAIMED'" class="secondary code-button" @tap="shownCode = shownCode === coupon.id ? '' : coupon.id">{{ shownCode === coupon.id ? '收起' : '到店出示券码' }}</button><text v-if="shownCode === coupon.id" class="code">仅向核销工作人员出示：{{ coupon.code }}</text>
     </view>
-    <SectionEmpty v-if="!coupons.length && !loading && !error" title="券包还是空的" description="已有券码可以在下方领取；领取后在使用时出示。" />
+    <SectionEmpty v-if="session.isAuthenticated && !coupons.length && !loading && !error" title="券包还是空的" description="已有券码可以在下方领取；领取后在使用时出示。" />
 
     <!-- #ifdef MP-WEIXIN -->
     <button class="primary claim-entry" :disabled="claiming" @tap="scanClaim">扫一扫领券</button>

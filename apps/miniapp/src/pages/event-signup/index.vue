@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { onLoad, onShow, onShareAppMessage } from '@dcloudio/uni-app'
+import { useAccessToken } from '../../services/auth-session'
 import AppIcon from '../../components/AppIcon.vue'
 import { endpoints } from '../../services/api'
 import { resolveApiAssetUrl } from '../../services/http'
@@ -51,17 +52,18 @@ function prefill() {
     form.playerBName = session.user?.displayName || ''
   }
 }
+watch(useAccessToken(), () => { registration.value = null; invite.value = null; consent.value = false; Object.keys(form).forEach(key => { form[key as keyof typeof form] = '' }); error.value = ''; result.value = '' }, { flush: 'sync' })
 async function load() {
   if (loading.value || !id.value) return
   loading.value = true
   error.value = ''
   try {
-    if (session.isAuthenticated && !await session.hydrate()) throw new Error('账号资料暂未同步，请重试')
+    event.value = await endpoints.event(id.value)
+    if (session.isAuthenticated && !await session.hydrate() && session.isAuthenticated) throw new Error('账号资料暂未同步，请重试')
     if (!code.value && session.user) code.value = pendingTeamInvite(session.user.id, id.value)
     if (code.value) invite.value = await endpoints.teamInvite(id.value, code.value, session.isAuthenticated)
     if (session.user && invite.value?.role === 'CAPTAIN' && ['EXPIRED', 'SUBMITTED'].includes(invite.value.status)) forgetTeamInvite(session.user.id, id.value)
     if (session.isAuthenticated) {
-      event.value = await endpoints.event(id.value)
       const mine = await endpoints.myEventRegistration(id.value)
       registration.value = mine?.registration || null
     }

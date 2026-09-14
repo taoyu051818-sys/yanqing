@@ -19,8 +19,10 @@ export class ApiError extends Error {
   }
 }
 
-export const request = <T>(options: UniApp.RequestOptions & { redirectOnUnauthorized?: boolean }): Promise<T> => {
-  const { redirectOnUnauthorized = true, ...transportOptions } = options
+export const request = <T>(options: UniApp.RequestOptions): Promise<T> => {
+  // Authentication errors invalidate credentials, never navigate. Only an
+  // explicit page action may ask the user to log in.
+  const transportOptions = { ...options }
   // Native wx.request serializes undefined query values differently from H5.
   // Remove absent GET fields before either adapter sees them; retain 0/false
   // and do not alter mutation bodies where null can mean "clear this value".
@@ -56,7 +58,6 @@ export const request = <T>(options: UniApp.RequestOptions & { redirectOnUnauthor
         }
         if (response.statusCode === 401) {
           clearAuthSession()
-          if (redirectOnUnauthorized) uni.reLaunch({ url: '/pages/login/index' })
         }
         reject(new ApiError(apiFeedback(envelope?.message, response.statusCode), response.statusCode, envelope?.requestId))
       },

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useSessionStore } from '../../stores/session'
 import { requestMemberLogin, openMemberPage } from '../../utils/member-navigation'
+import GuestState from '../../components/GuestState.vue'
+import { captureAuthSession, isAuthSessionCurrent, useAccessToken } from '../../services/auth-session'
 import SectionEmpty from '../../components/SectionEmpty.vue'
 import ReasonForm from '../../components/ReasonForm.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
@@ -39,7 +41,9 @@ const refundOrder = ref<any>(null)
 const refundError = ref('')
 const customRefund = ref(false)
 const refundAmount = ref('')
+function login() { return requestMemberLogin('/pages/training/index?tab=' + tab.value) }
 function preparePurchase(product: any) {
+  if (!session.isAuthenticated) return login()
   if (purchasingId.value) return
   selectedProductId.value = product.id
   selectedClassId.value = product.classes?.length === 1 ? product.classes[0].id : ''
@@ -55,7 +59,7 @@ const showStudentForm = ref(false)
 const defaultBirthMonth = `${new Date().getFullYear() - 10}-01`
 const studentForm = ref({ displayName: '', birthMonth: defaultBirthMonth, guardianConsentStatus: false })
 const maxBirthMonth = computed(() => new Date().toISOString().slice(0, 7))
-function openStudentForm() { showStudentForm.value = true; uni.pageScrollTo({ scrollTop: 0, duration: 200 }) }
+function openStudentForm() { if (!session.isAuthenticated) return login(); showStudentForm.value = true; uni.pageScrollTo({ scrollTop: 0, duration: 200 }) }
 
 onLoad((query) => {
   const requested = query?.tab
@@ -100,24 +104,46 @@ const paymentComposition = (order: any) => {
 }
 const setBirthMonth = (event: any) => { studentForm.value.birthMonth = String(event.detail.value) }
 const setConsent = (event: any) => { studentForm.value.guardianConsentStatus = Boolean(event.detail.value) }
+function clearPrivateState() {
+  students.value = []; enrollments.value = []; trials.value = []
+  selectedProductId.value = ''; selectedStudentId.value = ''; selectedClassId.value = ''
+  showStudentForm.value = false; expandedEnrollments.value = {}
+  studentForm.value = { displayName: '', birthMonth: defaultBirthMonth, guardianConsentStatus: false }
+  refundItemId.value = ''; refundOrder.value = null; refundError.value = ''; purchaseError.value = ''
+  memberError.value = ''
+}
+const memberError = ref('')
+watch(useAccessToken(), clearPrivateState, { flush: 'sync' })
+let loadGeneration = 0
 async function load() {
-  if (!session.isAuthenticated) return requestMemberLogin('/pages/training/index?tab=' + tab.value)
+  const run = ++loadGeneration
   loading.value = true
-  error.value = ''
+  error.value = ''; memberError.value = ''
   try {
-    if (!(await session.hydrate())) { throw new Error('报名人信息暂未同步，请重试') }
-    [products.value, students.value, enrollments.value, trials.value] = await Promise.all([
-      endpoints.trainingProducts(),
-      endpoints.trainingStudents(),
-      endpoints.trainingEnrollments(),
-      endpoints.myTrainingTrials(),
-    ])
-  }
-  catch (cause: any) { error.value = cause?.message || '培训数据加载失败，请稍后重试' }
-  finally { loading.value = false }
+    const catalog = await endpoints.publicTrainingProducts()
+    if (run !== loadGeneration) return
+    products.value = catalog
+    if (!session.isAuthenticated) { clearPrivateState(); return }
+    const owner = captureAuthSession()
+    try {
+      const refreshed = await session.hydrate()
+      if (run !== loadGeneration || !isAuthSessionCurrent(owner)) return
+      if (!refreshed) throw new Error('报名人信息暂未同步，请重试')
+      const [nextStudents, nextEnrollments, nextTrials] = await Promise.all([
+        endpoints.trainingStudents(), endpoints.trainingEnrollments(), endpoints.myTrainingTrials(),
+      ])
+      if (run !== loadGeneration || !isAuthSessionCurrent(owner)) return
+      students.value = nextStudents; enrollments.value = nextEnrollments; trials.value = nextTrials
+    } catch (cause: any) {
+      if (run === loadGeneration && isAuthSessionCurrent(owner)) memberError.value = cause?.message || '个人课程记录暂未同步'
+    }
+  } catch (cause: any) {
+    if (run === loadGeneration) error.value = cause?.message || '课程加载失败，请稍后重试'
+  } finally { if (run === loadGeneration) loading.value = false }
 }
 
 async function createStudent() {
+  if (!session.isAuthenticated) return login()
   if (savingStudent.value) return
   const displayName = studentForm.value.displayName.trim()
   if (!displayName) return uni.showToast({ title: '请填写学员姓名', icon: 'none' })
@@ -144,6 +170,7 @@ async function createStudent() {
 }
 
 async function purchase(product: any) {
+  if (!session.isAuthenticated) return login()
   if (purchasingId.value) return
   purchaseError.value = ''
   if (product.classes?.length && !product.classes.some((item: any) => item.id === selectedClassId.value)) {
@@ -169,6 +196,7 @@ async function purchase(product: any) {
 }
 
 async function prepareRefund(item: any) {
+  if (!session.isAuthenticated) return login()
   if (refundingId.value) return
   refundItemId.value = item.id
   refundingId.value = item.id
@@ -191,6 +219,7 @@ async function prepareRefund(item: any) {
   finally { refundingId.value = '' }
 }
 async function requestTrainingRefund(item: any, reason: string) {
+  if (!session.isAuthenticated) return login()
   if (!refundOrder.value || refundingId.value || refundItemId.value !== item.id) return
   const amountCents = customRefund.value ? parseYuanToCents(refundAmount.value) : refundMaximum.value
   if (amountCents === null || amountCents <= 0 || amountCents > refundMaximum.value) {
@@ -215,11 +244,13 @@ onShow(load)
 <template>
   <view class="page safe-bottom">
     <view class="course-intro"><text class="banner-title">{{ tab === 'products' ? '找到适合你的课程' : tab === 'mine' ? '我的课程' : '我的试听记录' }}</text><text>{{ tab === 'products' ? '先选课程，再选择班级与报名学员。' : '查看上课记录、剩余课时与老师反馈。' }}</text></view>
+    <view v-if="session.isAuthenticated && memberError" class="card load-error"><text>{{ memberError }}</text><button class="secondary retry" @tap="load">重试</button></view>
+    <GuestState v-if="!session.isAuthenticated && tab !== 'products'" :title="tab === 'mine' ? '我的课程' : '试听记录'" description="这里展示你报名的课程、剩余课时和试听安排。可以先切换到“找课程”浏览在售课程。" @login="login" />
     <view v-if="error" class="card load-error"><text>{{ error }}</text><button class="secondary retry" @tap="load">重试</button></view>
     <view class="tabs"><button :class="{ active: tab === 'products' }" @tap="tab='products'">找课程</button><button :class="{ active: tab === 'mine' }" @tap="tab='mine'">我的课程</button><button v-if="trials.length || tab === 'trials'" :class="{ active: tab === 'trials' }" @tap="tab='trials'">试听记录</button></view>
     <template v-if="tab === 'products'">
       <view class="audience-tabs"><button v-for="option in [{ value: 'ALL', label: '全部' }, { value: 'ADULT', label: '成人课程' }, { value: 'YOUTH', label: '青少年课程' }]" :key="option.value" :class="{ selected: audience === option.value }" @tap="audience = option.value">{{ option.label }}</button></view>
-      <view v-if="audience === 'YOUTH' || showStudentForm" class="card student-card">
+      <view v-if="session.isAuthenticated && (audience === 'YOUTH' || showStudentForm)" class="card student-card">
         <view class="row"><view><text class="student-title">我的青少年学员</text><text class="student-tip">监护人主账号负责授权与报名</text></view><button class="mini" @tap="showStudentForm = !showStudentForm">{{ showStudentForm ? '收起' : '添加学员' }}</button></view>
         <view v-if="students.length" class="student-list">
           <view v-for="student in students" :key="student.id" class="student-row"><text>{{ student.displayName }}</text><text :class="student.guardianConsentStatus ? 'consent-ok' : 'consent-warn'">{{ student.guardianConsentStatus ? '已授权' : '待授权' }}</text></view>
@@ -287,7 +318,7 @@ onShow(load)
         </ReasonForm>
         <view v-if="item.attendances?.[0]" class="feedback">最近：{{ item.attendances[0].feedback || '已完成签到消课' }}</view>
       </view>
-      <SectionEmpty v-if="!enrollments.length && !loading && !error" title="还没有课程" description="找到合适的课程并报名后，可以在这里查看课时。" />
+      <SectionEmpty v-if="session.isAuthenticated && !enrollments.length && !loading && !error && !memberError" title="还没有课程" description="找到合适的课程并报名后，可以在这里查看课时。" />
       <button v-if="!enrollments.length && !loading" class="secondary" @tap="tab = 'products'">去找课程</button>
     </template>
     <template v-else>
@@ -301,7 +332,7 @@ onShow(load)
         <text v-else class="student-tip">{{ trial.status === 'CHECKED_IN' ? '已签到，等待教练提交测评。' : trial.status === 'RESERVED' ? '预约成功，请按时到场。' : '当前暂无测评结果。' }}</text>
         <text v-if="trial.student" class="privacy-note">该结果仅对本学员监护人账号和授权经营人员可见。</text>
       </view>
-      <SectionEmpty v-if="!trials.length && !loading && !error" title="还没有试听记录" />
+      <SectionEmpty v-if="session.isAuthenticated && !trials.length && !loading && !error && !memberError" title="还没有试听记录" />
     </template>
   </view>
 </template>

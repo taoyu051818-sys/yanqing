@@ -1,0 +1,3 @@
+$ pnpm --dir apps/api build
+$ pnpm --dir ../../packages/shared build && nest build
+$ tsc

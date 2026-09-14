@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 
-import { CurrentUser } from '../common/auth/auth.decorators.js'
+import { CurrentUser, Public } from '../common/auth/auth.decorators.js'
 import type { AuthUser } from '../common/auth/auth-user.js'
 import { CreateGoodsOrderDto } from './goods.dto.js'
 import { GoodsService } from './goods.service.js'
@@ -13,6 +13,7 @@ export class GoodsController {
   constructor(private readonly goods: GoodsService) {}
 
   @Get()
+  @Public()
   products() { return this.goods.products() }
 
   @Post('orders')

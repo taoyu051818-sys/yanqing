@@ -103,7 +103,7 @@ export const endpoints = {
     api.post<{ accessToken: string; user: SessionUser }>("/auth/dev-login", {
       role,
     }),
-  me: () => request<SessionUser>({ url: "/auth/me", method: "GET", redirectOnUnauthorized: false }),
+  me: () => request<SessionUser>({ url: "/auth/me", method: "GET" }),
   updateMyProfile: (displayName: string) =>
     api.patch<SessionUser>("/auth/profile", { displayName }),
   uploadMyAvatar: (filePath: string) =>
@@ -157,14 +157,13 @@ export const endpoints = {
     api.post<{ status: string }>(`/orders/refunds/${refundId}/approve`, data),
   rejectRefund: (refundId: string, data: object = {}) =>
     api.post(`/orders/refunds/${refundId}/reject`, data),
-  publicGames: () => request<GameListItem[]>({ url: "/games/public", method: "GET", redirectOnUnauthorized: false }),
-  games: () => request<GameListItem[]>({ url: "/games", method: "GET", redirectOnUnauthorized: false }),
+  publicGames: () => request<GameListItem[]>({ url: "/games/public", method: "GET" }),
+  games: () => request<GameListItem[]>({ url: "/games", method: "GET" }),
   game: (id: string) => api.get<GameDetail>(`/games/${encodeURIComponent(id)}`),
   gameParticipants: (id: string) =>
     request<GameParticipants>({
       url: `/games/${encodeURIComponent(id)}/participants`,
       method: "GET",
-      redirectOnUnauthorized: false,
     }),
   createGame: (data: object) => api.post("/games", data),
   applyHost: () => api.post("/games/hosts/apply"),
@@ -181,7 +180,6 @@ export const endpoints = {
     request({
       url: `/games/${encodeURIComponent(id)}/register`,
       method: "POST",
-      redirectOnUnauthorized: false,
       data: {
         sourceChannel: "MINI_PROGRAM",
         creationIdempotencyKey,
@@ -190,12 +188,11 @@ export const endpoints = {
   promoteGameWaitlist: (id: string) =>
     api.post(`/games/${id}/promote-waitlist`),
   grantMaturedGameRewards: () => api.post("/games/rewards/grant-matured"),
-  events: () => request<any[]>({ url: "/events", method: "GET", redirectOnUnauthorized: false }),
+  events: () => request<any[]>({ url: "/events", method: "GET" }),
   event: (id: string) =>
     request<Record<string, any>>({
       url: `/events/${encodeURIComponent(id)}`,
       method: "GET",
-      redirectOnUnauthorized: false,
     }),
   managedEvents: () => api.get<any[]>("/events/managed"),
   managedEvent: (id: string) =>
@@ -220,7 +217,6 @@ export const endpoints = {
       url: `/events/${encodeURIComponent(id)}/team-invites/${authenticated ? "context" : "preview"}`,
       method: "POST",
       data: { partnerInviteCode },
-      redirectOnUnauthorized: false,
     }),
   acceptTeamInvite: (id: string, data: object) =>
     api.post<TeamInviteView>(
@@ -234,6 +230,7 @@ export const endpoints = {
   cancelEvent: (id: string, data: object) =>
     api.post(`/events/${id}/cancel`, data),
   trainingProducts: () => api.get<TrainingProductView[]>("/training/products"),
+  publicTrainingProducts: () => api.get<TrainingProductView[]>("/training/products/public"),
   createTrainingProduct: (data: object) => api.post("/training/products", data),
   updateTrainingProduct: (id: string, data: object) =>
     api.patch(`/training/products/${id}`, data),

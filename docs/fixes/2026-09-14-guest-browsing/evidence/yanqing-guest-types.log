@@ -1,0 +1,2 @@
+$ pnpm --dir apps/miniapp type-check
+$ vue-tsc --noEmit
