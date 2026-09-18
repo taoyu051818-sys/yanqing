@@ -1,3 +1,4 @@
+import { handleVenueSettings } from './routes/venues/settings';
 import type { AppRole } from "../../types/domain";
 import { mockLogin, mockUser, updateMockProfile } from "./core";
 import { routeMockTeamInvites } from "./event-signup";
@@ -266,6 +267,7 @@ import {
 } from "./routes/venues/fulfillment.js";
 
 const domainRoutes = [
+  handleVenueSettings,
   handleParametersGet,
   handleParametersPost,
   handleAuditLogsGet,

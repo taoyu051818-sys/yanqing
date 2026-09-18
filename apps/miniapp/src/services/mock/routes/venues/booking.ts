@@ -50,7 +50,7 @@ export async function handleVenuesAvailabilityAny(
       requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
     const date = text(data.date || new Date().toISOString().slice(0, 10));
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("日期格式无效");
-    return { handled: true, value: ok(availability(date)) };
+    return { handled: true, value: ok(availability(date, url.endsWith("/assisted"))) };
   }
   return { handled: false };
 }
@@ -114,7 +114,7 @@ export async function handleVenuesBookingsPost(
     if (creation.tracked && creation.replayed)
       return { handled: true, value: ok(creation.response) };
     const assistedShift = assisted ? requireMockOpenFrontDeskShift() : null;
-    const calendar = availability(date);
+    const calendar = availability(date, operatorOverride);
     const court = calendar.courts.find((item: any) => item.id === data.courtId);
     const slot = calendar.slots.find((item: any) => item.id === data.slotId);
     if (

@@ -12,6 +12,7 @@ export type OperationsCenter = {
 export const workQueueRoute = "/packages/ops/pages/admin/index";
 
 export const operationsAccessRoles = {
+  venueSettings: ["ADMIN", "SUPER_ADMIN"],
   workQueue: [
     "FRONT_DESK",
     "COACH",

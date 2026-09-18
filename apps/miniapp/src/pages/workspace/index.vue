@@ -50,8 +50,8 @@ const adminSettings = [
     description: '新增券模板、发行上限与启停设置', route: '/packages/ops/pages/merchant/index?view=coupons',
   },
   {
-    key: 'venue-pricing', icon: 'venue', title: '场地与价格',
-    description: '维护营业时段、场地状态与价格规则', route: '/packages/ops/pages/venue/index?view=pricing',
+    key: 'venue-pricing', icon: 'venue', title: '球馆设置',
+    description: '球馆地址、营业时间、场地与价格', route: '/packages/ops/pages/venue-settings/index',
   },
 ]
 const filteredCenters = computed(() => {

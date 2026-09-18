@@ -1,3 +1,5 @@
+import { VenueSettingsController } from './settings/venue-settings.controller.js';
+import { VenueSettingsService } from './settings/venue-settings.service.js';
 import { VenueAvailabilityService } from './availability/venues-availability.service.js';
 import { VenueClosuresService } from './closures/venues-closures.service.js';
 import { VenueBookingService } from './booking/venues-booking.service.js';
@@ -8,8 +10,9 @@ import { Module } from '@nestjs/common';
 import { VenuesController } from './venues.controller.js';
 
 @Module({
-  controllers: [VenuesController],
+  controllers: [VenuesController, VenueSettingsController],
   providers: [
+    VenueSettingsService,
     VenueAvailabilityService,
     VenueClosuresService,
     VenueBookingService,

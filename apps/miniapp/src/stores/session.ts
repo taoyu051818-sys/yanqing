@@ -18,7 +18,7 @@ import type { AppRole, SessionUser } from '../types/domain'
 import { isMockMode } from '../services/http'
 
 const normalizeRoles = (user?: SessionUser | null): AppRole[] =>
-  (user?.roles || []).map((item) => typeof item === 'string' ? item : item.role)
+  [...new Set([...(user?.primaryRole ? [user.primaryRole] : []), ...(user?.roles || []).map((item) => typeof item === 'string' ? item : item.role)])]
 
 export const useSessionStore = defineStore('session', () => {
   const user = ref<SessionUser | null>(null)

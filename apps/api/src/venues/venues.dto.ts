@@ -128,6 +128,19 @@ export class CreateVenueBookingDto {
 
 export class UpdateCourtDto {
   @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  name?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  sortOrder?: number;
+
+  @IsOptional()
   @IsEnum(CourtUsage)
   usage?: CourtUsage;
 

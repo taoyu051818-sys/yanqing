@@ -1,15 +1,15 @@
 import type { CourtAvailability } from '../../types/domain'
 import { getPriceRules, getVenueBookings, getVenueClosures, saveVenueBookings } from './state'
-import { hourlyVenueSlots } from './venue-catalog'
+import { getMockVenueSlots } from './venue-settings'
 
-export function availability(date: string): CourtAvailability {
-  const courts = getMockVenueCourts().map((court) => ({
+export function availability(date: string, includeUnavailable = false): CourtAvailability {
+  const courts = getMockVenueCourts().filter(court => includeUnavailable || court.enabled).map((court) => ({
     id: court.id,
     name: court.name,
     usage: court.usage,
     enabled: court.enabled,
   }))
-  const slots = hourlyVenueSlots.map((slot) => {
+  const slots = getMockVenueSlots().filter(slot => includeUnavailable || slot.enabled).map((slot) => {
     const rule = resolveMockPriceRule(date, slot.id)
     return {
       id: slot.id,
@@ -17,7 +17,7 @@ export function availability(date: string): CourtAvailability {
       startMinutes: slot.startMinutes,
       endMinutes: slot.endMinutes,
       period: slot.period,
-      enabled: true,
+      enabled: slot.enabled,
       price: rule ? {
         priceCents: rule.priceCents,
         newcomerPriceCents: rule.newcomerPriceCents,
@@ -60,7 +60,9 @@ export function availability(date: string): CourtAvailability {
   return { date, courts, slots, bookings, closures }
 }
 
-export function getMockVenueCourts() {
+export function getMockVenueCourts(): any[] {
+  const stored = uni.getStorageSync("yanqing_mock_venue_courts")
+  if (Array.isArray(stored)) return stored.slice().sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
   return Array.from({ length: 20 }, (_, index) => ({
     id: `court-${index + 1}`,
     code: `C${String(index + 1).padStart(2, '0')}`,
@@ -72,7 +74,7 @@ export function getMockVenueCourts() {
 }
 
 export function resolveMockPriceRule(date: string, slotId: string) {
-  const pricingAt = new Date(`${date}T00:00:00+08:00`).getTime() + (hourlyVenueSlots.find(slot => slot.id === slotId)?.startMinutes || 0) * 60_000
+  const pricingAt = new Date(`${date}T00:00:00+08:00`).getTime() + (getMockVenueSlots().find(slot => slot.id === slotId)?.startMinutes || 0) * 60_000
   const weekdayBit = 1 << new Date(`${date}T00:00:00Z`).getUTCDay()
   return getPriceRules()
     .filter((candidate) =>
