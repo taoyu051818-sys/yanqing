@@ -1,3 +1,5 @@
+import { VenueSettingsController } from '../src/venues/settings/venue-settings.controller.js';
+import { VenueSettingsService } from '../src/venues/settings/venue-settings.service.js';
 import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import {
@@ -94,6 +96,7 @@ const controllers: Record<string, Type> = {
   OrdersController,
   TrainingTrialsController,
   VenuesController,
+  VenueSettingsController,
 };
 const providers: Record<string, Type> = {
   InventorySuppliersService,
@@ -123,6 +126,7 @@ const providers: Record<string, Type> = {
   VenueBookingService,
   VenueFulfillmentService,
   VenuePricingService,
+  VenueSettingsService,
   GovernanceUsersService,
   GovernanceRisksService,
   MembershipProductsService,
@@ -230,7 +234,7 @@ describe('functional domain module wiring and HTTP contracts', () => {
     vi.restoreAllMocks();
   });
 
-  it('preserves all 152 route, role and public-access declarations with no additions or omissions', () => {
+  it('preserves all 156 route, role and public-access declarations with no additions or omissions', () => {
     const actual: object[] = [];
     for (const [name, controller] of Object.entries(controllers)) {
       for (const method of Object.getOwnPropertyNames(controller.prototype)) {
@@ -267,11 +271,11 @@ describe('functional domain module wiring and HTTP contracts', () => {
     );
     const sort = (items: object[]) =>
       items.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-    expect(actual).toHaveLength(152);
+    expect(actual).toHaveLength(156);
     expect(sort(actual)).toEqual(sort(expected));
     expect(
       new Set(routes.map((route) => `${route.verb} ${route.path}`)).size,
-    ).toBe(152);
+    ).toBe(156);
   });
 
   it('dispatches every existing HTTP route to its owning domain provider, including static routes', async () => {

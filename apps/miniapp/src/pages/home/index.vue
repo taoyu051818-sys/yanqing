@@ -1,11 +1,14 @@
 <script setup lang="ts">
+import VenueSummary from '../../components/VenueSummary.vue'
+import { useVenueProfile } from '../../composables/use-venue-profile'
+const venue = useVenueProfile()
 import { onShow } from '@dcloudio/uni-app'
 import AppIcon from '../../components/AppIcon.vue'
 import MemberNextStep from '../../components/MemberNextStep.vue'
 import { useSessionStore } from '../../stores/session'
 import { openMemberPage } from '../../utils/member-navigation'
 const session = useSessionStore()
-onShow(() => { if (session.isAuthenticated) void session.hydrate() })
+onShow(() => { void venue.refresh(); if (session.isAuthenticated) void session.hydrate() })
 const services = [
   { icon: 'sport', title: '参加球局', note: '一个人也能约球', url: '/pages/community/index?tab=games&view=browse' },
   { icon: 'training', title: '找课程', note: '成人 · 青少年', url: '/pages/training/index?tab=products' },
@@ -14,7 +17,7 @@ const services = [
 </script>
 <template>
   <view class="page safe-bottom">
-    <view class="venue-heading"><view class="venue-icon"><AppIcon name="sport" :size="38" /></view><view><text class="venue-name">延庆金羽羽毛球馆</text><text class="muted">订场、约球、上课，都在这里</text></view></view>
+    <VenueSummary :profile="venue.profile.value" :error="venue.error.value" />
     <view class="booking-hero">
       <text class="hero-eyebrow">今天，来打场球</text>
       <text class="hero-title">先找一片合适的场地</text>

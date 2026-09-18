@@ -1910,5 +1910,54 @@
     "isPublic": false,
     "provider": "VenuePricingService",
     "serviceMethod": "setPriceRuleStatus"
+  },
+  {
+    "controller": "VenueSettingsController",
+    "method": "profile",
+    "verb": "GET",
+    "path": "/api/v1/venues/profile",
+    "roles": [],
+    "isPublic": true,
+    "provider": "VenueSettingsService",
+    "serviceMethod": "publicProfile"
+  },
+  {
+    "controller": "VenueSettingsController",
+    "method": "settings",
+    "verb": "GET",
+    "path": "/api/v1/venues/settings",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenueSettingsService",
+    "serviceMethod": "settings"
+  },
+  {
+    "controller": "VenueSettingsController",
+    "method": "save",
+    "verb": "POST",
+    "path": "/api/v1/venues/settings",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenueSettingsService",
+    "serviceMethod": "save"
+  },
+  {
+    "controller": "VenueSettingsController",
+    "method": "createCourt",
+    "verb": "POST",
+    "path": "/api/v1/venues/courts",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenueSettingsService",
+    "serviceMethod": "createCourt"
   }
 ]

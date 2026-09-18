@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import VenueSummary from '../../components/VenueSummary.vue'
+import { useVenueProfile } from '../../composables/use-venue-profile'
+const venue = useVenueProfile()
 import { computed, ref, watch } from 'vue'
 import { onHide, onShow, onUnload } from '@dcloudio/uni-app'
 import AppIcon from '../../components/AppIcon.vue'
@@ -182,6 +185,7 @@ function openAssistedOrder() {
 
 onShow(async () => {
   pageVisible = true
+  void venue.refresh()
   await session.hydrate()
   const intent = consumeBookingIntent()
   if (intent?.mode === 'ASSISTED' && canAssist.value) {
@@ -201,6 +205,7 @@ onShow(async () => {
 
 <template>
   <view class="page booking-page">
+    <VenueSummary :profile="venue.profile.value" :error="venue.error.value" />
     <view class="notice"><AppIcon name="clock" :size="30" tone="accent" /><text>每格 1 小时，显示该小时费用。下单后保留 10 分钟，未付款自动取消并释放场地。</text></view>
     <view class="card row">
       <view class="date-label"><AppIcon name="booking" :size="32" /><text>预订日期</text></view>

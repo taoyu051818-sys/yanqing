@@ -1,3 +1,4 @@
+import type { VenueProfile, VenueSettings, VenueCourt } from "../types/venue-settings";
 import type {
   TrainingCorrectionView,
   TrainingTrialView,
@@ -95,6 +96,11 @@ export interface VenueClosure {
 }
 
 export const endpoints = {
+  venueProfile: () => api.get<VenueProfile>("/venues/profile"),
+  venueSettings: () => api.get<VenueSettings>("/venues/settings"),
+  saveVenueSettings: (data: object) => api.post("/venues/settings", data),
+  createVenueCourt: (data: object) => api.post<VenueCourt>("/venues/courts", data),
+  updateVenueCourt: (id: string, data: object) => api.patch<VenueCourt>(`/venues/courts/${id}`, data),
   wechatLogin: (code: string) =>
     api.post<{ accessToken: string; user: SessionUser }>("/auth/wechat-login", {
       code,

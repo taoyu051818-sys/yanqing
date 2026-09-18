@@ -204,7 +204,7 @@ async function seed() {
   for (let number = 1; number <= 20; number += 1) {
     await prisma.court.upsert({
       where: { code: `C${String(number).padStart(2, '0')}` },
-      update: { enabled: true },
+      update: {},
       create: {
         code: `C${String(number).padStart(2, '0')}`,
         name: `${number}号场`,
@@ -233,7 +233,7 @@ async function seed() {
   ] of slotSeeds) {
     const slot = await prisma.timeSlot.upsert({
       where: { code },
-      update: { label, startMinutes, endMinutes, enabled: true },
+      update: {},
       create: {
         code,
         label,

@@ -75,5 +75,12 @@
       "test/privacy-avatar.integration.spec.ts",
       "test/order-search.integration.spec.ts"
     ]
+  },
+  "venue_settings": {
+    "purpose": "球馆公开资料、营业时段、场地设置与预约一致性",
+    "isolated": true,
+    "files": [
+      "test/venue-settings.integration.spec.ts"
+    ]
   }
 }

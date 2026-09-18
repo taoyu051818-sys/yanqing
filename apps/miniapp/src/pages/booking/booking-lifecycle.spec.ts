@@ -8,6 +8,7 @@ beforeEach(() => { storage.clear(); vi.stubGlobal('uni', { getStorageSync: (key:
 it('keeps a created order recoverable without navigating after the booking page hides', async () => {
   const order = deferred(); const navigate = vi.fn(); const hooks: Record<string, () => void> = {}
   const p = loadSfcScript(new URL('./index.vue', import.meta.url), ['submit', 'selected', 'submitting'], id => {
+    if (id.endsWith('/composables/use-venue-profile')) return { useVenueProfile: () => ({ refresh: vi.fn() }) }
     if (id === 'vue') return vue
     if (id === '@dcloudio/uni-app') return Object.fromEntries(['onShow', 'onHide', 'onUnload'].map(name => [name, (callback: () => void) => { hooks[name] = callback }]))
     if (id.endsWith('/services/api')) return { endpoints: { createBooking: () => order.promise } }

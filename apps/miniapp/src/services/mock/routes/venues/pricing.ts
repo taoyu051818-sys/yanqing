@@ -31,10 +31,10 @@ export async function handleVenuesTimeSlotsManageGet(
     return {
       handled: true,
       value: ok(
-        availability(mockShanghaiBusinessDate()).slots.map(
+        availability(mockShanghaiBusinessDate(), true).slots.map(
           ({ price: _price, ...slot }: any, index: number) => ({
             ...slot,
-            enabled: true,
+            enabled: slot.enabled,
             sortOrder: index + 1,
           }),
         ),
@@ -52,7 +52,7 @@ export async function handleVenuesPriceRulesManageGet(
 ): Promise<MockRouteResult> {
   if (url === "/venues/price-rules/manage" && method === "GET") {
     requireMockRole("FRONT_DESK", "ADMIN", "SUPER_ADMIN");
-    const slots = availability(mockShanghaiBusinessDate()).slots;
+    const slots = availability(mockShanghaiBusinessDate(), true).slots;
     return {
       handled: true,
       value: ok(
@@ -107,7 +107,7 @@ export async function handleVenuesPriceRulesPost(
       throw new Error("价格规则编码格式无效");
     if (name.length < 2 || name.length > 80)
       throw new Error("价格规则名称长度必须为2-80个字符");
-    const slots = availability(mockShanghaiBusinessDate()).slots;
+    const slots = availability(mockShanghaiBusinessDate(), true).slots;
     if (timeSlotId && !slots.some((slot) => slot.id === timeSlotId))
       throw new Error("计价时段不存在");
     if (!Number.isInteger(weekdayMask) || weekdayMask < 1 || weekdayMask > 127)
@@ -233,7 +233,7 @@ export async function handlePriceRuleVersionPost(
     );
     if (name.length < 2 || name.length > 80)
       throw new Error("价格规则名称长度必须为2-80个字符");
-    const slots = availability(mockShanghaiBusinessDate()).slots;
+    const slots = availability(mockShanghaiBusinessDate(), true).slots;
     if (timeSlotId && !slots.some((slot) => slot.id === timeSlotId))
       throw new Error("计价时段不存在");
     if (!Number.isInteger(weekdayMask) || weekdayMask < 1 || weekdayMask > 127)
