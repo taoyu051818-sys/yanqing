@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resolveWorkItemDestination } from "../../utils/work-item-deep-link";
+import { resolveWorkItemDestination } from "../../packages/ops/utils/work-item-deep-link";
 import { mockRequest } from "./router";
 import {
   getCustomerLeads,

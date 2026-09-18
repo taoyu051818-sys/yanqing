@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
+import CustomerDetail from './sections/CustomerDetail.vue'
 import OperationsFrame from '../../components/OperationsFrame.vue'
 import OperationTask from '../../components/OperationTask.vue'
 import { useOperationTask, reasonField } from '../../components/operation-task'
-import MetricCard from '../../../../components/MetricCard.vue'
 import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
@@ -17,7 +17,7 @@ import {
   opsDeepLinkDomId,
   parseOpsDeepLinkQuery,
   type OpsDeepLinkQuery,
-} from '../../../../utils/work-item-deep-link'
+} from '../../utils/work-item-deep-link'
 
 const task = useOperationTask()
 const session = useSessionStore()
@@ -34,11 +34,16 @@ const loadError = ref('')
 const membersLoaded = ref(false)
 const leadsLoaded = ref(false)
 const hostApplicationsLoaded = ref(false)
+const showHostApplications = ref(false)
 const rechargePlansLoaded = ref(false)
 const membershipProductSubmitting = ref(false)
 const membershipProductError = ref('')
 const membershipProductSource = ref<any>(null)
 const selectedId = ref('')
+const detailMemberId = ref('')
+const customerError = ref('')
+let loadedOwner = ''
+function openMember(member: MemberDirectoryItem) { uni.navigateTo({ url: `/packages/ops/pages/members/index?memberId=${encodeURIComponent(member.id)}` }) }
 const tab = ref<'members' | 'leads' | 'membershipProducts' | 'rechargePlans'>('members')
 const deepLinkQuery = ref<OpsDeepLinkQuery>({})
 const deepLinkHandled = ref(false)
@@ -100,16 +105,11 @@ const filteredLeads = computed(() => {
   if (!keyword) return leads.value
   return leads.value.filter((lead) => `${lead.displayName || ''}${lead.phone || ''}${lead.campaign || ''}`.toLowerCase().includes(keyword))
 })
-const metrics = computed(() => [
-  ['匹配会员', String(memberQueue.total.value), '当前查询范围'],
-  ['活跃线索', String(leads.value.filter((lead) => !['CONVERTED', 'LOST', 'ARCHIVED'].includes(lead.status)).length), '待持续推进'],
-  ['SLA逾期', String(leads.value.filter((lead) => !['CONVERTED', 'LOST', 'ARCHIVED'].includes(lead.status) && new Date(lead.slaDueAt).getTime() < Date.now()).length), '优先处理'],
-  ['客户360', selectedId.value ? '已载入' : '待选择', '角色数据隔离'],
-])
 
 async function load() {
   await session.hydrate()
   if (!hasOperationsAccess(session.roles, 'members')) return
+  if (detailMemberId.value) { await selectMember({ id: detailMemberId.value } as MemberDirectoryItem); return }
   loading.value = true
   loadError.value = ''
   membersLoaded.value = false
@@ -165,6 +165,7 @@ async function applyMemberDeepLink() {
     prefix = 'lead'
     label = '客户线索'
   } else if (focus === 'host-application') {
+    showHostApplications.value = true
     tab.value = 'members'
     record = findOpsDeepLinkRecord(hostApplications.value, deepLinkQuery.value, ['id', 'userId'])
     prefix = 'host-application'
@@ -178,7 +179,7 @@ async function applyMemberDeepLink() {
     }
     prefix = 'member'
     label = '会员'
-    if (record) await selectMember(record)
+    if (record) { deepLinkHandled.value = true; openMember(record); return }
   } else {
     deepLinkHandled.value = true
     uni.showToast({ title: `无法识别客户待办类型：${focus}`, icon: 'none' })
@@ -196,21 +197,22 @@ async function applyMemberDeepLink() {
 
 const customerLoading = ref(false)
 let customerGeneration = 0
-watch(() => session.user?.id, () => { customerGeneration++; customer.value = null; selectedId.value = ''; customerLoading.value = false }, { flush: 'sync' })
+watch(() => `${session.user?.id}:${session.roles.join()}`, () => { customerGeneration++; customer.value = null; selectedId.value = ''; customerLoading.value = false; customerError.value = '' }, { flush: 'sync' })
 async function selectMember(member: MemberDirectoryItem) {
-  const generation = ++customerGeneration, actorId = session.user?.id
+  const generation = ++customerGeneration, actorId = session.user?.id, roles = session.roles.join()
   selectedId.value = member.id
   customer.value = null
   customerLoading.value = true
-  const current = () => generation === customerGeneration && selectedId.value === member.id && session.user?.id === actorId
-  uni.setStorageSync('yanqing_selected_member', member)
+  customerError.value = ''
+  const current = () => generation === customerGeneration && selectedId.value === member.id && session.user?.id === actorId && session.roles.join() === roles
   try {
     const detail = await endpoints.member360(member.id)
     if (!current()) return
     if (detail.member.id !== member.id) throw new Error('会员信息不一致，请重新选择')
     customer.value = detail
-    uni.showToast({ title: `已载入 ${member.displayName}`, icon: 'success' })
-  } catch (cause: any) { if (current()) uni.showToast({ title: cause.message || '客户全景加载失败', icon: 'none' }) }
+    uni.setStorageSync('yanqing_selected_member', detail.member)
+
+  } catch (cause: any) { if (current()) customerError.value = cause.message || '客户详情加载失败，请重试' }
   finally { if (current()) customerLoading.value = false }
 }
 
@@ -503,21 +505,33 @@ function changeSource(event: any) {
 }
 
 onLoad((options) => {
+  detailMemberId.value = typeof options?.memberId === 'string' ? options.memberId : ''
+  if (detailMemberId.value) uni.setNavigationBarTitle({ title: '客户详情' })
   deepLinkQuery.value = parseOpsDeepLinkQuery(options)
 })
-onShow(load)
+onShow(async () => {
+  await session.hydrate()
+  const owner = `${session.user?.id}:${session.roles.join()}`
+  if (detailMemberId.value || owner !== loadedOwner || !membersLoaded.value) { loadedOwner = owner; await load() }
+})
 </script>
 
 <template>
-  <OperationsFrame access="members" icon="members" title="客户经营" eyebrow="CRM & MEMBER 360" role="前台 / 教练 / 财务" description="线索先进入责任队列，跟进记录只追加；转化后关联现有会员并进入客户360。">
+  <OperationsFrame access="members" icon="members" :title="detailMemberId ? '客户详情' : '客户与会员'" compact eyebrow="CRM & MEMBER 360" role="前台 / 教练 / 财务" description="线索先进入责任队列，跟进记录只追加；转化后关联现有会员并进入客户360。">
     <OperationTask :task="task" />
-    <view class="metric-grid"><MetricCard v-for="item in metrics" :key="item[0]" :label="item[0]" :value="item[1]" :note="item[2]" /></view>
+    <template v-if="detailMemberId">
+      <view v-if="customerLoading" class="card empty">正在加载客户详情…</view>
+      <view v-else-if="customerError" class="card load-error"><text>{{ customerError }}</text><button class="secondary" @tap="load">重试</button></view>
+      <CustomerDetail v-else-if="customer" :customer="customer" :canAdjust="canRequestAdjustments" @adjust="requestAccountAdjustment" />
+    </template>
+    <template v-else>
     <view v-if="loadError" class="card load-error"><view><text class="member-name">客户数据未完整同步</text><text class="muted block">{{ loadError }}</text></view><button class="secondary retry-button" :disabled="loading" @tap="load">重新加载</button></view>
     <view class="tabs card"><button class="tab" :class="{ active: tab === 'members' }" @tap="tab = 'members'">会员360</button><button v-if="canViewLeads" class="tab" :class="{ active: tab === 'leads' }" @tap="tab = 'leads'">客户线索</button><button v-if="canViewMembershipProducts" class="tab" :class="{ active: tab === 'membershipProducts' }" @tap="tab = 'membershipProducts'">会员产品</button><button v-if="canManageRechargePlans" class="tab" :class="{ active: tab === 'rechargePlans' }" @tap="tab = 'rechargePlans'">充值计划</button></view>
     <view v-if="tab === 'members' || tab === 'leads'" class="search-card card"><input v-model="query" class="input" :placeholder="tab === 'members' ? '输入姓名或手机号后四位查询会员' : '搜索姓名、来源活动'" confirm-type="search" maxlength="50" @confirm="tab === 'members' && memberQueue.refresh()" /><button v-if="tab === 'members'" class="secondary" :disabled="memberQueue.loading.value" @tap="memberQueue.refresh()">查询</button></view>
 
     <template v-if="tab === 'members'">
-      <view v-if="canReviewHosts" class="card host-queue">
+      <button v-if="canReviewHosts" class="secondary host-toggle" @tap="showHostApplications = !showHostApplications">主理人申请 · {{ hostApplicationsLoaded ? hostApplications.length : '…' }} 条 {{ showHostApplications ? '收起⌃' : '展开⌄' }}</button>
+      <view v-if="canReviewHosts && showHostApplications" class="card host-queue">
         <view class="section-title">主理人申请 <text class="section-note">{{ hostApplications.length }} 条待审批</text></view>
         <view v-for="application in hostApplications" :id="opsDeepLinkDomId('host-application', application.id)" :key="application.id" class="host-row" :class="{ 'deep-link-target': focusedRecord === `host-application:${application.id}` }">
           <view><text class="member-name">{{ application.user?.displayName }}</text><text class="muted">{{ application.user?.phone || '未登记手机号' }} · 到店 {{ application.user?.memberProfile?.visitCount || 0 }} 次</text></view>
@@ -526,22 +540,11 @@ onShow(load)
         <text v-if="!loading && hostApplicationsLoaded && !hostApplications.length" class="muted">当前没有待审批主理人申请</text>
       </view>
       <view class="section-title">会员列表 <text class="section-note">{{ loading ? '同步中' : membersLoaded ? `${memberQueue.total.value} 人 · 已加载 ${members.length} 人` : '未同步' }}</text></view>
-      <view v-for="member in filteredMembers" :id="opsDeepLinkDomId('member', member.id)" :key="member.id" class="card member-row" :class="{ selected: selectedId === member.id, 'deep-link-target': focusedRecord === `member:${member.id}` }" @tap="selectMember(member)"><view><text class="member-name">{{ member.displayName || '未命名会员' }}</text><text class="muted">{{ member.phone || '联系方式按角色隐藏' }} · {{ memberLevelLabel(member.level || member.memberProfile?.level) }}</text></view><text class="select-mark">{{ selectedId === member.id ? '已载入' : '查看360' }}</text></view>
+      <view v-for="member in filteredMembers" :id="opsDeepLinkDomId('member', member.id)" :key="member.id" class="card member-row" role="button" tabindex="0" @keyup.enter="openMember(member)" :class="{ selected: selectedId === member.id, 'deep-link-target': focusedRecord === `member:${member.id}` }" @tap="openMember(member)"><view><text class="member-name">{{ member.displayName || '未命名会员' }}</text><text class="muted">{{ member.phone || '联系方式按角色隐藏' }} · {{ memberLevelLabel(member.level || member.memberProfile?.level) }}</text></view><text class="select-mark">查看详情 ›</text></view>
       <view v-if="!loading && membersLoaded && !filteredMembers.length" class="card empty">{{ query.trim() ? '没有匹配的会员' : '当前服务范围内暂无会员' }}</view>
       <text v-if="memberQueue.error.value" class="muted block">{{ memberQueue.error.value }}</text>
       <button v-if="members.length < memberQueue.total.value" class="secondary" :loading="memberQueue.loading.value" :disabled="memberQueue.loading.value" @tap="memberQueue.more()">加载更多会员</button>
-      <view v-if="customer" class="card customer-card">
-        <view class="section-title">{{ customer.member?.displayName }} · 客户360</view>
-        <text class="muted">订单 {{ customer.recentOrders?.length || 0 }} · 培训 {{ customer.recentTraining?.length || 0 }} · 球局 {{ customer.recentGames?.length || 0 }} · 赛事 {{ customer.recentEvents?.length || 0 }} · 券 {{ customer.recentCoupons?.length || 0 }}</text>
-        <view v-if="customer.paymentSummary" class="account-grid">
-          <view class="account"><text>储值可支付合计</text><text class="account-value">{{ money(customer.paymentSummary.storedValueAvailableCents) }}</text></view>
-          <view class="account"><text>可用羽毛球币</text><text class="account-value">{{ customer.paymentSummary.badmintonCoinAvailable }}</text></view>
-        </view>
-        <view v-if="customer.accounts?.length" class="account-grid"><view v-for="account in customer.accounts" :key="account.id" class="account"><text>{{ accountLabel(account.type) }}</text><text class="account-value">{{ accountBalance(account) }}</text></view></view>
-        <button v-if="canRequestAdjustments && customer.accounts?.length" class="secondary adjustment-button" @tap="requestAccountAdjustment">提交账户调整申请</button>
-        <text v-if="customer.privacyScope === 'FRONT_DESK_LIMITED'" class="privacy">前台视图仅展示脱敏联系方式、现场履约信息及可支付额度汇总；账户构成、赛事积分、成长积分和财务明细已隐藏。</text>
-        <text v-else-if="customer.privacyScope === 'COACH_ASSIGNED'" class="privacy">教练视图仅展示本班培训信息，财务、订单、账户及联系方式已隐藏。</text>
-      </view>
+
     </template>
 
     <template v-else-if="tab === 'leads'">
@@ -613,6 +616,7 @@ onShow(load)
       <view v-if="!loading && rechargePlansLoaded && !rechargePlans.length" class="card empty">尚未配置充值计划版本</view>
     </template>
     <view class="card boundary"><text class="muted">线索跟进记录不可删除；教练仅能查看分配给自己或本班会员关联线索，且看不到账户和联系方式。</text></view>
+    </template>
   </OperationsFrame>
 </template>
 
@@ -697,4 +701,11 @@ onShow(load)
   .host-row .actions { width: 100%; }
   .host-row .actions button { flex: 1 1 0; min-width: 0; }
 }
+
+
+.tabs { position:sticky; top:0; z-index:5; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); padding:8rpx; gap:4rpx; }
+.tabs .tab { min-width:0; padding:12rpx 4rpx; min-height:88rpx; font-size:24rpx; white-space:normal; }
+
+
+.host-toggle { width:100%; margin:16rpx 0; min-height:88rpx; font-size:25rpx; }
 </style>

@@ -10,7 +10,7 @@ import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../components/OperationsFrame.vue";
 import OperationTask from "../../components/OperationTask.vue";
 import { useOperationTask, reasonField } from "../../components/operation-task";
-import MetricCard from "../../../../components/MetricCard.vue";
+import MetricCard from "../../components/MetricCard.vue";
 import { hasOperationsAccess } from "../../../../config/operations";
 import { presentPrizePool } from "../../config/event-presentation";
 import { endpoints } from "../../../../services/api";
@@ -23,7 +23,7 @@ import {
   opsDeepLinkDomId,
   parseOpsDeepLinkQuery,
   type OpsDeepLinkQuery,
-} from "../../../../utils/work-item-deep-link";
+} from "../../utils/work-item-deep-link";
 import type {
   EventStatus,
   MatchStatus,

@@ -1,0 +1,12 @@
+{
+  "checks": [
+    "menu layout 375x812",
+    "menu layout 320x568",
+    "menu layout 812x375",
+    "permission detail and save in isolated mock",
+    "member detail tabs, fixed action and return search preservation",
+    "front desk permissions",
+    "coach privacy"
+  ],
+  "errors": []
+}

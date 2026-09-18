@@ -93,7 +93,8 @@ describe('GovernanceService permissions and sensitive responses', () => {
     };
     const service = new GovernanceService(prisma as never);
 
-    const users = await service.users({ page: 1, pageSize: 20 }, superAdmin);
+    const users = await service.users({ page: 1, pageSize: 20, userId: user.id }, superAdmin);
+    expect(prisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { AND: [{ deletedAt: null }, { id: user.id }] } }));
     expect(users.items[0]).toMatchObject({
       wechatBound: true,
       unionBound: true,

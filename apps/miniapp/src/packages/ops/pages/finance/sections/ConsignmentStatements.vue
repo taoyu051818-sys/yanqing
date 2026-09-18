@@ -2,7 +2,7 @@
 import type { ConsignmentSettlementUiAction } from "../page-types";
 import { toRefs } from "vue";
 import { money } from "../../../../../utils/format";
-import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
+import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 
 const props = defineProps<{
   loadErrors: {

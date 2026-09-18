@@ -6,6 +6,11 @@ import type { GovernanceTab } from "../../../config/governance";
 import type { AppRole } from "../../../../../types/domain";
 
 const props = defineProps<{
+  userPage: number;
+  userTotal: number;
+  loading: boolean;
+  changeUserPage: (delta: number) => Promise<void>;
+  detailMode?: boolean;
   activeTab: GovernanceTab;
   userKeyword: string;
   loadCurrentTab: () => Promise<void>;
@@ -70,25 +75,29 @@ const roleReason = computed({
 <template>
   <view>
     <template v-if="activeTab === 'users'">
-      <view class="card toolbar"
-        ><input v-model="userKeyword" placeholder="姓名或手机号" /><button
+      <view v-if="!detailMode" class="card toolbar"
+        ><input v-model="userKeyword" placeholder="姓名或手机号" confirm-type="search" @confirm="loadCurrentTab" /><button
           size="mini"
+          :disabled="loading"
           @tap="loadCurrentTab"
         >
           查询
         </button></view
       >
       <SectionEmpty
-        v-if="!users.length"
+        v-if="!users.length && !detailMode"
         title="没有组织用户"
         description="首次微信登录后会生成会员账户，超级管理员可在此授予岗位角色。"
       />
-      <view v-else class="split">
-        <view class="list">
+      <view class="split">
+        <view v-if="!detailMode" class="list">
           <view
             v-for="user in users"
             :key="user.id"
             class="card row-card"
+            role="button"
+            tabindex="0"
+            @keyup.enter="selectUser(user)"
             :class="{ selected: user.id === selectedUserId }"
             @tap="selectUser(user)"
           >
@@ -100,7 +109,7 @@ const roleReason = computed({
               ></view
             >
             <view class="right"
-              ><StatusBadge :value="user.status" /><text
+              ><StatusBadge :value="user.status" /><text class="detail-link">查看权限 ›</text><text
                 class="wechat"
                 :class="{ bound: user.wechatBound }"
                 >{{ user.wechatBound ? "微信已绑定" : "微信未绑定" }}</text
@@ -108,13 +117,13 @@ const roleReason = computed({
             >
           </view>
         </view>
-        <view v-if="selectedUser" class="card editor">
+        <view v-if="!detailMode && userTotal" class="pagination"><button :disabled="loading || userPage <= 1" @tap="changeUserPage(-1)">上一页</button><text>{{ userPage }} / {{ Math.ceil(userTotal / 20) }} · {{ userTotal }}人</text><button :disabled="loading || userPage * 20 >= userTotal" @tap="changeUserPage(1)">下一页</button></view>
+        <view v-if="detailMode && selectedUser" class="card editor">
           <text class="section-title"
             >{{ selectedUser.displayName }} · 岗位配置</text
           >
           <text class="muted small"
-            >真实员工先用微信首次登录生成账户，再由超级管理员在此授权；无需直接改数据库或复制
-            OpenID。</text
+            >为该人员选择岗位和主角色，填写变更原因后保存。</text
           >
           <view class="chips"
             ><text
@@ -122,11 +131,13 @@ const roleReason = computed({
               :key="option.value"
               class="chip"
               :class="{ on: selectedRoles.includes(option.value) }"
-              @tap="toggleRole(option.value)"
+              @tap="!acting && toggleRole(option.value)"
               >{{ option.label }}</text
             ></view
           >
           <picker
+            :disabled="!canSuperviseUsers || Boolean(acting)"
+            :value="availablePrimaryRoles.findIndex(item => item.value === primaryRole)"
             :range="availablePrimaryRoles"
             range-key="label"
             @change="onPrimaryRoleChange"
@@ -136,6 +147,7 @@ const roleReason = computed({
           >
           <picker
             v-if="selectedRoles.includes('MERCHANT')"
+            :disabled="!canSuperviseUsers || Boolean(acting)"
             :range="merchantChoices"
             range-key="name"
             @change="
@@ -150,8 +162,10 @@ const roleReason = computed({
               }}</view
             >
           </picker>
+          <text class="small">变更原因</text>
           <textarea
             v-model="roleReason"
+            :disabled="!canSuperviseUsers || Boolean(acting)"
             class="textarea"
             maxlength="200"
             placeholder="角色或状态变更原因（必填）"
@@ -159,6 +173,7 @@ const roleReason = computed({
           <view v-if="canSuperviseUsers" class="actions"
             ><button
               class="primary"
+              :disabled="Boolean(acting)"
               :loading="acting === `roles:${selectedUser.id}`"
               @tap="saveRoles"
             >
@@ -166,10 +181,11 @@ const roleReason = computed({
             ><button
               v-if="selectedUser.status === 'ACTIVE'"
               class="danger"
+              :disabled="Boolean(acting)"
               @tap="changeUserStatus('DISABLED')"
             >
               停用</button
-            ><button v-else @tap="changeUserStatus('ACTIVE')">
+            ><button v-else :disabled="Boolean(acting)" @tap="changeUserStatus('ACTIVE')">
               启用
             </button></view
           >
@@ -183,3 +199,17 @@ const roleReason = computed({
 </template>
 
 <style scoped src="../page.css"></style>
+<style scoped>
+
+.editor { margin-bottom:calc(150rpx + env(safe-area-inset-bottom)); }
+.editor .actions { position:fixed; bottom:0; left:0; right:0; z-index:30; padding:20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom)); background:#fff; border-top:1rpx solid #dce7de; margin:0; }
+.editor .actions button { min-height:88rpx; flex:1; margin:0; }
+.detail-link { display:block; color:#17653d; font-size:23rpx; margin:6rpx 0; }
+
+
+.pagination { display:flex; align-items:center; justify-content:space-between; gap:12rpx; font-size:24rpx; }
+.pagination button { margin:0; font-size:24rpx; min-height:88rpx; }
+
+
+.chip { min-width:88rpx; min-height:88rpx; box-sizing:border-box; display:flex; align-items:center; justify-content:center; }
+</style>

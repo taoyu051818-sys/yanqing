@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { toRefs, computed } from "vue";
 import { money } from "../../../../../utils/format";
-import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
+import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 import type { Tab, MasterType } from "../page-types.js";
 
 const props = defineProps<{

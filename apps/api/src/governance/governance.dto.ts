@@ -20,6 +20,11 @@ import {
 } from '../generated/prisma/enums.js';
 
 export class GovernanceUserQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  userId?: string;
+
   @Type(() => Number)
   @IsInt()
   @Min(1)

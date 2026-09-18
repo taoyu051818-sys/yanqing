@@ -7,7 +7,7 @@ import {
   findOpsDeepLinkRecord,
   opsDeepLinkDomId,
   type OpsDeepLinkQuery,
-} from "../../../../../utils/work-item-deep-link";
+} from "../../../utils/work-item-deep-link";
 import type { Tab, MasterType } from "../page-types.js";
 
 interface ActionContext {

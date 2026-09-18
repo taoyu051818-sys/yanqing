@@ -4,7 +4,7 @@ import {
   findOpsDeepLinkRecord,
   parseOpsDeepLinkQuery,
   resolveWorkItemDestination,
-} from "./work-item-deep-link";
+} from "../packages/ops/utils/work-item-deep-link";
 
 describe("work item deep links", () => {
   it.each([

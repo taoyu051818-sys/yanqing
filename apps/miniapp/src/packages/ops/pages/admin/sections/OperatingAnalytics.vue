@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { toRefs } from "vue";
-import MetricCard from "../../../../../components/MetricCard.vue";
+import MetricCard from "../../../components/MetricCard.vue";
 
 const props = defineProps<{
   showAnalytics: boolean;

@@ -6,7 +6,7 @@ import AuditHistory from "./sections/AuditHistory.vue";
 import PrivacyRequests from "./sections/PrivacyRequests.vue";
 import ReportExport from "./sections/ReportExport.vue";
 
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../components/OperationsFrame.vue";
 import SectionEmpty from "../../../../components/SectionEmpty.vue";
@@ -42,6 +42,13 @@ const erasureRequests = ref<any[]>([]);
 const erasureBlockers = reactive<Record<string, any[]>>({});
 const erasureReasons = reactive<Record<string, string>>({});
 const userKeyword = ref("");
+const detailUserId = ref("");
+const userPage = ref(1), userTotal = ref(0);
+async function searchUsers() { userPage.value = 1; await loadCurrentTab(); }
+async function changeUserPage(delta: number) { if (loading.value) return; userPage.value = Math.max(1, userPage.value + delta); await loadCurrentTab(); uni.pageScrollTo({ scrollTop: 0, duration: 0 }); }
+let loadSequence = 0;
+watch(() => `${session.user?.id}:${session.roles.join()}`, () => { loadSequence++; users.value = []; selectedUserId.value = ""; }, { flush: "sync" });
+function openUser(user: any) { uni.navigateTo({ url: `/packages/ops/pages/governance/index?userId=${encodeURIComponent(user.id)}` }); }
 const selectedUserId = ref("");
 const selectedRoles = ref<AppRole[]>([]);
 const primaryRole = ref<AppRole>("MEMBER");
@@ -166,7 +173,8 @@ function toggleParameterPeriod(period: string) {
 
 async function loadCurrentTab() {
   if (!hasOperationsAccess(session.roles, "governance")) return;
-  loading.value = true;
+  const run = ++loadSequence;
+  loading.value = !users.value.length || activeTab.value !== "users";
   error.value = "";
   try {
     if (activeTab.value === "users") {
@@ -175,18 +183,19 @@ async function loadCurrentTab() {
             (item: any) => item.status === "ACTIVE",
           )
         : [];
-      users.value = unwrapItems(
-        await endpoints.governanceUsers({
-          page: 1,
-          pageSize: 100,
-          keyword: userKeyword.value || undefined,
-        }),
-      );
-      if (
-        !users.value.some((item) => item.id === selectedUserId.value) &&
-        users.value[0]
-      )
-        selectUser(users.value[0]);
+      const response = await endpoints.governanceUsers({
+        page: detailUserId.value ? 1 : userPage.value, pageSize: detailUserId.value ? 1 : 20, userId: detailUserId.value || undefined,
+        keyword: detailUserId.value ? undefined : userKeyword.value || undefined,
+      });
+      const result = unwrapItems(response);
+      userTotal.value = (response as any)?.total ?? result.length;
+      if (run !== loadSequence) return;
+      users.value = result;
+      if (detailUserId.value) {
+        const user = result.find((item: any) => item.id === detailUserId.value);
+        if (!user) { selectedUserId.value = ""; throw new Error("未找到该人员，可能已删除或无权查看"); }
+        selectUser(user);
+      }
     } else if (activeTab.value === "parameters") {
       parameters.value = unwrapItems(await endpoints.parameters());
     } else if (activeTab.value === "risks") {
@@ -207,9 +216,9 @@ async function loadCurrentTab() {
       );
     }
   } catch (cause: any) {
-    error.value = cause?.message || "治理数据加载失败";
+    if (run === loadSequence) error.value = cause?.message || "治理数据加载失败";
   } finally {
-    loading.value = false;
+    if (run === loadSequence) loading.value = false;
   }
 }
 
@@ -219,7 +228,7 @@ async function switchTab(tab: GovernanceTab) {
 }
 
 async function saveRoles() {
-  if (!selectedUser.value || !canSuperviseUsers.value) return;
+  if (acting.value || !selectedUser.value || !canSuperviseUsers.value) return;
   if (roleReason.value.trim().length < 2) {
     uni.showToast({ title: "请填写角色变更原因", icon: "none" });
     return;
@@ -262,7 +271,7 @@ async function saveRoles() {
 }
 
 async function changeUserStatus(status: "ACTIVE" | "DISABLED") {
-  if (!selectedUser.value || !canSuperviseUsers.value) return;
+  if (acting.value || !selectedUser.value || !canSuperviseUsers.value) return;
   if (roleReason.value.trim().length < 2) {
     uni.showToast({ title: "请填写状态变更原因", icon: "none" });
     return;
@@ -476,6 +485,8 @@ async function exportReport(scope: string) {
 }
 
 onLoad((options) => {
+  detailUserId.value = typeof options?.userId === "string" ? options.userId : "";
+  if (detailUserId.value) uni.setNavigationBarTitle({ title: "人员权限" });
   if (
     options?.focus === "privacy" &&
     visibleTabs.value.some((tab) => tab.key === "privacy")
@@ -487,6 +498,7 @@ onLoad((options) => {
 onShow(async () => {
   await session.hydrate();
   if (!hasOperationsAccess(session.roles, "governance")) return;
+  if (detailUserId.value && !visibleTabs.value.some(tab => tab.key === "users")) { error.value = "当前岗位无权查看人员权限"; return; }
   if (!visibleTabs.value.some((tab) => tab.key === activeTab.value))
     activeTab.value = visibleTabs.value[0]?.key || "risks";
   await loadCurrentTab();
@@ -497,12 +509,13 @@ onShow(async () => {
   <OperationsFrame
     access="governance"
     icon="governance"
-    title="治理与审计"
+    compact
+    :title="detailUserId ? '人员权限' : '组织与管理'"
     eyebrow="GOVERNANCE & CONTROL"
     role="管理员 / 财务"
     description="管理员维护组织权限和业务规则；财务仅处理风险、审计与数据导出。"
   >
-    <scroll-view scroll-x enable-flex class="tabs">
+    <view v-if="!detailUserId" class="tabs governance-tabs">
       <view class="tab-row">
         <button
           v-for="tab in visibleTabs"
@@ -514,7 +527,7 @@ onShow(async () => {
           {{ tab.label }}
         </button>
       </view>
-    </scroll-view>
+    </view>
 
     <view v-if="error" class="error card"
       ><text>{{ error }}</text
@@ -526,10 +539,15 @@ onShow(async () => {
       v-else-if="activeTab === 'users'"
       :activeTab="activeTab"
       v-model:userKeyword="userKeyword"
-      :loadCurrentTab="loadCurrentTab"
+      :loadCurrentTab="searchUsers"
+      :userPage="userPage"
+      :userTotal="userTotal"
+      :loading="loading"
+      :changeUserPage="changeUserPage"
       :users="users"
       :selectedUserId="selectedUserId"
-      :selectUser="selectUser"
+      :detailMode="Boolean(detailUserId)"
+      :selectUser="openUser"
       :roleLabel="roleLabel"
       :selectedUser="selectedUser"
       :roleOptions="roleOptions"

@@ -3,9 +3,9 @@ import type { EventDetail, InventoryItem } from "../page-types";
 
 import type { EventMatch } from "../page-types";
 import { toRefs, computed } from "vue";
-import MetricCard from "../../../../../components/MetricCard.vue";
+import MetricCard from "../../../components/MetricCard.vue";
 import { shortDate } from "../../../../../utils/format";
-import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
+import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 import type {
   EventStatus,
   MatchStatus,

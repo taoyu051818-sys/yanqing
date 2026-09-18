@@ -10,7 +10,7 @@ import BookingMemberPicker from "../../../../../components/BookingMemberPicker.v
 import { toRefs, computed, ref } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import { shortDate } from "../../../../../utils/format";
-import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
+import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 
 const showMemberPicker = ref(false);
 const props = defineProps<{

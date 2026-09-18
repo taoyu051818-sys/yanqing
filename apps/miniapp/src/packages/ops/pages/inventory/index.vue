@@ -10,7 +10,7 @@ import InventoryCatalog from "./sections/InventoryCatalog.vue";
 import { withPendingCreationKey } from "../../../../utils/pending-creation-key";
 import { computed, nextTick, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
-import MetricCard from "../../../../components/MetricCard.vue";
+import MetricCard from "../../components/MetricCard.vue";
 import OperationsFrame from "../../components/OperationsFrame.vue";
 import OperationTask from "../../components/OperationTask.vue";
 import { useOperationTask, reasonField } from "../../components/operation-task";
@@ -23,7 +23,7 @@ import {
   opsDeepLinkDomId,
   parseOpsDeepLinkQuery,
   type OpsDeepLinkQuery,
-} from "../../../../utils/work-item-deep-link";
+} from "../../utils/work-item-deep-link";
 import type { Tab, MasterType, MovementType, UsageType } from "./page-types.js";
 import { useInventoryCatalogActions } from "./actions/catalog.js";
 import { useInventoryUsageActions } from "./actions/usage.js";
