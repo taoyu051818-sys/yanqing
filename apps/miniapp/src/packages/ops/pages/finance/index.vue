@@ -19,7 +19,7 @@ import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../components/OperationsFrame.vue";
 import OperationTask from "../../components/OperationTask.vue";
 import { useOperationTask, reasonField } from "../../components/operation-task";
-import MetricCard from "../../../../components/MetricCard.vue";
+import MetricCard from "../../components/MetricCard.vue";
 import StatusBadge from "../../../../components/StatusBadge.vue";
 import {
   visibleFinancePageExportScopes,
@@ -36,7 +36,7 @@ import {
   opsDeepLinkDomId,
   parseOpsDeepLinkQuery,
   type OpsDeepLinkQuery,
-} from "../../../../utils/work-item-deep-link";
+} from "../../utils/work-item-deep-link";
 import type { LoadSource } from "./page-types.js";
 import { useFinanceRefundsActions } from "./actions/refunds.js";
 import { useFinanceTrainingActions } from "./actions/training.js";

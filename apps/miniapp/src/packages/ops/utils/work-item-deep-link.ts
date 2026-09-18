@@ -1,6 +1,6 @@
-import { hasOperationsAccess, type OperationsAccessScope } from "../config/operations";
-import type { AppRole } from "../types/domain";
-import type { WorkItem } from "../services/api";
+import { hasOperationsAccess, type OperationsAccessScope } from "../../../config/operations";
+import type { AppRole } from "../../../types/domain";
+import type { WorkItem } from "../../../services/api";
 
 export type OpsPage =
   | "merchant"

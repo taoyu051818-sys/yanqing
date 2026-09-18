@@ -2,7 +2,7 @@
 import { toRefs } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import { money, shortDate } from "../../../../../utils/format";
-import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
+import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 
 const props = defineProps<{
   loading: boolean;

@@ -29,6 +29,7 @@ export async function handleGovernanceUsersGet(
     const status = text(data.status);
     const items = getGovernanceUsers().filter(
       (item) =>
+        (!data.userId || item.id === data.userId) &&
         (!keyword ||
           `${item.displayName} ${item.phone || ""}`
             .toLowerCase()
@@ -40,7 +41,7 @@ export async function handleGovernanceUsersGet(
     );
     return {
       handled: true,
-      value: ok({ items, total: items.length, page: 1, pageSize: 100 }),
+      value: ok({ items: items.slice((Math.max(1, Number(data.page) || 1) - 1) * (Number(data.pageSize) || 20), Math.max(1, Number(data.page) || 1) * (Number(data.pageSize) || 20)), total: items.length, page: Number(data.page) || 1, pageSize: Number(data.pageSize) || 20 }),
     };
   }
   return { handled: false };

@@ -12,7 +12,7 @@ import {
   opsDeepLinkDomId,
   parseOpsDeepLinkQuery,
   type OpsDeepLinkQuery,
-} from "../../../../../utils/work-item-deep-link";
+} from "../../../utils/work-item-deep-link";
 
 export function useCoachNavigation({
   lessons,

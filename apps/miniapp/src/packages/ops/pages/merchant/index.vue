@@ -6,14 +6,14 @@ import OperationTask from '../../components/OperationTask.vue'
 import { useOperationTask, reasonField } from '../../components/operation-task'
 import { couponClaimPath, couponCodeFromInput } from '../../../../utils/coupon-invitation'
 import { SHARE_CARD_IMAGES } from '../../../../config/share'
-import MetricCard from '../../../../components/MetricCard.vue'
+import MetricCard from '../../components/MetricCard.vue'
 import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
 import { idempotencyKey, money, today as shanghaiDate, venueDateKey } from '../../../../utils/format'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
 
-import { parseOpsDeepLinkQuery, opsDeepLinkDomId, type OpsDeepLinkQuery } from '../../../../utils/work-item-deep-link'
+import { parseOpsDeepLinkQuery, opsDeepLinkDomId, type OpsDeepLinkQuery } from '../../utils/work-item-deep-link'
 const deepLinkQuery = ref<OpsDeepLinkQuery>({})
 const focusedSettlementId = ref('')
 let deepLinkHandled = false

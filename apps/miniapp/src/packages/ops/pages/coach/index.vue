@@ -28,7 +28,7 @@ import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../components/OperationsFrame.vue";
 import OperationTask from "../../components/OperationTask.vue";
 import { useOperationTask } from "../../components/operation-task";
-import MetricCard from "../../../../components/MetricCard.vue";
+import MetricCard from "../../components/MetricCard.vue";
 import { useSessionStore } from "../../../../stores/session";
 import { useCoachCatalogActions } from "./actions/catalog.js";
 import { useCoachScheduleActions } from "./actions/schedule.js";

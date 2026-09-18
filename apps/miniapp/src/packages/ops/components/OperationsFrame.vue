@@ -8,6 +8,7 @@ import { useSessionStore } from '../../../stores/session'
 import AppIcon from '../../../components/AppIcon.vue'
 
 const props = defineProps<{
+  compact?: boolean
   title: string
   eyebrow: string
   description: string
@@ -33,19 +34,19 @@ function backToMember() {
 
 <template>
   <view class="ops-page safe-bottom">
-    <view class="ops-header">
-      <view class="eyebrow-row">
+    <view class="ops-header" :class="{ compact: props.compact }">
+      <view v-if="!props.compact" class="eyebrow-row">
         <view class="header-icon"><AppIcon :name="props.icon || 'work'" :size="34" tone="inverse" /></view>
         <text class="eyebrow">{{ props.eyebrow }}</text>
       </view>
       <view class="header-row">
         <view>
           <text class="title">{{ props.title }}</text>
-          <text class="description">{{ props.description }}</text>
+          <text v-if="!props.compact" class="description">{{ props.description }}</text>
         </view>
         <text class="role-chip">{{ canAccess ? props.role : '会员端' }}</text>
       </view>
-      <view v-if="canAccess" class="context-bar">
+      <view v-if="canAccess && !props.compact" class="context-bar">
         <text>{{ props.venue || '延庆金羽主馆' }}</text>
         <text>{{ businessDate }} · {{ props.shift || '全日营业' }}</text>
       </view>
@@ -89,4 +90,8 @@ function backToMember() {
     align-self: flex-start;
   }
 }
+.ops-header.compact { padding:20rpx 24rpx; border-radius:20rpx; }
+.compact .header-row { margin:0; flex-direction:row; align-items:center; }
+.compact .title { font-size:32rpx; }
+.compact .role-chip { align-self:center; }
 </style>

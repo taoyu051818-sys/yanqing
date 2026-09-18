@@ -34,6 +34,7 @@ export async function users(
 ) {
   assertRoles(actor, [AppRole.ADMIN, AppRole.SUPER_ADMIN], '无权查看组织用户');
   const conditions: Prisma.UserWhereInput[] = [{ deletedAt: null }];
+  if (query.userId) conditions.push({ id: query.userId });
   if (query.status) conditions.push({ status: query.status });
   if (query.keyword) {
     conditions.push({

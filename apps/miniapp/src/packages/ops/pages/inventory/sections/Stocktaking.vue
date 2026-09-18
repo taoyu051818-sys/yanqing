@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { toRefs, computed } from "vue";
-import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
+import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 import type { Tab } from "../page-types.js";
 
 const props = defineProps<{

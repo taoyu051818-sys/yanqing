@@ -323,3 +323,6 @@
     gap: 10rpx;
   }
 }
+
+.governance-tabs .tab-row { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); white-space:normal; gap:10rpx; }
+.governance-tabs .tab { min-width:0; padding:12rpx 4rpx; }

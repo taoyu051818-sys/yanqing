@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { toRefs } from "vue";
 import { shortDate } from "../../../../../utils/format";
-import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
+import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 
 const props = defineProps<{
   canFinanceAction: boolean;

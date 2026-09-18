@@ -7,7 +7,7 @@ import WorkItemQueues from "./sections/WorkItemQueues.vue";
 import { computed, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../components/OperationsFrame.vue";
-import MetricCard from "../../../../components/MetricCard.vue";
+import MetricCard from "../../components/MetricCard.vue";
 import StatusBadge from "../../../../components/StatusBadge.vue";
 import { hasOperationsAccess } from "../../../../config/operations";
 import {
@@ -21,7 +21,7 @@ import { useSessionStore } from "../../../../stores/session";
 import type { AppRole } from "../../../../types/domain";
 import { money, shortDate } from "../../../../utils/format";
 import { workGroupRoute } from "../../../../config/work-items";
-import { resolveWorkItemDestination } from "../../../../utils/work-item-deep-link";
+import { resolveWorkItemDestination } from "../../utils/work-item-deep-link";
 
 const session = useSessionStore();
 const dashboard = ref<Record<string, any> | null>(null);

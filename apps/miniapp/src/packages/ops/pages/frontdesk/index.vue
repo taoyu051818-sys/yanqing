@@ -7,7 +7,7 @@ import { useOperationTask, reasonField } from '../../components/operation-task'
 import BookingMemberPicker from '../../../../components/BookingMemberPicker.vue'
 import { usePagedList } from '../../utils/paged-list'
 import ReasonForm from '../../../../components/ReasonForm.vue'
-import MetricCard from '../../../../components/MetricCard.vue'
+import MetricCard from '../../components/MetricCard.vue'
 import StatusBadge from '../../../../components/StatusBadge.vue'
 import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
@@ -21,7 +21,7 @@ import {
   opsDeepLinkDomId,
   parseOpsDeepLinkQuery,
   type OpsDeepLinkQuery,
-} from '../../../../utils/work-item-deep-link'
+} from '../../utils/work-item-deep-link'
 
 const task = useOperationTask()
 const session = useSessionStore()

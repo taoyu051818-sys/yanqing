@@ -3,7 +3,7 @@ import type { TrainingCorrectionView } from "../../../../../types/training-opera
 import { toRefs } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import { money } from "../../../../../utils/format";
-import { opsDeepLinkDomId } from "../../../../../utils/work-item-deep-link";
+import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 
 const props = defineProps<{
   corrections: TrainingCorrectionView[];
