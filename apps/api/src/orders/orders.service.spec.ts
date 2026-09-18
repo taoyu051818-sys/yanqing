@@ -24,7 +24,7 @@ const actor: AuthUser = {
 };
 
 describe('OrdersService refund controls', () => {
-  it('rejects approving a refund created by the same account', async () => {
+  it('rejects approval by a member even when they requested the refund', async () => {
     const refund = {
       id: 'refund-1',
       requestedById: actor.sub,
@@ -49,9 +49,9 @@ describe('OrdersService refund controls', () => {
     );
 
     await expect(
-      service.approveRefund('refund-1', { reason: '同账号测试' }, actor),
+      service.approveRefund('refund-1', { reason: '同账号测试' }, { ...actor, roles: [AppRole.MEMBER] }),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(tx.refund.findUnique).toHaveBeenCalledOnce();
+    expect(tx.refund.findUnique).not.toHaveBeenCalled();
   });
 
   it('keeps the refund status gate before any money movement', async () => {
@@ -82,10 +82,10 @@ describe('OrdersService refund controls', () => {
     ).rejects.toThrow('退款申请已处理');
   });
 
-  it('rejects a refund and restores the order to a payable state', async () => {
+  it.each([AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN])('allows %s to reject their own refund and restores order state', async role => {
     const refund = {
       id: 'refund-3',
-      requestedById: 'front-desk-1',
+      requestedById: actor.sub,
       status: RefundStatus.REQUESTED,
       originalOrderStatus: OrderStatus.PAID,
       orderId: 'order-3',
@@ -125,10 +125,11 @@ describe('OrdersService refund controls', () => {
     const result = await service.rejectRefund(
       'refund-3',
       { reason: '资料不完整' },
-      actor,
+      { ...actor, roles: [role] },
     );
 
     expect(result.status).toBe(RefundStatus.REJECTED);
+    expect(refund).toMatchObject({ requestedById: actor.sub, approvedById: actor.sub });
     expect(tx.order.updateMany).toHaveBeenCalledWith({
       where: { id: 'order-3', status: OrderStatus.REFUND_PENDING },
       data: { status: OrderStatus.PAID },
