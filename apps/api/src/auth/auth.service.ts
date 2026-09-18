@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomInt, randomUUID } from 'node:crypto'
 import { mkdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -54,7 +54,7 @@ export class AuthService {
         create: {
           openId: session.openid,
           unionId: session.unionid,
-          displayName: '微信用户',
+          displayName: String(randomInt(10_000_000, 100_000_000)),
           primaryRole: AppRole.MEMBER,
           roles: { create: { role: AppRole.MEMBER } },
           memberProfile: { create: { tags: [] } },
