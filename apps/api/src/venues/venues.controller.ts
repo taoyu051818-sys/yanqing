@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
-import { CurrentUser, Roles } from '../common/auth/auth.decorators.js';
+import { CurrentUser, Public, Roles } from '../common/auth/auth.decorators.js';
 import type { AuthUser } from '../common/auth/auth-user.js';
 import { AppRole } from '../generated/prisma/enums.js';
 import {
@@ -50,6 +50,7 @@ export class VenuesController {
   ) {}
 
   @Get('availability')
+  @Public()
   availability(@Query() query: AvailabilityQueryDto) {
     return this.venuesVenueAvailability.availability(query.date);
   }

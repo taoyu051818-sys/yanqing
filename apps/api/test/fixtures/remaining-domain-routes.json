@@ -1735,7 +1735,7 @@
     "verb": "GET",
     "path": "/api/v1/venues/availability",
     "roles": [],
-    "isPublic": false,
+    "isPublic": true,
     "provider": "VenueAvailabilityService",
     "serviceMethod": "availability"
   },
