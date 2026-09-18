@@ -62,8 +62,6 @@ export async function rejectRefund(
     ) {
       throw new ConflictException('系统强制退款不可驳回，请完成审批并原路退回');
     }
-    if (refund.requestedById === actor.sub)
-      throw new ForbiddenException('退款申请人与审批人不能是同一账号');
 
     const rejected = await tx.refund.updateMany({
       where: {
@@ -195,13 +193,6 @@ export async function approveRefund(
               return refund;
             }
             throw new ConflictException('退款申请已处理');
-          }
-          // Enforce maker/checker separation at the domain boundary.  A finance
-          // or admin account may initiate a refund on behalf of a member, but it
-          // must not approve its own request; otherwise a single compromised
-          // account can both create and release a money movement.
-          if (refund.requestedById === actor.sub) {
-            throw new ForbiddenException('退款申请人与审批人不能是同一账号');
           }
           const payment = refund.order.payments[0];
           if (!payment) throw new ConflictException('未找到成功支付记录');

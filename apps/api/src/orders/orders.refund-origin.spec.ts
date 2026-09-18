@@ -103,9 +103,23 @@ describe('refund original order status evidence', () => {
       service,
       refund,
       courtBookingUpdate,
+      auditLogCreate: tx.auditLog.create,
       bookingStatus: () => persistedBookingStatus,
     };
   };
+
+  it.each([AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN])('allows %s to approve their own refund once and records the reviewer', async role => {
+    const harness = approvalHarness(BookingStatus.CONFIRMED);
+    harness.refund.requestedById = finance.sub;
+    const reviewer = { ...finance, roles: [role] };
+    await harness.service.approveRefund(harness.refund.id, { reason: '同账号审批' }, reviewer);
+    expect(harness.refund).toMatchObject({ status: RefundStatus.SUCCEEDED, requestedById: finance.sub, approvedById: finance.sub });
+    expect(harness.bookingStatus()).toBe(BookingStatus.CANCELLED);
+    await harness.service.approveRefund(harness.refund.id, { reason: '重复审批' }, reviewer);
+    expect(harness.courtBookingUpdate).toHaveBeenCalledOnce();
+    expect(harness.auditLogCreate).toHaveBeenCalledOnce();
+    expect(harness.auditLogCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actorId: finance.sub }) }));
+  });
 
   it('cancels an unfulfilled booking after a full refund releases the slot', async () => {
     const harness = approvalHarness(BookingStatus.CONFIRMED);

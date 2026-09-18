@@ -49,8 +49,6 @@ export async function handleApproveRefundPost(
       (item: any) => item.id === approveRefundMatch[1],
     );
     if (!order || !refund) throw new Error("退款申请不存在");
-    if (refund.requestedById === mockUser().id)
-      throw new Error("退款申请人与审批人不能是同一账号");
     if (refund.status === "SUCCEEDED")
       return { handled: true, value: ok(mockRefundCommandResponse(refund)) };
     if (refund.status !== "REQUESTED") throw new Error("当前退款状态不能批准");
