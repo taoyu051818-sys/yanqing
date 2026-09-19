@@ -114,7 +114,7 @@ export async function createBookingOnce(
           }),
         ]);
         const operatorOverride = Boolean(dto.overrideReason);
-        if (!court || !slot) throw new NotFoundException('场地或时段不存在');
+        if (!court || court.deletedAt || !slot) throw new NotFoundException('场地或时段不存在');
         if (!operatorOverride && (!court.enabled || !slot.enabled))
           throw new NotFoundException('场地或时段不存在');
         if (!operatorOverride && court.usage === CourtUsage.MAINTENANCE)

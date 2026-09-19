@@ -22,7 +22,7 @@ export async function availability(
   await releaseExpiredHolds(prisma);
   const [courts, slots, bookings, closures] = await Promise.all([
     prisma.court.findMany({
-      where: includeUnavailable ? undefined : { enabled: true },
+      where: { deletedAt: null, ...(includeUnavailable ? {} : { enabled: true }) },
       select: { id: true, name: true, usage: true, enabled: true },
       orderBy: { sortOrder: 'asc' },
     }),

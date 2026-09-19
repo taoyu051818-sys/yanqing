@@ -1,3 +1,5 @@
+import { loadCapacitySlots } from '../common/venue/capacity-slots.js';
+import { loadCapacityCourts } from '../common/venue/capacity-courts.js';
 import {
   Injectable,
   Logger,
@@ -166,20 +168,8 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
           games,
           events,
         ] = await Promise.all([
-          tx.court.findMany({
-            where: { enabled: true },
-            select: { id: true, createdAt: true },
-          }),
-          tx.timeSlot.findMany({
-            where: { enabled: true },
-            select: {
-              id: true,
-              label: true,
-              startMinutes: true,
-              endMinutes: true,
-            },
-            orderBy: { startMinutes: 'asc' },
-          }),
+          loadCapacityCourts(tx, new Date(+start - 7 * DAY), end),
+          loadCapacitySlots(tx, new Date(+start - 7 * DAY), end),
           tx.courtBooking.findMany({
             where: {
               startsAt: { lt: new Date(+end + 30 * DAY) },
@@ -429,7 +419,7 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
         venueRevenue:
           '场地收入按场地订单履约完成时间确认，已成功退款按确认时点反冲；不含充值、培训和活动收入。',
         utilization:
-          '使用率=已确认/签到/完成预约占用分钟÷可售分钟，排除封场和待支付临时占位；以当前启用场地、营业时段配置计算。',
+          '使用率=已确认/签到/完成预约占用分钟÷可售分钟，排除封场和待支付临时占位；按查询日期的场地与营业时段历史计算，保留营业配置外的实际预约。',
         activities:
           '活动为查询时当前及未来开放球局/积分赛。双打每队按2人；确认报名、待支付占位、候补分别统计。已收报名费为累计实付减成功退款。',
       },

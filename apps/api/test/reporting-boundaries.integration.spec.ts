@@ -574,7 +574,7 @@ describe.skipIf(!url)('reporting boundaries on PostgreSQL', () => {
     expect(after.status).toBe('REVIEWING');
   });
 
-  it('uses the same enabled court set in dashboard and boss summary', async () => {
+  it('preserves actual reservations on disabled courts in dashboard and boss summary', async () => {
     const today = dayRange();
     const courts = [];
     for (let i = 0; i < 2; i++) {
@@ -609,7 +609,7 @@ describe.skipIf(!url)('reporting boundaries on PostgreSQL', () => {
     });
     await new VenuesService(db).updateCourt(
       courts[1].id,
-      { enabled: false },
+      { enabled: false, revision: courts[1].updatedAt.toISOString() },
       admin,
     );
     const dashboard = await new DashboardService(db).overview(
@@ -620,9 +620,9 @@ describe.skipIf(!url)('reporting boundaries on PostgreSQL', () => {
       db,
       new ConfigService({ NODE_ENV: 'test' }),
     ).summary(today.date);
-    expect(dashboard.venue.courtCount).toBe(1);
-    expect(dashboard.venue.bookedCourtHours).toBe(1);
-    expect(dashboard.venue.availableCourtHours).toBe(1);
+    expect(dashboard.venue.courtCount).toBe(2);
+    expect(dashboard.venue.bookedCourtHours).toBe(2);
+    expect(dashboard.venue.availableCourtHours).toBe(2);
     expect(dashboard.venue.utilizationRate).toBe(100);
     expect(boss.venue.utilizationRate).toBe(100);
   });

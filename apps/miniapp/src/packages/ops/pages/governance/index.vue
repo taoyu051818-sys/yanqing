@@ -42,6 +42,8 @@ const erasureRequests = ref<any[]>([]);
 const erasureBlockers = reactive<Record<string, any[]>>({});
 const erasureReasons = reactive<Record<string, string>>({});
 const userKeyword = ref("");
+const userRole = ref("");
+function resetUserEditor() { if (selectedUser.value) selectUser(selectedUser.value); }
 const detailUserId = ref("");
 const userPage = ref(1), userTotal = ref(0);
 async function searchUsers() { userPage.value = 1; await loadCurrentTab(); }
@@ -186,6 +188,7 @@ async function loadCurrentTab() {
       const response = await endpoints.governanceUsers({
         page: detailUserId.value ? 1 : userPage.value, pageSize: detailUserId.value ? 1 : 20, userId: detailUserId.value || undefined,
         keyword: detailUserId.value ? undefined : userKeyword.value || undefined,
+        role: detailUserId.value ? undefined : userRole.value || undefined,
       });
       const result = unwrapItems(response);
       userTotal.value = (response as any)?.total ?? result.length;
@@ -537,6 +540,8 @@ onShow(async () => {
 
     <UserGovernance
       v-else-if="activeTab === 'users'"
+      :resetEditor="resetUserEditor"
+      v-model:userRole="userRole"
       :activeTab="activeTab"
       v-model:userKeyword="userKeyword"
       :loadCurrentTab="searchUsers"

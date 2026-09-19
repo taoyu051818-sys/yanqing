@@ -63,7 +63,7 @@ describe('guest court availability through real authentication guards', () => {
     expect(body.closures).toEqual([{ courtId: 'court', startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), status: 'ACTIVE' }]);
     expect(JSON.stringify(body)).not.toMatch(/private|orderId|userId|phone|createdById/);
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
-    expect(prisma.court.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { enabled: true } }));
+    expect(prisma.court.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { enabled: true, deletedAt: null } }));
   });
 
   it.each(['/availability/assisted', '/closures', '/time-slots/manage', '/price-rules/manage'])('keeps staff query %s authenticated', async path => {

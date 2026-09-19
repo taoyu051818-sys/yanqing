@@ -264,7 +264,7 @@ export async function handleMembersAny(
             privacyScope,
           }));
     const keyword = text(data.keyword).trim().toLowerCase();
-    const filtered = [...members].filter(
+    const filtered = [...members].filter(member => !data.level || member.level === data.level).filter(
       (member) =>
         !keyword ||
         member.displayName.toLowerCase().includes(keyword) ||

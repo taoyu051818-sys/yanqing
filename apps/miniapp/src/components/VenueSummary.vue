@@ -8,6 +8,7 @@ function openMap() {
   if (!p || p.latitude == null || p.longitude == null) return
   uni.openLocation({ latitude: p.latitude, longitude: p.longitude, name: p.name, address: p.address, fail: () => uni.showToast({ title: '地图暂时无法打开，请按地址前往', icon: 'none' }) })
 }
+function copyAddress() { if (props.profile?.address) uni.setClipboardData({ data: props.profile.address, fail: () => uni.showToast({ title: '复制失败，请重试', icon: 'none' }) }) }
 function callVenue() { if (props.profile?.contactPhone) uni.makePhoneCall({ phoneNumber: props.profile.contactPhone }) }
 </script>
 <template>
@@ -15,8 +16,9 @@ function callVenue() { if (props.profile?.contactPhone) uni.makePhoneCall({ phon
     <view class="venue-title"><AppIcon name="sport" :size="36" /><text>{{ profile.name }}</text></view>
     <text class="muted">{{ profile.opensAtHour != null && profile.closesAtHour != null ? `每日 ${hour(profile.opensAtHour)}–${hour(profile.closesAtHour)}` : '营业时间待配置' }} · {{ profile.courtCount }} 片开放场地</text>
     <text class="venue-address">{{ profile.address || '详细地址待球馆补充' }}</text>
-    <view v-if="profile.contactPhone || (profile.latitude != null && profile.longitude != null)" class="venue-actions">
+    <view v-if="profile.address || profile.contactPhone || (profile.latitude != null && profile.longitude != null)" class="venue-actions">
       <button v-if="profile.latitude != null && profile.longitude != null" class="secondary" @tap="openMap">地图导航</button>
+      <button v-if="profile.address" class="secondary" @tap="copyAddress">复制地址</button>
       <button v-if="profile.contactPhone" class="secondary" @tap="callVenue">联系球馆 · {{ profile.contactPhone }}</button>
     </view>
   </view>

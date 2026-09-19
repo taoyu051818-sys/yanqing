@@ -334,7 +334,7 @@ export async function create(
   return prisma.$transaction(
     async (tx) => {
       const courts = await tx.court.findMany({
-        where: { id: { in: dto.courtIds }, enabled: true },
+        where: { id: { in: dto.courtIds }, enabled: true, deletedAt: null },
         select: { id: true, usage: true },
       });
       if (courts.length !== dto.courtIds.length)

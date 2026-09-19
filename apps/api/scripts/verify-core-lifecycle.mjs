@@ -18,8 +18,8 @@ if (args.length === 1 && args[0] === '--list') {
     const base = new URL(raw);
     if (!['postgres:', 'postgresql:'].includes(base.protocol) || !['localhost', '127.0.0.1'].includes(base.hostname) || !/^\/[a-zA-Z0-9_]+_test$/.test(base.pathname)) throw new Error('只允许本地、名称以 _test 结尾的隔离 PostgreSQL 数据库');
     if (base.hostname === 'localhost') base.hostname = '127.0.0.1';
-    const run = (command, databaseUrl) => {
-      const child = spawnSync('pnpm', command, { cwd, stdio: 'inherit', env: { ...process.env, DATABASE_URL: databaseUrl, TEST_DATABASE_URL: databaseUrl } });
+    const run = (command, databaseUrl, extraEnv = {}) => {
+      const child = spawnSync('pnpm', command, { cwd, stdio: 'inherit', env: { ...process.env, DATABASE_URL: databaseUrl, TEST_DATABASE_URL: databaseUrl, ...extraEnv } });
       if (child.error || child.status !== 0) throw new Error(`核心验收命令失败：pnpm ${command.join(' ')}`);
     };
     const groups = args.length ? [[args[1], matrix[args[1]]]] : Object.entries(matrix);
@@ -37,8 +37,9 @@ if (args.length === 1 && args[0] === '--list') {
           created = true;
           target.pathname = `/${database}`;
         }
-        run(['db:deploy'], target.href);
-        run(['exec', 'vitest', 'run', '--no-file-parallelism', '--testTimeout=30000', '--hookTimeout=60000', ...group.files], target.href);
+        // Legacy migration acceptance creates the pre-upgrade schema itself.
+        if (!group.legacyMigration) run(['db:deploy'], target.href);
+        run(['exec', 'vitest', 'run', '--no-file-parallelism', '--testTimeout=30000', '--hookTimeout=60000', ...group.files], target.href, group.legacyMigration ? { HISTORY_MIGRATION_TEST_URL: target.href } : {});
       } finally {
         try { if (created) await admin.query(`DROP DATABASE "${database}"`); }
         finally { if (admin) await admin.end(); }

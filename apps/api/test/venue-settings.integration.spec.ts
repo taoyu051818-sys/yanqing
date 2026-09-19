@@ -37,11 +37,34 @@ describe.skipIf(!url)('venue configuration on isolated PostgreSQL', () => {
     await expect(booking.createBooking({ date: '2035-01-01', courtId: court.id, slotId: early.id, sourceChannel: 'MINI_PROGRAM', creationIdempotencyKey: randomUUID() }, { ...admin, roles: ['MEMBER'] })).rejects.toThrow('场地或时段不存在');
     await expect(settings.save(command, admin)).rejects.toThrow('已被修改');
     expect((await db.courtBooking.findUniqueOrThrow({ where: { id: reserved.id } })).status).toBe('CONFIRMED');
-    await updateCourt(db, court.id, { name: '新名称', enabled: false }, admin);
+    await updateCourt(db, court.id, { revision: court.updatedAt.toISOString(), name: '新名称', enabled: false }, admin);
     expect((await availability.availability('2035-01-01')).courts.some(c => c.id === court.id)).toBe(false);
     expect((await availability.availability('2035-01-01', true)).courts.find(c => c.id === court.id)).toMatchObject({ name: '新名称', enabled: false });
     expect(await db.auditLog.count({ where: { action: 'VENUE_SETTINGS_UPDATED', actorId: admin.sub } })).toBe(1);
     await expect(settings.createCourt({ code: court.code, name: '重复', zone: 'EAST', usage: 'RETAIL', enabled: true, sortOrder: 2 }, admin)).rejects.toThrow('已存在');
+  });
+  it('edits court metadata and deletes without cancelling orders, including retry and stale client protection', async () => {
+    const court = await settings.createCourt({ code: 'DELETE_TEST', name: '可删除场地', zone: 'EAST', usage: 'RETAIL', enabled: true, sortOrder: 2 }, admin);
+    const order = await db.order.create({ data: { orderNo: 'COURT_DELETE_' + randomUUID(), businessType: 'VENUE', memberId: admin.sub, subjectAccount: 'VENUE', sourceChannel: 'MINI_PROGRAM', title: '场地订单', parameterSnapshot: {}, listAmountCents: 6800, payableCents: 6800, paidCents: 6800, status: 'PAID' } });
+    const reserved = await db.courtBooking.create({ data: { courtId: court.id, orderId: order.id, status: 'CONFIRMED', startsAt: new Date('2035-01-02T01:00:00Z'), endsAt: new Date('2035-01-02T02:00:00Z') } });
+    const changed = await updateCourt(db, court.id, { revision: court.updatedAt.toISOString(), code: 'DELETE_CHANGED', name: '已编辑场地', zone: 'WEST', sortOrder: 8 }, admin);
+    expect(changed).toMatchObject({ code: 'DELETE_CHANGED', name: '已编辑场地', zone: 'WEST', sortOrder: 8 });
+    await expect(updateCourt(db, court.id, { revision: changed.updatedAt.toISOString(), code: 'SETTINGS_TEST' }, admin)).rejects.toThrow('已存在');
+    await expect(settings.deleteCourt(court.id, { ...admin, roles: ['FRONT_DESK'] })).rejects.toThrow('仅管理员');
+    await expect(updateCourt(db, court.id, { revision: changed.updatedAt.toISOString(), name: '越权修改' }, { ...admin, roles: ['MEMBER'] })).rejects.toThrow('仅管理员');
+    expect((await settings.settings(admin)).courts.some(c => c.id === court.id)).toBe(true);
+    await settings.deleteCourt(court.id, admin);
+    await settings.deleteCourt(court.id, admin);
+    expect((await settings.settings(admin)).courts.some(c => c.id === court.id)).toBe(false);
+    for (const assisted of [false, true]) expect((await availability.availability('2035-01-02', assisted)).courts.some(c => c.id === court.id)).toBe(false);
+    expect((await db.courtBooking.findUniqueOrThrow({ where: { id: reserved.id }, include: { order: true } }))).toMatchObject({ status: 'CONFIRMED', order: { status: 'PAID', paidCents: 6800 } });
+    await expect(updateCourt(db, court.id, { revision: changed.updatedAt.toISOString(), enabled: true }, admin)).rejects.toThrow('已删除');
+    const slot = await db.timeSlot.findFirstOrThrow({ where: { enabled: true } });
+    const member = await db.user.create({ data: { displayName: '订场会员', memberProfile: { create: {} } } });
+    for (const overrideReason of [undefined, '管理员特殊代订']) {
+      await expect(booking.createBooking({ date: '2035-01-03', courtId: court.id, slotId: slot.id, memberId: member.id, sourceChannel: 'MINI_PROGRAM', creationIdempotencyKey: randomUUID(), overrideReason }, admin)).rejects.toThrow('场地或时段不存在');
+    }
+    expect(await db.auditLog.count({ where: { action: 'COURT_DELETED', objectId: court.id } })).toBe(1);
   });
   it('rejects non-admin access and invalid hours or coordinate pairs', async () => {
     await expect(settings.settings({ ...admin, roles: ['FRONT_DESK'] })).rejects.toThrow('仅管理员');

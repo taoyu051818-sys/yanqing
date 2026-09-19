@@ -68,7 +68,7 @@ export async function createClosure(
     const created = await prisma.$transaction(
       async (tx) => {
         const court = await tx.court.findUnique({
-          where: { id: command.courtId },
+          where: { id: command.courtId, deletedAt: null },
           select: { id: true, code: true, name: true },
         });
         if (!court) throw new NotFoundException('场地不存在');

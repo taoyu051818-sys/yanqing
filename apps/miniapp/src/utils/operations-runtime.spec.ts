@@ -28,6 +28,7 @@ function initializePage(path: string) {
       },
     }),
     onUnmounted: () => {},
+    onScopeDispose: () => {},
     nextTick: () => Promise.resolve(),
     watch: () => {},
   };
@@ -52,6 +53,8 @@ function initializePage(path: string) {
     modules.set(file, module);
     const require = (id: string) => {
       if (id === "vue") return vue;
+      if (id === "@yanqing/shared")
+        return load(resolve(sourceRoot, "../../../packages/shared/src/index.ts"));
       if (id === "@dcloudio/uni-app")
         return {
           onLoad() {},

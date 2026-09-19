@@ -22,7 +22,10 @@ import {
 const task = useOperationTask()
 const session = useSessionStore()
 const query = ref('')
-const memberQueue = usePagedList<MemberDirectoryItem>((page, pageSize) => endpoints.members({ page, pageSize, keyword: query.value.trim() }), 20, () => query.value.trim())
+const memberLevel = ref('')
+const levelFilters = [{ value:'', label:'全部等级' }, { value:'EXPERIENCE', label:'体验会员' }, { value:'REGULAR', label:'普通会员' }, { value:'GOLD', label:'金卡会员' }, { value:'BLACK', label:'黑金会员' }]
+function filterMembers(event: any) { memberLevel.value = levelFilters[Number(event.detail.value)].value; void memberQueue.refresh() }
+const memberQueue = usePagedList<MemberDirectoryItem>((page, pageSize) => endpoints.members({ page, pageSize, keyword: query.value.trim(), level: memberLevel.value || undefined }), 20, () => `${query.value.trim()}:${memberLevel.value}`)
 const members = memberQueue.items
 const leads = ref<any[]>([])
 const hostApplications = ref<any[]>([])
@@ -526,8 +529,9 @@ onShow(async () => {
     </template>
     <template v-else>
     <view v-if="loadError" class="card load-error"><view><text class="member-name">客户数据未完整同步</text><text class="muted block">{{ loadError }}</text></view><button class="secondary retry-button" :disabled="loading" @tap="load">重新加载</button></view>
-    <view class="tabs card"><button class="tab" :class="{ active: tab === 'members' }" @tap="tab = 'members'">会员360</button><button v-if="canViewLeads" class="tab" :class="{ active: tab === 'leads' }" @tap="tab = 'leads'">客户线索</button><button v-if="canViewMembershipProducts" class="tab" :class="{ active: tab === 'membershipProducts' }" @tap="tab = 'membershipProducts'">会员产品</button><button v-if="canManageRechargePlans" class="tab" :class="{ active: tab === 'rechargePlans' }" @tap="tab = 'rechargePlans'">充值计划</button></view>
+    <view class="tabs card"><button class="tab" :class="{ active: tab === 'members' }" @tap="tab = 'members'">会员列表</button><button v-if="canViewLeads" class="tab" :class="{ active: tab === 'leads' }" @tap="tab = 'leads'">客户线索</button><button v-if="canViewMembershipProducts" class="tab" :class="{ active: tab === 'membershipProducts' }" @tap="tab = 'membershipProducts'">会员产品</button><button v-if="canManageRechargePlans" class="tab" :class="{ active: tab === 'rechargePlans' }" @tap="tab = 'rechargePlans'">充值计划</button></view>
     <view v-if="tab === 'members' || tab === 'leads'" class="search-card card"><input v-model="query" class="input" :placeholder="tab === 'members' ? '输入姓名或手机号后四位查询会员' : '搜索姓名、来源活动'" confirm-type="search" maxlength="50" @confirm="tab === 'members' && memberQueue.refresh()" /><button v-if="tab === 'members'" class="secondary" :disabled="memberQueue.loading.value" @tap="memberQueue.refresh()">查询</button></view>
+    <view v-if="tab === 'members'" class="list-toolbar"><text>{{ memberQueue.loading.value ? '查询中…' : `共 ${memberQueue.total.value} 位会员` }}</text><picker :range="levelFilters" range-key="label" :value="levelFilters.findIndex(item => item.value === memberLevel)" @change="filterMembers"><view class="level-filter">{{ levelFilters.find(item => item.value === memberLevel)?.label }} ▾</view></picker></view>
 
     <template v-if="tab === 'members'">
       <button v-if="canReviewHosts" class="secondary host-toggle" @tap="showHostApplications = !showHostApplications">主理人申请 · {{ hostApplicationsLoaded ? hostApplications.length : '…' }} 条 {{ showHostApplications ? '收起⌃' : '展开⌄' }}</button>
@@ -539,8 +543,9 @@ onShow(async () => {
         </view>
         <text v-if="!loading && hostApplicationsLoaded && !hostApplications.length" class="muted">当前没有待审批主理人申请</text>
       </view>
-      <view class="section-title">会员列表 <text class="section-note">{{ loading ? '同步中' : membersLoaded ? `${memberQueue.total.value} 人 · 已加载 ${members.length} 人` : '未同步' }}</text></view>
-      <view v-for="member in filteredMembers" :id="opsDeepLinkDomId('member', member.id)" :key="member.id" class="card member-row" role="button" tabindex="0" @keyup.enter="openMember(member)" :class="{ selected: selectedId === member.id, 'deep-link-target': focusedRecord === `member:${member.id}` }" @tap="openMember(member)"><view><text class="member-name">{{ member.displayName || '未命名会员' }}</text><text class="muted">{{ member.phone || '联系方式按角色隐藏' }} · {{ memberLevelLabel(member.level || member.memberProfile?.level) }}</text></view><text class="select-mark">查看详情 ›</text></view>
+      <view class="business-list">
+      <view v-for="member in filteredMembers" :id="opsDeepLinkDomId('member', member.id)" :key="member.id" class="card member-row" role="button" tabindex="0" @keyup.enter="openMember(member)" :class="{ selected: selectedId === member.id, 'deep-link-target': focusedRecord === `member:${member.id}` }" @tap="openMember(member)"><view><text class="member-name">{{ member.displayName || '未命名会员' }}</text><text class="muted">{{ member.phone || '联系方式按岗位隐藏' }}</text></view><view class="member-trailing"><text class="member-level">{{ memberLevelLabel(member.level || member.memberProfile?.level) }}</text><text class="select-mark">›</text></view></view>
+      </view>
       <view v-if="!loading && membersLoaded && !filteredMembers.length" class="card empty">{{ query.trim() ? '没有匹配的会员' : '当前服务范围内暂无会员' }}</view>
       <text v-if="memberQueue.error.value" class="muted block">{{ memberQueue.error.value }}</text>
       <button v-if="members.length < memberQueue.total.value" class="secondary" :loading="memberQueue.loading.value" :disabled="memberQueue.loading.value" @tap="memberQueue.more()">加载更多会员</button>
@@ -708,4 +713,12 @@ onShow(async () => {
 
 
 .host-toggle { width:100%; margin:16rpx 0; min-height:88rpx; font-size:25rpx; }
+.tabs { background:#fff; padding:0 8rpx; border-radius:16rpx; margin:8rpx 0 20rpx; }
+.tabs .tab { background:transparent; border-radius:0; border-bottom:4rpx solid transparent; color:#687079; font-size:26rpx; }
+.tabs .tab.active { background:transparent; color:#17653d; border-bottom-color:#17653d; }
+.search-card { margin:0; padding:8rpx 20rpx; }.search-card .input { font-size:28rpx; min-height:88rpx; padding:0; }
+.search-card .secondary { background:transparent; font-size:26rpx; border:0; }
+.list-toolbar { display:flex; justify-content:space-between; align-items:center; padding:12rpx 8rpx; font-size:26rpx; color:#727982; }
+.level-filter { min-height:88rpx; display:flex; align-items:center; color:#4b535b; }
+.member-trailing { display:flex; gap:20rpx; align-items:center; }.member-level { font-size:25rpx; color:#687079; }.select-mark { font-size:34rpx; color:#969da4; }
 </style>

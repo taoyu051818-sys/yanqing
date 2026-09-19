@@ -99,6 +99,7 @@ export const endpoints = {
   venueProfile: () => api.get<VenueProfile>("/venues/profile"),
   venueSettings: () => api.get<VenueSettings>("/venues/settings"),
   saveVenueSettings: (data: object) => api.post("/venues/settings", data),
+  deleteVenueCourt: (id: string) => api.delete<{ id: string; deleted: boolean }>(`/venues/courts/${id}`),
   createVenueCourt: (data: object) => api.post<VenueCourt>("/venues/courts", data),
   updateVenueCourt: (id: string, data: object) => api.patch<VenueCourt>(`/venues/courts/${id}`, data),
   wechatLogin: (code: string) =>

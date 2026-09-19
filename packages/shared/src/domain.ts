@@ -44,6 +44,7 @@ export interface ApiEnvelope<T> {
   message: string
   data: T
   requestId?: string
+  businessCode?: string
 }
 
 export interface PageResult<T> {

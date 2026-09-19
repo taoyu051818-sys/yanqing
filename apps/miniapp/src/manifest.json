@@ -51,6 +51,8 @@
     /* 小程序特有相关 */
     "mp-weixin" : {
         "appid" : "wx25610460bc96894b",
+        "requiredPrivateInfos" : ["chooseLocation"],
+        "permission" : { "scope.userLocation" : { "desc" : "用于管理员在地图上选择球馆地址，提供到馆导航" } },
         "setting" : {
             "urlCheck" : true,
             "es6" : true,

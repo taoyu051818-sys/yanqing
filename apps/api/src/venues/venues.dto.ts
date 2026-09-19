@@ -20,6 +20,7 @@ import {
   BookingStatus,
   CourtClosureStatus,
   CourtUsage,
+  CourtZone,
   SourceChannel,
 } from '../generated/prisma/enums.js';
 
@@ -127,6 +128,20 @@ export class CreateVenueBookingDto {
 }
 
 export class UpdateCourtDto {
+  @IsString()
+  @IsDateString()
+  revision: string;
+
+  @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @Matches(/^[A-Z0-9][A-Z0-9_-]{0,31}$/)
+  code?: string;
+
+  @IsOptional()
+  @IsEnum(CourtZone)
+  zone?: CourtZone;
+
   @IsOptional()
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   @IsString()

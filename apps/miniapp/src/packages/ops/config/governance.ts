@@ -8,7 +8,7 @@ export const governanceTabs: Array<{
   label: string;
   roles: AppRole[];
 }> = [
-  { key: "users", label: "组织权限", roles: ["ADMIN", "SUPER_ADMIN"] },
+  { key: "users", label: "员工权限", roles: ["ADMIN", "SUPER_ADMIN"] },
   { key: "parameters", label: "业务规则", roles: ["ADMIN", "SUPER_ADMIN"] },
   {
     key: "risks",

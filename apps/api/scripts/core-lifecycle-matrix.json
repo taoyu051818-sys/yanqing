@@ -82,5 +82,28 @@
     "files": [
       "test/venue-settings.integration.spec.ts"
     ]
+  },
+  "training_courts": {
+    "purpose": "场地删除与培训排课并发、历史排课保留和幂等重试",
+    "isolated": true,
+    "files": [
+      "test/training-deleted-courts.integration.spec.ts"
+    ]
+  },
+  "availability_history": {
+    "purpose": "场地与营业时段历史口径、旧版本并发写入、修改后历史数据稳定",
+    "isolated": true,
+    "files": [
+      "test/availability-history.integration.spec.ts",
+      "test/court-revision-history.integration.spec.ts"
+    ]
+  },
+  "availability_migration": {
+    "purpose": "真实旧版本数据库迁移、审计历史回填、历史触发器事务回滚",
+    "isolated": true,
+    "legacyMigration": true,
+    "files": [
+      "test/availability-history-migration.integration.spec.ts"
+    ]
   }
 }

@@ -3,7 +3,7 @@ import { getPriceRules, getVenueBookings, getVenueClosures, saveVenueBookings } 
 import { getMockVenueSlots } from './venue-settings'
 
 export function availability(date: string, includeUnavailable = false): CourtAvailability {
-  const courts = getMockVenueCourts().filter(court => includeUnavailable || court.enabled).map((court) => ({
+  const courts = getMockVenueCourts().filter(court => !court.deletedAt && (includeUnavailable || court.enabled)).map((court) => ({
     id: court.id,
     name: court.name,
     usage: court.usage,
