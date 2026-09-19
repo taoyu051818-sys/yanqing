@@ -234,7 +234,7 @@ describe('functional domain module wiring and HTTP contracts', () => {
     vi.restoreAllMocks();
   });
 
-  it('preserves all 156 route, role and public-access declarations with no additions or omissions', () => {
+  it('preserves all 157 route, role and public-access declarations with no additions or omissions', () => {
     const actual: object[] = [];
     for (const [name, controller] of Object.entries(controllers)) {
       for (const method of Object.getOwnPropertyNames(controller.prototype)) {
@@ -271,11 +271,11 @@ describe('functional domain module wiring and HTTP contracts', () => {
     );
     const sort = (items: object[]) =>
       items.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-    expect(actual).toHaveLength(156);
+    expect(actual).toHaveLength(157);
     expect(sort(actual)).toEqual(sort(expected));
     expect(
       new Set(routes.map((route) => `${route.verb} ${route.path}`)).size,
-    ).toBe(156);
+    ).toBe(157);
   });
 
   it('dispatches every existing HTTP route to its owning domain provider, including static routes', async () => {
@@ -290,7 +290,7 @@ describe('functional domain module wiring and HTTP contracts', () => {
           ? server.get(path)
           : route.verb === 'PATCH'
             ? server.patch(path)
-            : server.post(path);
+            : route.verb === 'DELETE' ? server.delete(path) : server.post(path);
       const response = await call
         .set('x-test-role', route.roles[0] || 'SUPER_ADMIN')
         .send({
@@ -322,7 +322,7 @@ describe('functional domain module wiring and HTTP contracts', () => {
           ? server.get(path)
           : route.verb === 'PATCH'
             ? server.patch(path)
-            : server.post(path);
+            : route.verb === 'DELETE' ? server.delete(path) : server.post(path);
       const response = await call.set('x-test-role', 'MEMBER').send({});
       expect(response.status, `${route.verb} ${path}`).toBe(403);
       expect(

@@ -16,20 +16,20 @@ const makePrisma = () => {
       findMany: vi
         .fn()
         .mockResolvedValue(
-          Array.from({ length: 20 }, (_, i) => ({ id: 'court-' + i })),
+          Array.from({ length: 20 }, (_, i) => ({ id: 'court-' + i, availabilityHistory: [{ validFrom: new Date('2020-01-01'), validTo: null }] })),
         ),
     },
-    timeSlot: {
+    timeSlotAvailability: {
       findMany: vi.fn().mockResolvedValue([
         {
-          id: 'daytime',
+          timeSlotId: 'daytime', enabled: true, validFrom: new Date('2020-01-01'), validTo: null,
           label: '日间',
           startMinutes: 9 * 60,
           endMinutes: 11 * 60,
           period: SlotPeriod.DAYTIME,
         },
         {
-          id: 'prime',
+          timeSlotId: 'prime', enabled: true, validFrom: new Date('2020-01-01'), validTo: null,
           label: '晚间',
           startMinutes: 19 * 60,
           endMinutes: 21 * 60,
@@ -156,7 +156,7 @@ const makePrisma = () => {
         { userId: 'member-2', subscriptions: [] },
       ]),
     },
-    auditLog: { count: vi.fn().mockResolvedValue(7) },
+    auditLog: { count: vi.fn().mockResolvedValue(7), findMany: vi.fn().mockResolvedValue([]) },
     eventTeam: {
       findMany: vi.fn().mockResolvedValue([
         {

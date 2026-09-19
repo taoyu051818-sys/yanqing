@@ -8,6 +8,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { stateTransition } from '../../common/state-transition.js';
 import type { AuthUser } from '../../common/auth/auth-user.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import {
@@ -192,6 +193,7 @@ export class TrainingScheduleService {
     if (new Set(dto.courtIds).size !== dto.courtIds.length)
       throw new BadRequestException('场地不能重复');
     const courtIds = [...dto.courtIds].sort();
+    if (!courtIds.length) throw new BadRequestException('请至少选择一片场地');
     const note = dto.note?.trim() || undefined;
     const requestId = dto.creationIdempotencyKey?.trim() || undefined;
     const reason = dto.reason?.trim() || note || '创建培训课次';
@@ -223,7 +225,8 @@ export class TrainingScheduleService {
     const occupiedCourtHours =
       courtIds.length * ((endsAt.getTime() - startsAt.getTime()) / 3_600_000);
 
-    const session = await this.prisma.$transaction(
+    const session = await stateTransition(
+      this.prisma,
       async (tx) => {
         const concurrentReplay = await findTrainingCommandReplay(tx, requestId);
         if (concurrentReplay) {
@@ -256,6 +259,19 @@ export class TrainingScheduleService {
           trainingClass.assistantId !== actor.sub
         ) {
           throw new ForbiddenException('教练只能为自己负责的班级排课');
+        }
+        // Keep the rows locked until occupancy is committed. A concurrent
+        // delete/update takes FOR UPDATE on the same court, so it cannot pass
+        // between this validation and the booking insert.
+        const courts = await tx.$queryRaw<{ id: string; deletedAt: Date | null }[]>`
+          SELECT "id", "deletedAt" FROM "Court"
+          WHERE "id" IN (${Prisma.join(courtIds)}) ORDER BY "id" FOR SHARE
+        `;
+        if (
+          courts.length !== courtIds.length ||
+          courts.some(court => court.deletedAt)
+        ) {
+          throw new NotFoundException('所选场地不存在或已删除，请刷新后重新选择');
         }
         const closure = await tx.courtClosure.findFirst({
           where: {
@@ -347,7 +363,6 @@ export class TrainingScheduleService {
         });
         return session;
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
     return trainingSessionCommandResponse(session);
   }

@@ -94,7 +94,7 @@ export async function handleVenuesClosuresPost(
     const date = mockShanghaiBusinessDate(startsAt);
     const calendar = availability(date);
     const court = getMockVenueCourts().find((item) => item.id === courtId);
-    if (!court) throw new Error("场地不存在");
+    if (!court || court.deletedAt) throw new Error("场地不存在");
     const overlappingClosure = closures.find(
       (closure) =>
         closure.courtId === courtId &&

@@ -1,3 +1,5 @@
+import { loadCapacitySlots } from '../../common/venue/capacity-slots.js';
+import { loadCapacityCourts } from '../../common/venue/capacity-courts.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import { venueCapacityRows } from '../../common/venue/venue-capacity.js';
 import { PrismaService } from '../../database/prisma.service.js';
@@ -7,21 +9,8 @@ export function loadCapacity(prisma: PrismaService, start: Date, end: Date) {
   return prisma.$transaction(
     async (tx) => {
       const [courts, slots, bookings, closures] = await Promise.all([
-        tx.court.findMany({
-          where: { enabled: true },
-          select: { id: true, createdAt: true },
-        }),
-        tx.timeSlot.findMany({
-          where: { enabled: true },
-          select: {
-            id: true,
-            label: true,
-            startMinutes: true,
-            endMinutes: true,
-            period: true,
-          },
-          orderBy: { startMinutes: 'asc' },
-        }),
+        loadCapacityCourts(tx, start, end),
+        loadCapacitySlots(tx, start, end),
         tx.courtBooking.findMany({
           where: {
             startsAt: { lt: end },
@@ -50,10 +39,15 @@ export function loadCapacity(prisma: PrismaService, start: Date, end: Date) {
           select: { courtId: true, startsAt: true, endsAt: true },
         }),
       ]);
-      const ids = new Set(courts.map((c) => c.id));
+      const bookedIds = new Set(bookings.map((b) => b.courtId));
+      const participating = courts.filter(
+        (c) =>
+          bookedIds.has(c.id) ||
+          c.activeIntervals?.some((i) => i.startsAt < end && i.endsAt > start),
+      );
       return {
-        courtCount: courts.length,
-        bookingCount: bookings.filter((b) => ids.has(b.courtId)).length,
+        courtCount: participating.length,
+        bookingCount: bookings.length,
         rows: venueCapacityRows(courts, slots, bookings, closures, start, end),
       };
     },

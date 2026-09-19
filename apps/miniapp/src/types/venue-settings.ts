@@ -9,6 +9,7 @@ export interface VenueProfile {
   courtCount: number
 }
 export interface VenueCourt {
+  updatedAt: string
   id: string
   code: string
   name: string

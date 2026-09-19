@@ -1,3 +1,4 @@
+import { VenueErrorCode } from '@yanqing/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -22,27 +23,33 @@ import {
   priceRuleTransitionView,
 } from '../shared/venues-support.js';
 
-export function updateCourt(
+export async function updateCourt(
   prisma: PrismaService,
   id: string,
   dto: UpdateCourtDto,
   actor: AuthUser,
 ) {
+  assertPriceRuleRole(actor, PRICE_RULE_WRITE_ROLES, '仅管理员可管理场地');
   return prisma.$transaction(async (tx) => {
-    const before = await tx.court.findUniqueOrThrow({ where: { id } });
-    const after = await tx.court.update({ where: { id }, data: dto });
+    await tx.$queryRaw`SELECT "id" FROM "Court" WHERE "id" = ${id} FOR UPDATE`;
+    const before = await tx.court.findUnique({ where: { id } });
+    if (!before || before.deletedAt) throw new NotFoundException('场地不存在或已删除');
+    const { revision, ...fields } = dto;
+    if (revision !== before.updatedAt.toISOString())
+      throw new ConflictException({ message: '场地已被修改，请重新加载最新信息后再保存', businessCode: VenueErrorCode.COURT_REVISION_CONFLICT });
+    // Keep revisions distinct even for two successful writes in one millisecond.
+    const updatedAt = new Date(Math.max(Date.now(), +before.updatedAt + 1));
+    const after = await tx.court.update({ where: { id }, data: { ...fields, updatedAt } });
     await tx.auditLog.create({
       data: {
-        actorId: actor.sub,
-        actorRole: actor.roles[0],
-        action: 'COURT_UPDATED',
-        objectType: 'Court',
-        objectId: id,
-        oldValue: before as never,
-        newValue: after as never,
+        actorId: actor.sub, actorRole: actor.roles[0], action: 'COURT_UPDATED',
+        objectType: 'Court', objectId: id, oldValue: before as never, newValue: after as never,
       },
     });
     return after;
+  }).catch(error => {
+    if (error?.code === 'P2002') throw new ConflictException('场地编号已存在，请使用其他编号');
+    throw error;
   });
 }
 

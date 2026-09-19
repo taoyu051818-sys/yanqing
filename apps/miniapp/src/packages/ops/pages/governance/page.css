@@ -326,3 +326,7 @@
 
 .governance-tabs .tab-row { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); white-space:normal; gap:10rpx; }
 .governance-tabs .tab { min-width:0; padding:12rpx 4rpx; }
+
+.governance-tabs { background:#fff; border-radius:16rpx; margin-top:8rpx; padding:8rpx; }
+.governance-tabs .tab { border-radius:0; background:transparent; color:#687079; font-size:26rpx; border-bottom:4rpx solid transparent; }
+.governance-tabs .tab.active { background:transparent; color:#17653d; border-bottom-color:#17653d; font-weight:600; }

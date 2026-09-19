@@ -139,7 +139,7 @@ describe.skipIf(!url)(
       it(`sequential court change blocks booking ${JSON.stringify(change)}`, async () => {
         const f = await fixture();
         await price(f.slot.id, '2026-01-01T00:00:00+08:00');
-        await venues.updateCourt(f.court.id, change, admin);
+        await venues.updateCourt(f.court.id, { ...change, revision: f.court.updatedAt.toISOString() }, admin);
         expect(
           (await capture(venues.createBooking(f.dto, f.buyer))).error,
         ).toBeDefined();
@@ -171,7 +171,7 @@ describe.skipIf(!url)(
         );
         await read.promise;
         try {
-          await venues.updateCourt(f.court.id, change, admin);
+          await venues.updateCourt(f.court.id, { ...change, revision: f.court.updatedAt.toISOString() }, admin);
         } finally {
           resume.signal();
         }

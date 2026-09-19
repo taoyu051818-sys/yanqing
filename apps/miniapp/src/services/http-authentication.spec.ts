@@ -24,6 +24,12 @@ describe('remote authentication transport', () => {
     vi.stubEnv('VITE_DATA_MODE', 'remote')
   })
 
+  it('preserves stable business codes when display messages change', async () => {
+    requestMock.mockImplementation((options: UniApp.RequestOptions) => options.success?.({ statusCode: 409, data: { code: 409, message: '版本冲突文案已调整', businessCode: 'COURT_REVISION_CONFLICT' }, header: {}, cookies: [] }))
+    const { api } = await import('./http')
+    await expect(api.patch('/venues/courts/c1', {})).rejects.toMatchObject({ statusCode: 409, businessCode: 'COURT_REVISION_CONFLICT', message: '版本冲突文案已调整' })
+  })
+
   it('clears the reactive and persisted session when the API returns 401', async () => {
     const auth = await import('./auth-session')
     auth.saveAuthSession('expired-token', 'member-1')

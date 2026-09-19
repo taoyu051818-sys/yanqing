@@ -33,8 +33,8 @@ function backToMember() {
 </script>
 
 <template>
-  <view class="ops-page safe-bottom">
-    <view class="ops-header" :class="{ compact: props.compact }">
+  <view class="ops-page safe-bottom" :class="{ 'plain-page': props.compact }">
+    <view v-if="!props.compact" class="ops-header">
       <view v-if="!props.compact" class="eyebrow-row">
         <view class="header-icon"><AppIcon :name="props.icon || 'work'" :size="34" tone="inverse" /></view>
         <text class="eyebrow">{{ props.eyebrow }}</text>
@@ -94,4 +94,11 @@ function backToMember() {
 .compact .header-row { margin:0; flex-direction:row; align-items:center; }
 .compact .title { font-size:32rpx; }
 .compact .role-chip { align-self:center; }
+.plain-page { --ops-text:#20252b; --ops-muted:#687079; --ops-accent:#17653d; background:#f5f6f8; padding:12rpx 24rpx 48rpx; }
+.plain-page :deep(.card) { box-shadow:none; border-radius:16rpx; }
+.plain-page :deep(.business-list) { background:#fff; border-radius:16rpx; overflow:hidden; }
+.plain-page :deep(.business-list .card) { margin:0; border:0; border-bottom:1rpx solid #edf0f2; border-radius:0; padding:28rpx 24rpx; }
+.plain-page :deep(.business-list .card:last-child) { border-bottom:0; }
+.plain-page :deep(.business-list .member-name),.plain-page :deep(.business-list .strong) { font-size:30rpx; color:#20252b; }
+.plain-page :deep(.business-list .muted) { font-size:25rpx; color:#727982; margin-top:8rpx; }
 </style>

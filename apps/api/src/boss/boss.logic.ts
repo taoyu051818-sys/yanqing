@@ -17,7 +17,6 @@ export function dayRange(value = venueDay(), now = new Date()) {
     throw new BadRequestException('仅支持今天及过去90天的有效日期');
   return { date: value, start, end: new Date(start.getTime() + DAY) };
 }
-export { coveredMinutes } from '../common/venue/venue-capacity.js';
 import {
   venueCapacityRows,
   type CapacityCourt,

@@ -1959,5 +1959,18 @@
     "isPublic": false,
     "provider": "VenueSettingsService",
     "serviceMethod": "createCourt"
+  },
+  {
+    "controller": "VenueSettingsController",
+    "method": "deleteCourt",
+    "verb": "DELETE",
+    "path": "/api/v1/venues/courts/:id",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenueSettingsService",
+    "serviceMethod": "deleteCourt"
   }
 ]

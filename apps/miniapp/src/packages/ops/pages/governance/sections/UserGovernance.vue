@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { toRefs, computed } from "vue";
+import { toRefs, computed, ref, watch, nextTick } from "vue";
+import BusinessSection from "../../../components/BusinessSection.vue";
+import InfoRow from "../../../components/InfoRow.vue";
 import SectionEmpty from "../../../../../components/SectionEmpty.vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import type { GovernanceTab } from "../../../config/governance";
 import type { AppRole } from "../../../../../types/domain";
 
 const props = defineProps<{
+  resetEditor: () => void;
+  userRole: string;
   userPage: number;
   userTotal: number;
   loading: boolean;
@@ -34,6 +38,7 @@ const props = defineProps<{
   changeUserStatus: (status: "ACTIVE" | "DISABLED") => Promise<void>;
 }>();
 const emit = defineEmits<{
+  (event: "update:userRole", value: string): void;
   (event: "update:userKeyword", value: string): void;
   (event: "update:merchantId", value: string): void;
   (event: "update:roleReason", value: string): void;
@@ -70,6 +75,13 @@ const roleReason = computed({
   get: () => props.roleReason,
   set: (value) => emit("update:roleReason", value),
 });
+const editing = ref<'roles' | 'status' | null>(null);
+function beginEdit(mode: 'roles' | 'status') { props.resetEditor(); editing.value = mode; void nextTick(() => uni.pageScrollTo({ scrollTop:0, duration:0 })); }
+function cancelEdit() { if (!props.acting) { props.resetEditor(); editing.value = null; } }
+watch(() => props.selectedUser, () => { editing.value = null; });
+const storedRoles = computed(() => [...new Set([props.selectedUser?.primaryRole, ...(props.selectedUser?.roles || []).map((item: any) => typeof item === 'string' ? item : item.role)])].filter(Boolean).map(props.roleLabel).join('、'));
+const filterRoles = computed(() => [{ value:'', label:'全部岗位' }, ...props.roleOptions]);
+function filterChanged(event: any) { emit('update:userRole', filterRoles.value[Number(event.detail.value)].value); props.loadCurrentTab(); }
 </script>
 
 <template>
@@ -84,13 +96,14 @@ const roleReason = computed({
           查询
         </button></view
       >
+      <view v-if="!detailMode" class="list-filterbar"><text>共 {{ userTotal }} 位人员</text><picker :range="filterRoles" range-key="label" :value="filterRoles.findIndex(item => item.value === userRole)" @change="filterChanged"><view class="role-filter">{{ filterRoles.find(item => item.value === userRole)?.label || '全部岗位' }} ▾</view></picker></view>
       <SectionEmpty
         v-if="!users.length && !detailMode"
-        title="没有组织用户"
+        title="没有匹配的人员"
         description="首次微信登录后会生成会员账户，超级管理员可在此授予岗位角色。"
       />
       <view class="split">
-        <view v-if="!detailMode" class="list">
+        <view v-if="!detailMode" class="list business-list">
           <view
             v-for="user in users"
             :key="user.id"
@@ -118,13 +131,15 @@ const roleReason = computed({
           </view>
         </view>
         <view v-if="!detailMode && userTotal" class="pagination"><button :disabled="loading || userPage <= 1" @tap="changeUserPage(-1)">上一页</button><text>{{ userPage }} / {{ Math.ceil(userTotal / 20) }} · {{ userTotal }}人</text><button :disabled="loading || userPage * 20 >= userTotal" @tap="changeUserPage(1)">下一页</button></view>
-        <view v-if="detailMode && selectedUser" class="card editor">
-          <text class="section-title"
-            >{{ selectedUser.displayName }} · 岗位配置</text
-          >
-          <text class="muted small"
-            >为该人员选择岗位和主角色，填写变更原因后保存。</text
-          >
+        <template v-if="detailMode && selectedUser && !editing">
+          <BusinessSection title="人员信息"><InfoRow label="姓名" :value="selectedUser.displayName" /><InfoRow label="联系电话" :value="selectedUser.phone" /><InfoRow label="微信绑定" :value="selectedUser.wechatBound ? '已绑定' : '未绑定'" /></BusinessSection>
+          <BusinessSection title="岗位权限" :action="canSuperviseUsers ? '修改岗位' : undefined" @action="beginEdit('roles')"><InfoRow label="主角色" :value="roleLabel(selectedUser.primaryRole)" /><InfoRow label="可用岗位" :value="storedRoles" /></BusinessSection>
+          <BusinessSection title="账号状态" :action="canSuperviseUsers ? '修改状态' : undefined" @action="beginEdit('status')"><InfoRow label="当前状态"><StatusBadge :value="selectedUser.status" /></InfoRow></BusinessSection>
+        </template>
+        <view v-if="detailMode && selectedUser && editing" class="card editor">
+          <text class="section-title">{{ editing === 'roles' ? '修改岗位权限' : '修改账号状态' }}</text>
+          <text class="muted small">{{ selectedUser.displayName }}</text>
+          <template v-if="editing === 'roles'">
           <view class="chips"
             ><text
               v-for="option in roleOptions"
@@ -162,6 +177,8 @@ const roleReason = computed({
               }}</view
             >
           </picker>
+          </template>
+          <text v-else class="status-description">{{ selectedUser.status === 'ACTIVE' ? '停用后，该账号将无法登录。' : '启用后，该账号可恢复登录。' }}</text>
           <text class="small">变更原因</text>
           <textarea
             v-model="roleReason"
@@ -170,28 +187,7 @@ const roleReason = computed({
             maxlength="200"
             placeholder="角色或状态变更原因（必填）"
           />
-          <view v-if="canSuperviseUsers" class="actions"
-            ><button
-              class="primary"
-              :disabled="Boolean(acting)"
-              :loading="acting === `roles:${selectedUser.id}`"
-              @tap="saveRoles"
-            >
-              保存角色</button
-            ><button
-              v-if="selectedUser.status === 'ACTIVE'"
-              class="danger"
-              :disabled="Boolean(acting)"
-              @tap="changeUserStatus('DISABLED')"
-            >
-              停用</button
-            ><button v-else :disabled="Boolean(acting)" @tap="changeUserStatus('ACTIVE')">
-              启用
-            </button></view
-          >
-          <text v-else class="notice"
-            >管理员可查看；只有超级管理员可变更角色和状态。</text
-          >
+          <view v-if="canSuperviseUsers" class="actions"><button class="secondary" :disabled="Boolean(acting)" @tap="cancelEdit">取消</button><button v-if="editing === 'roles'" class="primary" :loading="Boolean(acting)" :disabled="Boolean(acting)" @tap="saveRoles">保存角色</button><button v-else :class="selectedUser.status === 'ACTIVE' ? 'danger' : 'primary'" :disabled="Boolean(acting)" :loading="Boolean(acting)" @tap="changeUserStatus(selectedUser.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE')">{{ selectedUser.status === 'ACTIVE' ? '确认停用' : '确认启用' }}</button></view>
         </view>
       </view>
     </template>
@@ -212,4 +208,20 @@ const roleReason = computed({
 
 
 .chip { min-width:88rpx; min-height:88rpx; box-sizing:border-box; display:flex; align-items:center; justify-content:center; }
+</style>
+<style scoped>
+.split { gap:0; }
+.business-list { display:block; background:#fff; border-radius:16rpx; overflow:hidden; }
+.business-list .row-card { border:0; border-bottom:1rpx solid #edf0f2; margin:0; border-radius:0; box-shadow:none; padding:28rpx 24rpx; }
+.business-list .wechat { display:none; }.business-list .strong { font-size:30rpx; }.business-list .small { font-size:25rpx; }
+.toolbar { margin:16rpx 0 24rpx; padding:8rpx 20rpx; box-shadow:none; border-radius:16rpx; }
+.toolbar input { height:88rpx; font-size:28rpx; }.toolbar button { background:transparent; color:#17653d; padding:0 12rpx; font-size:26rpx; }
+.role-filter { min-height:88rpx; display:flex; align-items:center; font-size:25rpx; color:#555e65; }
+.editor { display:grid; gap:22rpx; box-shadow:none; }.editor .section-title { margin:0; font-size:30rpx; }.editor .small { font-size:26rpx; }
+.status-description { font-size:28rpx; color:#687079; line-height:1.6; }
+</style>
+<style scoped>
+.toolbar { flex-direction:row; align-items:center; gap:12rpx; padding:0 22rpx; margin-bottom:0; }
+.toolbar input { flex:1; width:0; min-width:0; }.toolbar button { width:auto; flex:0 0 auto; margin:0; min-width:72rpx; }.toolbar button::after { border:0; }
+.list-filterbar { display:flex; align-items:center; justify-content:space-between; padding:4rpx 8rpx; color:#727982; font-size:26rpx; }
 </style>

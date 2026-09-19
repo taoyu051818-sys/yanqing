@@ -69,12 +69,7 @@ export interface Member360View {
   financialsRedacted: boolean;
   accountTypesLimited: boolean;
 }
-export interface ApiEnvelope<T> {
-  code: number;
-  message: string;
-  data: T;
-  requestId?: string;
-}
+export type { ApiEnvelope } from "@yanqing/shared";
 export type { CourtAvailability } from "@yanqing/shared";
 
 export type WorkItemKind =

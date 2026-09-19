@@ -14,7 +14,7 @@ export const resolveApiAssetUrl = (url?: string | null) => {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, readonly statusCode = 500, readonly requestId?: string) {
+  constructor(message: string, readonly statusCode = 500, readonly requestId?: string, readonly businessCode?: string) {
     super(message)
   }
 }
@@ -59,7 +59,7 @@ export const request = <T>(options: UniApp.RequestOptions): Promise<T> => {
         if (response.statusCode === 401) {
           clearAuthSession()
         }
-        reject(new ApiError(apiFeedback(envelope?.message, response.statusCode), response.statusCode, envelope?.requestId))
+        reject(new ApiError(apiFeedback(envelope?.message, response.statusCode), response.statusCode, envelope?.requestId, envelope?.businessCode))
       },
       fail: () => reject(isAuthSessionCurrent(session)
         ? new ApiError('网络不可用，请检查服务地址', 0)
@@ -69,6 +69,7 @@ export const request = <T>(options: UniApp.RequestOptions): Promise<T> => {
 }
 
 export const api = {
+  delete: <T>(url: string) => request<T>({ url, method: 'DELETE' }),
   get: <T>(url: string, data?: object) => request<T>({ url, method: 'GET', data }),
   post: <T>(url: string, data?: object) => request<T>({ url, method: 'POST', data }),
   patch: <T>(url: string, data?: object) => request<T>({ url, method: 'PATCH' as any, data }),
@@ -94,7 +95,7 @@ export const upload = <T>(url: string, filePath: string, name: string): Promise<
           return
         }
         if (response.statusCode === 401) clearAuthSession()
-        reject(new ApiError(apiFeedback(envelope?.message, response.statusCode), response.statusCode, envelope?.requestId))
+        reject(new ApiError(apiFeedback(envelope?.message, response.statusCode), response.statusCode, envelope?.requestId, envelope?.businessCode))
       },
       fail: () => reject(isAuthSessionCurrent(session)
         ? new ApiError('头像上传失败，请检查网络', 0)

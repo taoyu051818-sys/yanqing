@@ -853,6 +853,8 @@ model Court {
   usage     CourtUsage     @default(RETAIL)
   enabled   Boolean        @default(true)
   sortOrder Int
+  deletedAt DateTime?
+  availabilityHistory CourtAvailability[]
   bookings  CourtBooking[]
   closures  CourtClosure[]
   createdAt DateTime       @default(now())
@@ -893,6 +895,7 @@ model TimeSlot {
   period       SlotPeriod
   enabled      Boolean     @default(true)
   sortOrder    Int
+  availabilityHistory TimeSlotAvailability[]
   priceRules   PriceRule[]
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
@@ -2443,4 +2446,35 @@ model AvatarDeletionTask {
   updatedAt     DateTime  @updatedAt
 
   @@index([completedAt, nextAttemptAt])
+}
+
+// Maintained transactionally by database triggers. See the availability_history migration.
+model CourtAvailability {
+  id        String   @id @default(cuid())
+  courtId   String
+  validFrom DateTime
+  validTo   DateTime?
+  enabled   Boolean
+  source    String   @default("RECORDED")
+  court     Court    @relation(fields: [courtId], references: [id], onDelete: Restrict)
+
+  @@unique([courtId, validFrom])
+  @@index([validFrom, validTo])
+}
+
+model TimeSlotAvailability {
+  id           String   @id @default(cuid())
+  timeSlotId   String
+  validFrom    DateTime
+  validTo      DateTime?
+  enabled      Boolean
+  label        String
+  startMinutes Int
+  endMinutes   Int
+  period       SlotPeriod
+  source       String   @default("RECORDED")
+  timeSlot     TimeSlot @relation(fields: [timeSlotId], references: [id], onDelete: Restrict)
+
+  @@unique([timeSlotId, validFrom])
+  @@index([validFrom, validTo])
 }

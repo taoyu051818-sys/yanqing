@@ -1,3 +1,5 @@
+import { loadCapacitySlots } from '../common/venue/capacity-slots.js';
+import { loadCapacityCourts } from '../common/venue/capacity-courts.js';
 import {
   Injectable,
   Logger,
@@ -166,20 +168,8 @@ export class BossService implements OnApplicationBootstrap, OnModuleDestroy {
           games,
           events,
         ] = await Promise.all([
-          tx.court.findMany({
-            where: { enabled: true },
-            select: { id: true, createdAt: true },
-          }),
-          tx.timeSlot.findMany({
-            where: { enabled: true },
-            select: {
-              id: true,
-              label: true,
-              startMinutes: true,
-              endMinutes: true,
-            },
-            orderBy: { startMinutes: 'asc' },
-          }),
+          loadCapacityCourts(tx, new Date(+start - 7 * DAY), end),
+          loadCapacitySlots(tx, new Date(+start - 7 * DAY), end),
           tx.courtBooking.findMany({
             where: {
               startsAt: { lt: new Date(+end + 30 * DAY) },

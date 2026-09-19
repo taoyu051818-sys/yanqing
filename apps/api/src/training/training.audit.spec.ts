@@ -229,6 +229,7 @@ describe('TrainingService session audit', () => {
     });
     const sessionCreate = vi.fn().mockResolvedValue(session);
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: 'court-1', deletedAt: null }, { id: 'court-2', deletedAt: null }]),
       trainingClass: { findUnique: vi.fn().mockResolvedValue(trainingClass) },
       trainingSession: {
         create: sessionCreate,
@@ -312,6 +313,7 @@ describe('TrainingService session audit', () => {
     };
     const sessionCreate = vi.fn();
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: 'court-1', deletedAt: null }]),
       trainingClass: {
         findUnique: vi.fn().mockResolvedValue({
           id: dto.classId,

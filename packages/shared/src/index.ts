@@ -13,3 +13,5 @@ export type {
   GameDetail,
   GameParticipants,
 } from "./game-contract.js";
+
+export * from "./error-contract.js";
