@@ -115,7 +115,7 @@ export const endpoints = {
     api.patch<SessionUser>("/auth/profile", { displayName }),
   uploadMyAvatar: (filePath: string) =>
     upload<SessionUser>("/auth/profile/avatar", filePath, "avatar"),
-  dashboard: () => api.get<Record<string, any>>("/dashboard"),
+  dashboard: (period?: { periodStart: string; periodEnd: string }) => api.get<Record<string, any>>("/dashboard", period),
   reconciliationPeriod: (date: string) =>
     api.get<ReconciliationPeriod>(`/reconciliation/periods/${date}`),
   closeReconciliationPeriod: (date: string, data: object = {}) =>
@@ -160,6 +160,8 @@ export const endpoints = {
     api.post(`/orders/${id}/cancel`, data),
   refundOrder: (id: string, data: object) =>
     api.post(`/orders/${id}/refunds`, data),
+  directRefundOrder: (id: string, data: object) =>
+    api.post<{ status: string }>(`/orders/${id}/refunds/direct`, data),
   approveRefund: (refundId: string, data: object) =>
     api.post<{ status: string }>(`/orders/refunds/${refundId}/approve`, data),
   rejectRefund: (refundId: string, data: object = {}) =>

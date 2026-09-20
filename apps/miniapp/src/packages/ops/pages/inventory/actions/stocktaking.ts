@@ -1,3 +1,4 @@
+import { canExecuteDirectly } from '../../../../../utils/admin-execution';
 import type { Ref, ComputedRef } from "vue";
 import { withPendingCreationKey } from "../../../../../utils/pending-creation-key";
 import type { useOperationTask } from "../../../components/operation-task";
@@ -5,6 +6,7 @@ import { endpoints } from "../../../../../services/api";
 import { idempotencyKey } from "../../../../../utils/format";
 
 interface ActionContext {
+  session?: { roles: string[] };
   stocktakeForm: Ref<
     { locationId: string; reason: string },
     | { locationId: string; reason: string }
@@ -20,6 +22,7 @@ interface ActionContext {
 }
 
 export function useInventoryStocktakingActions({
+  session,
   stocktakeForm,
   showStocktakeForm,
   activeLocations,
@@ -67,7 +70,7 @@ export function useInventoryStocktakingActions({
         task.start({
           title: "登记实盘数量",
           description:
-            "选择本次已清点商品，账面数量仅供核对。录入不会立即改变库存，差异须复核后过账。",
+            "选择本次已清点商品，账面数量仅供核对。录入不会立即改变库存，全部清点完成后统一确认更新。",
           confirmText: "确认保存实盘数",
           fields: [
             {
@@ -105,10 +108,11 @@ export function useInventoryStocktakingActions({
       document.status === "DRAFT"
         ? "开始盘点"
         : document.status === "COUNTING"
-          ? "提交盘点复核"
+          ? (canExecuteDirectly(session?.roles || []) ? "确认盘点并更新库存" : "提交盘点复核")
           : "复核并过账差异";
     task.start({
       title: label,
+      successFeedback: canExecuteDirectly(session?.roles || []) ? "toast" : "dialog",
       description:
         "当前盘点单 · 过账将按已复核差异更新库存，并保留不可覆盖的流水。",
       confirmText: "确认" + label,

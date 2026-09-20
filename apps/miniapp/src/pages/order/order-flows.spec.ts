@@ -24,6 +24,7 @@ vi.mock("../../services/api", () => ({
     payOrder: vi.fn(),
     cancelPendingOrder: vi.fn(),
     refundOrder: vi.fn(),
+    directRefundOrder: vi.fn(),
   },
 }));
 vi.mock("../../services/http", () => ({ isMockMode: false }));
@@ -432,4 +433,19 @@ describe("order countdown lifecycle", () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(refresh).toHaveBeenCalledOnce();
   });
+});
+
+it("administrator refund uses one direct command and reuses its key after an uncertain response", async () => {
+  const flow = useOrderAftersales(useOrderActionScope(), vi.fn(), () => false, () => true);
+  const venue = order("direct-paid", {status:"PAID", paidCents:5000, refundedCents:1000});
+  vi.mocked(endpoints.directRefundOrder).mockRejectedValueOnce(new Error("连接中断")).mockResolvedValueOnce({status:"PROCESSING"});
+  await flow.refund(venue,"会员取消预约");
+  expect(flow.refundError.value).toContain("连接中断");
+  await flow.refund(venue,"会员取消预约");
+  const calls=vi.mocked(endpoints.directRefundOrder).mock.calls;
+  expect(calls).toHaveLength(2);
+  expect(calls[0][1]).toEqual(calls[1][1]);
+  expect(calls[0][1]).toMatchObject({amountCents:4000});
+  expect(endpoints.refundOrder).not.toHaveBeenCalled();
+  expect(ui.showToast).toHaveBeenLastCalledWith(expect.objectContaining({title:"退款处理中，无需再次审核"}));
 });

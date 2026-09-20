@@ -4,6 +4,7 @@ import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 import type { Tab } from "../page-types.js";
 
 const props = defineProps<{
+  direct?: boolean;
   errorMessage: string;
   tab: Tab;
   canOperate: boolean;
@@ -139,7 +140,7 @@ const showStocktakeForm = computed({
                     (line: any) => line.countedQuantity === null,
                   )
                   ? "录入下一项"
-                  : "提交复核"
+                  : (direct ? "确认并更新库存" : "提交复核")
                 : "复核过账"
           }}
         </button></view

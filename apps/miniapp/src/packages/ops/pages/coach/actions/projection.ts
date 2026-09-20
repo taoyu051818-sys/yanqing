@@ -1,3 +1,4 @@
+import { canExecuteDirectly } from '../../../../../utils/admin-execution';
 import type { MemberDirectoryItem } from "../../../../../types/domain";
 import type {
   TrainingStaffSummary,
@@ -88,10 +89,10 @@ export function useCoachViewModel({
     session.roles.some((role) => ["ADMIN", "SUPER_ADMIN"].includes(role)),
   );
 
-  const canDraftYouthRule = computed(() => session.roles.includes("ADMIN"));
+  const canDraftYouthRule = computed(() => canExecuteDirectly(session.roles));
 
   const canReviewYouthRule = computed(() =>
-    session.roles.includes("SUPER_ADMIN"),
+    canExecuteDirectly(session.roles),
   );
 
   const canCreateSession = computed(() =>

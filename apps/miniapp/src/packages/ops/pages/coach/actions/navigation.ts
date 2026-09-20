@@ -28,15 +28,17 @@ export function useCoachNavigation({
   const deepLinkQuery = ref<OpsDeepLinkQuery>({});
   const deepLinkHandled = ref(false);
   const focusedRecord = ref("");
-  const managementView = ref("");
-  const managementViewHandled = ref(false);
+  const activeView = ref("lessons");
+  const lessonId = ref("");
   function setQuery(options: Record<string, unknown> | undefined) {
     deepLinkQuery.value = parseOpsDeepLinkQuery(options);
     deepLinkHandled.value = false;
     focusedRecord.value = "";
-    managementView.value =
-      typeof options?.view === "string" ? options.view : "";
-    managementViewHandled.value = false;
+    const views = ['lessons', 'trials', 'products', 'rules', 'corrections', 'create-session', 'create-product', 'create-class'];
+    activeView.value = typeof options?.view === 'string' && views.includes(options.view) ? options.view : 'lessons';
+    lessonId.value = typeof options?.lessonId === 'string' ? options.lessonId : '';
+    const titles: Record<string, string> = { 'create-session':'新建课次', 'create-product':'新建课程产品', 'create-class':'新建班级', products:'课程班级' };
+    uni.setNavigationBarTitle({ title: lessonId.value ? '课次详情' : titles[activeView.value] || '培训管理' });
   }
   async function applyCoachDeepLink() {
     if (deepLinkHandled.value || !deepLinkQuery.value.focus) return;
@@ -50,10 +52,12 @@ export function useCoachNavigation({
         "recognitionId",
         "attendanceId",
       ]);
+      activeView.value = "corrections";
       prefix = "coach-correction";
       label = "消课冲正申请";
     } else if (focus === "trial") {
       record = findOpsDeepLinkRecord(trials.value, deepLinkQuery.value, ["id"]);
+      activeView.value = "trials";
       prefix = "coach-trial";
       label = "试听预约";
     } else if (focus === "attendance" || focus === "session") {
@@ -94,6 +98,7 @@ export function useCoachNavigation({
       return;
     }
     focusedRecord.value = `${prefix}:${record.id}`;
+    if (prefix === 'coach-lesson') { activeView.value = 'lessons'; lessonId.value = record.id; uni.setNavigationBarTitle({ title:'课次详情' }); }
     await nextTick();
     uni.pageScrollTo({
       selector: `#${opsDeepLinkDomId(prefix, record.id)}`,
@@ -101,16 +106,5 @@ export function useCoachNavigation({
     });
   }
 
-  async function apply() {
-    await applyCoachDeepLink();
-    if (managementView.value === "products" && !managementViewHandled.value) {
-      managementViewHandled.value = true;
-      await nextTick();
-      uni.pageScrollTo({
-        selector: "#training-product-management",
-        duration: 280,
-      });
-    }
-  }
-  return { focusedRecord, setQuery, apply };
+  return { focusedRecord, activeView, lessonId, setQuery, apply: applyCoachDeepLink };
 }

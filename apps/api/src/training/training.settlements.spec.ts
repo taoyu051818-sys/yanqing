@@ -107,6 +107,7 @@ function workflowPrisma(initialStatus = SettlementStatus.DRAFT) {
     audits,
     tx,
     prisma: {
+      trainingSettlement: tx.trainingSettlement,
       $transaction: vi.fn(async (work: (client: typeof tx) => unknown) =>
         work(tx),
       ),
@@ -115,6 +116,19 @@ function workflowPrisma(initialStatus = SettlementStatus.DRAFT) {
 }
 
 describe('TrainingService settlement state machine', () => {
+  it.each([AppRole.ADMIN, AppRole.SUPER_ADMIN])('%s settles its own draft in one call and retries without duplicate ledger transitions', async role => {
+    const { prisma, tx, current, audits } = workflowPrisma();
+    const actor = { ...admin, roles: [role] };
+    audits[0].actorId = actor.sub;
+    const service = new TrainingService(prisma as never);
+    const dto = { reason: '结算金额已核对', idempotencyKey: 'direct-training-settle' };
+    await expect(service.settleSettlement(current.id, dto, actor)).resolves.toMatchObject({ status: SettlementStatus.SETTLED });
+    await expect(service.settleSettlement(current.id, dto, actor)).resolves.toMatchObject({ status: SettlementStatus.SETTLED });
+    expect(tx.trainingSettlement.updateMany).toHaveBeenCalledTimes(3);
+    expect(tx.auditLog.create).toHaveBeenCalledTimes(3);
+    expect(audits.slice(1).map(row => row.actorId)).toEqual([actor.sub, actor.sub, actor.sub]);
+  });
+
   it('runs draft → pending → confirmed → settled with maker/checker and retry idempotency', async () => {
     const { prisma, tx, current, audits } = workflowPrisma();
     const service = new TrainingService(prisma as never);

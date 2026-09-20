@@ -3,6 +3,8 @@ import { usePagedList } from "../../utils/paged-list";
 import { useFinanceLoadingActions } from "./actions/loading.js";
 
 import ReconciliationSummary from "./sections/ReconciliationSummary.vue";
+import { canDirectRefund } from "../../../../utils/refund-action";
+import { refundQueueSummary } from "./refund-queue-summary";
 import RefundReview from "./sections/RefundReview.vue";
 import AccountAdjustments from "./sections/AccountAdjustments.vue";
 import TrainingSettlements from "./sections/TrainingSettlements.vue";
@@ -14,8 +16,9 @@ import BusinessDayClose from "./sections/BusinessDayClose.vue";
 import AllianceMerchants from "./sections/AllianceMerchants.vue";
 import AllianceStatements from "./sections/AllianceStatements.vue";
 
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
+import OperationsTabs from "../../components/OperationsTabs.vue";
 import OperationsFrame from "../../components/OperationsFrame.vue";
 import OperationTask from "../../components/OperationTask.vue";
 import { useOperationTask, reasonField } from "../../components/operation-task";
@@ -52,6 +55,7 @@ const dashboard = ref<Record<string, any> | null>(null);
 const refundKeyword = ref("");
 const refundQueue = usePagedList<any>((page, pageSize) => endpoints.adminOrders({ page, pageSize, status: "REFUND_PENDING", keyword: refundKeyword.value.trim() || undefined }), 20, () => refundKeyword.value.trim());
 const orders = refundQueue.items;
+const refundSummary = computed(() => refundQueueSummary(orders.value, refundQueue.total.value, loading.value || refundQueue.loading.value, refundQueue.error.value));
 
 const training = ref<Record<string, any> | null>(null);
 
@@ -88,6 +92,28 @@ const deepLinkQuery = ref<OpsDeepLinkQuery>({});
 const deepLinkHandled = ref(false);
 
 const focusedRecord = ref("");
+const financeView = ref('approvals');
+const settlementView = ref('training');
+const approvalView = ref('refunds');
+const refundDetailId = ref('');
+const refundDetailOrderId = ref('');
+const refundDetail = ref<any>(null);
+const refundDetailError = ref('');
+const refundDetailLoading = ref(false);
+const financeTabs = [{ key:'approvals', title:'审批' }, { key:'settlements', title:'结算' }, { key:'close', title:'日结' }, { key:'reports', title:'对账' }];
+const settlementTabs = [{ key:'training', title:'培训' }, { key:'alliance', title:'联盟' }, { key:'consignment', title:'寄售' }];
+const approvalTabs = computed(() => [{ key:'refunds', title:'退款申请' }, { key:'adjustments', title:'账户调整', count:adjustments.value.length }]);
+function openRefund(refund: any) {
+  uni.navigateTo({ url:`/packages/ops/pages/finance/index?focus=refund&id=${encodeURIComponent(refund.id)}&orderId=${encodeURIComponent(refund.order.id)}` });
+}
+watch(focusedRecord, value => {
+  if (value.startsWith('finance-refund:')) { refundDetailId.value = value.slice('finance-refund:'.length); uni.setNavigationBarTitle({ title:'退款详情' }); }
+  else if (value.startsWith('finance-adjustment:')) { financeView.value = 'approvals'; approvalView.value = 'adjustments'; }
+  else if (value.startsWith('finance-training-settlement:')) { financeView.value = 'settlements'; settlementView.value = 'training'; }
+  else if (value.startsWith('finance-consignment-settlement:')) { financeView.value = 'settlements'; settlementView.value = 'consignment'; }
+  else if (value.startsWith('finance-alliance-settlement:')) { financeView.value = 'settlements'; settlementView.value = 'alliance'; }
+  else if (value.startsWith('finance-shift:') || value === 'finance-reconciliation') financeView.value = 'close';
+}, { flush:'sync' });
 
 const trainingSettlementStatusOptions = [
   { value: "", label: "全部状态" },
@@ -373,6 +399,7 @@ const {
   trainingSettlementLatestNote,
   changeTrainingSettlement,
 } = useFinanceTrainingActions({
+  session,
   trainingSettlementStatusIndex,
   refresh: (...args: Parameters<typeof refresh>) => refresh(...args),
   trainingPeriodStartDate,
@@ -394,6 +421,7 @@ const {
   consignmentLatestTransition,
   payableAssignment,
 } = useFinanceConsignmentActions({
+  session,
   consignmentPeriodStartDate,
   consignmentPeriodEndDate,
   actionError,
@@ -435,7 +463,7 @@ const { closeBusinessDay, reconciliationStatusLabel, reconciliationAmount } =
     runAction: (...args: Parameters<typeof runAction>) => runAction(...args),
   });
 
-const { sourceError, load, applyFinanceDeepLink } = useFinanceLoadingActions({
+const { sourceError, load: loadFinanceData, applyFinanceDeepLink } = useFinanceLoadingActions({
   loading,
   actionError,
   loadErrors,
@@ -473,8 +501,39 @@ const { sourceError, load, applyFinanceDeepLink } = useFinanceLoadingActions({
   focusedRecord,
 });
 
+let detailRequest = 0;
+const detailScope = () => `${session.user?.id || ''}:${session.roles.join(',')}`;
+watch(detailScope, () => { detailRequest++; refundDetail.value = null; refundDetailError.value = ''; refundDetailLoading.value = false; }, { flush:'sync' });
+onUnmounted(() => { detailRequest++; });
+async function load(options: { preserveMessage?: boolean } = {}) {
+  await session.hydrate();
+  const request = ++detailRequest;
+  refundDetail.value = null;
+  refundDetailError.value = '';
+  await loadFinanceData(options);
+  if (request !== detailRequest || !refundDetailId.value || !canFinanceAction.value) return;
+  const actor = detailScope(), id = refundDetailId.value;
+  const current = () => request === detailRequest && actor === detailScope();
+  refundDetailLoading.value = true;
+  try {
+    const cached = allRefunds.value.find(item => item.id === id);
+    const orderId = refundDetailOrderId.value || cached?.order?.id;
+    if (!orderId) throw new Error('未找到退款对应的订单，请返回列表重试。');
+    refundDetailOrderId.value = orderId;
+    const order = await endpoints.order(orderId);
+    if (!current()) return;
+    const refund = (order.refunds || []).find((item: any) => item.id === id);
+    if (!refund) throw new Error('该退款记录已不可用，请返回列表刷新。');
+    refundDetail.value = { ...refund, order };
+  } catch (cause: any) { if (current()) refundDetailError.value = cause?.message || '退款详情加载失败，请重试。'; }
+  finally { if (current()) refundDetailLoading.value = false; }
+}
+
 onLoad((options) => {
+  if (options?.focus === 'refund') { refundDetailId.value = String(options.id || options.refundId || ''); refundDetailOrderId.value = String(options.orderId || ''); uni.setNavigationBarTitle({ title:'退款详情' }); }
+  if (typeof options?.view === 'string' && financeTabs.some(tab => tab.key === options.view)) financeView.value = options.view;
   deepLinkQuery.value = parseOpsDeepLinkQuery(options);
+  if (refundDetailId.value && refundDetailOrderId.value) deepLinkHandled.value = true;
 });
 
 onShow(() => {
@@ -492,7 +551,10 @@ onShow(() => {
     description="以营业日期为边界核对收入、退款、培训分成、联盟结算和寄售供应商应付；每个财务动作都有状态、原因和复核责任。"
   >
     <OperationTask :task="task" />
-    <view class="metric-grid">
+    <OperationsTabs v-if="!refundDetailId" v-model="financeView" :items="financeTabs" label="财务分类" />
+    <OperationsTabs v-if="!refundDetailId && financeView === 'settlements'" v-model="settlementView" :items="settlementTabs" label="结算业务" />
+    <OperationsTabs v-if="!refundDetailId && financeView === 'approvals'" v-model="approvalView" :items="approvalTabs" label="审批分类" />
+    <view v-if="financeView === 'reports' && !refundDetailId" class="metric-grid">
       <MetricCard
         v-for="item in metrics"
         :key="item[0]"
@@ -526,7 +588,7 @@ onShow(() => {
     }}</view>
     <view v-if="actionError" class="notice error card">{{ actionError }}</view>
 
-    <view v-if="visibleExportScopes.length" class="card export-bar">
+    <view v-if="financeView === 'reports' && !refundDetailId && visibleExportScopes.length" class="card export-bar">
       <view
         ><text class="sync-title">经营明细导出</text
         ><text class="muted">{{
@@ -550,16 +612,24 @@ onShow(() => {
     </view>
 
     <ReconciliationSummary
+      v-if="financeView === 'reports' && !refundDetailId"
       :dashboard="dashboard"
       :training="training"
       :loadErrors="loadErrors"
     />
 
-    <view class="card"><view class="section-title">退款队列查询 · 共 {{ refundQueue.total.value }} 单</view><input v-model="refundKeyword" class="input" maxlength="50" placeholder="订单号、会员姓名或订单标题" confirm-type="search" @confirm="refundQueue.refresh()" /><button class="secondary" :disabled="refundQueue.loading.value" @tap="refundQueue.refresh()">查询待退款订单</button><text v-if="refundQueue.error.value" class="muted">{{ refundQueue.error.value }}</text></view>
+    <view v-if="financeView === 'approvals' && approvalView === 'refunds' && !refundDetailId" class="card"><view class="section-title">查找退款</view><input v-model="refundKeyword" class="input" maxlength="50" placeholder="订单号、会员姓名或订单标题" confirm-type="search" @confirm="refundQueue.refresh()" /><button class="secondary" :disabled="refundQueue.loading.value" @tap="refundQueue.refresh()">查询</button><text v-if="refundQueue.error.value" class="muted">{{ refundQueue.error.value }}</text></view>
+    <view v-if="refundDetailError" class="notice error card" role="alert"><text>{{ refundDetailError }}</text><button :disabled="refundDetailLoading" @tap="load()">重试详情</button></view>
     <RefundReview
-      :loading="loading"
+      v-if="refundDetailId || (financeView === 'approvals' && approvalView === 'refunds')"
+      :detail-id="refundDetailId"
+      :detail-refund="refundDetail"
+      @open="openRefund"
+      :loading="loading || refundDetailLoading || refundQueue.loading.value"
+      :summary="refundSummary"
+      :direct="canDirectRefund(session.roles)"
       :reviewRefunds="reviewRefunds"
-      :loadErrors="loadErrors"
+      :loadErrors="{ ...loadErrors, refunds: refundQueue.error.value }"
       :refresh="refresh"
       :activeRefunds="activeRefunds"
       :focusedRecord="focusedRecord"
@@ -571,10 +641,10 @@ onShow(() => {
       :rejectRefund="rejectRefund"
     />
 
-    <button v-if="orders.length < refundQueue.total.value" class="secondary" :loading="refundQueue.loading.value" :disabled="refundQueue.loading.value" @tap="refundQueue.more()">加载更多待退款订单（已加载 {{ orders.length }}）</button>
+    <button v-if="!refundDetailId && financeView === 'approvals' && approvalView === 'refunds' && orders.length < refundQueue.total.value" class="secondary" :loading="refundQueue.loading.value" :disabled="refundQueue.loading.value" @tap="refundQueue.more()">继续加载退款申请</button>
 
     <AccountAdjustments
-      v-if="canFinanceAction"
+      v-if="!refundDetailId && financeView === 'approvals' && approvalView === 'adjustments' && canFinanceAction"
       :canFinanceAction="canFinanceAction"
       :loading="loading"
       :adjustments="adjustments"
@@ -588,7 +658,8 @@ onShow(() => {
       :acting="acting"
     />
 
-    <TrainingSettlements
+    <TrainingSettlements :direct="canDirectRefund(session.roles)"
+      v-if="!refundDetailId && financeView === 'settlements' && settlementView === 'training'"
       :loading="loading"
       :trainingSettlements="trainingSettlements"
       :trainingPeriodStartDate="trainingPeriodStartDate"
@@ -612,6 +683,7 @@ onShow(() => {
     />
 
     <ConsignmentPeriod
+      v-if="!refundDetailId && financeView === 'settlements' && settlementView === 'consignment'"
       :loading="loading"
       :consignmentPayables="consignmentPayables"
       :consignmentSettlements="consignmentSettlements"
@@ -628,6 +700,7 @@ onShow(() => {
     />
 
     <ConsignmentPayables
+      v-if="!refundDetailId && financeView === 'settlements' && settlementView === 'consignment'"
       :loadErrors="loadErrors"
       :loading="loading"
       :refresh="refresh"
@@ -635,7 +708,8 @@ onShow(() => {
       :payableAssignment="payableAssignment"
     />
 
-    <ConsignmentStatements
+    <ConsignmentStatements :direct="canDirectRefund(session.roles)"
+      v-if="!refundDetailId && financeView === 'settlements' && settlementView === 'consignment'"
       :loadErrors="loadErrors"
       :loading="loading"
       :refresh="refresh"
@@ -651,6 +725,7 @@ onShow(() => {
     />
 
     <ShiftVariances
+      v-if="!refundDetailId && financeView === 'close'"
       :loading="loading"
       :unreviewedShiftVariances="unreviewedShiftVariances"
       :loadErrors="loadErrors"
@@ -663,6 +738,7 @@ onShow(() => {
     />
 
     <BusinessDayClose
+      v-if="!refundDetailId && financeView === 'close'"
       :loadErrors="loadErrors"
       :loading="loading"
       :refresh="refresh"
@@ -678,6 +754,7 @@ onShow(() => {
     />
 
     <AllianceMerchants
+      v-if="!refundDetailId && financeView === 'settlements' && settlementView === 'alliance'"
       :loadErrors="loadErrors"
       :merchants="merchants"
       :loading="loading"
@@ -688,6 +765,7 @@ onShow(() => {
     />
 
     <AllianceStatements
+      v-if="!refundDetailId && financeView === 'settlements' && settlementView === 'alliance'"
       :loading="loading"
       :settlements="settlements"
       :loadErrors="loadErrors"
@@ -711,13 +789,11 @@ onShow(() => {
       :settleSettlement="settleSettlement"
     />
 
-    <view class="card boundary">
-      <text class="muted"
-        >岗位边界：库存管理员维护供应商、寄售规则与 SKU
-        归属；财务负责退款复核、结算制单与最终入账，且制单人不能复核或付款自己的单据。前台签到、教练消课、商户券码核销均由原岗位完成，财务不越权代办。</text
-      >
-    </view>
   </OperationsFrame>
 </template>
 
 <style scoped src="./page.css"></style>
+
+<style scoped>
+.sync-bar.card { display:flex; padding:16rpx 20rpx; margin:0 0 20rpx; border:0; background:transparent; }.sync-title { display:none; }.sync-bar .muted { font-size:24rpx; }.notice.error { position:sticky; top:0; z-index:15; }
+</style>

@@ -1,3 +1,4 @@
+import { executeMockActivityRefunds } from "../orders/activity-refunds";
 import { mockUser } from "../../core";
 import { getOrders, saveOrders } from "../../venue";
 import { getAuditLogs, saveEventDetail, saveAuditLogs } from "../../state";
@@ -18,7 +19,7 @@ import {
 } from "../../policies/events.js";
 import type { MockRouteResult, MockRouteOptions } from "../route-contract.js";
 
-export async function handleCancelEventPost(
+async function cancelEventAndRecord(
   method: string,
   url: string,
   data: any,
@@ -65,6 +66,16 @@ export async function handleCancelEventPost(
     if (new Date(detail.startsAt) <= now)
       throw new Error("赛事已开赛，不能执行开赛前取消");
     const orders = getOrders();
+    const cancelledOrderIds = new Set(
+      (detail.teams || []).map((row: any) => row.orderId),
+    );
+    for (const order of orders.filter((row: any) =>
+      cancelledOrderIds.has(row.id),
+    )) {
+      for (const refund of order.refunds || [])
+        if (["REQUESTED", "APPROVED", "PROCESSING"].includes(refund.status))
+          refund.cancellationRequired = true;
+    }
     const refundRequests: any[] = [];
     let cancelledPendingOrders = 0;
     let cancelledWaitlist = 0;
@@ -120,6 +131,7 @@ export async function handleCancelEventPost(
             amountCents,
             reason: `赛事取消：${reason}`,
             status: "REQUESTED",
+            cancellationRequired: true,
             originalOrderStatus,
             requestedAt: now.toISOString(),
           };
@@ -195,4 +207,21 @@ export async function handleCancelEventPost(
     };
   }
   return { handled: false };
+}
+
+export async function handleCancelEventPost(
+  method: string,
+  url: string,
+  data: any,
+  options: MockRouteOptions,
+): Promise<MockRouteResult> {
+  const result = await cancelEventAndRecord(method, url, data, options);
+  if (!result.handled) return result;
+  const id = url.split("/")[2];
+  const participants = requireEvent(id).teams || [];
+  await executeMockActivityRefunds(
+    new Set(participants.map((row: any) => row.orderId)),
+    data.reason,
+  );
+  return result;
 }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { canExecuteDirectly } from '../../../../../utils/admin-execution';
+
 import type {
   TrainingEnrollmentView,
   TrainingSessionView,
@@ -121,11 +123,11 @@ const {
 </script>
 
 <template>
-  <view>
+  <view class="lesson-detail">
     <view class="section-title"
-      >待处理课表
+      >学员与点名
       <text class="section-note">{{
-        loading ? "同步中" : `${activeLessons.length} 节`
+        loading ? "同步中" : `${lessons.reduce((total, lesson) => total + studentsFor(lesson).length, 0)} 位学员`
       }}</text></view
     >
     <view
@@ -246,12 +248,14 @@ const {
                 isConsumableLesson(lesson) && isActiveEnrollment(student) &&
                 !isRefundPending(student) &&
                 isChecker &&
-                hasPendingProposal(lesson, student)
+                attendanceStatus(lesson, student) === 'ATTENDED' &&
+                !activeRecognition(lesson, student) &&
+                (canExecuteDirectly(session.roles) || hasPendingProposal(lesson, student))
               "
               class="primary inline"
               :disabled="
-                attendanceFor(lesson, student)?.operatorId ===
-                  session.user?.id ||
+                (!canExecuteDirectly(session.roles) && attendanceFor(lesson, student)?.operatorId ===
+                  session.user?.id) ||
                 !canUseLessonWindow(lesson, 'completionWindow')
               "
               @tap="confirm(lesson, student)"
@@ -265,8 +269,10 @@ const {
               v-if="
                 isConsumableLesson(lesson) && isActiveEnrollment(student) &&
                 isChecker &&
-                hasPendingProposal(lesson, student) &&
-                attendanceFor(lesson, student)?.operatorId === session.user?.id
+                attendanceStatus(lesson, student) === 'ATTENDED' &&
+                !activeRecognition(lesson, student) &&
+                (canExecuteDirectly(session.roles) || hasPendingProposal(lesson, student)) &&
+                attendanceFor(lesson, student)?.operatorId === session.user?.id && !canExecuteDirectly(session.roles)
               "
               class="pending-text"
               >本人提交，须由另一管理员确认</text
@@ -295,7 +301,7 @@ const {
               class="danger inline"
               @tap="requestCorrection(lesson, student)"
             >
-              申请冲正
+              {{ canExecuteDirectly(session.roles) ? "撤销消课" : "申请冲正" }}
             </button>
             <text
               v-if="
@@ -335,3 +341,7 @@ const {
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>
+.lesson-detail { padding-bottom:calc(140rpx + env(safe-area-inset-bottom)); }.lesson-detail .finish { position:fixed; bottom:env(safe-area-inset-bottom); left:28rpx; right:28rpx; width:auto; margin:0; z-index:20; box-shadow:0 0 0 28rpx #fff; }
+</style>

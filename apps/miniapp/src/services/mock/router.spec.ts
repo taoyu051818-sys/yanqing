@@ -488,23 +488,13 @@ describe("miniapp mock acceptance journeys", () => {
       reason: "管理员发现第二次误消",
       idempotencyKey: "consume-correction-request-2",
     });
-    await expect(
-      request("POST", `/training/consume-corrections/${adminMade.id}/reject`, {
-        reason: "本人不能复核",
-        idempotencyKey: "consume-correction-reject-self",
-      }),
-    ).rejects.toThrow("申请人与复核人不能为同一账号");
-    await login("SUPER_ADMIN");
-    await expect(
-      request("POST", `/training/consume-corrections/${adminMade.id}/reject`, {
-        reason: "复查证据不足，保留原消课",
-        idempotencyKey: "consume-correction-reject-2",
-      }),
-    ).resolves.toMatchObject({ status: "REJECTED" });
-    expect(
-      getEnrollments().find((item) => item.id === enrollment.id)!.attendances[0]
-        .revenueRecognitions,
-    ).toHaveLength(3);
+    expect(adminMade).toMatchObject({ status: "APPROVED" });
+    const replay = await request("POST", "/training/consume-corrections", {
+      recognitionId: reconsume.id, reason: "管理员发现第二次误消", idempotencyKey: "consume-correction-request-2",
+    });
+    expect(replay.id).toBe(adminMade.id);
+    expect(getEnrollments().find((item) => item.id === enrollment.id)!.attendances[0].revenueRecognitions).toHaveLength(4);
+
   });
 
   it("blocks consume after completion and blocks completion while attended work is unconsumed", async () => {
@@ -1263,19 +1253,6 @@ describe("miniapp mock acceptance journeys", () => {
       }),
     ).rejects.toThrow("另一组关班数据");
 
-    await expect(
-      request("POST", `/operations/shifts/${opened.id}/review-variance`, {
-        reason: "管理员参与关班，不能自行复核",
-      }),
-    ).rejects.toThrow("不能复核自己的现金差异");
-    await login("FINANCE");
-    expect(
-      (
-        await request<any[]>("GET", "/operations/shifts/history", {
-          status: "CLOSED",
-        })
-      ).map((shift) => shift.id),
-    ).toContain(opened.id);
     const reviewCommand = { reason: "盘点凭证确认多收现金五元" };
     await expect(
       request(
@@ -1285,7 +1262,7 @@ describe("miniapp mock acceptance journeys", () => {
       ),
     ).resolves.toMatchObject({
       id: opened.id,
-      varianceReviewedById: "user-finance",
+      varianceReviewedById: "user-admin",
       varianceReviewReason: reviewCommand.reason,
     });
     await expect(

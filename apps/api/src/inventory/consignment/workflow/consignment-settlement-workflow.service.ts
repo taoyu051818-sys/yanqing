@@ -45,7 +45,7 @@ export class ConsignmentWorkflowService {
   ) {
     return returnSettlement(this.prisma, id, dto, actor);
   }
-  settleSettlement(
+  async settleSettlement(
     id: string,
     dto: SettleConsignmentSettlementDto,
     actor: AuthUser,

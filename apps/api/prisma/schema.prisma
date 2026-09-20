@@ -1203,6 +1203,29 @@ model Refund {
   @@index([status, requestedAt])
 }
 
+// Durable administrator authorization, committed with activity cancellation.
+// COMPLETED means all required refunds were submitted; channel settlement is tracked on Refund.
+model ActivityRefundJob {
+  id             String   @id @default(cuid())
+  kind           String
+  activityId     String
+  actorId        String
+  actorRoles     AppRole[]
+  reason         String
+  status         String   @default("QUEUED")
+  attempts       Int      @default(0)
+  nextAttemptAt  DateTime @default(now())
+  leaseToken     String?
+  leaseExpiresAt DateTime?
+  lastError      String?
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([kind, activityId])
+  @@index([status, nextAttemptAt])
+}
+
 model Game {
   id                   String             @id @default(cuid())
   code                 String             @unique

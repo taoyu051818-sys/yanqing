@@ -8,6 +8,7 @@ import { computed, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../components/OperationsFrame.vue";
 import MetricCard from "../../components/MetricCard.vue";
+import { workItemDescription } from "../../../../config/status-labels";
 import StatusBadge from "../../../../components/StatusBadge.vue";
 import { hasOperationsAccess } from "../../../../config/operations";
 import {
@@ -337,7 +338,7 @@ function previewItems(items: WorkItem[]) {
 
 function workItemMeta(item: WorkItem) {
   const parts = [];
-  if (item.description) parts.push(item.description);
+  if (item.description) parts.push(workItemDescription(item.description));
   if (item.dueAt) parts.push(`截止 ${shortDate(item.dueAt)}`);
   if (!parts.length && item.createdAt)
     parts.push(`创建于 ${shortDate(item.createdAt)}`);
@@ -442,17 +443,7 @@ onShow(load);
     :role="roleLabel"
     description="待办与异常优先处理；经营指标独立查看，不让分析信息挤占现场工作入口。"
   >
-    <view class="operator-context card">
-      <view>
-        <text class="operator-name">{{
-          session.user?.displayName || "未登录账号"
-        }}</text>
-        <text class="muted"
-          >当前角色：{{ roleLabel }} · 待办按岗位权限和责任范围分派</text
-        >
-      </view>
-      <text class="sync-time">{{ syncLabel }}</text>
-    </view>
+    <view class="sync-context"><text>{{ syncLabel }}</text><button class="secondary" :disabled="loading" @tap="load">刷新</button></view>
 
     <view v-if="canViewDashboard" class="view-switch">
       <view
@@ -489,12 +480,9 @@ onShow(load);
       :unmappedItems="unmappedItems"
     />
 
-    <view class="card boundary"
-      ><text class="muted"
-        >本页只负责汇总、分派和复核。余额、积分、库存、退款、比分和结算必须通过对应业务中心的状态动作留痕。</text
-      ></view
-    >
   </OperationsFrame>
 </template>
 
 <style scoped src="./page.css"></style>
+
+<style scoped>.sync-context { display:flex; justify-content:space-between; align-items:center; color:#65716b; font-size:26rpx; }.sync-context button { width:auto; margin:0; padding:0 24rpx; min-height:88rpx; }</style>

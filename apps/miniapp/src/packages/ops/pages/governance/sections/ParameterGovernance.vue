@@ -13,6 +13,7 @@ import {
 import { shortDate } from "../../../../../utils/format";
 
 const props = defineProps<{
+  editing?: boolean;
   activeTab: GovernanceTab;
   canConfigure: boolean;
   changeParameterDefinition: (event: any) => void;
@@ -44,12 +45,14 @@ const {
   createParameter,
   parameters,
 } = toRefs(props);
+function openRuleForm() { uni.navigateTo({ url:'/packages/ops/pages/governance/index?view=create-parameter' }); }
 </script>
 
 <template>
   <view>
     <template v-if="activeTab === 'parameters'">
-      <view v-if="canConfigure" class="card editor">
+      <button v-if="canConfigure && !editing" class="primary new-rule" @tap="openRuleForm">新增业务规则</button>
+      <view v-if="canConfigure && editing" class="card editor rule-editor">
         <text class="section-title">发布业务规则新版本</text>
         <picker
           :range="businessParameterCatalog"
@@ -130,13 +133,15 @@ const {
           />锁定版本（仅超级管理员可继续变更）</label
         >
         <button
-          class="primary"
+          class="primary save-rule"
+          :disabled="Boolean(acting)"
           :loading="acting === 'parameter'"
           @tap="createParameter"
         >
           发布业务规则版本
         </button>
       </view>
+      <template v-if="!editing">
       <SectionEmpty
         v-if="!parameters.length"
         title="暂无生效业务规则"
@@ -156,8 +161,11 @@ const {
           {{ shortDate(item.effectiveFrom) }}</text
         ></view
       >
+      </template>
     </template>
   </view>
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>.new-rule { margin-bottom:24rpx; }.rule-editor { margin-bottom:calc(150rpx + env(safe-area-inset-bottom)); }.save-rule { position:fixed; left:28rpx; right:28rpx; bottom:calc(20rpx + env(safe-area-inset-bottom)); width:auto; z-index:20; box-shadow:0 0 0 28rpx #fff!important; }</style>

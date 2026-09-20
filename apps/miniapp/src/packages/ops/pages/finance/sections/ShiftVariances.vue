@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { canExecuteDirectly } from '../../../../../utils/admin-execution';
+
 import type { useSessionStore } from "../../../../../stores/session";
 import { toRefs } from "vue";
 import { money, shortDate } from "../../../../../utils/format";
@@ -50,7 +52,7 @@ const {
       }}</text>
     </view>
     <text class="section-description"
-      >现金按实际收款操作员归属；班次操作人或关班人不能复核自己的差异，非零差异处理后才能完成日结关账。</text
+      >现金按实际收款操作员归属；管理员可直接处理本班差异，其他人员须交由另一账号复核，非零差异处理后才能完成日结关账。</text
     >
     <view v-if="loadErrors.shifts" class="notice error card">
       <text>{{ loadErrors.shifts }}</text>
@@ -106,7 +108,7 @@ const {
         >
       </view>
       <view
-        v-if="[shift.operatorId, shift.closedById].includes(session.user?.id)"
+        v-if="!canExecuteDirectly(session.roles) && [shift.operatorId, shift.closedById].includes(session.user?.id)"
         class="locked-note"
         >你参与了本班次操作或关班，请切换另一名财务或管理员复核。</view
       >
@@ -119,7 +121,7 @@ const {
           {{
             acting(`shift-variance-review:${shift.id}`)
               ? "复核中…"
-              : "复核现金差异"
+              : (canExecuteDirectly(session.roles) ? "处理现金差异" : "复核现金差异")
           }}
         </button>
       </view>

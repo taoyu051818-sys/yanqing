@@ -50,12 +50,12 @@ describe('training operations controller boundaries', () => {
         ROLES_KEY,
         YouthTrainingRulesController.prototype.create,
       ),
-    ).toEqual([AppRole.ADMIN]);
+    ).toEqual([AppRole.ADMIN, AppRole.SUPER_ADMIN]);
     expect(
       Reflect.getMetadata(
         ROLES_KEY,
         YouthTrainingRulesController.prototype.publish,
       ),
-    ).toEqual([AppRole.SUPER_ADMIN]);
+    ).toEqual([AppRole.ADMIN, AppRole.SUPER_ADMIN]);
   });
 });

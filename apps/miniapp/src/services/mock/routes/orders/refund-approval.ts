@@ -2,6 +2,8 @@ import { mockUser } from "../../core";
 import { recordMockConsignmentRefund } from "../../consignment-settlement";
 import { getOrders, saveOrders } from "../../venue";
 import {
+  getVenueBookings,
+  saveVenueBookings,
   getEnrollments,
   getGames,
   getGoods,
@@ -359,6 +361,12 @@ export async function handleApproveRefundPost(
       }
     });
     if (referralRewardChanged) saveReferralRewards(referralRewards);
+    if (order.status === 'REFUNDED' && !refund.compensationOnly) {
+      const release = (booking: any) => !['COMPLETED', 'NO_SHOW'].includes(booking.status)
+        ? { ...booking, status: 'CANCELLED' } : booking;
+      saveVenueBookings(getVenueBookings().map(booking => booking.orderId === order.id ? release(booking) : booking));
+      if (order.bookings) order.bookings = order.bookings.map(release);
+    }
     saveOrders(ordersAfterRefund);
     return { handled: true, value: ok(mockRefundCommandResponse(refund)) };
   }

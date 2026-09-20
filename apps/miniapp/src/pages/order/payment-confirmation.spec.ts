@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import ts from "typescript";
-import { watch } from "vue";
+import { computed, watch } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OrderView } from "@yanqing/shared";
 import { endpoints } from "../../services/api";
@@ -9,6 +9,7 @@ import { useOrderList } from "./use-order-list";
 import { useOrderActionScope } from "./order-action-scope";
 import { useOrderPayment } from "./use-order-payment";
 import { useOrderAftersales } from "./use-order-aftersales";
+import { canDirectRefund } from "../../utils/refund-action";
 import { useOrderClock } from "./use-order-clock";
 
 vi.mock("../../services/api", () => ({
@@ -103,6 +104,7 @@ function fixture(notifyImmediately = false) {
     },
   });
   const session = {
+    roles: ["MEMBER"],
     isAuthenticated: true,
     user: { id: "member" },
     hydrate: vi.fn(async () => true),
@@ -120,8 +122,11 @@ function fixture(notifyImmediately = false) {
   });
   saveAuthSession("token", "member");
   const noop = () => {};
+  const hooks: Record<string, () => any> = {};
   const deps = {
     watch,
+    computed,
+    canDirectRefund,
     useOrderList,
     useOrderActionScope,
     useOrderPayment,
@@ -129,8 +134,8 @@ function fixture(notifyImmediately = false) {
     useOrderClock,
     useSessionStore: () => session,
     onLoad: noop,
-    onShow: noop,
-    onHide: noop,
+    onShow: (callback: () => any) => { hooks.show = callback; },
+    onHide: (callback: () => any) => { hooks.hide = callback; },
     onUnload: noop,
     onPullDownRefresh: noop,
   };
@@ -141,6 +146,7 @@ function fixture(notifyImmediately = false) {
   )(...Object.values(deps));
   return {
     page,
+    hooks,
     session,
     requestPayment,
     notify: () => {
@@ -184,4 +190,19 @@ describe("order page payment confirmation regression", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(f.page.orders.value[0].status).toBe("PAID");
   });
+});
+
+it("hydrates the role before loading a directly opened order and does not resume a hidden page", async () => {
+  const f = fixture();
+  let resolve!: () => void;
+  f.session.hydrate.mockImplementationOnce(() => new Promise<boolean>(done => { resolve = () => done(true); }));
+  const showing = f.hooks.show();
+  expect(endpoints.order).not.toHaveBeenCalled();
+  f.hooks.hide(); resolve(); await showing;
+  expect(endpoints.order).not.toHaveBeenCalled();
+  expect(endpoints.orders).not.toHaveBeenCalled();
+  await f.hooks.show();
+  expect(f.session.hydrate).toHaveBeenCalledTimes(2);
+  expect(endpoints.orders).toHaveBeenCalledTimes(1);
+  f.hooks.hide();
 });

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import type { TrainingProductView } from "@yanqing/shared";
 
-import { toRefs, computed } from "vue";
+import { toRefs, computed, watch } from "vue";
+import { useUnsavedForm } from "../../../composables/use-unsaved-form";
 
 const props = defineProps<{
+  formType: "product" | "class";
+  errorMessage?: string;
   canConfigureTraining: boolean;
   productCode: string;
   productName: string;
@@ -147,11 +150,14 @@ const classReason = computed({
   get: () => props.classReason,
   set: (value) => emit("update:classReason", value),
 });
+const { markSaved } = useUnsavedForm(() => props.formType === 'product' ? [props.productCode, props.productName, props.productTotalSessions, props.productValidityDays, props.productPriceYuan, props.productReason, props.productAudienceIndex] : [props.classCode, props.className, props.classProductIndex, props.classWeekdayIndex, props.classStartTime, props.classEndTime, props.classCapacity, props.classCoachId, props.classAssistantId, props.classCoachCostYuan, props.classAssistantCostYuan, props.classMaterialCostYuan, props.classReason]);
+watch(() => props.actionKey, (key, previous) => { if (previous === `create-${props.formType}` && !key && !props.errorMessage) markSaved(); });
 </script>
 
 <template>
-  <view>
+  <view class="configuration-page">
     <template v-if="canConfigureTraining">
+      <template v-if="formType === 'product'">
       <view class="section-title"
         >创建课程产品 <text class="section-note">仅管理员</text></view
       >
@@ -220,18 +226,20 @@ const classReason = computed({
           />
         </view>
         <text class="guardrail"
-          >退费规则固定为开课前全退、开课后按未消耗课次退款。提交会生成持久幂等键，网络失败后原命令重试不会重复创建。</text
+          >退费规则固定为开课前全退、开课后按未消耗课次退款。网络失败可重试，系统会避免重复创建。</text
         >
-        <button
+        <view class="save-bar"><text v-if="errorMessage" class="field-error" role="alert">{{ errorMessage }}</text><button
           class="primary full-button"
           :loading="actionKey === 'create-product'"
           :disabled="loading || Boolean(actionKey)"
           @tap="createProduct"
         >
           创建课程产品
-        </button>
+        </button></view>
       </view>
 
+      </template>
+      <template v-else>
       <view class="section-title"
         >创建培训班级 <text class="section-note">仅管理员</text></view
       >
@@ -357,17 +365,22 @@ const classReason = computed({
             placeholder="说明开班、人员与成本依据"
           />
         </view>
-        <button
+        <view class="save-bar"><text v-if="errorMessage" class="field-error" role="alert">{{ errorMessage }}</text><button
           class="primary full-button"
           :loading="actionKey === 'create-class'"
           :disabled="loading || Boolean(actionKey) || !selectedClassProduct"
           @tap="createClass"
         >
           创建培训班级
-        </button>
+        </button></view>
       </view>
+      </template>
     </template>
   </view>
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>
+.configuration-page { padding-bottom:calc(190rpx + env(safe-area-inset-bottom)); }.save-bar { position:fixed; bottom:0; left:0; right:0; z-index:25; padding:20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom)); background:#fff; border-top:1rpx solid #e2e7e3; }.save-bar button { width:100%; margin:0; }.field-error { display:block; color:#a52626; font-size:26rpx; margin-bottom:12rpx; }
+</style>

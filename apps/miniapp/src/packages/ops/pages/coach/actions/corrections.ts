@@ -1,3 +1,4 @@
+import { canExecuteDirectly } from '../../../../../utils/admin-execution';
 import type {
   TrainingEnrollmentView,
   TrainingSessionView,
@@ -63,7 +64,7 @@ export function useCoachCorrectionsActions({
   }
 
   function isOwnCorrection(correction: any) {
-    return correction.requestedBy?.id === session.user?.id;
+    return correction.requestedBy?.id === session.user?.id && !canExecuteDirectly(session.roles);
   }
 
   function correctionStudentName(correction: any) {
@@ -85,13 +86,14 @@ export function useCoachCorrectionsActions({
       return;
     }
     task.start({
-      title: "申请消课冲正",
+      title: canExecuteDirectly(session.roles) ? "撤销本次消课" : "申请消课冲正",
+      successFeedback: canExecuteDirectly(session.roles) ? "toast" : "dialog",
       description:
         (enrollment.student?.displayName ||
           enrollment.buyer?.displayName ||
           "成人学员") +
-        " · 申请不立即改变课时和收入，原消课保留，须另一名管理员批准。",
-      confirmText: "确认提交冲正复核",
+        (canExecuteDirectly(session.roles) ? " · 确认后恢复课时并冲回该次收入，原始流水保留。" : " · 提交申请后由管理员复核，原消课暂时保留。"),
+      confirmText: canExecuteDirectly(session.roles) ? "确认撤销消课" : "提交冲正申请",
       fields: [reasonField("误消原因与核对依据")],
       submit: async ({ reason }) => {
         const command = { recognitionId: recognition.id, reason };
@@ -105,7 +107,7 @@ export function useCoachCorrectionsActions({
             }),
         );
         await load();
-        return "冲正申请已提交；原消课仍有效，请等待另一名管理员复核。";
+        return canExecuteDirectly(session.roles) ? "消课已撤销，课时、余额和流水已更新。" : "冲正申请已提交，等待管理员复核。";
       },
     });
   }

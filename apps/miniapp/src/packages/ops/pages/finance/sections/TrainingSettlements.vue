@@ -4,6 +4,7 @@ import { money } from "../../../../../utils/format";
 import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 
 const props = defineProps<{
+  direct?: boolean;
   loading: boolean;
   trainingSettlements: any[];
   trainingPeriodStartDate: string;
@@ -74,7 +75,7 @@ const {
       }}</text>
     </view>
     <text class="section-description"
-      >财务制单、另一账号复核、确认后入账；营业日关账锁定源流水，不锁死之后的周/月结算。</text
+      >{{ direct ? "核对账单后可直接结算入账，系统保留账期明细与操作记录。" : "财务制单、另一账号复核后入账，系统保留账期明细与操作记录。" }}</text
     >
     <view class="card training-settlement-tools">
       <view class="period-picker-row">
@@ -222,7 +223,7 @@ const {
       >
       <view class="action-row">
         <button
-          v-if="statement.status === 'DRAFT'"
+          v-if="!direct && statement.status === 'DRAFT'"
           class="primary action-button"
           :disabled="loading || Boolean(actionKey)"
           @tap="changeTrainingSettlement(statement, 'submit')"
@@ -247,7 +248,7 @@ const {
         </button>
         <button
           v-if="
-            statement.status === 'PENDING_CONFIRMATION' &&
+            !direct && statement.status === 'PENDING_CONFIRMATION' &&
             !isOwnTrainingSettlement(statement)
           "
           class="primary action-button"
@@ -262,7 +263,7 @@ const {
         </button>
         <button
           v-if="
-            statement.status === 'PENDING_CONFIRMATION' &&
+            !direct && statement.status === 'PENDING_CONFIRMATION' &&
             !isOwnTrainingSettlement(statement)
           "
           class="danger action-button"
@@ -277,8 +278,7 @@ const {
         </button>
         <button
           v-if="
-            statement.status === 'CONFIRMED' &&
-            !isOwnTrainingSettlement(statement)
+            (direct ? ['DRAFT','PENDING_CONFIRMATION','CONFIRMED'].includes(statement.status) : statement.status === 'CONFIRMED' && !isOwnTrainingSettlement(statement))
           "
           class="primary action-button"
           :disabled="loading || Boolean(actionKey)"
@@ -287,7 +287,7 @@ const {
           {{
             acting(`training-settlement-settle:${statement.id}`)
               ? "入账中…"
-              : "确认结算入账"
+              : (direct ? "确认并结算入账" : "确认结算入账")
           }}
         </button>
       </view>

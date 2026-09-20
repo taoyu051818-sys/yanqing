@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import { canExecuteDirectly } from '../../../../utils/admin-execution';
+
 import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { useUnsavedForm } from '../../composables/use-unsaved-form'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import CustomerDetail from './sections/CustomerDetail.vue'
 import OperationsFrame from '../../components/OperationsFrame.vue'
@@ -21,6 +24,12 @@ import {
 
 const task = useOperationTask()
 const session = useSessionStore()
+const formMode = ref(''), formSourceId = ref(''), formError = ref('')
+const formBusy = ref(false)
+let sourceInitialized = false
+function openForm(form: string, source = '') { uni.navigateTo({ url:`/packages/ops/pages/members/index?form=${form}&source=${encodeURIComponent(source)}` }) }
+function formNotice(options: { title: string; icon?: string }) { formError.value = options.title }
+function finishForm() { uni.setStorageSync('yanqing_member_operations_changed', Date.now()); markFormSaved(); uni.navigateBack({ fail:() => uni.redirectTo({ url:`/packages/ops/pages/members/index?view=${tab.value}` }) }) }
 const query = ref('')
 const memberLevel = ref('')
 const levelFilters = [{ value:'', label:'全部等级' }, { value:'EXPERIENCE', label:'体验会员' }, { value:'REGULAR', label:'普通会员' }, { value:'GOLD', label:'金卡会员' }, { value:'BLACK', label:'黑金会员' }]
@@ -46,6 +55,7 @@ const selectedId = ref('')
 const detailMemberId = ref('')
 const customerError = ref('')
 let loadedOwner = ''
+let loadedRevision: unknown = ''
 function openMember(member: MemberDirectoryItem) { uni.navigateTo({ url: `/packages/ops/pages/members/index?memberId=${encodeURIComponent(member.id)}` }) }
 const tab = ref<'members' | 'leads' | 'membershipProducts' | 'rechargePlans'>('members')
 const deepLinkQuery = ref<OpsDeepLinkQuery>({})
@@ -74,6 +84,7 @@ const membershipProductForm = reactive({
   effectiveFrom: new Date().toISOString().slice(0, 10),
   effectiveTo: '2099-01-01', reason: '',
 })
+const { markSaved: markFormSaved } = useUnsavedForm(() => formMode.value === 'lead' ? createForm : formMode.value === 'product' ? membershipProductForm : rechargePlanForm, () => Boolean(formMode.value))
 const leadLabels: Record<string, string> = {
   NEW: '新线索', CONTACTING: '跟进中', TRIAL_RESERVED: '已约体验', ATTENDED: '已到店',
   CONVERTED: '已转会员', LOST: '已流失', ARCHIVED: '已归档',
@@ -144,7 +155,7 @@ async function load() {
     rechargePlansLoaded.value = true
   }
   if (membershipProductResult.status === 'fulfilled') membershipProducts.value = membershipProductResult.value || []
-  else if (canViewMembershipProducts.value) membershipProductError.value = membershipProductResult.reason?.message || '会员产品版本加载失败'
+  else if (canViewMembershipProducts.value) membershipProductError.value = membershipProductResult.reason?.message || '会员产品加载失败'
   const failedSources = [
     memberResult.status === 'rejected' ? '会员目录' : '',
     canViewLeads.value && leadResult.status === 'rejected' ? '客户线索' : '',
@@ -201,7 +212,7 @@ async function applyMemberDeepLink() {
 const customerLoading = ref(false)
 let customerGeneration = 0
 watch(() => `${session.user?.id}:${session.roles.join()}`, () => { customerGeneration++; customer.value = null; selectedId.value = ''; customerLoading.value = false; customerError.value = '' }, { flush: 'sync' })
-async function selectMember(member: MemberDirectoryItem) {
+async function selectMember(member: Pick<MemberDirectoryItem, "id">) {
   const generation = ++customerGeneration, actorId = session.user?.id, roles = session.roles.join()
   selectedId.value = member.id
   customer.value = null
@@ -220,13 +231,15 @@ async function selectMember(member: MemberDirectoryItem) {
 }
 
 async function createLead() {
-  if (!createForm.displayName.trim()) return uni.showToast({ title: '请填写客户姓名', icon: 'none' })
+  if (formBusy.value || !canWriteLeads.value) return
+  formError.value = ''
+  if (!createForm.displayName.trim()) return formNotice({ title: '请填写客户姓名', icon: 'none' })
+  formBusy.value = true
   try {
     await endpoints.createCustomerLead({ ...createForm })
     Object.assign(createForm, { displayName: '', phone: '', sourceChannel: 'STORE_VISIT', campaign: '' })
-    leads.value = (await endpoints.customerLeads()).items || []
-    uni.showToast({ title: '线索已创建', icon: 'success' })
-  } catch (cause: any) { uni.showToast({ title: cause.message || '创建失败', icon: 'none' }) }
+    uni.showToast({ title: '线索已创建', icon: 'success' }); finishForm()
+  } catch (cause: any) { formNotice({ title: cause.message || '创建失败', icon: 'none' }) } finally { formBusy.value = false }
 }
 
 async function refreshLeads(message: string) {
@@ -297,7 +310,8 @@ function requestAccountAdjustment() {
   const accounts = snapshot.accounts || []
   const memberId = snapshot.member.id
   if (!accounts.length) return
-  task.start({ title: '申请账户调整', description: (snapshot.member.displayName || '当前会员') + ' · 提交不会立即改变余额，必须由另一名财务或管理员复核。', confirmText: '提交独立复核',
+  const direct = canExecuteDirectly(session.roles)
+  task.start({ title: direct ? '调整会员账户' : '申请账户调整', description: (snapshot.member.displayName || '当前会员') + (direct ? ' · 确认后立即调整账户并记录流水。' : ' · 提交后由财务或管理员复核。'), confirmText: direct ? '确认调整' : '提交复核', successFeedback: direct ? 'toast' : 'dialog',
     fields: [
       { key: 'accountType', label: '调整账户', kind: 'choices', options: accounts.map((account: any) => ({ value: account.type, label: accountLabel(account.type), description: '当前 ' + accountBalance(account) })) },
       { key: 'amount', label: '增减数额', hint: '金额账户填元，其余账户填整数；扣减带负号，例如 -20。' },
@@ -312,7 +326,8 @@ function requestAccountAdjustment() {
       const command = { memberId, accountType, amount, reason }
       await withPendingCreationKey('account.adjustment.' + memberId + '.' + accountType, command, idempotencyKey =>
         endpoints.createAccountAdjustment(memberId, { accountType, amount, reason, idempotencyKey }))
-      return '调整申请已提交，余额尚未改变，请等待独立复核。'
+      if (direct) { await selectMember(snapshot.member); return '账户已调整，流水已记录。' }
+      return '调整申请已提交，等待复核。'
     },
   })
 }
@@ -337,33 +352,36 @@ async function refreshRechargePlans(message: string) {
 }
 
 async function createRechargePlan() {
+  if (formBusy.value || !canManageRechargePlans.value) return
+  formError.value = ''
   const principalCents = yuanToCents(rechargePlanForm.principalYuan)
   const giftCents = yuanToCents(rechargePlanForm.giftYuan)
   const effectiveFrom = effectiveIso(rechargePlanForm.effectiveFrom)
   const effectiveTo = effectiveIso(rechargePlanForm.effectiveTo)
   if (!/^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(rechargePlanForm.code.trim()))
-    return uni.showToast({ title: '计划编码需为大写字母、数字、下划线或横线', icon: 'none' })
+    return formNotice({ title: '计划编码需为大写字母、数字、下划线或横线', icon: 'none' })
   if (rechargePlanForm.name.trim().length < 2)
-    return uni.showToast({ title: '请填写计划名称', icon: 'none' })
+    return formNotice({ title: '请填写计划名称', icon: 'none' })
   if (!Number.isSafeInteger(principalCents) || principalCents < 100)
-    return uni.showToast({ title: '充值本金无效', icon: 'none' })
+    return formNotice({ title: '充值本金无效', icon: 'none' })
   if (!Number.isSafeInteger(giftCents) || giftCents < 0 || giftCents > principalCents)
-    return uni.showToast({ title: '赠送金额不得超过本金', icon: 'none' })
+    return formNotice({ title: '赠送金额不得超过本金', icon: 'none' })
   if (!effectiveFrom || !effectiveTo || new Date(effectiveTo) <= new Date(effectiveFrom))
-    return uni.showToast({ title: '有效期无效', icon: 'none' })
+    return formNotice({ title: '有效期无效', icon: 'none' })
   const reason = rechargePlanForm.reason.trim()
-  if (reason.length < 2) return uni.showToast({ title: '请填写创建原因', icon: 'none' })
+  if (reason.length < 2) return formNotice({ title: '请填写创建原因', icon: 'none' })
   const command = {
     code: rechargePlanForm.code.trim(), name: rechargePlanForm.name.trim(),
     principalCents, giftCents, effectiveFrom, effectiveTo, reason,
   }
+  formBusy.value = true
   try {
     await withPendingCreationKey('membership.recharge-plan.create', command, (idempotencyKey) =>
       endpoints.createRechargePlan({ ...command, idempotencyKey }),
     )
     Object.assign(rechargePlanForm, { code: '', name: '', principalYuan: '', giftYuan: '0', reason: '' })
-    await refreshRechargePlans('充值计划版本已创建')
-  } catch (cause: any) { uni.showToast({ title: cause.message || '创建失败', icon: 'none' }) }
+    uni.showToast({ title:'充值计划草稿已保存', icon:'success' }); finishForm()
+  } catch (cause: any) { formNotice({ title: cause.message || '创建失败', icon: 'none' }) } finally { formBusy.value = false }
 }
 
 function setRechargePlanStatus(plan: any) {
@@ -378,6 +396,7 @@ function setRechargePlanStatus(plan: any) {
 }
 
 function resetMembershipProductForm() {
+  formSourceId.value = ''
   membershipProductSource.value = null
   Object.assign(membershipProductForm, {
     code: '', name: '', level: 'REGULAR', priceYuan: '', durationDays: '365',
@@ -390,10 +409,6 @@ function resetMembershipProductForm() {
 function beginMembershipProductVersion(product: any) {
   membershipProductSource.value = product
   const benefits = product.benefits || {}
-  const fallbackBenefits = Object.entries(benefits)
-    .filter(([key]) => !['booking', 'discount', 'additional'].includes(key))
-    .map(([key, value]) => `${key}：${String(value)}`)
-    .join('；')
   Object.assign(membershipProductForm, {
     code: product.code,
     name: product.name,
@@ -402,7 +417,7 @@ function beginMembershipProductVersion(product: any) {
     durationDays: String(product.durationDays || 365),
     bookingBenefit: String(benefits.booking || ''),
     discountBenefit: String(benefits.discount || ''),
-    additionalBenefit: String(benefits.additional || fallbackBenefits),
+    additionalBenefit: String(benefits.additional || ''),
     effectiveFrom: new Date().toISOString().slice(0, 10),
     effectiveTo: '2099-01-01',
     reason: '',
@@ -413,6 +428,11 @@ function beginMembershipProductVersion(product: any) {
 function changeMemberLevel(event: any) {
   membershipProductForm.level = memberLevelOptions[Number(event.detail.value)]?.value || 'REGULAR'
 }
+
+function extraMembershipBenefits(product: any) {
+  return membershipBenefits({ benefits:Object.fromEntries(Object.entries(product?.benefits || {}).filter(([key]) => !['booking','discount','additional'].includes(key))) })
+}
+const hasExtraMembershipBenefits = computed(() => Object.keys(membershipProductSource.value?.benefits || {}).some(key => !['booking','discount','additional'].includes(key)))
 
 function membershipBenefits(product: any) {
   const entries = Object.entries(product?.benefits || {})
@@ -426,12 +446,14 @@ async function refreshMembershipProducts(message?: string) {
     membershipProducts.value = await endpoints.manageMembershipProducts()
     if (message) uni.showToast({ title: message, icon: 'success' })
   } catch (cause: any) {
-    membershipProductError.value = cause?.message || '会员产品版本加载失败'
+    membershipProductError.value = cause?.message || '会员产品加载失败'
   }
 }
 
 async function createMembershipProductVersion() {
   if (!canManageMembershipProducts.value || membershipProductSubmitting.value) return
+  formError.value = ''
+  if (formSourceId.value && !membershipProductSource.value) { formError.value = '原产品尚未加载，请返回列表重试。'; return }
   const source = membershipProductSource.value
   const code = membershipProductForm.code.trim()
   const name = membershipProductForm.name.trim()
@@ -443,28 +465,29 @@ async function createMembershipProductVersion() {
     : ''
   const reason = membershipProductForm.reason.trim()
   if (!source && !/^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(code))
-    return uni.showToast({ title: '产品编码格式无效', icon: 'none' })
+    return formNotice({ title: '产品编码格式无效', icon: 'none' })
   if (name.length < 2 || name.length > 80)
-    return uni.showToast({ title: '产品名称需为2-80个字', icon: 'none' })
+    return formNotice({ title: '产品名称需为2-80个字', icon: 'none' })
   if (!Number.isSafeInteger(priceCents) || priceCents < 0)
-    return uni.showToast({ title: '会员价格无效', icon: 'none' })
+    return formNotice({ title: '会员价格无效', icon: 'none' })
   if (!Number.isSafeInteger(durationDays) || durationDays < 1 || durationDays > 3650)
-    return uni.showToast({ title: '有效天数需为1-3650天', icon: 'none' })
+    return formNotice({ title: '有效天数需为1-3650天', icon: 'none' })
   if (!effectiveFrom || (membershipProductForm.effectiveTo.trim() && !effectiveTo) || (effectiveTo && new Date(effectiveTo) <= new Date(effectiveFrom)))
-    return uni.showToast({ title: '产品生效区间无效', icon: 'none' })
+    return formNotice({ title: '产品生效区间无效', icon: 'none' })
   if (reason.length < 2 || reason.length > 300)
-    return uni.showToast({ title: '请填写2-300字创建原因', icon: 'none' })
+    return formNotice({ title: '请填写2-300字创建原因', icon: 'none' })
   const benefits = {
+    ...(source?.benefits || {}),
     booking: membershipProductForm.bookingBenefit.trim(),
     discount: membershipProductForm.discountBenefit.trim(),
     additional: membershipProductForm.additionalBenefit.trim(),
   }
   if (!Object.values(benefits).some(Boolean))
-    return uni.showToast({ title: '至少填写一项会员权益', icon: 'none' })
+    return formNotice({ title: '至少填写一项会员权益', icon: 'none' })
   const confirmed = await uni.showModal({
-    title: source ? `确认创建 ${source.code} 新版本` : '确认创建会员产品',
-    content: `${name} · ${money(priceCents)} · ${durationDays}天\n创建后条款不可覆盖，新版本默认停用，需另行启用。`,
-    confirmText: '创建停用版本',
+    title: source ? `确认调整${source.name}` : '确认创建会员产品',
+    content: `${name} · ${money(priceCents)} · ${durationDays}天\n保存后暂不销售，核对并启用后生效；已购买会员的权益不变。`,
+    confirmText: '保存草稿',
   })
   if (!confirmed.confirm) return
   const command: Record<string, any> = {
@@ -483,9 +506,9 @@ async function createMembershipProductVersion() {
         : endpoints.createMembershipProduct({ ...command, idempotencyKey }),
     )
     resetMembershipProductForm()
-    await refreshMembershipProducts('会员产品版本已创建')
+    uni.showToast({ title:'会员产品草稿已保存', icon:'success' }); finishForm()
   } catch (cause: any) {
-    uni.showToast({ title: cause?.message || '会员产品创建失败', icon: 'none' })
+    formNotice({ title: cause?.message || '会员产品创建失败', icon: 'none' })
   } finally {
     membershipProductSubmitting.value = false
   }
@@ -508,6 +531,13 @@ function changeSource(event: any) {
 }
 
 onLoad((options) => {
+  if (typeof options?.view === 'string' && ['members','leads','membershipProducts','rechargePlans'].includes(options.view)) tab.value = options.view as typeof tab.value
+  formMode.value = typeof options?.form === 'string' && ['lead','product','recharge'].includes(options.form) ? options.form : ''
+  formSourceId.value = typeof options?.source === 'string' ? options.source : ''
+  if (formMode.value) {
+    tab.value = formMode.value === 'lead' ? 'leads' : formMode.value === 'product' ? 'membershipProducts' : 'rechargePlans'
+    uni.setNavigationBarTitle({ title:formMode.value === 'lead' ? '新建客户线索' : formMode.value === 'product' ? (formSourceId.value ? '调整会员产品' : '新建会员产品') : '新建充值计划' })
+  }
   detailMemberId.value = typeof options?.memberId === 'string' ? options.memberId : ''
   if (detailMemberId.value) uni.setNavigationBarTitle({ title: '客户详情' })
   deepLinkQuery.value = parseOpsDeepLinkQuery(options)
@@ -515,7 +545,13 @@ onLoad((options) => {
 onShow(async () => {
   await session.hydrate()
   const owner = `${session.user?.id}:${session.roles.join()}`
-  if (detailMemberId.value || owner !== loadedOwner || !membersLoaded.value) { loadedOwner = owner; await load() }
+  const revision = uni.getStorageSync('yanqing_member_operations_changed')
+  if (formMode.value || detailMemberId.value || owner !== loadedOwner || revision !== loadedRevision || !membersLoaded.value) { loadedOwner = owner; loadedRevision = revision; await load() }
+  if (formMode.value === 'product' && formSourceId.value && !sourceInitialized) {
+    const source = membershipProducts.value.find(product => product.id === formSourceId.value)
+    if (source) { beginMembershipProductVersion(source); markFormSaved(); sourceInitialized = true }
+    else formError.value = '原产品未找到，请返回列表重试。'
+  }
 })
 </script>
 
@@ -528,9 +564,10 @@ onShow(async () => {
       <CustomerDetail v-else-if="customer" :customer="customer" :canAdjust="canRequestAdjustments" @adjust="requestAccountAdjustment" />
     </template>
     <template v-else>
+    <view v-if="formError" class="card form-error" role="alert">{{ formError }}</view>
     <view v-if="loadError" class="card load-error"><view><text class="member-name">客户数据未完整同步</text><text class="muted block">{{ loadError }}</text></view><button class="secondary retry-button" :disabled="loading" @tap="load">重新加载</button></view>
-    <view class="tabs card"><button class="tab" :class="{ active: tab === 'members' }" @tap="tab = 'members'">会员列表</button><button v-if="canViewLeads" class="tab" :class="{ active: tab === 'leads' }" @tap="tab = 'leads'">客户线索</button><button v-if="canViewMembershipProducts" class="tab" :class="{ active: tab === 'membershipProducts' }" @tap="tab = 'membershipProducts'">会员产品</button><button v-if="canManageRechargePlans" class="tab" :class="{ active: tab === 'rechargePlans' }" @tap="tab = 'rechargePlans'">充值计划</button></view>
-    <view v-if="tab === 'members' || tab === 'leads'" class="search-card card"><input v-model="query" class="input" :placeholder="tab === 'members' ? '输入姓名或手机号后四位查询会员' : '搜索姓名、来源活动'" confirm-type="search" maxlength="50" @confirm="tab === 'members' && memberQueue.refresh()" /><button v-if="tab === 'members'" class="secondary" :disabled="memberQueue.loading.value" @tap="memberQueue.refresh()">查询</button></view>
+    <view v-if="!formMode" class="tabs card"><button class="tab" :class="{ active: tab === 'members' }" @tap="tab = 'members'">会员列表</button><button v-if="canViewLeads" class="tab" :class="{ active: tab === 'leads' }" @tap="tab = 'leads'">客户线索</button><button v-if="canViewMembershipProducts" class="tab" :class="{ active: tab === 'membershipProducts' }" @tap="tab = 'membershipProducts'">会员产品</button><button v-if="canManageRechargePlans" class="tab" :class="{ active: tab === 'rechargePlans' }" @tap="tab = 'rechargePlans'">充值计划</button></view>
+    <view v-if="!formMode && (tab === 'members' || tab === 'leads')" class="search-card card"><input v-model="query" class="input" :placeholder="tab === 'members' ? '输入姓名或手机号后四位查询会员' : '搜索姓名、来源活动'" confirm-type="search" maxlength="50" @confirm="tab === 'members' && memberQueue.refresh()" /><button v-if="tab === 'members'" class="secondary" :disabled="memberQueue.loading.value" @tap="memberQueue.refresh()">查询</button></view>
     <view v-if="tab === 'members'" class="list-toolbar"><text>{{ memberQueue.loading.value ? '查询中…' : `共 ${memberQueue.total.value} 位会员` }}</text><picker :range="levelFilters" range-key="label" :value="levelFilters.findIndex(item => item.value === memberLevel)" @change="filterMembers"><view class="level-filter">{{ levelFilters.find(item => item.value === memberLevel)?.label }} ▾</view></picker></view>
 
     <template v-if="tab === 'members'">
@@ -553,14 +590,16 @@ onShow(async () => {
     </template>
 
     <template v-else-if="tab === 'leads'">
-      <view v-if="canWriteLeads" class="card lead-form">
+      <button v-if="canWriteLeads && !formMode" class="primary new-record" @tap="openForm('lead')">新建客户线索</button>
+      <view v-if="canWriteLeads && formMode === 'lead'" class="card lead-form dedicated-form">
         <view class="section-title">新建客户线索</view>
-        <input v-model="createForm.displayName" class="input field" placeholder="客户姓名（必填）" />
-        <input v-model="createForm.phone" class="input field" type="number" placeholder="手机号" />
+        <view class="form-field"><text class="field-caption">客户姓名（必填）</text><input v-model="createForm.displayName" class="input field" placeholder="客户姓名（必填）" /></view>
+        <view class="form-field"><text class="field-caption">手机号</text><input v-model="createForm.phone" class="input field" type="number" placeholder="手机号" /></view>
         <picker :range="sourceOptions" range-key="label" @change="changeSource"><view class="picker field">来源：{{ sourceOptions.find((item) => item.value === createForm.sourceChannel)?.label }}</view></picker>
-        <input v-model="createForm.campaign" class="input field" placeholder="来源活动，例如周末体验课" />
-        <button class="primary" @tap="createLead">建立线索</button>
+        <view class="form-field"><text class="field-caption">来源活动</text><input v-model="createForm.campaign" class="input field" placeholder="来源活动，例如周末体验课" /></view>
+        <button class="primary form-save" :disabled="formBusy" :loading="formBusy" @tap="createLead">建立线索</button>
       </view>
+      <template v-if="!formMode">
       <view class="section-title">线索队列 <text class="section-note">{{ loading ? '同步中' : leadsLoaded ? `${filteredLeads.length} 条` : '未同步' }}</text></view>
       <view v-for="lead in filteredLeads" :id="opsDeepLinkDomId('lead', lead.id)" :key="lead.id" class="card lead-card" :class="{ 'deep-link-target': focusedRecord === `lead:${lead.id}` }">
         <view class="lead-head"><view><text class="member-name">{{ lead.displayName }}</text><text class="muted">{{ lead.phone || '联系方式按角色隐藏' }} · {{ lead.campaign || leadSourceLabel(lead.sourceChannel) }}</text></view><text class="lead-status">{{ leadLabels[lead.status] || '状态更新中' }}</text></view>
@@ -569,58 +608,66 @@ onShow(async () => {
         <view v-if="canWriteLeads && !['CONVERTED', 'LOST', 'ARCHIVED'].includes(lead.status)" class="actions"><button size="mini" @tap="claim(lead)">认领</button><button size="mini" @tap="assign(lead)">分配</button><button size="mini" @tap="followUp(lead)">跟进推进</button><button size="mini" @tap="convert(lead)">转会员</button><button size="mini" @tap="lose(lead)">流失</button></view>
       </view>
       <view v-if="!loading && leadsLoaded && !filteredLeads.length" class="card empty">{{ query.trim() ? '没有匹配的客户线索' : '当前没有客户线索' }}</view>
+      </template>
     </template>
     <template v-else-if="tab === 'membershipProducts'">
-      <view v-if="canManageMembershipProducts" class="card membership-product-form">
+      <button v-if="canManageMembershipProducts && !formMode" class="primary new-record" @tap="openForm('product')">新增会员产品</button>
+      <view v-if="canManageMembershipProducts && formMode === 'product'" class="card membership-product-form dedicated-form">
         <view class="form-heading">
-          <view><text class="member-name">{{ membershipProductSource ? `创建 ${membershipProductSource.code} 新版本` : '新建会员产品 v1' }}</text><text class="muted block">商业条款一经创建不可覆盖；新版本默认停用，启用时校验同编码有效期。</text></view>
-          <button v-if="membershipProductSource" class="secondary compact-action" :disabled="membershipProductSubmitting" @tap="resetMembershipProductForm">取消派生</button>
+          <view><text class="member-name">{{ membershipProductSource ? `调整${membershipProductSource.name}` : '新建会员产品' }}</text><text class="muted block">保存后先保留为草稿，启用后才可销售；已购买会员的权益不变。</text></view>
+          <button v-if="membershipProductSource" class="secondary compact-action" :disabled="membershipProductSubmitting" @tap="resetMembershipProductForm">改为新建产品</button>
         </view>
-        <input v-model="membershipProductForm.code" class="input field" :disabled="Boolean(membershipProductSource)" placeholder="产品编码，例如 MEMBER_GOLD_YEAR" />
-        <input v-model="membershipProductForm.name" class="input field" placeholder="产品名称" />
+        <view class="form-field"><text class="field-caption">产品编码</text><input v-model="membershipProductForm.code" class="input field" :disabled="Boolean(membershipProductSource)" placeholder="产品编码，例如 MEMBER_GOLD_YEAR" /></view>
+        <view class="form-field"><text class="field-caption">产品名称</text><input v-model="membershipProductForm.name" class="input field" placeholder="产品名称" /></view>
         <picker :range="memberLevelOptions" range-key="label" @change="changeMemberLevel"><view class="picker field">会员等级：{{ memberLevelOptions.find((item) => item.value === membershipProductForm.level)?.label }} ›</view></picker>
-        <view class="amount-grid"><input v-model="membershipProductForm.priceYuan" class="input field" type="digit" placeholder="售价（元）" /><input v-model="membershipProductForm.durationDays" class="input field" type="number" placeholder="有效天数" /></view>
-        <input v-model="membershipProductForm.bookingBenefit" class="input field" placeholder="订场权益，例如提前14天订场" />
-        <input v-model="membershipProductForm.discountBenefit" class="input field" placeholder="折扣权益，例如场地9折" />
-        <input v-model="membershipProductForm.additionalBenefit" class="input field" placeholder="其他权益，例如每月同行券" />
-        <view class="amount-grid"><input v-model="membershipProductForm.effectiveFrom" class="input field" placeholder="生效日 YYYY-MM-DD" /><input v-model="membershipProductForm.effectiveTo" class="input field" placeholder="失效日，可留空" /></view>
-        <input v-model="membershipProductForm.reason" class="input field" placeholder="创建原因（审计留痕）" />
-        <button class="primary create-plan" :loading="membershipProductSubmitting" :disabled="membershipProductSubmitting" @tap="createMembershipProductVersion">创建停用状态的新版本</button>
+        <view class="amount-grid"><view class="form-field"><text class="field-caption">售价（元）</text><input v-model="membershipProductForm.priceYuan" class="input field" type="digit" placeholder="售价（元）" /></view><view class="form-field"><text class="field-caption">有效天数</text><input v-model="membershipProductForm.durationDays" class="input field" type="number" placeholder="有效天数" /></view></view>
+        <view class="form-field"><text class="field-caption">订场权益</text><input v-model="membershipProductForm.bookingBenefit" class="input field" placeholder="订场权益，例如提前14天订场" /></view>
+        <view class="form-field"><text class="field-caption">折扣权益</text><input v-model="membershipProductForm.discountBenefit" class="input field" placeholder="折扣权益，例如场地9折" /></view>
+        <view class="form-field"><text class="field-caption">其他权益</text><input v-model="membershipProductForm.additionalBenefit" class="input field" placeholder="其他权益，例如每月同行券" /></view>
+        <view class="amount-grid"><view class="form-field"><text class="field-caption">生效日 YYYY-MM-DD</text><input v-model="membershipProductForm.effectiveFrom" class="input field" placeholder="生效日 YYYY-MM-DD" /></view><view class="form-field"><text class="field-caption">失效日</text><input v-model="membershipProductForm.effectiveTo" class="input field" placeholder="失效日，可留空" /></view></view>
+        <view class="form-field"><text class="field-caption">操作原因（必填）</text><input v-model="membershipProductForm.reason" class="input field" placeholder="操作原因（必填）" /></view>
+        <view v-if="hasExtraMembershipBenefits" class="retained-benefits"><text class="field-caption">以下权益沿用原设置</text><text>{{ extraMembershipBenefits(membershipProductSource) }}</text></view>
+        <button class="primary create-plan form-save" :loading="membershipProductSubmitting" :disabled="membershipProductSubmitting" @tap="createMembershipProductVersion">保存草稿</button>
       </view>
-      <view v-else class="card readonly-note"><text class="member-name">前台只读</text><text class="muted">可核对产品条款和上下架状态；创建版本、启停必须由管理员完成。</text></view>
-      <view class="section-title">会员产品版本 <text class="section-note">{{ loading ? '同步中' : `${membershipProducts.length} 个` }}</text></view>
+      <template v-if="!formMode">
+      <view v-if="!canManageMembershipProducts" class="card readonly-note"><text class="member-name">前台只读</text><text class="muted">可查看价格、权益与销售状态；修改和启停请联系管理员。</text></view>
+      <view class="section-title">会员产品 <text class="section-note">{{ loading ? '同步中' : `${membershipProducts.length} 个` }}</text></view>
       <view v-if="membershipProductError" class="card product-error"><text class="member-name">会员产品加载失败</text><text class="muted block">{{ membershipProductError }}</text><button class="secondary status-button" @tap="refreshMembershipProducts()">重新加载</button></view>
-      <view v-else-if="loading" class="card empty">正在同步会员产品版本…</view>
-      <view v-else-if="!membershipProducts.length" class="card empty">尚未配置会员产品版本</view>
+      <view v-else-if="loading" class="card empty">正在同步会员产品…</view>
+      <view v-else-if="!membershipProducts.length" class="card empty">尚未配置会员产品</view>
       <view v-for="product in membershipProducts" v-else :key="product.id" class="card plan-row">
         <view class="plan-head"><view><text class="member-name">{{ product.name }}</text><text class="muted">{{ product.code }} · 第{{ product.version }}版 · {{ memberLevelLabel(product.level) }} · {{ money(product.priceCents) }} / {{ product.durationDays }}天</text></view><text class="lead-status" :class="{ disabled: !product.enabled }">{{ product.enabled ? '已启用' : '已停用' }}</text></view>
         <text class="benefit-line">{{ membershipBenefits(product) }}</text>
         <text class="muted block">有效期：{{ new Date(product.effectiveFrom).toLocaleDateString() }} 至 {{ product.effectiveTo ? new Date(product.effectiveTo).toLocaleDateString() : '长期' }} · 创建人 {{ product.createdBy?.displayName || '系统记录' }}</text>
         <text v-if="product.transitions?.[0]" class="follow-up">最近变更：{{ product.transitions[0].reason }} · {{ product.transitions[0].actor?.displayName }}</text>
-        <view v-if="canManageMembershipProducts" class="product-actions"><button class="secondary status-button" :disabled="membershipProductSubmitting" @tap="beginMembershipProductVersion(product)">基于此版本派生</button><button class="secondary status-button" :disabled="membershipProductSubmitting" @tap="setMembershipProductStatus(product)">{{ product.enabled ? '停用产品' : '启用产品' }}</button></view>
+        <view v-if="canManageMembershipProducts" class="product-actions"><button class="secondary status-button" :disabled="membershipProductSubmitting" @tap="openForm('product', product.id)">调整价格与权益</button><button class="secondary status-button" :disabled="membershipProductSubmitting" @tap="setMembershipProductStatus(product)">{{ product.enabled ? '停用产品' : '启用产品' }}</button></view>
       </view>
+      </template>
     </template>
     <template v-else>
-      <view class="card recharge-plan-form">
-        <view class="section-title">新建充值计划版本</view>
-        <text class="muted block">财务条款创建后不可修改；新版本默认停用，需单独启用。赠送金额不得超过本金。</text>
-        <input v-model="rechargePlanForm.code" class="input field" placeholder="计划编码，例如 RECHARGE_500" />
-        <input v-model="rechargePlanForm.name" class="input field" placeholder="计划名称" />
-        <view class="amount-grid"><input v-model="rechargePlanForm.principalYuan" class="input field" type="digit" placeholder="充值本金（元）" /><input v-model="rechargePlanForm.giftYuan" class="input field" type="digit" placeholder="赠送金额（元）" /></view>
-        <view class="amount-grid"><input v-model="rechargePlanForm.effectiveFrom" class="input field" placeholder="生效日 YYYY-MM-DD" /><input v-model="rechargePlanForm.effectiveTo" class="input field" placeholder="失效日 YYYY-MM-DD" /></view>
-        <input v-model="rechargePlanForm.reason" class="input field" placeholder="创建原因（审计留痕）" />
-        <button class="primary create-plan" @tap="createRechargePlan">创建停用状态的新版本</button>
+      <button v-if="canManageRechargePlans && !formMode" class="primary new-record" @tap="openForm('recharge')">新增充值计划</button>
+      <view v-if="canManageRechargePlans && formMode === 'recharge'" class="card recharge-plan-form dedicated-form">
+        <view class="section-title">新建充值计划</view>
+        <text class="muted block">保存后暂不销售，启用后会员才可购买。赠送金额不能超过充值本金。</text>
+        <view class="form-field"><text class="field-caption">计划编码</text><input v-model="rechargePlanForm.code" class="input field" placeholder="计划编码，例如 RECHARGE_500" /></view>
+        <view class="form-field"><text class="field-caption">计划名称</text><input v-model="rechargePlanForm.name" class="input field" placeholder="计划名称" /></view>
+        <view class="amount-grid"><view class="form-field"><text class="field-caption">充值本金（元）</text><input v-model="rechargePlanForm.principalYuan" class="input field" type="digit" placeholder="充值本金（元）" /></view><view class="form-field"><text class="field-caption">赠送金额（元）</text><input v-model="rechargePlanForm.giftYuan" class="input field" type="digit" placeholder="赠送金额（元）" /></view></view>
+        <view class="amount-grid"><view class="form-field"><text class="field-caption">生效日 YYYY-MM-DD</text><input v-model="rechargePlanForm.effectiveFrom" class="input field" placeholder="生效日 YYYY-MM-DD" /></view><view class="form-field"><text class="field-caption">失效日 YYYY-MM-DD</text><input v-model="rechargePlanForm.effectiveTo" class="input field" placeholder="失效日 YYYY-MM-DD" /></view></view>
+        <view class="form-field"><text class="field-caption">操作原因（必填）</text><input v-model="rechargePlanForm.reason" class="input field" placeholder="操作原因（必填）" /></view>
+        <button class="primary create-plan form-save" :disabled="formBusy" :loading="formBusy" @tap="createRechargePlan">保存草稿</button>
       </view>
-      <view class="section-title">充值计划版本 <text class="section-note">{{ rechargePlans.length }} 个</text></view>
+      <template v-if="!formMode">
+      <view class="section-title">充值计划 <text class="section-note">{{ rechargePlans.length }} 个</text></view>
       <view v-for="plan in rechargePlans" :key="plan.id" class="card plan-row">
         <view class="plan-head"><view><text class="member-name">{{ plan.name }}</text><text class="muted">{{ plan.code }} · 第{{ plan.version }}版 · 本金 {{ money(plan.principalCents) }} · 赠送 {{ money(plan.giftCents) }}</text></view><text class="lead-status" :class="{ disabled: !plan.enabled }">{{ plan.enabled ? '已启用' : '已停用' }}</text></view>
         <text class="muted block">有效期：{{ new Date(plan.effectiveFrom).toLocaleDateString() }} 至 {{ plan.effectiveTo ? new Date(plan.effectiveTo).toLocaleDateString() : '长期' }} · 创建人 {{ plan.createdBy?.displayName || '系统记录' }}</text>
         <text v-if="plan.transitions?.[0]" class="follow-up">最近变更：{{ plan.transitions[0].reason }} · {{ plan.transitions[0].actor?.displayName }}</text>
         <button class="secondary status-button" @tap="setRechargePlanStatus(plan)">{{ plan.enabled ? '停用计划' : '启用计划' }}</button>
       </view>
-      <view v-if="!loading && rechargePlansLoaded && !rechargePlans.length" class="card empty">尚未配置充值计划版本</view>
+      <view v-if="!loading && rechargePlansLoaded && !rechargePlans.length" class="card empty">尚未配置充值计划</view>
+      </template>
     </template>
-    <view class="card boundary"><text class="muted">线索跟进记录不可删除；教练仅能查看分配给自己或本班会员关联线索，且看不到账户和联系方式。</text></view>
+
     </template>
   </OperationsFrame>
 </template>
@@ -722,3 +769,9 @@ onShow(async () => {
 .level-filter { min-height:88rpx; display:flex; align-items:center; color:#4b535b; }
 .member-trailing { display:flex; gap:20rpx; align-items:center; }.member-level { font-size:25rpx; color:#687079; }.select-mark { font-size:34rpx; color:#969da4; }
 </style>
+
+<style scoped>.new-record { margin-bottom:24rpx; }.dedicated-form { padding-bottom:140rpx!important; }.form-save { position:fixed; bottom:calc(20rpx + env(safe-area-inset-bottom)); left:28rpx; right:28rpx; width:auto; z-index:20; box-shadow:0 0 0 28rpx #fff!important; }.form-error { position:sticky; top:0; z-index:21; background:#fff0ef; color:#a52626; font-size:28rpx; }</style>
+
+<style scoped>.form-field { min-width:0; margin-top:24rpx; }.field-caption { display:block; font-size:26rpx; color:#626d66; }.form-field .field { margin-top:8rpx; }</style>
+
+<style scoped>.retained-benefits { display:grid; gap:12rpx; margin-top:24rpx; padding:20rpx; background:#f5f6f8; border-radius:16rpx; font-size:28rpx; }</style>

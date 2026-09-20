@@ -364,8 +364,7 @@ export function useEventLoadingActions({
 }: ActionContext) {
   function preferredEvent(list: EventSummary[], preferredId?: string) {
     if (preferredId) {
-      const preferred = list.find((event) => event.id === preferredId);
-      if (preferred) return preferred;
+      return list.find((event) => event.id === preferredId);
     }
     const priority: EventStatus[] = [
       "IN_PROGRESS",
@@ -395,7 +394,13 @@ export function useEventLoadingActions({
       const list = (await endpoints.managedEvents()) as EventSummary[];
       eventList.value = Array.isArray(list) ? list : [];
       const selected = preferredEvent(eventList.value, preferredId);
-      selectedEventId.value = selected?.id || "";
+      selectedEventId.value = selected?.id || preferredId || "";
+      if (preferredId && !selected) {
+        eventDetail.value = null;
+        prizeAwards.value = [];
+        inventoryItems.value = [];
+        throw new Error('未找到该赛事，可能已删除或无权查看，请返回赛事列表。');
+      }
       eventDetail.value = selected
         ? ((await endpoints.managedEvent(selected.id)) as EventDetail)
         : null;

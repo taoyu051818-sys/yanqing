@@ -1,3 +1,4 @@
+import { canExecuteDirectly } from '../../../../../utils/admin-execution';
 import type { Ref, ComputedRef } from "vue";
 import {
   useOperationTask,
@@ -8,6 +9,7 @@ import { money, shortDate } from "../../../../../utils/format";
 import { withPendingCreationKey } from "../../../../../utils/pending-creation-key";
 
 interface ActionContext {
+  session?: { roles: string[] };
   trainingSettlementStatusIndex: Ref<number, number>;
   refresh: () => void;
   trainingPeriodStartDate: Ref<string, string>;
@@ -18,6 +20,7 @@ interface ActionContext {
 }
 
 export function useFinanceTrainingActions({
+  session,
   trainingSettlementStatusIndex,
   refresh,
   trainingPeriodStartDate,
@@ -57,7 +60,7 @@ export function useFinanceTrainingActions({
         start +
         " 至 " +
         end +
-        "（结束日不含）。核对本账期成本，草稿生成后仍须独立复核。",
+        (canExecuteDirectly(session?.roles || []) ? "（结束日不含）。核对本账期成本后生成账单，再确认结算金额。" : "（结束日不含）。核对本账期成本，草稿生成后提交复核。"),
       confirmText: "确认生成草稿",
       fields: [
         {
@@ -81,7 +84,7 @@ export function useFinanceTrainingActions({
           marketingCostCents: Math.round(Number(values.marketing) * 100),
         });
         await load();
-        return "培训结算草稿已生成，下一步提交独立复核。";
+        return canExecuteDirectly(session?.roles || []) ? "账单已生成，核对金额后可直接结算入账。" : "培训结算草稿已生成，下一步提交复核。";
       },
     });
   }
@@ -108,7 +111,7 @@ export function useFinanceTrainingActions({
   }
 
   function isOwnTrainingSettlement(settlement: any) {
-    return settlement.isOwnCreator === true;
+    return settlement.isOwnCreator === true && !canExecuteDirectly(session?.roles || []);
   }
 
   function trainingSettlementLatestNote(settlement: any) {
@@ -145,6 +148,7 @@ export function useFinanceTrainingActions({
       void: "作废草稿",
     };
     task.start({
+      successFeedback: canExecuteDirectly(session?.roles || []) ? "toast" : "dialog",
       title: "培训结算 · " + labels[action],
       description:
         trainingSettlementPeriod(settlement) +

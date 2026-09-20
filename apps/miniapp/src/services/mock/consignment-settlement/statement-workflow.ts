@@ -1,3 +1,6 @@
+import { withMockTransaction } from "../state/storage";
+import { mockExecutionKey } from "../policies/admin-execution";
+import { hasMockRole } from "../policies/common.js";
 import { mockUser } from "../core";
 import {
   getConsignmentPayableEntries,
@@ -47,7 +50,7 @@ export const assertStatementSnapshotCurrent = (
     throw new Error("账期新增寄售应付或退款冲正，请作废并重建结算单");
 };
 
-export const transitionSettlement = (
+const applyTransition = (
   settlementId: string,
   actionName: string,
   data: JsonRecord,
@@ -121,7 +124,8 @@ export const transitionSettlement = (
     );
   if (
     ["confirm", "dispute", "return", "settle"].includes(actionName) &&
-    settlement.createdById === mockUser().id
+    settlement.createdById === mockUser().id &&
+    !hasMockRole("ADMIN", "SUPER_ADMIN")
   ) {
     throw new Error("制单人不能确认、争议、退回或结算自己的寄售结算单");
   }
@@ -193,4 +197,36 @@ export const transitionSettlement = (
     },
   );
   return settlementView(settlement, true);
+};
+
+export const transitionSettlement = (
+  id: string,
+  action: string,
+  data: JsonRecord,
+) => {
+  if (action !== "settle" || !hasMockRole("ADMIN", "SUPER_ADMIN"))
+    return applyTransition(id, action, data);
+  const paymentReference = text(data.paymentReference);
+  if (paymentReference.length < 2 || paymentReference.length > 120)
+    throw new Error("结算付款凭证长度必须为2-120个字符");
+  return withMockTransaction(() => {
+    const current = getConsignmentSettlements().find((row) => row.id === id);
+    if (current?.status === "DRAFT")
+      applyTransition(id, "submit", {
+        reason: data.reason,
+        idempotencyKey: mockExecutionKey(
+          "consignment-submit",
+          data.idempotencyKey,
+        ),
+      });
+    if (current && ["DRAFT", "PENDING_CONFIRMATION"].includes(current.status))
+      applyTransition(id, "confirm", {
+        reason: data.reason,
+        idempotencyKey: mockExecutionKey(
+          "consignment-confirm",
+          data.idempotencyKey,
+        ),
+      });
+    return applyTransition(id, action, data);
+  });
 };

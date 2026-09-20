@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { canExecuteDirectly } from '../../../../utils/admin-execution';
+
 import { useInventoryLoadingActions } from "./actions/loading.js";
 
 import StockUsage from "./sections/StockUsage.vue";
@@ -396,6 +398,7 @@ const {
   submitStocktake,
   stocktakeAction,
 } = useInventoryStocktakingActions({
+  session,
   stocktakeForm,
   showStocktakeForm,
   activeLocations,
@@ -559,7 +562,7 @@ onShow(load);
       :purchaseAction="purchaseAction"
     />
 
-    <Stocktaking
+    <Stocktaking :direct="canExecuteDirectly(session.roles)"
       v-else-if="!errorMessage && tab === 'STOCKTAKE'"
       :errorMessage="errorMessage"
       :tab="tab"

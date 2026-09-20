@@ -778,16 +778,16 @@ describe('TrainingService consumption workflow', () => {
     });
   });
 
-  it('rejects administrator confirmation when no coach proposal exists', async () => {
+  it('allows administrator consumption without a coach proposal', async () => {
     const { prisma, tx } = consumePrisma();
     const service = new TrainingService(prisma as never);
 
     await expect(
       service.consume('session-1', dto, administrator),
-    ).rejects.toThrow('必须先由教练提交消课建议');
-    expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled();
-    expect(tx.trainingEnrollment.update).not.toHaveBeenCalled();
-    expect(tx.auditLog.create).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ workflowStatus: 'CONFIRMED' });
+    expect(tx.trainingRevenueRecognition.create).toHaveBeenCalledOnce();
+    expect(tx.trainingEnrollment.update).toHaveBeenCalledOnce();
+    expect(tx.auditLog.create).toHaveBeenCalled();
   });
 
   it('rejects a configured training contract rate other than the locked 20 percent', async () => {
@@ -897,7 +897,7 @@ describe('TrainingService consumption workflow', () => {
     expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 
-  it('enforces maker/checker separation when a proposal was submitted by the approver account', async () => {
+  it('allows administrators to confirm their own proposal', async () => {
     const { prisma, tx } = consumePrisma(
       attendanceFixture({ operatorId: administrator.sub }),
     );
@@ -909,10 +909,10 @@ describe('TrainingService consumption workflow', () => {
         { enrollmentId: 'enrollment-1' },
         administrator,
       ),
-    ).rejects.toThrow('提交人与确认人不能是同一账号');
-    expect(tx.trainingAttendance.update).not.toHaveBeenCalled();
-    expect(tx.trainingEnrollment.update).not.toHaveBeenCalled();
-    expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ workflowStatus: 'CONFIRMED' });
+    expect(tx.trainingAttendance.update).toHaveBeenCalledOnce();
+    expect(tx.trainingEnrollment.update).toHaveBeenCalledOnce();
+    expect(tx.trainingRevenueRecognition.create).toHaveBeenCalled();
   });
 
   it('does not confirm consumption before the scheduled lesson ends', async () => {

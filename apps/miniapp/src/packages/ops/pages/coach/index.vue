@@ -23,12 +23,14 @@ import TrainingSchedule from "./sections/TrainingSchedule.vue";
 import LessonAttendance from "./sections/LessonAttendance.vue";
 import ConsumptionCorrections from "./sections/ConsumptionCorrections.vue";
 
-import { onUnmounted, ref } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
+import OperationsTabs from "../../components/OperationsTabs.vue";
+import LessonList from "./sections/LessonList.vue";
+import { today, venueDateKey } from "../../../../utils/format";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../components/OperationsFrame.vue";
 import OperationTask from "../../components/OperationTask.vue";
 import { useOperationTask } from "../../components/operation-task";
-import MetricCard from "../../components/MetricCard.vue";
 import { useSessionStore } from "../../../../stores/session";
 import { useCoachCatalogActions } from "./actions/catalog.js";
 import { useCoachScheduleActions } from "./actions/schedule.js";
@@ -56,7 +58,10 @@ const navigation = useCoachNavigation({
   corrections,
   trials,
 });
-const { focusedRecord } = navigation;
+const { focusedRecord, activeView, lessonId } = navigation;
+const lessonFilter = ref("today");
+const lessonSearch = ref("");
+const sessionValidationField = ref("");
 
 const actionKey = ref("");
 
@@ -347,6 +352,7 @@ const {
   sessionEndTime,
   runCreation: (...args: Parameters<typeof runCreation>) =>
     runCreation(...args),
+  onValidationError: (field) => { sessionValidationField.value = field; },
 });
 
 const {
@@ -457,6 +463,23 @@ const {
   errorMessage,
 });
 
+
+const isCreationPage = computed(() => activeView.value.startsWith('create-'));
+const coachTabs = computed(() => [
+  { key:'lessons', title:'课表' }, { key:'trials', title:'试听' }, { key:'products', title:'课程' },
+  ...(canConfigureTraining.value ? [{ key:'rules', title:'规则' }] : []),
+  { key:'corrections', title:'复核', count:requestedCorrections.value.length },
+]);
+const filteredLessons = computed(() => lessons.value.filter(lesson => {
+  const date = venueDateKey(lesson.startsAt);
+  return (lessonFilter.value === 'all' || date === today(lessonFilter.value === 'tomorrow' ? 1 : 0)) &&
+    String(lesson.class?.name || '').includes(lessonSearch.value.trim());
+}));
+const detailLessons = computed(() => lessons.value.filter(lesson => lesson.id === lessonId.value));
+function openLesson(id: string) { uni.navigateTo({ url:`/packages/ops/pages/coach/index?lessonId=${encodeURIComponent(id)}` }); }
+function openCreation(view: string) { uni.navigateTo({ url:`/packages/ops/pages/coach/index?view=${view}` }); }
+watch(activeView, () => { if (!isCreationPage.value && !lessonId.value) uni.pageScrollTo({ scrollTop:0, duration:0 }); });
+
 onLoad(navigation.setQuery);
 onShow(load);
 onUnmounted(dispose);
@@ -472,7 +495,11 @@ onUnmounted(dispose);
     description="以课表为主线，按点名、消课建议、主管确认和课后反馈完成培训账本闭环。"
   >
     <OperationTask :task="task" />
-    <view v-if="errorMessage" class="card error-panel">
+    <OperationsTabs v-if="!lessonId && !isCreationPage" v-model="activeView" :items="coachTabs" label="培训分类" />
+    <LessonList v-if="activeView === 'lessons' && !lessonId" v-model:filter="lessonFilter" v-model:search="lessonSearch" :lessons="filteredLessons" :loading="loading" :can-create="canCreateSession" :students-for="studentsFor" @open="openLesson" @create="openCreation('create-session')" />
+    <view v-if="lessonId && !loading && !detailLessons.length" class="card empty">未找到该课次，可能已移除或当前账号无权查看。</view>
+
+    <view v-if="errorMessage && !sessionValidationField" class="card error-panel">
       <view
         ><text class="panel-title">操作未完成</text
         ><text class="muted">{{ errorMessage }}</text></view
@@ -485,17 +512,10 @@ onUnmounted(dispose);
         重试
       </button>
     </view>
-    <view class="metric-grid"
-      ><MetricCard
-        v-for="item in metrics"
-        :key="item[0]"
-        :label="item[0]"
-        :value="item[1]"
-        :note="item[2]"
-    /></view>
     <view v-if="actionMessage" class="notice card">{{ actionMessage }}</view>
 
     <TrialAppointments
+      v-if="activeView === 'trials' && !lessonId"
       :trials="trials"
       :canManageTrials="canManageTrials"
       :trialSubjectOptions="trialSubjectOptions"
@@ -534,7 +554,7 @@ onUnmounted(dispose);
     />
 
     <YouthRules
-      v-if="canConfigureTraining"
+      v-if="activeView === 'rules' && canConfigureTraining && !lessonId"
       :canConfigureTraining="canConfigureTraining"
       :activeYouthRule="activeYouthRule"
       :canDraftYouthRule="canDraftYouthRule"
@@ -555,7 +575,9 @@ onUnmounted(dispose);
       :decideYouthRule="decideYouthRule"
     />
 
+    <view v-if="activeView === 'products' && !lessonId && canConfigureTraining" class="creation-shortcuts"><button class="primary" @tap="openCreation('create-product')">新增课程</button><button class="secondary" @tap="openCreation('create-class')">新增班级</button></view>
     <TrainingProducts
+      v-if="activeView === 'products' && !lessonId"
       :activeProducts="activeProducts"
       :activeClasses="activeClasses"
       :products="products"
@@ -575,7 +597,9 @@ onUnmounted(dispose);
     />
 
     <TrainingConfiguration
-      v-if="canConfigureTraining"
+      v-if="['create-product', 'create-class'].includes(activeView) && canConfigureTraining"
+      :form-type="activeView === 'create-product' ? 'product' : 'class'"
+      :error-message="errorMessage"
       :canConfigureTraining="canConfigureTraining"
       v-model:productCode="productCode"
       v-model:productName="productName"
@@ -612,7 +636,9 @@ onUnmounted(dispose);
     />
 
     <TrainingSchedule
-      v-if="canCreateSession"
+      v-if="activeView === 'create-session' && canCreateSession"
+      :error-message="errorMessage"
+      :error-field="sessionValidationField"
       :canCreateSession="canCreateSession"
       :sessionClasses="sessionClasses"
       v-model:sessionClassIndex="sessionClassIndex"
@@ -633,9 +659,10 @@ onUnmounted(dispose);
     />
 
     <LessonAttendance
+      v-if="lessonId"
       :loading="loading"
       :activeLessons="activeLessons"
-      :lessons="lessons"
+      :lessons="detailLessons"
       :focusedRecord="focusedRecord"
       :studentsFor="studentsFor"
       :isActiveEnrollment="isActiveEnrollment"
@@ -668,6 +695,7 @@ onUnmounted(dispose);
       :lessonWindowState="lessonWindowState"
     />
     <ConsumptionCorrections
+      v-if="activeView === 'corrections' && !lessonId"
       :corrections="corrections"
       :focusedRecord="focusedRecord"
       :correctionStudentName="correctionStudentName"
@@ -677,13 +705,12 @@ onUnmounted(dispose);
       :decideCorrection="decideCorrection"
       :loading="loading"
     />
-    <view class="section-title">教练工作边界</view>
-    <view class="card boundary"
-      ><text class="muted"
-        >教练可处理学员出勤、消课与训练反馈；退款审批、库存调整和结算发布由对应岗位处理。</text
-      ></view
-    >
   </OperationsFrame>
 </template>
 
 <style scoped src="./page.css"></style>
+
+<style scoped>
+.creation-shortcuts { display:flex; gap:20rpx; margin:12rpx 0 24rpx; }.creation-shortcuts button { flex:1; margin:0; font-size:28rpx; }
+.error-panel { position:sticky; top:0; z-index:12; background:#fff0ef; }
+</style>

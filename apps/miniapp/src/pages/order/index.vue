@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch } from "vue";
+import { computed, watch } from "vue";
 import type { OrderView } from "@yanqing/shared";
 import {
   onHide,
@@ -13,6 +13,7 @@ import GuestState from "../../components/GuestState.vue";
 import SectionEmpty from "../../components/SectionEmpty.vue";
 import ReasonForm from "../../components/ReasonForm.vue";
 import StatusBadge from "../../components/StatusBadge.vue";
+import { canDirectRefund } from "../../utils/refund-action";
 import { money } from "../../utils/format";
 import { useSessionStore } from "../../stores/session";
 import {
@@ -37,6 +38,7 @@ import { useOrderAftersales } from "./use-order-aftersales";
 import { useOrderClock } from "./use-order-clock";
 
 const session = useSessionStore();
+const directRefund = computed(() => canDirectRefund(session.roles));
 const list = useOrderList(session);
 const {
   orders,
@@ -70,6 +72,7 @@ const aftersales = useOrderAftersales(
   actions,
   load,
   (id) => paymentConfirmation.value?.orderId === id,
+  () => directRefund.value,
 );
 const { refundingId, refundError, cancelPending, refund } = aftersales;
 watch(
@@ -97,17 +100,23 @@ function openRelated(order: OrderView) {
     return openMemberPage("/pages/training/index?tab=mine");
 }
 
+let showGeneration = 0;
 onLoad(list.configure);
-onShow(() => {
+onShow(async () => {
+  const generation = ++showGeneration;
+  await session.hydrate();
+  if (generation !== showGeneration) return;
   clock.start();
   confirmation.resume();
   void load();
 });
 onHide(() => {
+  showGeneration++;
   clock.stop();
   confirmation.pause();
 });
 onUnload(() => {
+  showGeneration++;
   clock.stop();
   actions.dispose();
   list.dispose();
@@ -386,21 +395,21 @@ onPullDownRefresh(() => load());
             refundError = '';
           "
         >
-          <AppIcon name="refund" :size="28" />申请退款
+          <AppIcon name="refund" :size="28" />{{ directRefund ? "直接退款" : "申请退款" }}
         </button></view
       >
       <ReasonForm
         v-if="refundingId === order.id && canRequestOrderRefund(order)"
         :key="order.id"
-        title="申请退款"
+        :title="directRefund ? '直接退款' : '申请退款'"
         :description="
-          '申请金额 ' +
+          '退款金额 ' +
           money(refundableAmount(order)) +
-          '。提交后由工作人员按订单状态和退款规则审核，进度在本订单查看。'
+          (directRefund ? '。确认后按原支付方式退款，无需再次审核。现金订单请确认已向会员退回现金。' : '。提交后由工作人员按订单状态和退款规则审核，进度在本订单查看。')
         "
         :busy="Boolean(actionKey)"
         :error="refundError"
-        confirm-text="确认申请退款"
+        :confirm-text="directRefund ? '确认退款' : '确认申请退款'"
         @cancel="refundingId = ''"
         @submit="refund(order, $event)"
       />

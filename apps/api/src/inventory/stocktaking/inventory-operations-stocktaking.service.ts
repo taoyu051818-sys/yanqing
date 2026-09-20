@@ -1,3 +1,7 @@
+import {
+  canExecuteDirectly,
+  directExecutionKey,
+} from '../../common/auth/admin-execution.js';
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuthUser } from '../../common/auth/auth-user.js';
 import { PrismaService } from '../../database/prisma.service.js';
@@ -35,8 +39,15 @@ export class InventoryStocktakingService {
   ) {
     return countStocktakeLine(this.prisma, id, lineId, dto, actor);
   }
-  submitStocktake(id: string, actor: AuthUser) {
-    return submitStocktake(this.prisma, id, actor);
+  async submitStocktake(id: string, actor: AuthUser) {
+    const result = await submitStocktake(this.prisma, id, actor);
+    if (!canExecuteDirectly(actor) || result.status === 'POSTED') return result;
+    return postStocktake(
+      this.prisma,
+      id,
+      { idempotencyKey: directExecutionKey('stocktake', id) },
+      actor,
+    );
   }
   async postStocktake(id: string, dto: PostStocktakeDto, actor: AuthUser) {
     return postStocktake(this.prisma, id, dto, actor);

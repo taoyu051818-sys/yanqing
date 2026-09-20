@@ -130,7 +130,7 @@ export class YouthTrainingRulesController {
   }
 
   @Post()
-  @Roles(AppRole.ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   create(
     @Body() dto: CreateYouthTrainingRuleDto,
     @CurrentUser() actor: AuthUser,
@@ -139,7 +139,7 @@ export class YouthTrainingRulesController {
   }
 
   @Post(':id/publish')
-  @Roles(AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   publish(
     @Param('id') id: string,
     @Body() dto: DecideYouthTrainingRuleDto,
@@ -149,7 +149,7 @@ export class YouthTrainingRulesController {
   }
 
   @Post(':id/reject')
-  @Roles(AppRole.SUPER_ADMIN)
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
   reject(
     @Param('id') id: string,
     @Body() dto: DecideYouthTrainingRuleDto,

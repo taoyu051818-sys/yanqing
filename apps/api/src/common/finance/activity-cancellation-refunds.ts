@@ -1,3 +1,4 @@
+import { canExecuteDirectly } from '../auth/admin-execution.js';
 import { ConflictException } from '@nestjs/common';
 import type { AuthUser } from '../auth/auth-user.js';
 import {
@@ -49,6 +50,21 @@ export async function requireActivityCancellationRefunds(
           amountCents: refund.amountCents,
         },
       },
+    });
+  }
+  if (canExecuteDirectly(actor)) {
+    await tx.activityRefundJob.upsert({
+      where: {
+        kind_activityId: { kind: activity.kind, activityId: activity.id },
+      },
+      create: {
+        kind: activity.kind,
+        activityId: activity.id,
+        actorId: actor.sub,
+        actorRoles: actor.roles,
+        reason: activity.reason,
+      },
+      update: {},
     });
   }
 }

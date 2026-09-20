@@ -1,4 +1,8 @@
 import {
+  canExecuteDirectly,
+  directExecutionKey,
+} from '../../common/auth/admin-execution.js';
+import {
   listConsumeCorrections,
   requestConsumeCorrection,
   approveConsumeCorrection,
@@ -24,7 +28,21 @@ export class TrainingCorrectionsService {
     dto: CreateTrainingConsumeCorrectionDto,
     actor: AuthUser,
   ) {
-    return requestConsumeCorrection(this.prisma, dto, actor);
+    const result = await requestConsumeCorrection(this.prisma, dto, actor);
+    if (!canExecuteDirectly(actor) || result.status !== 'REQUESTED')
+      return result;
+    return approveConsumeCorrection(
+      this.prisma,
+      result.id,
+      {
+        reason: dto.reason,
+        idempotencyKey: directExecutionKey(
+          'consume-correction',
+          dto.idempotencyKey,
+        ),
+      },
+      actor,
+    );
   }
 
   async approveConsumeCorrection(

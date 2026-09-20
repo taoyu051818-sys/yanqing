@@ -1,3 +1,4 @@
+import { mockExecutionKey } from "../../policies/admin-execution";
 import { mockUser } from "../../core";
 import { getOrders, saveOrders } from "../../venue";
 import {
@@ -52,7 +53,7 @@ export async function handleTrainingConsumeCorrectionsGet(
   return { handled: false };
 }
 
-export async function handleTrainingConsumeCorrectionsPost(
+async function createCorrectionRequest(
   method: string,
   url: string,
   data: any,
@@ -166,7 +167,10 @@ export async function handleTrainingCorrectionDecisionPost(
           ? "只有待复核申请可以批准"
           : "只有待复核申请可以驳回",
       );
-    if (correction.requestedById === mockUser().id)
+    if (
+      correction.requestedById === mockUser().id &&
+      !hasMockRole("ADMIN", "SUPER_ADMIN")
+    )
       throw new Error("消课冲正申请人与复核人不能为同一账号");
     const now = new Date().toISOString();
     if (action === "reject") {
@@ -297,4 +301,28 @@ export async function handleTrainingCorrectionDecisionPost(
     return { handled: true, value: ok(trainingCorrectionView(correction)) };
   }
   return { handled: false };
+}
+
+export async function handleTrainingConsumeCorrectionsPost(
+  method: string,
+  url: string,
+  data: any,
+  options: MockRouteOptions,
+): Promise<MockRouteResult> {
+  const result = await createCorrectionRequest(method, url, data, options);
+  if (!result.handled) return result;
+  if (
+    hasMockRole("ADMIN", "SUPER_ADMIN") &&
+    result.value.status === "REQUESTED"
+  )
+    return handleTrainingCorrectionDecisionPost(
+      "POST",
+      `/training/consume-corrections/${result.value.id}/approve`,
+      {
+        reason: data.reason,
+        idempotencyKey: mockExecutionKey("correction", data.idempotencyKey),
+      },
+      options,
+    );
+  return result;
 }

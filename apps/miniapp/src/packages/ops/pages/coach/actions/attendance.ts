@@ -1,3 +1,4 @@
+import { canExecuteDirectly } from '../../../../../utils/admin-execution';
 import type {
   TrainingEnrollmentView,
   TrainingSessionView,
@@ -303,7 +304,7 @@ export function useCoachAttendanceActions({
   ) {
     if (!isConsumableLesson(lesson) || !isActiveEnrollment(enrollment)) return;
     const attendance = attendanceFor(lesson, enrollment);
-    if (!attendance?.operatorId || attendance.operatorId === session.user?.id) {
+    if (!canExecuteDirectly(session.roles) && (!attendance?.operatorId || attendance.operatorId === session.user?.id)) {
       errorMessage.value = "须由教练先提交建议，且提交人与确认人不同。";
       return;
     }
@@ -315,7 +316,8 @@ export function useCoachAttendanceActions({
           "当前学员") +
         " · 确认扣减1课次并确认本节收入，按原合同快照核算。误操作须通过冲正复核恢复。",
       confirmText: "确认扣课并入账",
-      fields: [reasonField("独立复核依据", ["已核对点名与教练反馈"])],
+      fields: [reasonField("消课依据", ["已核对学员到场与训练完成"])],
+      successFeedback: canExecuteDirectly(session.roles) ? "toast" : "dialog",
       submit: async ({ reason }) => {
         const gate = await operationWindowReason({
           startsAt: lesson.endsAt,

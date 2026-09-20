@@ -1,7 +1,7 @@
+import { canExecuteDirectly } from '../../common/auth/admin-execution.js';
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import type { AuthUser } from '../../common/auth/auth-user.js';
@@ -208,7 +208,11 @@ export function submitStocktake(
       include: { lines: true },
     });
     if (!stocktake) throw new NotFoundException('盘点单不存在');
-    if (stocktake.status === StocktakeStatus.REVIEW) return stocktake;
+    if (
+      stocktake.status === StocktakeStatus.REVIEW ||
+      (canExecuteDirectly(actor) && stocktake.status === StocktakeStatus.POSTED)
+    )
+      return stocktake;
     if (stocktake.status !== StocktakeStatus.COUNTING)
       throw new ConflictException('盘点单不在录数状态');
     if (
@@ -265,14 +269,6 @@ export async function postStocktake(
       }
       if (stocktake.status !== StocktakeStatus.REVIEW)
         throw new ConflictException('盘点单尚未提交复核');
-      if (
-        stocktake.submittedById === actor.sub ||
-        stocktake.createdById === actor.sub
-      ) {
-        throw new ForbiddenException(
-          '盘点制单/提交人与过账审批人不能为同一账号',
-        );
-      }
       const currentItemStocks = new Map<string, number>();
       for (const line of stocktake.lines) {
         if (line.countedQuantity === null)

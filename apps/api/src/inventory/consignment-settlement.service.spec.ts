@@ -672,8 +672,8 @@ describe('consignment settlement creation and workflow', () => {
     await expect(
       service.confirmSettlement(
         'settlement-1',
-        action('consignment-confirm-maker', '制单人尝试确认'),
-        admin,
+        action('consignment-confirm-maker', '普通财务不能自审'),
+        { ...admin, roles: [AppRole.FINANCE] },
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     await service.confirmSettlement(

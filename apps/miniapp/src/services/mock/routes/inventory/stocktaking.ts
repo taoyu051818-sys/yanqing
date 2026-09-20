@@ -1,3 +1,5 @@
+import { mockExecutionKey } from "../../policies/admin-execution";
+import { hasMockRole } from "../../policies/common.js";
 import { mockUser } from "../../core";
 import {
   getGoods,
@@ -98,7 +100,7 @@ export async function handleStocktakeCountPost(
   return { handled: false };
 }
 
-export async function handleStocktakeActionPost(
+async function applyStocktakeActionPost(
   method: string,
   url: string,
   data: any,
@@ -146,6 +148,8 @@ export async function handleStocktakeActionPost(
       }
     } else if (action === "submit") {
       requireMockRole("ADMIN", "SUPER_ADMIN");
+      if (["REVIEW", "POSTED"].includes(stocktake.status))
+        return { handled: true, value: ok(mockStocktakeResponse(stocktake)) };
       if (
         stocktake.status !== "COUNTING" ||
         stocktake.lines.some((line: any) => line.countedQuantity === null)
@@ -166,8 +170,9 @@ export async function handleStocktakeActionPost(
       }
       if (stocktake.status !== "REVIEW") throw new Error("盘点单尚未提交复核");
       if (
-        stocktake.createdById === mockUser().id ||
-        stocktake.submittedById === mockUser().id
+        (stocktake.createdById === mockUser().id ||
+          stocktake.submittedById === mockUser().id) &&
+        !hasMockRole("ADMIN", "SUPER_ADMIN")
       )
         throw new Error("盘点制单/提交人与过账审批人不能为同一账号");
       const goods = getGoods();
@@ -202,4 +207,26 @@ export async function handleStocktakeActionPost(
     return { handled: true, value: ok(mockStocktakeResponse(stocktake)) };
   }
   return { handled: false };
+}
+
+export async function handleStocktakeActionPost(
+  method: string,
+  url: string,
+  data: any,
+  options: MockRouteOptions,
+): Promise<MockRouteResult> {
+  const result = await applyStocktakeActionPost(method, url, data, options);
+  if (!result.handled) return result;
+  if (
+    url.endsWith("/submit") &&
+    hasMockRole("ADMIN", "SUPER_ADMIN") &&
+    result.value.status === "REVIEW"
+  )
+    return applyStocktakeActionPost(
+      "POST",
+      url.replace(/\/submit$/, "/post"),
+      { idempotencyKey: mockExecutionKey("stocktake", result.value.id) },
+      options,
+    );
+  return result;
 }

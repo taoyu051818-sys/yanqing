@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useUnsavedForm } from "../../composables/use-unsaved-form";
 import { useEventLoadingActions } from "./actions/loading.js";
 
 import EventCreation from "./sections/EventCreation.vue";
@@ -107,6 +108,10 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const task = useOperationTask();
+const pageMode = ref("list");
+function openEventPage(id: string) { uni.navigateTo({ url:`/packages/ops/pages/event/index?eventId=${encodeURIComponent(id)}` }); }
+async function chooseEvent(id: string) { openEventPage(id); }
+function openEventCreation() { uni.navigateTo({ url:"/packages/ops/pages/event/index?view=create" }); }
 
 const session = useSessionStore();
 
@@ -447,7 +452,9 @@ async function runAction(
   }
 }
 
+const { markSaved: markEventSaved } = useUnsavedForm(() => [eventCode.value, eventName.value, eventDate.value, eventTime.value, registrationEndDate.value, registrationEndTime.value, eventFeeYuan.value, eventCapacityIndex.value, eventSponsor.value], () => pageMode.value === 'create');
 const { publishEvent, cancelEvent, createEvent } = useEventCatalogActions({
+  onCreated: id => { markEventSaved(); uni.redirectTo({ url:`/packages/ops/pages/event/index?eventId=${encodeURIComponent(id)}` }); },
   eventDetail,
   showPublish,
   task,
@@ -575,6 +582,8 @@ const {
 
 onLoad((options) => {
   deepLinkQuery.value = parseOpsDeepLinkQuery(options);
+  pageMode.value = options?.view === 'create' ? 'create' : deepLinkQuery.value.eventId || deepLinkQuery.value.focus ? 'detail' : 'list';
+  uni.setNavigationBarTitle({ title:pageMode.value === 'create' ? '新建赛事' : pageMode.value === 'detail' ? '赛事详情' : '赛事管理' });
 });
 
 onShow(loadFromPage);
@@ -601,7 +610,7 @@ onShow(loadFromPage);
     </view>
 
     <EventCreation
-      v-if="mayManageEvent"
+      v-if="pageMode === 'create' && mayManageEvent"
       :mayManageEvent="mayManageEvent"
       v-model:eventCode="eventCode"
       v-model:eventName="eventName"
@@ -618,26 +627,28 @@ onShow(loadFromPage);
       :createEvent="createEvent"
     />
 
+    <view v-if="pageMode === 'list' && mayManageEvent" class="event-create-entry"><button class="primary" @tap="openEventCreation">新增赛事</button></view>
     <EventQueue
+      v-if="pageMode === 'list'"
       :statusCounts="statusCounts"
       :loading="loading"
       :actionKey="actionKey"
       :refresh="refresh"
       :eventList="eventList"
       :selectedEventId="selectedEventId"
-      :selectEvent="selectEvent"
+      :selectEvent="chooseEvent"
       :statusLabel="statusLabel"
     />
 
-    <view v-if="loading && !eventDetail" class="card loading-panel"
+    <view v-if="pageMode !== 'create' && loading && !eventDetail" class="card loading-panel"
       >赛事数据同步中…</view
     >
-    <view v-else-if="!eventDetail" class="empty card"
+    <view v-else-if="pageMode !== 'create' && !eventDetail" class="empty card"
       >当前没有可管理的赛事</view
     >
 
     <EventOperationDetails
-      v-if="eventDetail"
+      v-if="pageMode === 'detail' && eventDetail"
       :eventDetail="eventDetail"
       :metrics="metrics"
       :focusedRecord="focusedRecord"
@@ -701,3 +712,5 @@ onShow(loadFromPage);
 </template>
 
 <style scoped src="./page.css"></style>
+
+<style scoped>.event-create-entry { display:flex; justify-content:flex-end; margin-bottom:20rpx; }.event-create-entry button { margin:0; padding:18rpx 28rpx; font-size:28rpx; }.error-panel { position:sticky; top:0; z-index:15; }</style>

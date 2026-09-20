@@ -79,14 +79,14 @@ export function useCoachRulesActions({
         throw new Error("到期预警阈值不能超过最大有效期限。");
       }
       const confirmation = await uni.showModal({
-        title: "提交监管规则草案",
-        content: `所有数值均来自本次管理员配置，不代表系统内置法定值。\n生效：${ruleEffectiveDate.value} ${ruleEffectiveTime.value}\n提交后须由另一 SUPER_ADMIN 复核。`,
-        confirmText: "确认制单",
+        title: "发布青训规则",
+        content: `所有数值均来自本次管理员配置，不代表系统内置法定值。\n生效：${ruleEffectiveDate.value} ${ruleEffectiveTime.value}\n确认后按生效时间启用，无需另一账号复核。`,
+        confirmText: "确认发布",
       });
       if (!confirmation.confirm) return;
       const succeeded = await runCreation(
         "create-youth-rule",
-        "监管规则草案已提交，等待异人复核。",
+        "规则已发布，将按生效时间启用。",
         () =>
           withPendingCreationKey(
             "training.youth-rule.create",
@@ -110,11 +110,11 @@ export function useCoachRulesActions({
   function decideYouthRule(rule: any, decision: "publish" | "reject") {
     if (!canReviewYouthRule.value || actionKey.value) return;
     task.start({
-      title: decision === "publish" ? "复核发布监管规则" : "驳回监管草案",
+      title: decision === "publish" ? "发布监管规则" : "驳回监管草案",
       description:
-        "须由独立复核人核对课时、有效期与金额边界。发布按生效时间启用，不改历史合同。",
-      confirmText: decision === "publish" ? "确认复核发布" : "确认驳回",
-      fields: [reasonField("独立复核意见")],
+        "请核对课时、有效期与金额边界。发布按生效时间启用，不改历史合同。",
+      confirmText: decision === "publish" ? "确认发布" : "确认驳回",
+      fields: [reasonField("操作原因")],
       submit: async ({ reason }) => {
         await withPendingCreationKey(
           "training.youth-rule." + rule.id + "." + decision,
@@ -132,7 +132,7 @@ export function useCoachRulesActions({
         );
         await load();
         return decision === "publish"
-          ? "规则已复核发布，将按生效时间启用。"
+          ? "规则已发布，将按生效时间启用。"
           : "规则草案已驳回。";
       },
     });
