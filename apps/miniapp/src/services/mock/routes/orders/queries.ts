@@ -46,11 +46,66 @@ export async function handleOrdersAdminAllAny(
 ): Promise<MockRouteResult> {
   if (url === "/orders/admin/all") {
     requireMockRole("FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
+    const keyword = String(data.keyword || "").toLowerCase();
+    const rows = getOrders()
+      .filter(
+        (order) =>
+          (!data.status || order.status === data.status) &&
+          (!data.businessType || order.businessType === data.businessType) &&
+          (!data.channel || order.paymentChannel === data.channel) &&
+          (!keyword ||
+            [
+              order.orderNo,
+              order.title,
+              order.member?.displayName,
+              order.member?.phone,
+            ].some((x) =>
+              String(x || "")
+                .toLowerCase()
+                .includes(keyword),
+            )),
+      )
+      .filter((order) => {
+        const dates =
+          data.dateBasis === "usage"
+            ? [
+                order.bookings?.[0]?.startsAt,
+                order.gameRegistration?.game?.startsAt,
+                order.eventTeam?.event?.startsAt,
+              ]
+            : [order.createdAt];
+        return (
+          (!data.dateFrom && !data.dateTo) ||
+          dates.some(
+            (at) =>
+              at &&
+              (!data.dateFrom ||
+                new Date(at) >= new Date(data.dateFrom + "T00:00:00+08:00")) &&
+              (!data.dateTo ||
+                new Date(at) <
+                  new Date(
+                    new Date(data.dateTo + "T00:00:00+08:00").getTime() +
+                      86400000,
+                  )),
+          )
+        );
+      })
+      .sort(
+        (a, b) =>
+          String(b.createdAt).localeCompare(String(a.createdAt)) ||
+          String(b.id).localeCompare(String(a.id)),
+      );
+    const page = Math.max(1, Number(data.page) || 1),
+      pageSize = Math.min(100, Math.max(1, Number(data.pageSize) || 20));
     return {
       handled: true,
       value: ok({
-        items: getOrders().map(mockOrderResponse),
-        total: getOrders().length,
+        items: rows
+          .slice((page - 1) * pageSize, page * pageSize)
+          .map(mockOrderResponse),
+        total: rows.length,
+        page,
+        pageSize,
       }),
     };
   }

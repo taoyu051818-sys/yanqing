@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import ts from "typescript";
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OrderView } from "@yanqing/shared";
 import { endpoints } from "../../services/api";
@@ -24,7 +24,7 @@ vi.mock("../../services/http", () => ({ isMockMode: false }));
 vi.mock("../../utils/member-navigation", () => ({
   requestMemberLogin: vi.fn(),
 }));
-const source = readFileSync(new URL("./index.vue", import.meta.url), "utf8")
+const source = readFileSync(new URL("./detail.vue", import.meta.url), "utf8")
   .split('<script setup lang="ts">')[1]
   .split("</script>")[0];
 const js = ts
@@ -125,6 +125,7 @@ function fixture(notifyImmediately = false) {
   const hooks: Record<string, () => any> = {};
   const deps = {
     watch,
+    ref,
     computed,
     canDirectRefund,
     useOrderList,
@@ -133,9 +134,13 @@ function fixture(notifyImmediately = false) {
     useOrderAftersales,
     useOrderClock,
     useSessionStore: () => session,
-    onLoad: noop,
-    onShow: (callback: () => any) => { hooks.show = callback; },
-    onHide: (callback: () => any) => { hooks.hide = callback; },
+    onLoad: (fn: (query: { id: string }) => void) => fn({ id: "venue-order" }),
+    onShow: (callback: () => any) => {
+      hooks.show = callback;
+    },
+    onHide: (callback: () => any) => {
+      hooks.hide = callback;
+    },
     onUnload: noop,
     onPullDownRefresh: noop,
   };
@@ -169,12 +174,12 @@ describe("order page payment confirmation regression", () => {
     await f.page.pay(pending);
     await vi.advanceTimersByTimeAsync(0);
     expect(f.requestPayment).toHaveBeenCalledOnce();
-    const readsAfterPayment = vi.mocked(endpoints.orders).mock.calls.length;
+    const readsAfterPayment = vi.mocked(endpoints.order).mock.calls.length;
     expect(f.page.orders.value[0].status).toBe("PENDING");
     await vi.advanceTimersByTimeAsync(5000);
     f.notify();
     await vi.advanceTimersByTimeAsync(25000);
-    expect(vi.mocked(endpoints.orders).mock.calls.length).toBeGreaterThan(
+    expect(vi.mocked(endpoints.order).mock.calls.length).toBeGreaterThan(
       readsAfterPayment,
     );
     expect(f.page.paymentConfirmation.value).toBeNull();
@@ -195,14 +200,22 @@ describe("order page payment confirmation regression", () => {
 it("hydrates the role before loading a directly opened order and does not resume a hidden page", async () => {
   const f = fixture();
   let resolve!: () => void;
-  f.session.hydrate.mockImplementationOnce(() => new Promise<boolean>(done => { resolve = () => done(true); }));
+  f.session.hydrate.mockImplementationOnce(
+    () =>
+      new Promise<boolean>((done) => {
+        resolve = () => done(true);
+      }),
+  );
   const showing = f.hooks.show();
   expect(endpoints.order).not.toHaveBeenCalled();
-  f.hooks.hide(); resolve(); await showing;
+  f.hooks.hide();
+  resolve();
+  await showing;
   expect(endpoints.order).not.toHaveBeenCalled();
   expect(endpoints.orders).not.toHaveBeenCalled();
   await f.hooks.show();
   expect(f.session.hydrate).toHaveBeenCalledTimes(2);
-  expect(endpoints.orders).toHaveBeenCalledTimes(1);
+  expect(endpoints.order).toHaveBeenCalledTimes(1);
+  expect(endpoints.orders).not.toHaveBeenCalled();
   f.hooks.hide();
 });

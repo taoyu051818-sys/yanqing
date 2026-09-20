@@ -17,7 +17,11 @@ import SectionEmpty from "../../components/SectionEmpty.vue";
 import ReasonForm from "../../components/ReasonForm.vue";
 import StatusBadge from "../../components/StatusBadge.vue";
 import { endpoints } from "../../services/api";
-import { captureAuthSession, isAuthSessionCurrent, useAccessToken } from "../../services/auth-session";
+import {
+  captureAuthSession,
+  isAuthSessionCurrent,
+  useAccessToken,
+} from "../../services/auth-session";
 import { useSessionStore } from "../../stores/session";
 import { money, shortDate } from "../../utils/format";
 import { withPendingCreationKey } from "../../utils/pending-creation-key";
@@ -68,8 +72,12 @@ const targetGameId = ref("");
 const targetEventId = ref("");
 const activeShare = ref<{ type: "event"; id: string } | null>(null);
 
-const isMember = computed(() => session.isAuthenticated && session.roles.includes("MEMBER"));
-const isHost = computed(() => session.isAuthenticated && session.roles.includes("HOST"));
+const isMember = computed(
+  () => session.isAuthenticated && session.roles.includes("MEMBER"),
+);
+const isHost = computed(
+  () => session.isAuthenticated && session.roles.includes("HOST"),
+);
 const visibleGames = computed(() =>
   games.value.filter((game) =>
     view.value === "mine"
@@ -79,14 +87,16 @@ const visibleGames = computed(() =>
 );
 
 const visibleEvents = computed(() =>
-  events.value.filter((event) =>
-    view.value === "mine"
-      ? Boolean(eventRegistrations.value[event.id]?.registration) ||
-        event.id === targetEventId.value
-      : showPast.value ||
-        ["OPEN", "FULL", "IN_PROGRESS"].includes(event.status) ||
-        event.id === targetEventId.value,
-  ),
+  events.value
+    .filter((event) => !targetEventId.value || event.id === targetEventId.value)
+    .filter((event) =>
+      view.value === "mine"
+        ? Boolean(eventRegistrations.value[event.id]?.registration) ||
+          event.id === targetEventId.value
+        : showPast.value ||
+          ["OPEN", "FULL", "IN_PROGRESS"].includes(event.status) ||
+          event.id === targetEventId.value,
+    ),
 );
 
 const applicationStatusLabel: Record<string, string> = {
@@ -131,7 +141,7 @@ function displayRefundStatus(status?: string) {
 let loadGeneration = 0;
 function clearPrivateState() {
   loadGeneration++;
-  games.value = games.value.map(game => ({ ...game, myRegistration: null }));
+  games.value = games.value.map((game) => ({ ...game, myRegistration: null }));
   eventRegistrations.value = {};
   hostApplication.value = null;
   cancellingEventId.value = "";
@@ -141,9 +151,13 @@ function clearPrivateState() {
   loading.value = false;
 }
 watch(useAccessToken(), clearPrivateState, { flush: "sync" });
-watch(() => session.user?.id, (id, previous) => {
-  if (previous && id !== previous) clearPrivateState();
-}, { flush: "sync" });
+watch(
+  () => session.user?.id,
+  (id, previous) => {
+    if (previous && id !== previous) clearPrivateState();
+  },
+  { flush: "sync" },
+);
 
 async function load() {
   const run = ++loadGeneration;
@@ -153,36 +167,69 @@ async function load() {
   errorMessage.value = "";
   try {
     // Public content must render even when there is no account or an old login expired.
-    const [gameList, eventList] = await Promise.all([endpoints.publicGames(), endpoints.events()]);
+    const [gameList, eventList] = await Promise.all([
+      endpoints.publicGames(),
+      endpoints.events(),
+    ]);
     if (!current()) return;
     games.value = gameList;
-    const visible = eventList.filter(event =>
-      ["OPEN", "FULL", "IN_PROGRESS", "COMPLETED", "CANCELLED"].includes(event.status));
-    events.value = targetEventId.value ? [...visible].sort((left, right) =>
-      left.id === targetEventId.value ? -1 : right.id === targetEventId.value ? 1 : 0) : visible;
+    const visible = eventList.filter((event) =>
+      ["OPEN", "FULL", "IN_PROGRESS", "COMPLETED", "CANCELLED"].includes(
+        event.status,
+      ),
+    );
+    events.value = targetEventId.value
+      ? [...visible].sort((left, right) =>
+          left.id === targetEventId.value
+            ? -1
+            : right.id === targetEventId.value
+              ? 1
+              : 0,
+        )
+      : visible;
     eventRegistrations.value = {};
     loading.value = false;
     if (!session.isAuthenticated) return;
     const ready = await session.hydrate();
     if (!current()) return;
-    if (!ready) { errorMessage.value = "个人报名暂未同步，可继续浏览活动或稍后重试。"; return; }
+    if (!ready) {
+      errorMessage.value = "个人报名暂未同步，可继续浏览活动或稍后重试。";
+      return;
+    }
     const [personalGames, hydratedEvents, registrations] = await Promise.all([
       endpoints.games(),
-      Promise.all(events.value.map(async event => {
-        if (event.status !== "COMPLETED") return event;
-        try { return await endpoints.event(event.id); } catch { return event; }
-      })),
-      isMember.value ? Promise.all(visible.map(async event => {
-        try { return [event.id, await endpoints.myEventRegistration(event.id)] as const; }
-        catch { return [event.id, null] as const; }
-      })) : Promise.resolve([]),
+      Promise.all(
+        events.value.map(async (event) => {
+          if (event.status !== "COMPLETED") return event;
+          try {
+            return await endpoints.event(event.id);
+          } catch {
+            return event;
+          }
+        }),
+      ),
+      isMember.value
+        ? Promise.all(
+            visible.map(async (event) => {
+              try {
+                return [
+                  event.id,
+                  await endpoints.myEventRegistration(event.id),
+                ] as const;
+              } catch {
+                return [event.id, null] as const;
+              }
+            }),
+          )
+        : Promise.resolve([]),
     ]);
     if (!current()) return;
     games.value = personalGames;
     events.value = hydratedEvents;
     eventRegistrations.value = Object.fromEntries(registrations);
   } catch (cause: any) {
-    if (current()) errorMessage.value = cause?.message || "活动列表加载失败，请稍后重试。";
+    if (current())
+      errorMessage.value = cause?.message || "活动列表加载失败，请稍后重试。";
   } finally {
     if (current()) loading.value = false;
   }
@@ -214,7 +261,8 @@ async function applyHost() {
       showCancel: false,
     });
   } catch (cause: any) {
-    if (isAuthSessionCurrent(owner)) errorMessage.value = cause?.message || "主理人申请提交失败。";
+    if (isAuthSessionCurrent(owner))
+      errorMessage.value = cause?.message || "主理人申请提交失败。";
   } finally {
     if (isAuthSessionCurrent(owner)) actionKey.value = "";
   }
@@ -291,7 +339,8 @@ async function cancelEventRegistration(event: any, reason: string) {
     });
     await load();
   } catch (cause: any) {
-    if (isAuthSessionCurrent(owner)) cancelError.value = cause?.message || "退出赛事报名失败，请重试。";
+    if (isAuthSessionCurrent(owner))
+      cancelError.value = cause?.message || "退出赛事报名失败，请重试。";
   } finally {
     if (isAuthSessionCurrent(owner)) actionKey.value = "";
   }
@@ -376,6 +425,8 @@ function applyNavigation(options: any) {
     tab.value = "events";
     targetEventId.value = String(options.eventId);
     expanded.value[String(options.eventId)] = true;
+    if (options.view === "mine")
+      uni.setNavigationBarTitle({ title: "报名详情" });
   }
 }
 function changeView(next: "browse" | "mine") {
@@ -410,48 +461,34 @@ onShow(() => {
 
 <template>
   <view class="page safe-bottom">
-    <view class="journey-tabs"
+    <view v-if="!targetEventId" class="journey-tabs"
       ><button
-        :class="{ active: view === 'browse' }"
-        @tap="changeView('browse')"
+        :class="{ active: view === 'browse' && tab === 'games' }"
+        @tap="
+          changeView('browse');
+          tab = 'games';
+        "
       >
-        找活动</button
+        日常球局</button
+      ><button
+        :class="{ active: view === 'browse' && tab === 'events' }"
+        @tap="
+          changeView('browse');
+          tab = 'events';
+        "
+      >
+        积分赛</button
       ><button :class="{ active: view === 'mine' }" @tap="changeView('mine')">
         我的报名
       </button></view
     >
-    <view class="tabs" role="tablist" aria-label="活动类型">
-      <view
-        class="tab-option"
-        :class="{ active: tab === 'games' }"
-        role="tab"
-        tabindex="0"
-        :aria-selected="tab === 'games'"
-        @tap="tab = 'games'"
-        @keyup.enter="tab = 'games'"
-      >
-        <AppIcon
-          name="sport"
-          :size="30"
-          :tone="tab === 'games' ? 'primary' : 'muted'"
-        /><text>日常球局</text>
-      </view>
-      <view
-        class="tab-option"
-        :class="{ active: tab === 'events' }"
-        role="tab"
-        tabindex="0"
-        :aria-selected="tab === 'events'"
-        @tap="tab = 'events'"
-        @keyup.enter="tab = 'events'"
-      >
-        <AppIcon
-          name="event"
-          :size="30"
-          :tone="tab === 'events' ? 'primary' : 'muted'"
-        /><text>金羽积分赛</text>
-      </view>
-    </view>
+    <view v-if="!targetEventId && view === 'mine'" class="registration-types"
+      ><button :class="{ active: tab === 'games' }" @tap="tab = 'games'">
+        球局</button
+      ><button :class="{ active: tab === 'events' }" @tap="tab = 'events'">
+        赛事
+      </button></view
+    >
 
     <view v-if="errorMessage" class="card error-card">
       <view class="error-icon"
@@ -470,7 +507,10 @@ onShow(() => {
       </button>
     </view>
 
-    <view v-if="view === 'mine' && !session.isAuthenticated" class="card guest-registration">
+    <view
+      v-if="view === 'mine' && !session.isAuthenticated"
+      class="card guest-registration"
+    >
       <text class="guest-title">登录后查看我的报名</text>
       <text class="muted">你可以先浏览球局和赛事，报名时再登录。</text>
       <button class="primary" @tap="loginForRegistrations">去登录</button>
@@ -554,3 +594,21 @@ onShow(() => {
 </template>
 
 <style scoped src="./page.css"></style>
+
+<style scoped>
+.registration-types {
+  display: flex;
+  gap: 16rpx;
+  margin-bottom: 24rpx;
+}
+.registration-types button {
+  margin: 0;
+  min-height: 88rpx;
+  background: transparent;
+  font-size: 28rpx;
+}
+.registration-types .active {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+</style>

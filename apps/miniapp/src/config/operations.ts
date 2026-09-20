@@ -23,6 +23,7 @@ export const operationsAccessRoles = {
     "ADMIN",
     "SUPER_ADMIN",
   ],
+  transactions: ["FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN"],
   today: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
   venue: ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"],
   members: ["FRONT_DESK", "COACH", "FINANCE", "ADMIN", "SUPER_ADMIN"],
@@ -45,6 +46,14 @@ export function hasOperationsAccess(
 }
 
 export const operationsCenters: OperationsCenter[] = [
+  {
+    key: "transactions",
+    title: "订单与流水",
+    description: "按时间查单、收支明细与退款",
+    icon: "receipt",
+    route: "/packages/ops/pages/transactions/index",
+    roles: operationsAccessRoles.transactions,
+  },
   {
     key: "today",
     title: "今日营业",

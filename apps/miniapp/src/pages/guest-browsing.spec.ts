@@ -9,16 +9,17 @@ const session = vue.reactive({ user: null as any, roles: [] as string[], isAuthe
 const scopes: ReturnType<typeof vue.effectScope>[] = []
 const nativeEffects = { navigateTo: vi.fn(), redirectTo: vi.fn(), reLaunch: vi.fn(), showModal: vi.fn(), showToast: vi.fn(), login: vi.fn() }
 function page(name: string, names: string[], overrides: Record<string, any> = {}) {
-  const endpoints: Record<string, any> = Object.fromEntries(['publicTrainingProducts', 'membershipProducts', 'rechargePlans', 'goods', 'accountTransactions', 'myCoupons', 'trainingStudents', 'trainingEnrollments', 'myTrainingTrials', 'myDataErasureRequests', 'referralRewards', 'createReferralInvite'].map(key => [key, vi.fn(async () => [])]))
+  const endpoints: Record<string, any> = Object.fromEntries(['publicTrainingProducts', 'membershipProducts', 'rechargePlans', 'goods', 'accountTransactions', 'memberLedger', 'myCoupons', 'trainingStudents', 'trainingEnrollments', 'myTrainingTrials', 'myDataErasureRequests', 'referralRewards', 'createReferralInvite'].map(key => [key, vi.fn(async () => [])]))
   Object.assign(endpoints, overrides)
   const hooks: Record<string, Function> = {}
   const scope = vue.effectScope(); scopes.push(scope)
-  const result = scope.run(() => loadSfcScript(new URL(`./${name}/index.vue`, import.meta.url), names, id => {
+  const result = scope.run(() => loadSfcScript(new URL(`./${name.includes('/') ? name : name + '/index'}.vue`, import.meta.url), names, id => {
     if (id === 'vue') return vue
-    if (id === '@dcloudio/uni-app') return Object.fromEntries(['onShow', 'onLoad', 'onShareAppMessage', 'onShareTimeline'].map(hook => [hook, (fn: Function) => { hooks[hook] = fn }]))
+    if (id === '@dcloudio/uni-app') return Object.fromEntries(['onShow', 'onLoad', 'onUnload', 'onPullDownRefresh', 'onShareAppMessage', 'onShareTimeline'].map(hook => [hook, (fn: Function) => { hooks[hook] = fn }]))
     if (id.endsWith('/services/api')) return { endpoints }
     if (id.endsWith('/services/auth-session')) return auth
     if (id.endsWith('/stores/session')) return { useSessionStore: () => session }
+    if (id.endsWith('/utils/member-wallet')) return { accountLabels: {} }
     if (id.endsWith('/utils/member-navigation')) return { requestMemberLogin: login }
     if (id.endsWith('/services/http')) return { resolveApiAssetUrl: (url: string) => url || '' }
     if (id.endsWith('.vue') || id.includes('/utils/') || id.endsWith('/config/share') || id.endsWith('/services/referral-attribution')) return {}
@@ -35,7 +36,7 @@ beforeEach(() => {
 afterEach(() => { scopes.splice(0).forEach(scope => scope.stop()) })
 
 describe('guest page lifecycle', () => {
-  it.each(['wallet', 'coupon', 'settings', 'invite'])('%s opens and reopens without private requests or login effects', async name => {
+  it.each(['wallet', 'wallet/history', 'coupon', 'settings', 'invite'])('%s opens and reopens without private requests or login effects', async name => {
     const p = page(name, [])
     await p.hooks.onShow(); await p.hooks.onShow()
     expect(session.hydrate).not.toHaveBeenCalled()
@@ -82,7 +83,7 @@ describe('guest page lifecycle', () => {
     expect(p.products.value).toEqual([{ id: 'course' }]); expect(p.memberError.value).toBe(''); expect(p.loading.value).toBe(false)
     expect(p.endpoints.trainingEnrollments).not.toHaveBeenCalled(); expect(login).not.toHaveBeenCalled()
   })
-  it.each([['wallet', 'transactions', 'accountTransactions'], ['coupon', 'coupons', 'myCoupons']])('%s removes private records and ignores a late reply after logout', async (name, state, endpoint) => {
+  it.each([['wallet/history', 'items', 'memberLedger'], ['coupon', 'coupons', 'myCoupons']])('%s removes private records and ignores a late reply after logout', async (name, state, endpoint) => {
     auth.saveAuthSession('member-token', 'member'); session.isAuthenticated = true
     const reply = deferred()
     const p = page(name, [state], { [endpoint]: vi.fn(() => reply.promise) })
@@ -90,7 +91,7 @@ describe('guest page lifecycle', () => {
     const pending = p.hooks.onShow(); await vi.waitFor(() => expect(p.endpoints[endpoint]).toHaveBeenCalled())
     auth.clearAuthSession(); session.isAuthenticated = false
     expect(p[state].value).toEqual([])
-    reply.resolve([{ id: 'late-private-record' }]); await pending
+    reply.resolve(endpoint==='memberLedger' ? {items:[{id:'late-private-record'}],nextCursor:null} : [{ id: 'late-private-record' }]); await pending
     expect(p[state].value).toEqual([]); expect(login).not.toHaveBeenCalled()
   })
 })

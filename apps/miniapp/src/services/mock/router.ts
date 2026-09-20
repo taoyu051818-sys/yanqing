@@ -1,3 +1,4 @@
+import { handleOrderTimeline } from "./routes/orders/timeline";
 import { handleVenueSettings } from "./routes/venues/settings";
 import type { AppRole } from "../../types/domain";
 import { mockLogin, mockUser, updateMockProfile } from "./core";
@@ -300,6 +301,7 @@ const domainRoutes = [
   handlePriceRuleStatusPost,
   handleVenuesAvailabilityAny,
   handleVenuesBookingsPost,
+  handleOrderTimeline,
   handleOrdersAny,
   handleOrdersAdminAllAny,
   handleOptionsGet,

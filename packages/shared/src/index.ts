@@ -15,3 +15,5 @@ export type {
 } from "./game-contract.js";
 
 export * from "./error-contract.js";
+
+export * from "./transaction-contract.js";

@@ -1,3 +1,4 @@
+import { EVENT_SEAT_STATUSES } from '../registration/event-registration-policy.js';
 import {
   assertEventConfiguration,
   assertEventManager,
@@ -48,7 +49,7 @@ export class EventCatalogService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async list() {
-    return this.prisma.event.findMany({
+    const events = await this.prisma.event.findMany({
       where: {
         status: {
           in: [
@@ -73,9 +74,22 @@ export class EventCatalogService {
         feeCents: true,
         memberFeeCents: true,
         sponsor: true,
+        _count: {
+          select: {
+            teams: { where: { status: { in: [...EVENT_SEAT_STATUSES] } } },
+          },
+        },
       },
       orderBy: { startsAt: 'desc' },
     });
+    return events.map(({ _count, ...event }) => ({
+      ...event,
+      occupiedTeams: _count?.teams ?? 0,
+      remainingTeams: Math.max(
+        0,
+        Math.floor(event.capacityPeople / 2) - (_count?.teams ?? 0),
+      ),
+    }));
   }
 
   async detail(eventId: string) {
@@ -106,6 +120,11 @@ export class EventCatalogService {
           feeCents: true,
           memberFeeCents: true,
           sponsor: true,
+          _count: {
+            select: {
+              teams: { where: { status: { in: [...EVENT_SEAT_STATUSES] } } },
+            },
+          },
           teams: {
             where: {
               status: RegistrationStatus.COMPLETED,
@@ -129,9 +148,14 @@ export class EventCatalogService {
           throw new NotFoundException('赛事不存在或已下架');
         throw error;
       });
-    const { teams, ...summary } = event;
+    const { teams, _count, ...summary } = event;
     return {
       ...summary,
+      occupiedTeams: _count?.teams ?? 0,
+      remainingTeams: Math.max(
+        0,
+        Math.floor(summary.capacityPeople / 2) - (_count?.teams ?? 0),
+      ),
       standings: event.status === EventStatus.COMPLETED ? teams : [],
     };
   }
