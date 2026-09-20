@@ -77,7 +77,7 @@ describe.skipIf(!url)(
           },
         });
         if (channel === 'WECHAT') externalId = o.id;
-        
+
         await db.payment.create({
           data: {
             paymentNo: randomUUID(),
