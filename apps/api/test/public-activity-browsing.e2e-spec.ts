@@ -46,6 +46,7 @@ const rows = {
       name: '公开赛事',
       status: 'OPEN',
       capacityPeople: 32,
+      _count: { teams: 3 },
       contactPhone: 'private-phone',
       teams: [{ captainId: 'private-member' }],
     },
@@ -154,9 +155,13 @@ describe('guest activity browsing through real authentication guards', () => {
         name: '公开赛事',
         status: 'OPEN',
         capacityPeople: 32,
+        occupiedTeams: 3,
+        remainingTeams: 13,
       },
     ]);
     expect(JSON.stringify(response.body)).not.toMatch(/private-|event-draft/);
+    expect(response.body[0]).not.toHaveProperty('_count');
+    expect(prisma.event.findMany.mock.calls[0][0].select).not.toHaveProperty('teams');
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
   it.each([
