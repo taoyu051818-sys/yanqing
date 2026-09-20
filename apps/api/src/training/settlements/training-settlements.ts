@@ -148,16 +148,20 @@ export async function createSettlement(
         where: activeWhere,
       });
       if (existing) return replay(existing);
-      if (
-        await prisma.trainingSettlement.findFirst({
-          where: {
-            status: { not: SettlementStatus.VOID },
-            periodStart: { lt: periodEnd },
-            periodEnd: { gt: periodStart },
-          },
-        })
-      )
+      const overlap = await prisma.trainingSettlement.findFirst({
+        where: {
+          status: { not: SettlementStatus.VOID },
+          periodStart: { lt: periodEnd },
+          periodEnd: { gt: periodStart },
+        },
+      });
+      if (overlap) {
+        // The winning transaction may commit between these recovery reads.
+        // An exact period is a replay; different costs still fail validation.
+        if (+overlap.periodStart === +periodStart && +overlap.periodEnd === +periodEnd)
+          return replay(overlap);
         throw new ConflictException('已有重叠账期的培训结算单，请核对起止时间');
+      }
       if (error.code === 'P2034')
         throw new ConflictException('培训结算发生并发变更，请刷新后重试');
     }
