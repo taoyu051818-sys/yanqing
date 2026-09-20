@@ -114,5 +114,12 @@
       "test/admin-youth-rule-hardening.integration.spec.ts",
       "test/activity-refund-recovery.integration.spec.ts"
     ]
+  },
+  "order_timeline": {
+    "purpose": "订单与流水：跨日收退款、账户口径、游标分页、个人权限与使用日期查询",
+    "isolated": true,
+    "files": [
+      "test/order-timeline.integration.spec.ts"
+    ]
   }
 }

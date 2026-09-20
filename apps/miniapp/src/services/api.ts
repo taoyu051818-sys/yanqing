@@ -1,4 +1,8 @@
-import type { VenueProfile, VenueSettings, VenueCourt } from "../types/venue-settings";
+import type {
+  VenueProfile,
+  VenueSettings,
+  VenueCourt,
+} from "../types/venue-settings";
 import type {
   TrainingCorrectionView,
   TrainingTrialView,
@@ -10,6 +14,8 @@ import type {
 } from "../types/training-operations";
 import type {
   OrderView,
+  LedgerPage,
+  RefundTimelinePage,
   OrderPage,
   PaymentQuote,
   PaymentResult,
@@ -99,9 +105,12 @@ export const endpoints = {
   venueProfile: () => api.get<VenueProfile>("/venues/profile"),
   venueSettings: () => api.get<VenueSettings>("/venues/settings"),
   saveVenueSettings: (data: object) => api.post("/venues/settings", data),
-  deleteVenueCourt: (id: string) => api.delete<{ id: string; deleted: boolean }>(`/venues/courts/${id}`),
-  createVenueCourt: (data: object) => api.post<VenueCourt>("/venues/courts", data),
-  updateVenueCourt: (id: string, data: object) => api.patch<VenueCourt>(`/venues/courts/${id}`, data),
+  deleteVenueCourt: (id: string) =>
+    api.delete<{ id: string; deleted: boolean }>(`/venues/courts/${id}`),
+  createVenueCourt: (data: object) =>
+    api.post<VenueCourt>("/venues/courts", data),
+  updateVenueCourt: (id: string, data: object) =>
+    api.patch<VenueCourt>(`/venues/courts/${id}`, data),
   wechatLogin: (code: string) =>
     api.post<{ accessToken: string; user: SessionUser }>("/auth/wechat-login", {
       code,
@@ -115,7 +124,8 @@ export const endpoints = {
     api.patch<SessionUser>("/auth/profile", { displayName }),
   uploadMyAvatar: (filePath: string) =>
     upload<SessionUser>("/auth/profile/avatar", filePath, "avatar"),
-  dashboard: (period?: { periodStart: string; periodEnd: string }) => api.get<Record<string, any>>("/dashboard", period),
+  dashboard: (period?: { periodStart: string; periodEnd: string }) =>
+    api.get<Record<string, any>>("/dashboard", period),
   reconciliationPeriod: (date: string) =>
     api.get<ReconciliationPeriod>(`/reconciliation/periods/${date}`),
   closeReconciliationPeriod: (date: string, data: object = {}) =>
@@ -166,7 +176,8 @@ export const endpoints = {
     api.post<{ status: string }>(`/orders/refunds/${refundId}/approve`, data),
   rejectRefund: (refundId: string, data: object = {}) =>
     api.post(`/orders/refunds/${refundId}/reject`, data),
-  publicGames: () => request<GameListItem[]>({ url: "/games/public", method: "GET" }),
+  publicGames: () =>
+    request<GameListItem[]>({ url: "/games/public", method: "GET" }),
   games: () => request<GameListItem[]>({ url: "/games", method: "GET" }),
   game: (id: string) => api.get<GameDetail>(`/games/${encodeURIComponent(id)}`),
   gameParticipants: (id: string) =>
@@ -239,7 +250,8 @@ export const endpoints = {
   cancelEvent: (id: string, data: object) =>
     api.post(`/events/${id}/cancel`, data),
   trainingProducts: () => api.get<TrainingProductView[]>("/training/products"),
-  publicTrainingProducts: () => api.get<TrainingProductView[]>("/training/products/public"),
+  publicTrainingProducts: () =>
+    api.get<TrainingProductView[]>("/training/products/public"),
   createTrainingProduct: (data: object) => api.post("/training/products", data),
   updateTrainingProduct: (id: string, data: object) =>
     api.patch(`/training/products/${id}`, data),
@@ -316,7 +328,14 @@ export const endpoints = {
   createAllianceSettlement: (data: object) =>
     api.post("/alliance/settlements", data),
   allianceSettlements: () => api.get<any[]>("/alliance/settlements"),
-  reviseAllianceSettlement: (id: string, data: { attributedGrossProfitCents: number; reason: string; idempotencyKey: string }) => api.post<any>(`/alliance/settlements/${id}/revise`, data),
+  reviseAllianceSettlement: (
+    id: string,
+    data: {
+      attributedGrossProfitCents: number;
+      reason: string;
+      idempotencyKey: string;
+    },
+  ) => api.post<any>(`/alliance/settlements/${id}/revise`, data),
   submitAllianceSettlement: (id: string) =>
     api.post(`/alliance/settlements/${id}/submit`),
   confirmAllianceSettlement: (id: string) =>
@@ -407,7 +426,26 @@ export const endpoints = {
     api.post(`/inventory/operations/${id}/post`, { idempotencyKey }),
   cancelInventoryOperation: (id: string, reason: string) =>
     api.post(`/inventory/operations/${id}/cancel`, { reason }),
-  adminOrders: (params: { page?: number; pageSize?: number; status?: string; businessType?: string; keyword?: string } = {}) => api.get<OrderPage>("/orders/admin/all", params),
+  nextOrder: () => api.get<OrderView | null>("/orders/me/next"),
+  memberLedger: (params: Record<string, unknown>) =>
+    api.get<LedgerPage>("/orders/me/ledger", params),
+  ledgerTimeline: (params: Record<string, unknown>) =>
+    api.get<LedgerPage>("/orders/admin/ledger", params),
+  refundTimeline: (params: Record<string, unknown>) =>
+    api.get<RefundTimelinePage>("/orders/admin/refunds", params),
+  adminOrders: (
+    params: {
+      page?: number;
+      pageSize?: number;
+      status?: string;
+      businessType?: string;
+      keyword?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      dateBasis?: string;
+      channel?: string;
+    } = {},
+  ) => api.get<OrderPage>("/orders/admin/all", params),
   currentFrontDeskShift: () => api.get<any>("/operations/shifts/current"),
   frontDeskShiftHistory: (params: Record<string, any> = {}) =>
     api.get<any[]>("/operations/shifts/history", params),

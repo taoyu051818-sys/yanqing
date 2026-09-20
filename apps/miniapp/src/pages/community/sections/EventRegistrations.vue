@@ -108,11 +108,7 @@ const cancelError = computed({
             :aria-expanded="
               view === 'mine' ? Boolean(expanded[event.id]) : undefined
             "
-            @tap="
-              view === 'mine'
-                ? (expanded[event.id] = !expanded[event.id])
-                : openMemberPage(eventDetailPath(event.id))
-            "
+            @tap="openMemberPage(eventDetailPath(event.id))"
           >
             {{
               view === "browse"
@@ -128,7 +124,7 @@ const cancelError = computed({
             <view class="rules-heading"
               ><AppIcon name="event" :size="34" tone="accent" /><text
                 class="rules-title"
-                >固定双打 · 五轮瑞士制</text
+                >固定双打 · {{ event.totalRounds }}轮瑞士制</text
               ></view
             >
             <text class="muted"
@@ -249,7 +245,7 @@ const cancelError = computed({
             <text class="muted"
               >{{
                 event.cancelReason || "运营方已取消赛事"
-              }}。已支付报名费会生成退款申请，由财务复核后原路处理。</text
+              }}。已支付报名费按原支付方式退回，处理进度可在订单中查看。</text
             >
           </view>
           <view

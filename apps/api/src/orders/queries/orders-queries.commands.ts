@@ -1,3 +1,4 @@
+import { period } from '../timeline/query.js';
 import { NotFoundException } from '@nestjs/common';
 import type { AuthUser } from '../../common/auth/auth-user.js';
 import { PrismaService } from '../../database/prisma.service.js';
@@ -11,13 +12,30 @@ export async function list(
   query: OrderQueryDto,
   all = false,
 ) {
+  const range = period(query);
+  const dates: Prisma.OrderWhereInput = !Object.keys(range).length
+    ? {}
+    : query.dateBasis === 'usage'
+      ? {
+          OR: [
+            { bookings: { some: { startsAt: range } } },
+            { gameRegistration: { game: { startsAt: range } } },
+            { eventTeam: { event: { startsAt: range } } },
+          ],
+        }
+      : { createdAt: range };
   const where: Prisma.OrderWhereInput = {
+    AND: [dates],
+    paymentChannel: query.channel,
     memberId: all ? undefined : actor.sub,
     businessType: query.businessType,
     status: query.status,
     ...(query.keyword
       ? {
           OR: [
+            ...(all
+              ? [{ member: { phone: { contains: query.keyword } } }]
+              : []),
             {
               orderNo: {
                 contains: query.keyword,

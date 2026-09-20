@@ -1,6 +1,8 @@
+import { PeriodQuery } from './timeline/query.js';
 import { Transform, Type } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -21,7 +23,10 @@ import {
 const optionalFilter = ({ value }: { value: unknown }) =>
   value === '' || value === 'undefined' || value === 'null' ? undefined : value;
 
-export class OrderQueryDto {
+export class OrderQueryDto extends PeriodQuery {
+  @IsOptional() @IsIn(['created', 'usage']) dateBasis?: 'created' | 'usage';
+  @IsOptional() @IsEnum(PaymentChannel) channel?: PaymentChannel;
+
   @Type(() => Number)
   @IsInt()
   @Min(1)

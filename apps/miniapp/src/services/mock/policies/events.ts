@@ -139,6 +139,16 @@ export const publicEvent = (event: any) => ({
   registrationEndsAt: event.registrationEndsAt,
   status: event.status,
   capacityPeople: event.capacityPeople,
+  occupiedTeams: (getEventDetail(event.id)?.teams || []).filter((t: any) =>
+    activeTeamStatuses.includes(t.status),
+  ).length,
+  remainingTeams: Math.max(
+    0,
+    Math.floor(event.capacityPeople / 2) -
+      (getEventDetail(event.id)?.teams || []).filter((t: any) =>
+        activeTeamStatuses.includes(t.status),
+      ).length,
+  ),
   minimumPeople: event.minimumPeople,
   totalRounds: event.totalRounds,
   currentRound: event.currentRound,

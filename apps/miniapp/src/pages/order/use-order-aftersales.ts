@@ -61,7 +61,8 @@ export function useOrderAftersales(
     }
   }
   async function refund(order: OrderView, reason: string) {
-    if (actionKey.value || !canRequestOrderRefund(order)) return;
+    if (actionKey.value || !canRequestOrderRefund(order, canRefundDirectly()))
+      return;
     const action = scope.begin("refund:" + order.id);
     if (!action) return;
     refundError.value = "";
@@ -72,16 +73,27 @@ export function useOrderAftersales(
         amountCents: refundableAmount(order),
         reason,
       };
-      const result = await withPendingCreationKey(direct ? "order.direct-refund" : "order.refund", command, (idempotencyKey) =>
-        (direct ? endpoints.directRefundOrder : endpoints.refundOrder)(order.id, {
-          amountCents: command.amountCents,
-          reason,
-          idempotencyKey,
-        }),
+      const result = await withPendingCreationKey(
+        direct ? "order.direct-refund" : "order.refund",
+        command,
+        (idempotencyKey) =>
+          (direct ? endpoints.directRefundOrder : endpoints.refundOrder)(
+            order.id,
+            {
+              amountCents: command.amountCents,
+              reason,
+              idempotencyKey,
+            },
+          ),
       );
       if (!action.isCurrent()) return;
       refundingId.value = "";
-      uni.showToast({ title: direct ? directRefundFeedback((result as {status?:string})?.status) : "申请已提交", icon: "none" });
+      uni.showToast({
+        title: direct
+          ? directRefundFeedback((result as { status?: string })?.status)
+          : "申请已提交",
+        icon: "none",
+      });
       await load();
     } catch (cause: unknown) {
       if (!action.isCurrent()) return;

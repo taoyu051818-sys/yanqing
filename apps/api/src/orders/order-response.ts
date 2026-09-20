@@ -186,6 +186,22 @@ export const orderResponse = (
     payableCents: order.payableCents,
     paidCents: order.paidCents,
     refundedCents: order.refundedCents,
+    refundableCents: Array.isArray(order.refunds)
+      ? Math.max(
+          0,
+          Math.min(
+            order.paidCents - order.refundedCents,
+            order.businessType === 'TRAINING'
+              ? (order.trainingEnrollment?.prepaidBalanceCents ?? 0)
+              : order.paidCents,
+          ) -
+            order.refunds
+              .filter((item) =>
+                ['REQUESTED', 'APPROVED', 'PROCESSING'].includes(item.status),
+              )
+              .reduce((sum, item) => sum + item.amountCents, 0),
+        )
+      : undefined,
     paidAt: order.paidAt,
     completedAt: order.completedAt,
     cancelledAt: order.cancelledAt,

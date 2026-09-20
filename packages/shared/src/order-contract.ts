@@ -75,6 +75,7 @@ export interface OrderView<D = string> {
   payableCents: number;
   paidCents: number;
   refundedCents: number;
+  refundableCents?: number;
   paidAt?: D | null;
   completedAt?: D | null;
   cancelledAt?: D | null;

@@ -53,8 +53,14 @@ export function orderTimeLabel(order: OrderView) {
 export const refundableAmount = (order: OrderView) =>
   Math.max(
     0,
-    Number(order.paidCents ?? order.payableCents ?? 0) -
-      Number(order.refundedCents || 0),
+    order.refundableCents ??
+      Number(order.paidCents ?? order.payableCents ?? 0) -
+        Number(order.refundedCents || 0) -
+        (order.refunds || [])
+          .filter((item) =>
+            ["REQUESTED", "APPROVED", "PROCESSING"].includes(item.status),
+          )
+          .reduce((sum, item) => sum + item.amountCents, 0),
   );
 export const refundStatusLabels: Record<string, string> = {
   REQUESTED: "待审核",
@@ -67,8 +73,8 @@ export const refundStatusLabels: Record<string, string> = {
   CANCELLED: "已撤回",
 };
 
-export const canRequestOrderRefund = (order: OrderView) =>
-  !["EVENT", "TRAINING"].includes(order.businessType) &&
+export const canRequestOrderRefund = (order: OrderView, management = false) =>
+  (management || !["EVENT", "TRAINING"].includes(order.businessType)) &&
   ["PAID", "CHECKED_IN", "COMPLETED", "PARTIALLY_REFUNDED"].includes(
     order.status,
   ) &&

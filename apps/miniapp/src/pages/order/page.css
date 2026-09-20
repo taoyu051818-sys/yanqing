@@ -197,3 +197,24 @@
     width: 100%;
   }
 }
+.order-detail-page {
+  padding-bottom: calc(210rpx + env(safe-area-inset-bottom));
+}
+.detail-refund-action,
+.detail-primary-action {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  margin: 0;
+  padding: 20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom));
+  background: #fff;
+  border-top: 1rpx solid var(--color-border);
+  box-sizing: border-box;
+}
+.management-links {
+  display: grid;
+  gap: 16rpx;
+  margin-top: 20rpx;
+}
