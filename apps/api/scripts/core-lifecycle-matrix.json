@@ -105,5 +105,14 @@
     "files": [
       "test/availability-history-migration.integration.spec.ts"
     ]
+  },
+  "admin_execution": {
+    "purpose": "管理员直接结算的事务回滚与并发、青训自行发布、活动退款任务租约和重启恢复",
+    "isolated": true,
+    "files": [
+      "test/admin-settlement-hardening.integration.spec.ts",
+      "test/admin-youth-rule-hardening.integration.spec.ts",
+      "test/activity-refund-recovery.integration.spec.ts"
+    ]
   }
 }

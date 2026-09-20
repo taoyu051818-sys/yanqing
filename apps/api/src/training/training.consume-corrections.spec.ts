@@ -143,7 +143,7 @@ describe('Training consume corrections', () => {
     });
   });
 
-  it('enforces maker/checker separation before any reversal mutation', async () => {
+  it('rejects finance correction approval before any reversal mutation', async () => {
     const correction = correctionFixture({ requestedById: admin.sub });
     const tx = {
       trainingConsumeCorrection: {
@@ -164,7 +164,7 @@ describe('Training consume corrections', () => {
       service.approveConsumeCorrection(
         correction.id,
         { idempotencyKey: 'correction-decision-1' },
-        admin,
+        { ...admin, roles: [AppRole.FINANCE] },
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(tx.trainingRevenueRecognition.create).not.toHaveBeenCalled();

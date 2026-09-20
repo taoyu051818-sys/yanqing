@@ -1,3 +1,6 @@
+import { withMockTransaction } from "../../state/storage";
+import { mockExecutionKey } from "../../policies/admin-execution";
+import { hasMockRole } from "../../policies/common.js";
 import { mockUser } from "../../core";
 import {
   getEnrollments,
@@ -198,12 +201,12 @@ export async function handleTrainingSettlementsPost(
   return { handled: false };
 }
 
-export async function handleTrainingSettlementActionPost(
+function applyTrainingSettlementAction(
   method: string,
   url: string,
   data: any,
   options: MockRouteOptions,
-): Promise<MockRouteResult> {
+): MockRouteResult {
   const trainingSettlementAction = url.match(
     /^\/training\/settlements\/([^/]+)\/(submit|confirm|settle|return|void)$/,
   );
@@ -249,7 +252,8 @@ export async function handleTrainingSettlementActionPost(
     const actor = mockUser();
     if (
       ["confirm", "settle", "return"].includes(action) &&
-      settlement.createdById === actor.id
+      settlement.createdById === actor.id &&
+      !hasMockRole("ADMIN", "SUPER_ADMIN")
     ) {
       throw new Error("制单人不能确认、结算或退回自己的培训结算单");
     }
@@ -312,4 +316,46 @@ export async function handleTrainingSettlementActionPost(
     return { handled: true, value: ok(trainingSettlementView(settlement)) };
   }
   return { handled: false };
+}
+
+export function handleTrainingSettlementActionPost(
+  method: string,
+  url: string,
+  data: any,
+  options: MockRouteOptions,
+): MockRouteResult {
+  const match = url.match(/^\/training\/settlements\/([^/]+)\/settle$/);
+  if (method !== "POST" || !match || !hasMockRole("ADMIN", "SUPER_ADMIN"))
+    return applyTrainingSettlementAction(method, url, data, options);
+  return withMockTransaction(() => {
+    const current = getTrainingSettlements().find((row) => row.id === match[1]);
+    const path = url.replace(/\/settle$/, "");
+    if (current?.status === "DRAFT")
+      applyTrainingSettlementAction(
+        "POST",
+        `${path}/submit`,
+        {
+          reason: data.reason,
+          idempotencyKey: mockExecutionKey(
+            "training-submit",
+            data.idempotencyKey,
+          ),
+        },
+        options,
+      );
+    if (current && ["DRAFT", "PENDING_CONFIRMATION"].includes(current.status))
+      applyTrainingSettlementAction(
+        "POST",
+        `${path}/confirm`,
+        {
+          reason: data.reason,
+          idempotencyKey: mockExecutionKey(
+            "training-confirm",
+            data.idempotencyKey,
+          ),
+        },
+        options,
+      );
+    return applyTrainingSettlementAction(method, url, data, options);
+  });
 }

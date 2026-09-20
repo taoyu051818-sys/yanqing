@@ -254,7 +254,7 @@ describe("miniapp mock youth training rules", () => {
     return outcome.value;
   };
 
-  it("blocks youth sales without a rule, then applies ADMIN/SUPER maker-checker and snapshots the configured version", async () => {
+  it("blocks youth sales without a rule, then lets the administrator publish and snapshots the configured version", async () => {
     await timedRequest("POST", "/auth/dev-login", { role: "ADMIN" });
     await expect(
       timedRequest("POST", "/training/products", {
@@ -286,52 +286,11 @@ describe("miniapp mock youth training rules", () => {
       "/training/youth-rules",
       draftCommand,
     );
-    expect(draft).toMatchObject({
-      status: "DRAFT",
-      isOwnRequester: true,
-      requestedBy: { displayName: "金羽管理员" },
-    });
+    expect(draft).toMatchObject({ status: "PUBLISHED", isOwnRequester: true, reviewedBy: { displayName: "金羽管理员" } });
     expectSafeRule(draft);
-    await expect(
-      timedRequest("POST", "/training/youth-rules", draftCommand),
-    ).resolves.toEqual(draft);
-    await expect(
-      timedRequest("POST", `/training/youth-rules/${draft.id}/publish`, {
-        reason: "制单人越权复核",
-        idempotencyKey: "youth-rule-self-review-001",
-      }),
-    ).rejects.toThrow("SUPER_ADMIN");
-
-    await timedRequest("POST", "/auth/dev-login", { role: "SUPER_ADMIN" });
-    const publishCommand = {
-      reason: "异人复核字段完整并同意发布",
-      idempotencyKey: "youth-rule-publish-mock-001",
-    };
-    const published = await timedRequest(
-      "POST",
-      `/training/youth-rules/${draft.id}/publish`,
-      publishCommand,
-    );
-    expect(published).toMatchObject({
-      status: "PUBLISHED",
-      isOwnRequester: false,
-      reviewedBy: { displayName: "超级管理员" },
-    });
-    expectSafeRule(published);
-    await expect(
-      timedRequest(
-        "POST",
-        `/training/youth-rules/${draft.id}/publish`,
-        publishCommand,
-      ),
-    ).resolves.toEqual(published);
+    await expect(timedRequest("POST", "/training/youth-rules", draftCommand)).resolves.toEqual(draft);
     const listed = await timedRequest<any[]>("GET", "/training/youth-rules");
-    expect(listed[0]).toMatchObject({
-      id: draft.id,
-      isOwnRequester: false,
-      requestedBy: { displayName: "金羽管理员" },
-      reviewedBy: { displayName: "超级管理员" },
-    });
+    expect(listed[0]).toMatchObject({ id: draft.id, isOwnRequester: true, reviewedBy: { displayName: "金羽管理员" } });
     expectSafeRule(listed[0]);
     await vi.advanceTimersByTimeAsync(60_001);
     const active = await timedRequest("GET", "/training/youth-rules/active");

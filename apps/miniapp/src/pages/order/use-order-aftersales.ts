@@ -6,12 +6,14 @@ import { withPendingCreationKey } from "../../utils/pending-creation-key";
 import { idempotencyKey } from "../../utils/format";
 import type { OrderActionScope } from "./order-action-scope";
 import { refundableAmount, canRequestOrderRefund } from "./order-presentation";
+import { directRefundFeedback } from "../../utils/refund-action";
 import { orderFailure } from "./order-errors";
 
 export function useOrderAftersales(
   scope: OrderActionScope,
   load: () => Promise<unknown>,
   isConfirming: (id: string) => boolean,
+  canRefundDirectly: () => boolean = () => false,
 ) {
   const { actionKey } = scope;
   const refundingId = ref("");
@@ -64,13 +66,14 @@ export function useOrderAftersales(
     if (!action) return;
     refundError.value = "";
     try {
+      const direct = canRefundDirectly();
       const command = {
         orderId: order.id,
         amountCents: refundableAmount(order),
         reason,
       };
-      await withPendingCreationKey("order.refund", command, (idempotencyKey) =>
-        endpoints.refundOrder(order.id, {
+      const result = await withPendingCreationKey(direct ? "order.direct-refund" : "order.refund", command, (idempotencyKey) =>
+        (direct ? endpoints.directRefundOrder : endpoints.refundOrder)(order.id, {
           amountCents: command.amountCents,
           reason,
           idempotencyKey,
@@ -78,7 +81,7 @@ export function useOrderAftersales(
       );
       if (!action.isCurrent()) return;
       refundingId.value = "";
-      uni.showToast({ title: "申请已提交", icon: "success" });
+      uni.showToast({ title: direct ? directRefundFeedback((result as {status?:string})?.status) : "申请已提交", icon: "none" });
       await load();
     } catch (cause: unknown) {
       if (!action.isCurrent()) return;

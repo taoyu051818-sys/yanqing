@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { useUnsavedForm } from "../../composables/use-unsaved-form";
 import { computed, nextTick, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 
+import OperationsTabs from "../../components/OperationsTabs.vue";
 import OperationsFrame from '../../components/OperationsFrame.vue'
 import OperationTask from '../../components/OperationTask.vue'
 import { useOperationTask, reasonField } from '../../components/operation-task'
@@ -34,7 +36,11 @@ const pendingCreationKey = ref("");
 const priceRuleSource = ref<any>(null);
 const priceRuleSubmitting = ref(false);
 const priceRuleError = ref("");
-const managementView = ref("");
+const managementView = ref('closures');
+const venueTabs = [{ key:'closures', title:'封场维护' }, { key:'pricing', title:'价格设置' }];
+const priceSourceId = ref('');
+function openClosureForm() { uni.navigateTo({ url:`/packages/ops/pages/venue/index?view=create-closure&date=${selectedDate.value}` }); }
+function openPriceForm(id = '') { uni.navigateTo({ url:`/packages/ops/pages/venue/index?view=create-price&source=${encodeURIComponent(id)}` }); }
 const managementViewHandled = ref(false);
 const priceSlotIndex = ref(0);
 const priceRuleForm = ref({
@@ -47,6 +53,7 @@ const priceRuleForm = ref({
   effectiveTo: "2099-01-01",
   reason: "",
 });
+const { markSaved } = useUnsavedForm(() => managementView.value === 'create-price' ? [priceRuleForm.value, priceSlotIndex.value] : [selectedDate.value, startTime.value, endTime.value, reason.value, courtIndex.value], () => managementView.value.startsWith('create-'));
 const weekdayOptions = [
   { label: "一", bit: 2 }, { label: "二", bit: 4 }, { label: "三", bit: 8 },
   { label: "四", bit: 16 }, { label: "五", bit: 32 }, { label: "六", bit: 64 },
@@ -70,7 +77,7 @@ const affectedCourtCount = computed(
   () => new Set(activeClosures.value.map((item) => item.courtId)).size,
 );
 const priceSlotOptions = computed(() => [
-  { id: "", label: "全时段兜底", code: "GLOBAL" },
+  { id: "", label: "全时段默认价格", code: "GLOBAL" },
   ...priceTimeSlots.value.filter(slot => slot.enabled),
 ]);
 const selectedPriceSlot = computed(() =>
@@ -125,10 +132,10 @@ async function load() {
   } finally {
     loading.value = false;
   }
-  if (managementView.value === "pricing" && !managementViewHandled.value) {
-    managementViewHandled.value = true;
-    await nextTick();
-    uni.pageScrollTo({ selector: "#venue-pricing-management", duration: 280 });
+  if (managementView.value === 'create-price' && priceSourceId.value && !managementViewHandled.value) {
+    const source = priceRules.value.find(rule => rule.id === priceSourceId.value);
+    if (source) { beginPriceRuleVersion(source); managementViewHandled.value = true; markSaved(); }
+    else if (!loading.value) actionError.value = '未找到要调整的价格，请返回列表重新选择。';
   }
 }
 
@@ -178,7 +185,8 @@ async function createClosure() {
     pendingCreationKey.value = "";
     reason.value = "";
     uni.showToast({ title: "封场计划已生效", icon: "success" });
-    await load();
+    markSaved();
+    uni.navigateBack({ fail:() => uni.redirectTo({ url:'/packages/ops/pages/venue/index' }) });
   } catch (cause: any) {
     actionError.value =
       cause?.message || "封场计划创建失败，请核对预约冲突后重试。";
@@ -261,7 +269,7 @@ function beginPriceRuleVersion(rule: any) {
     effectiveTo: "2099-01-01",
     reason: "",
   };
-  uni.pageScrollTo({ scrollTop: 99999, duration: 250 });
+  uni.pageScrollTo({ scrollTop: 0, duration: 0 });
 }
 
 async function refreshPriceRules(message?: string) {
@@ -281,6 +289,7 @@ async function refreshPriceRules(message?: string) {
 
 async function createPriceRuleVersion() {
   if (!canManage.value || priceRuleSubmitting.value) return;
+  if (priceSourceId.value && !priceRuleSource.value) { actionError.value = '原价格未加载，请返回列表重试。'; return; }
   const source = priceRuleSource.value;
   const form = priceRuleForm.value;
   const code = form.code.trim();
@@ -328,9 +337,9 @@ async function createPriceRuleVersion() {
     return;
   }
   const confirmed = await uni.showModal({
-    title: source ? `确认创建 ${source.code} 新版本` : "确认创建价格规则",
-    content: `${name} · ${selectedPriceSlot.value?.label || "全时段"} · ${weekdayLabel(form.weekdayMask)} · ${money(priceCents)}\n创建后不可覆盖，新版本默认停用。`,
-    confirmText: "创建停用版本",
+    title: source ? `确认调整${source.name}` : "确认创建价格规则",
+    content: `${name} · ${selectedPriceSlot.value?.label || "全时段"} · ${weekdayLabel(form.weekdayMask)} · ${money(priceCents)}\n保存后暂不生效，请核对并启用；历史订单价格不变。`,
+    confirmText: "保存草稿",
   });
   if (!confirmed.confirm) return;
   const command: Record<string, any> = {
@@ -355,7 +364,9 @@ async function createPriceRuleVersion() {
         : endpoints.createPriceRule({ ...command, idempotencyKey }),
     );
     resetPriceRuleForm();
-    await refreshPriceRules("价格规则版本已创建");
+    markSaved();
+    uni.showToast({ title:'价格草稿已保存，请按需启用', icon:'none' });
+    uni.navigateBack({ fail:() => uni.redirectTo({ url:'/packages/ops/pages/venue/index?view=pricing' }) });
   } catch (cause: any) {
     actionError.value = cause?.message || "价格规则创建失败。";
   } finally {
@@ -376,7 +387,12 @@ function setPriceRuleStatus(rule: any) {
 }
 
 onLoad((options) => {
-  managementView.value = typeof options?.view === "string" ? options.view : "";
+  const view = String(options?.view || 'closures');
+  managementView.value = ['closures', 'pricing', 'create-closure', 'create-price'].includes(view) ? view : 'closures';
+  priceSourceId.value = String(options?.source || '');
+  if (typeof options?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(options.date)) selectedDate.value = options.date;
+  markSaved();
+  uni.setNavigationBarTitle({ title:managementView.value === 'create-price' ? '设置价格' : managementView.value === 'create-closure' ? '新增封场' : '场地维护与价格' });
 });
 onShow(load);
 </script>
@@ -391,6 +407,9 @@ onShow(load);
     description="先核对预约，再按真实起止时间封场；封场只改变可售资源，不会静默取消订单或触发退款。"
   >
     <OperationTask :task="task" />
+    <OperationsTabs v-if="!managementView.startsWith('create-')" v-model="managementView" :items="venueTabs" label="场馆配置分类" />
+    <view v-if="actionError" class="error-card card sticky-error" role="alert"><text class="error-copy">{{ actionError }}</text></view>
+    <template v-if="managementView === 'closures' || managementView === 'create-closure'">
     <view class="section-title">查看日期</view>
     <view class="card date-card">
       <picker mode="date" :value="selectedDate" :start="shanghaiDate()" @change="changeDate">
@@ -409,8 +428,8 @@ onShow(load);
       </view>
     </view>
 
-    <template v-if="canManage">
-      <view class="section-title">新增封场计划</view>
+    <button v-if="canManage && managementView === 'closures'" class="primary" @tap="openClosureForm">新增封场计划</button>
+    <template v-if="canManage && managementView === 'create-closure'">
       <view class="card form-card">
         <picker :range="courts" range-key="name" :value="courtIndex" @change="changeCourt">
           <view class="field-row"><text>场地</text><text class="field-choice">{{ selectedCourt?.name || "暂无场地" }} ›</text></view>
@@ -423,21 +442,17 @@ onShow(load);
             <view class="time-field"><text>结束</text><text>{{ endTime }}</text></view>
           </picker>
         </view>
-        <textarea v-model="reason" class="reason-input" maxlength="300" placeholder="填写维护、赛事包场或安全检查原因" @input="pendingCreationKey = ''" />
+        <text class="field-label">封场原因（必填）</text><textarea v-model="reason" class="reason-input" maxlength="300" placeholder="填写维护、赛事包场或安全检查原因" @input="pendingCreationKey = ''" />
         <text class="guardrail">提交前会重新检查重叠封场和未取消预约；存在预约时返回数量与明细，由管理员另行处理。</text>
         <button class="primary" :loading="submitting" :disabled="submitting || !selectedCourt" @tap="createClosure">创建封场计划</button>
       </view>
     </template>
-    <view v-else class="readonly card">
+    <view v-if="!canManage" class="readonly card">
       <text class="readonly-title">前台只读视图</text>
       <text class="muted">你可以查看封场和原因，但创建、取消必须由管理员完成。</text>
     </view>
 
-    <view v-if="actionError" class="error-card card">
-      <text class="error-title">操作未完成</text>
-      <text class="error-copy">{{ actionError }}</text>
-    </view>
-
+    <template v-if="managementView === 'closures'">
     <view class="section-title">当日封场记录</view>
     <view v-if="loading" class="card state-card"><text>正在同步维护日历…</text></view>
     <view v-else-if="loadError" class="card error-card">
@@ -465,38 +480,45 @@ onShow(load);
       </view>
     </view>
 
-    <view id="venue-pricing-management" class="section-title price-section-title">场馆价格规则 <text class="section-note">版本化主数据</text></view>
-    <view v-if="canManage" class="card price-form">
+    </template>
+    </template>
+    <template v-if="managementView === 'pricing' || managementView === 'create-price'">
+    <button v-if="canManage && managementView === 'pricing'" class="primary" @tap="openPriceForm()">新增价格规则</button>
+    <view id="venue-pricing-management" class="section-title price-section-title">场馆价格规则 <text class="section-note">已保存的价格</text></view>
+    <view v-if="canManage && managementView === 'create-price'" class="card price-form">
       <view class="price-form-head">
-        <view><text class="state-title">{{ priceRuleSource ? `创建 ${priceRuleSource.code} 新版本` : "新建价格规则 v1" }}</text><text class="muted">规则创建后不可覆盖；新版本默认停用，启用时检查时段、星期与有效期冲突。</text></view>
-        <button v-if="priceRuleSource" class="secondary small-button" :disabled="priceRuleSubmitting" @tap="resetPriceRuleForm">取消派生</button>
+        <view><text class="state-title">{{ priceRuleSource ? `调整${priceRuleSource.name}` : "新建价格规则" }}</text><text class="muted">保存后先生成草稿，核对并启用后才会生效；历史订单价格不变。</text></view>
+        <button v-if="priceRuleSource" class="secondary small-button" :disabled="priceRuleSubmitting" @tap="resetPriceRuleForm">清除当前方案</button>
       </view>
-      <input v-model="priceRuleForm.code" class="price-input" :disabled="Boolean(priceRuleSource)" placeholder="规则编码，例如 PRICE_S01" />
-      <input v-model="priceRuleForm.name" class="price-input" placeholder="规则名称" />
+      <view><text class="field-label">规则编码</text><input v-model="priceRuleForm.code" class="price-input" :disabled="Boolean(priceRuleSource)" placeholder="规则编码，例如 PRICE_S01" /></view>
+      <view><text class="field-label">规则名称</text><input v-model="priceRuleForm.name" class="price-input" placeholder="规则名称" /></view>
       <picker :range="priceSlotOptions" range-key="label" :value="priceSlotIndex" @change="changePriceSlot">
         <view class="field-row"><text>计价时段</text><text class="field-choice">{{ selectedPriceSlot?.label }} ›</text></view>
       </picker>
       <view class="weekday-row"><button v-for="option in weekdayOptions" :key="option.bit" class="weekday" :class="{ selected: (priceRuleForm.weekdayMask & option.bit) !== 0 }" :disabled="priceRuleSubmitting" @tap="toggleWeekday(option.bit)">{{ option.label }}</button></view>
-      <view class="time-grid"><input v-model="priceRuleForm.priceYuan" class="price-input" type="digit" placeholder="普通价（元）" /><input v-model="priceRuleForm.newcomerYuan" class="price-input" type="digit" placeholder="新客价（可空）" /></view>
-      <view class="time-grid"><input v-model="priceRuleForm.effectiveFrom" class="price-input" placeholder="生效日 YYYY-MM-DD" /><input v-model="priceRuleForm.effectiveTo" class="price-input" placeholder="失效日，可留空" /></view>
-      <input v-model="priceRuleForm.reason" class="price-input" placeholder="创建原因（审计留痕）" />
-      <button class="primary" :loading="priceRuleSubmitting" :disabled="priceRuleSubmitting" @tap="createPriceRuleVersion">创建停用状态的新版本</button>
+      <view class="time-grid"><view><text class="field-label">普通价格（元）</text><input v-model="priceRuleForm.priceYuan" class="price-input" type="digit" placeholder="普通价（元）" /></view><view><text class="field-label">新客价格（元，可选）</text><input v-model="priceRuleForm.newcomerYuan" class="price-input" type="digit" placeholder="新客价（可空）" /></view></view>
+      <view class="time-grid"><view><text class="field-label">生效日期</text><input v-model="priceRuleForm.effectiveFrom" class="price-input" placeholder="生效日 YYYY-MM-DD" /></view><view><text class="field-label">结束日期（可选）</text><input v-model="priceRuleForm.effectiveTo" class="price-input" placeholder="失效日，可留空" /></view></view>
+      <view><text class="field-label">修改原因</text><input v-model="priceRuleForm.reason" class="price-input" placeholder="操作原因（必填）" /></view>
+      <button class="primary" :loading="priceRuleSubmitting" :disabled="priceRuleSubmitting" @tap="createPriceRuleVersion">保存价格草稿</button>
     </view>
-    <view v-else class="readonly card"><text class="readonly-title">前台只读价格视图</text><text class="muted">可核对当前与历史版本；新建、派生和启停只能由管理员执行。</text></view>
+    <view v-if="!canManage" class="readonly card"><text class="readonly-title">前台只读价格视图</text><text class="muted">可查看当前与历史价格；调整和启停请联系管理员。</text></view>
 
+    <template v-if="managementView === 'pricing'">
     <view v-if="priceRuleError" class="card error-card"><text class="error-title">价格规则加载失败</text><text class="error-copy">{{ priceRuleError }}</text><button class="secondary" @tap="refreshPriceRules()">重新加载</button></view>
     <view v-else-if="loading" class="card state-card">正在同步价格规则…</view>
-    <view v-else-if="!priceRules.length" class="card state-card"><text class="state-title">尚未配置价格规则</text><text class="muted">管理员可先创建停用版本，再核对后启用。</text></view>
+    <view v-else-if="!priceRules.length" class="card state-card"><text class="state-title">尚未配置价格规则</text><text class="muted">管理员可先保存价格草稿，核对后再启用。</text></view>
     <view v-else class="price-list">
       <view v-for="rule in priceRules" :key="rule.id" class="card price-card">
-        <view class="row"><view><text class="closure-court">{{ rule.name }}</text><text class="closure-time">{{ rule.code }} · v{{ rule.version }} · {{ rule.timeSlot?.label || "全时段兜底" }}</text></view><text class="status-pill" :class="rule.enabled && rule.timeSlot?.enabled !== false ? 'active' : 'cancelled'">{{ rule.timeSlot?.enabled === false ? "历史时段已停售" : rule.enabled ? "已启用" : "已停用" }}</text></view>
+        <view class="row"><view><text class="closure-court">{{ rule.name }}</text><text class="closure-time">{{ rule.code }} · v{{ rule.version }} · {{ rule.timeSlot?.label || "全时段默认价格" }}</text></view><text class="status-pill" :class="rule.enabled && rule.timeSlot?.enabled !== false ? 'active' : 'cancelled'">{{ rule.timeSlot?.enabled === false ? "历史时段已停售" : rule.enabled ? "已启用" : "已停用" }}</text></view>
         <text class="price-value">普通价 {{ money(rule.priceCents) }} · 新客价 {{ rule.newcomerPriceCents == null ? "未配置" : money(rule.newcomerPriceCents) }}</text>
         <text class="audit-line">{{ weekdayLabel(rule.weekdayMask) }} · {{ venueDateKey(rule.effectiveFrom) || '待定' }} 至 {{ rule.effectiveTo ? venueDateKey(rule.effectiveTo) || '待定' : "长期" }}</text>
         <text class="audit-line">创建：{{ rule.createdBy?.displayName || rule.createdById }}</text>
         <text v-if="rule.transitions?.[0]" class="closure-reason">最近变更：{{ rule.transitions[0].reason }} · {{ rule.transitions[0].actor?.displayName }}</text>
-        <view v-if="canManage && rule.timeSlot?.enabled !== false" class="price-actions"><button class="secondary compact" :disabled="priceRuleSubmitting" @tap="beginPriceRuleVersion(rule)">基于此版本派生</button><button class="secondary compact" :disabled="priceRuleSubmitting" @tap="setPriceRuleStatus(rule)">{{ rule.enabled ? "停用规则" : "启用规则" }}</button></view>
+        <view v-if="canManage && rule.timeSlot?.enabled !== false" class="price-actions"><button class="secondary compact" :disabled="priceRuleSubmitting" @tap="openPriceForm(rule.id)">调整价格</button><button class="secondary compact" :disabled="priceRuleSubmitting" @tap="setPriceRuleStatus(rule)">{{ rule.enabled ? "停用规则" : "启用规则" }}</button></view>
       </view>
     </view>
+    </template>
+    </template>
   </OperationsFrame>
 </template>
 
@@ -524,4 +546,8 @@ onShow(load);
 @media screen and (max-width: 375px) {
   .price-form { padding-right: 20rpx; padding-left: 20rpx; }
 }
+</style>
+
+<style scoped>
+.sticky-error { position:sticky; top:0; z-index:15; }.price-form .field-label { display:block; margin-bottom:10rpx; font-size:28rpx; }.form-card,.price-form { padding-bottom:calc(150rpx + env(safe-area-inset-bottom)); }.form-card>button.primary,.price-form>button.primary { position:fixed; bottom:env(safe-area-inset-bottom); left:28rpx; right:28rpx; width:auto; z-index:20; margin:0; box-shadow:0 0 0 28rpx #fff; }
 </style>

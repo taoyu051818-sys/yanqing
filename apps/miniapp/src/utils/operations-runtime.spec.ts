@@ -58,6 +58,7 @@ function initializePage(path: string) {
       if (id === "@dcloudio/uni-app")
         return {
           onLoad() {},
+          onBackPress() {},
           onShow() {},
           onHide() {},
           onUnload() {},

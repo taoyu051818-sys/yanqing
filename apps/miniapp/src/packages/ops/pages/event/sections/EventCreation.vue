@@ -163,17 +163,19 @@ const eventSponsor = computed({
           >赛制锁定为固定双打、24 人成赛、24-48
           人双数容量、五轮瑞士制。创建得到草稿，必须二次确认发布才开放报名。</text
         >
-        <button
+        <view class="create-save-bar"><button
           class="primary"
           :loading="actionKey === 'create-event'"
           :disabled="loading || Boolean(actionKey)"
           @tap="createEvent"
         >
           创建赛事草稿
-        </button>
+        </button></view>
       </view>
     </template>
   </view>
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>.create-event-form { margin-bottom:calc(150rpx + env(safe-area-inset-bottom)); }.create-save-bar { position:fixed; bottom:0; left:0; right:0; z-index:20; padding:20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom)); background:#fff; border-top:1rpx solid #e2e7e3; }.create-save-bar button { width:100%; margin:0; }</style>

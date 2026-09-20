@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { statusLabel } from "../../../../../config/status-labels";
 import { toRefs } from "vue";
 import SectionEmpty from "../../../../../components/SectionEmpty.vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
@@ -33,11 +34,10 @@ const { activeTab, risks, riskReasons, acting, actRisk, canResolveRisk } =
           ><view
             ><text class="strong">{{ risk.summary }}</text
             ><text class="muted small"
-              >{{ risk.ruleCode }} · {{ risk.objectType }} ·
-              {{ shortDate(risk.createdAt) }}</text
+              >{{ shortDate(risk.createdAt) }}</text
             ></view
-          ><StatusBadge :value="risk.status" /></view
-        ><text class="risk-level">风险等级：{{ risk.severity }}</text
+          ><StatusBadge :value="risk.status" domain="risk" /></view
+        ><text class="risk-level">风险等级：{{ statusLabel(risk.severity, 'risk') }}</text
         ><input
           v-if="!['RESOLVED', 'DISMISSED'].includes(risk.status)"
           v-model="riskReasons[risk.id]"

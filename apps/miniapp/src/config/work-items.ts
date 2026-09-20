@@ -25,7 +25,7 @@ export const workGroupDefinitions: WorkGroupDefinition[] = [
   {
     key: "customer",
     title: "客户经营",
-    description: "线索 SLA、主理人申请与责任交接",
+    description: "客户跟进、主理人申请与工作交接",
     emptyText: "暂无逾期线索或主理人申请",
     route: "/packages/ops/pages/members/index",
     roles: ["FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN"],

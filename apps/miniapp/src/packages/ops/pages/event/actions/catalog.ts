@@ -8,6 +8,7 @@ import { withPendingCreationKey } from "../../../../../utils/pending-creation-ke
 import type { EventStatus, MatchStatus, EventDetail } from "../page-types.js";
 
 interface ActionContext {
+  onCreated?: (id: string) => void;
   eventDetail: Ref<EventDetail | null, EventDetail | EventDetail | null>;
   showPublish: ComputedRef<boolean>;
   task: ReturnType<typeof useOperationTask>;
@@ -35,6 +36,7 @@ interface ActionContext {
 }
 
 export function useEventCatalogActions({
+  onCreated,
   eventDetail,
   showPublish,
   task,
@@ -78,9 +80,10 @@ export function useEventCatalogActions({
     if (!event || !showCancel.value) return;
     task.start({
       title: "取消整场赛事",
+      successFeedback: "toast",
       description:
         event.name +
-        " · 待付订单与候补取消，已付报名生成退款申请，仍须另一名财务或管理员审批。",
+        " · 待付订单与候补取消，已付报名自动执行退款，无需逐笔审核；进度以退款记录为准。",
       confirmText: "确认取消整场赛事",
       fields: [
         reasonField("取消原因", [
@@ -97,7 +100,7 @@ export function useEventCatalogActions({
             endpoints.cancelEvent(event.id, { reason, idempotencyKey }),
         );
         await load(event.id);
-        return "赛事已取消，退款申请已转财务复核，尚不代表已到账。";
+        return "赛事已取消，退款已提交，系统会自动处理，无需逐笔审核。";
       },
     });
   }
@@ -163,6 +166,7 @@ export function useEventCatalogActions({
       eventCode.value = `EV-${Date.now().toString().slice(-8)}`;
       await load(created.id, undefined, false);
       uni.showToast({ title: "赛事草稿已创建", icon: "success" });
+      onCreated?.(created.id);
     } catch (cause) {
       errorMessage.value = causeMessage(cause, "赛事创建失败");
     } finally {

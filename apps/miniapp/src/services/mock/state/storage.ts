@@ -53,19 +53,39 @@ export const KEYS = {
   referralRewards: "yanqing_mock_referral_rewards",
 } as const;
 
+let staged: Map<string, unknown> | undefined;
+
 export function read<T>(key: string, fallback: T): T {
-  const value = uni.getStorageSync(key);
+  const value = staged?.has(key) ? staged.get(key) : uni.getStorageSync(key);
   return value === undefined || value === null || value === ""
     ? clone(fallback)
-    : (value as T);
+    : ((staged ? clone(value) : value) as T);
 }
 
 export function write<T>(key: string, value: T): T {
   const next = clone(value);
-  uni.setStorageSync(key, next);
+  if (staged) staged.set(key, next);
+  else uni.setStorageSync(key, next);
   return next;
 }
 
 export function resetCatalogState() {
   Object.values(KEYS).forEach((key) => uni.removeStorageSync(key));
+}
+
+/** Only synchronous domain commands may run here; asynchronous work belongs outside the transaction. */
+export function withMockTransaction<T>(work: () => T): T {
+  if (staged) return work();
+  const writes = new Map<string, unknown>();
+  staged = writes;
+  try {
+    const result = work();
+    if (result && typeof (result as any).then === "function")
+      throw new Error("模拟事务只接受同步业务命令");
+    staged = undefined;
+    for (const [key, value] of writes) uni.setStorageSync(key, value);
+    return result;
+  } finally {
+    staged = undefined;
+  }
 }

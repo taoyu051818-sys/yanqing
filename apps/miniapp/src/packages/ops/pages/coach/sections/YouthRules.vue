@@ -89,7 +89,7 @@ const ruleReason = computed({
       <view class="section-title"
         >青少年培训监管规则
         <text class="section-note"
-          >管理员配置 · 异人复核 · 按生效时间版本化</text
+          >管理员发布 · 按生效时间启用</text
         ></view
       >
       <view v-if="activeYouthRule" class="card active-rule">
@@ -116,7 +116,7 @@ const ruleReason = computed({
       <view v-else class="card rule-blocked"
         ><text class="trial-title">当前无生效规则</text
         ><text
-          >青少年培训产品启用、变更与正式购买均会明确阻断；请由管理员制单、另一名超级管理员复核，并等待生效时间。</text
+          >青少年培训产品启用、变更与正式购买均会明确阻断；请由管理员发布规则，并等待生效时间。</text
         ></view
       >
       <view v-if="canDraftYouthRule" class="card creation-form">
@@ -183,7 +183,7 @@ const ruleReason = computed({
             @change="setRuleHardBlock"
         /></view>
         <view
-          ><text class="field-label">制单依据（必填）</text
+          ><text class="field-label">发布依据（必填）</text
           ><textarea
             v-model="ruleReason"
             class="reason-input"
@@ -197,7 +197,7 @@ const ruleReason = computed({
           :disabled="loading || Boolean(actionKey)"
           @tap="createYouthRule"
         >
-          提交规则草案
+          确认发布规则
         </button>
       </view>
       <view v-for="rule in youthRules" :key="rule.id" class="card rule-card">
@@ -219,28 +219,26 @@ const ruleReason = computed({
             {{ rule.hardBlock ? "硬阻断" : "仅预警" }}</text
           ></view
         >
-        <text class="audit-hint">制单依据：{{ rule.requestReason }}</text>
+        <text class="audit-hint">发布依据：{{ rule.requestReason }}</text>
         <view
           v-if="rule.status === 'DRAFT' && canReviewYouthRule"
           class="trial-actions"
         >
           <button
             class="primary inline"
-            :disabled="rule.isOwnRequester === true"
+            :disabled="Boolean(actionKey)"
             @tap="decideYouthRule(rule, 'publish')"
           >
-            复核发布
+            确认发布
           </button>
           <button
             class="danger inline"
-            :disabled="rule.isOwnRequester === true"
+            :disabled="Boolean(actionKey)"
             @tap="decideYouthRule(rule, 'reject')"
           >
             驳回
           </button>
-          <text v-if="rule.isOwnRequester === true" class="pending-text"
-            >本人制单，必须由另一账号复核</text
-          >
+
         </view>
       </view>
     </template>

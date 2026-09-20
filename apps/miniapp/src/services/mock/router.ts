@@ -1,4 +1,4 @@
-import { handleVenueSettings } from './routes/venues/settings';
+import { handleVenueSettings } from "./routes/venues/settings";
 import type { AppRole } from "../../types/domain";
 import { mockLogin, mockUser, updateMockProfile } from "./core";
 import { routeMockTeamInvites } from "./event-signup";
@@ -441,15 +441,12 @@ const domainRoutes = [
   handleGameCheckInPost,
 ];
 
-export async function mockRequest<T>(
+async function dispatchMockRequest<T>(
   method: string,
   url: string,
   data: any = {},
   options: MockRouteOptions = {},
 ): Promise<T> {
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  options.beforeHandle?.();
-  expireMockPurchases();
   if (url === "/auth/wechat-login")
     return ok(mockLogin("MEMBER", options.persistLoginToken));
   if (url === "/auth/dev-login")
@@ -478,4 +475,16 @@ export async function mockRequest<T>(
     if (result.handled) return result.value as T;
   }
   throw new Error(`模拟接口尚未实现：${method} ${url}`);
+}
+
+export async function mockRequest<T>(
+  method: string,
+  url: string,
+  data: any = {},
+  options: MockRouteOptions = {},
+): Promise<T> {
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  options.beforeHandle?.();
+  expireMockPurchases();
+  return dispatchMockRequest(method, url, data, options);
 }

@@ -7,8 +7,10 @@ function page() {
   const member360 = vi.fn(async (id: string) => ({ member: { id, displayName: '会员' }, accounts: [] }))
   const listLoad = vi.fn(async () => {})
   const session = { roles: ['ADMIN'], user: { id: 'operator' }, hydrate: vi.fn(async () => {}) }
-  vi.stubGlobal('uni', { navigateTo: vi.fn(), setNavigationBarTitle: vi.fn(), setStorageSync: vi.fn(), showToast: vi.fn() })
+  const storage = new Map<string, unknown>()
+  vi.stubGlobal('uni', { getStorageSync:(key: string) => storage.get(key) || '', navigateTo: vi.fn(), setNavigationBarTitle: vi.fn(), setStorageSync: vi.fn((key, value) => storage.set(key, value)), showToast: vi.fn() })
   const state = loadSfcScript(new URL('./index.vue', import.meta.url), ['openMember', 'customer', 'membersLoaded', 'members', 'query'], id => {
+    if (id.endsWith('/composables/use-unsaved-form')) return { useUnsavedForm: () => ({ markSaved:vi.fn() }) }
     if (id === 'vue') return vue
     if (id === '@dcloudio/uni-app') return { onLoad: (fn: typeof onLoad) => { onLoad = fn }, onShow: (fn: typeof onShow) => { onShow = fn } }
     if (id.endsWith('/services/api')) return { endpoints: { member360, customerLeads: async () => ({ items: [] }), hostApplications: async () => [], manageRechargePlans: async () => [], manageMembershipProducts: async () => [] } }
@@ -44,4 +46,13 @@ it('retains loaded list and search on return, but reloads after identity changes
   p.session.user.id = 'another-operator'
   await p.show()
   expect(p.listLoad).toHaveBeenCalledTimes(2)
+})
+
+it('refreshes the list after a form save without clearing its search', async () => {
+  const p = page(); await p.start({}); p.query.value = '新会员'
+  uni.setStorageSync('yanqing_member_operations_changed', 1)
+  await p.show()
+  expect(p.listLoad).toHaveBeenCalledTimes(2)
+  expect(p.query.value).toBe('新会员')
+  await p.show(); expect(p.listLoad).toHaveBeenCalledTimes(2)
 })

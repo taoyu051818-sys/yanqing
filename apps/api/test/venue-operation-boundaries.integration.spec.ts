@@ -139,7 +139,11 @@ describe.skipIf(!url)(
       it(`sequential court change blocks booking ${JSON.stringify(change)}`, async () => {
         const f = await fixture();
         await price(f.slot.id, '2026-01-01T00:00:00+08:00');
-        await venues.updateCourt(f.court.id, { ...change, revision: f.court.updatedAt.toISOString() }, admin);
+        await venues.updateCourt(
+          f.court.id,
+          { ...change, revision: f.court.updatedAt.toISOString() },
+          admin,
+        );
         expect(
           (await capture(venues.createBooking(f.dto, f.buyer))).error,
         ).toBeDefined();
@@ -171,7 +175,11 @@ describe.skipIf(!url)(
         );
         await read.promise;
         try {
-          await venues.updateCourt(f.court.id, { ...change, revision: f.court.updatedAt.toISOString() }, admin);
+          await venues.updateCourt(
+            f.court.id,
+            { ...change, revision: f.court.updatedAt.toISOString() },
+            admin,
+          );
         } finally {
           resume.signal();
         }
@@ -298,33 +306,47 @@ describe.skipIf(!url)(
         await db.courtBooking.count({ where: { courtId: f.court.id } }),
       ).toBe(0);
     });
-    it('youth rule publishing requires a different reviewer and enforces hard limits', async () => {
-      const both = { ...admin, roles: ['ADMIN', 'SUPER_ADMIN'] as AppRole[] };
-      const rule = await youth.create(
-        {
-          maxTotalSessions: 10,
-          maxValidityDays: 90,
-          maxContractAmountCents: 100000,
-          warningThresholdDays: 10,
-          hardBlock: true,
-          effectiveFrom: new Date(Date.now() + day).toISOString(),
-          reason: '配置课程范围',
-          idempotencyKey: key(),
-        },
-        admin,
-      );
+    it('administrator publishes its own youth rule once and hard limits remain enforced', async () => {
+      const dto = {
+        maxTotalSessions: 10,
+        maxValidityDays: 90,
+        maxContractAmountCents: 100000,
+        warningThresholdDays: 10,
+        hardBlock: true,
+        effectiveFrom: new Date(Date.now() + day).toISOString(),
+        reason: '配置课程范围',
+        idempotencyKey: key(),
+      };
+      const rule = await youth.create(dto, admin);
+      expect(rule.status).toBe('PUBLISHED');
+      expect((await youth.create(dto, admin)).id).toBe(rule.id);
+      expect(
+        await db.youthTrainingRule.findUniqueOrThrow({
+          where: { id: rule.id },
+        }),
+      ).toMatchObject({
+        requestedById: admin.sub,
+        reviewedById: admin.sub,
+      });
+      expect(
+        await db.auditLog.count({
+          where: { objectId: rule.id, action: 'YOUTH_TRAINING_RULE_PUBLISHED' },
+        }),
+      ).toBe(1);
       await expect(
         youth.publish(
           rule.id,
-          { reason: '尝试自审', idempotencyKey: key() },
-          both,
+          { reason: '重复发布', idempotencyKey: key() },
+          superAdmin,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      await expect(
+        youth.publish(
+          rule.id,
+          { reason: '财务发布', idempotencyKey: key() },
+          await person('FINANCE'),
         ),
       ).rejects.toMatchObject({ status: 403 });
-      const decision = { reason: '异人复核通过', idempotencyKey: key() };
-      await youth.publish(rule.id, decision, superAdmin);
-      expect((await youth.publish(rule.id, decision, superAdmin)).id).toBe(
-        rule.id,
-      );
       await expect(
         youth.validateProduct(
           { totalSessions: 11, validityDays: 90, priceCents: 100000 },

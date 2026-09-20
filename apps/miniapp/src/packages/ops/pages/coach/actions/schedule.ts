@@ -4,6 +4,7 @@ import { endpoints } from "../../../../../services/api";
 import { withPendingCreationKey } from "../../../../../utils/pending-creation-key";
 
 interface ActionContext {
+  onValidationError?: (field: string) => void;
   sessionDate: Ref<string, string>;
   selectedCourtIds: Ref<string[], string[]>;
   loadCourtAvailability: () => Promise<void>;
@@ -45,6 +46,7 @@ export function useCoachScheduleActions({
   sessionStartTime,
   sessionEndTime,
   runCreation,
+  onValidationError,
 }: ActionContext) {
   async function changeSessionDate(event: any) {
     sessionDate.value = event.detail.value;
@@ -65,6 +67,8 @@ export function useCoachScheduleActions({
   async function createSession() {
     if (!canCreateSession.value || actionKey.value) return;
     errorMessage.value = "";
+    onValidationError?.("");
+    let field = "reason";
     try {
       const trainingClass = selectedSessionClass.value;
       const startsAt = sessionStartsAt.value;
@@ -74,7 +78,9 @@ export function useCoachScheduleActions({
       const reason = requiredReason(sessionReason.value);
       const note = sessionNote.value.trim();
       const courtIds = [...new Set(selectedCourtIds.value)].sort();
+      field = "class";
       if (!trainingClass) throw new Error("当前角色没有可排课的有效班级。");
+      field = "time";
       if (
         !Number.isFinite(startsTime) ||
         !Number.isFinite(endsTime) ||
@@ -84,11 +90,14 @@ export function useCoachScheduleActions({
       }
       if (startsTime <= Date.now())
         throw new Error("课次开始时间必须晚于当前时间。");
+      field = "courts";
       if (!courtIds.length) throw new Error("请至少选择一个可用场地。");
       const blocked = courtIds.filter((courtId) => isCourtBlocked(courtId));
       if (blocked.length)
         throw new Error("所选场地在该时段已预约或封场，请重新选择。");
+      field = "note";
       if (note.length > 300) throw new Error("课次备注不能超过 300 个字符。");
+      field = "";
       const command = {
         classId: trainingClass.id,
         startsAt,
@@ -111,7 +120,7 @@ export function useCoachScheduleActions({
       if (!modal.confirm) return;
       const succeeded = await runCreation(
         "create-session",
-        "培训课次与场地占用已原子创建。",
+        "课次已创建，场地已同步预留。",
         () =>
           withPendingCreationKey(
             "training.session.create",
@@ -129,6 +138,7 @@ export function useCoachScheduleActions({
         sessionReason.value = "";
       }
     } catch (cause: any) {
+      onValidationError?.(field);
       errorMessage.value = cause?.message || "培训课次表单校验失败。";
     }
   }

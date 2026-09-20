@@ -11,6 +11,7 @@ export type TaskField = {
 }
 export type TaskDefinition = {
   title: string; description: string; confirmText: string; fields: TaskField[]
+  successFeedback?: 'dialog' | 'toast'
   submit: (values: Record<string, string>) => Promise<string>
 }
 export function validateTaskField(field: TaskField, value: string): string {
@@ -88,7 +89,9 @@ export function useOperationTask() {
     try {
       const result = await definition.submit(values)
       if (!alive) return
-      state.open = false; state.result = result; definition = undefined
+      const toast = definition.successFeedback === 'toast'
+      state.open = false; state.result = toast ? '' : result; definition = undefined
+      if (toast) uni.showToast({ title: result, icon: 'none', duration: 3000 })
     } catch (cause: any) { if (alive) state.error = apiFeedback(cause?.message, cause?.statusCode || 0) }
     finally { state.busy = false }
   }

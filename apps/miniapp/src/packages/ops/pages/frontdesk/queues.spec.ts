@@ -11,6 +11,7 @@ function page(file: URL, names: string[], endpoints: any) {
     if (id === '@dcloudio/uni-app') return { onLoad() {}, onShow() {} }
     if (id.endsWith('/services/api')) return { endpoints }
     if (id.endsWith('/stores/session')) return { useSessionStore: () => ({ roles: ['ADMIN'], user: { id: 'admin' } }) }
+    if (id.endsWith('/utils/member-navigation')) return { openMemberPage:(url: string) => uni.navigateTo({ url }) }
     if (id.endsWith('/utils/paged-list')) return { usePagedList }
     if (id.endsWith('/components/operation-task')) return { useOperationTask: () => ({}) }
     if (id.includes('/actions/')) return new Proxy({}, { get: () => () => ({}) })
@@ -48,4 +49,21 @@ it('renders the real check-in button only for an unfulfilled, still-paid booking
     p.orders.value = [order]; expect(p.paidOrders.value.length).toBe(allowed ? 1 : 0)
     expect(order.status).toBe('PARTIALLY_REFUNDED')
   }
+})
+
+it('opens member selection from assisted booking, then continues only after a member is chosen', () => {
+  const p = page(new URL('./index.vue', import.meta.url), ['manualOrder','selectMember','showMemberPicker','closeMemberPicker','selectedMemberId'], {})
+  p.manualOrder(); expect(p.showMemberPicker.value).toBe(true)
+  expect(uni.navigateTo).not.toHaveBeenCalled()
+  p.closeMemberPicker(); expect(p.showMemberPicker.value).toBe(false)
+  p.manualOrder(); p.selectMember({ id:'member/a', displayName:'会员甲' })
+  expect(p.showMemberPicker.value).toBe(false)
+  expect(p.selectedMemberId.value).toBe('member/a')
+  expect(uni.navigateTo).toHaveBeenCalledWith({ url:'/pages/booking/index?mode=ASSISTED&memberId=member%2Fa' })
+})
+it('changing a previously chosen member does not immediately leave the front desk', () => {
+  const p = page(new URL('./index.vue', import.meta.url), ['changeBookingMember','selectMember','selectedMemberId'], {})
+  p.changeBookingMember(); p.selectMember({ id:'member-b', displayName:'会员乙' })
+  expect(p.selectedMemberId.value).toBe('member-b')
+  expect(uni.navigateTo).not.toHaveBeenCalled()
 })

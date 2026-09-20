@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import * as vue from 'vue'
+import { canExecuteDirectly } from '../../../../utils/admin-execution'
 import { deferred, loadSfcScript } from '../../../../test-utils/sfc-script'
 
 it('keeps the loaded customer, confirmation and adjustment target together despite out-of-order replies', async () => {
@@ -7,6 +8,8 @@ it('keeps the loaded customer, confirmation and adjustment target together despi
   const create = vi.fn(async () => ({}))
   vi.stubGlobal('uni', { setStorageSync: vi.fn(), showToast: vi.fn() })
   const p = loadSfcScript(new URL('./index.vue', import.meta.url), ['selectMember', 'requestAccountAdjustment', 'selectedId', 'customer'], id => {
+    if (id.endsWith('/composables/use-unsaved-form')) return { useUnsavedForm: () => ({ markSaved:vi.fn() }) }
+    if (id.endsWith('/utils/admin-execution')) return { canExecuteDirectly }
     if (id === 'vue') return vue
     if (id === '@dcloudio/uni-app') return { onLoad() {}, onShow() {} }
     if (id.endsWith('/services/api')) return { endpoints: { member360: (id: string) => id === 'a' ? a.promise : b.promise, createAccountAdjustment: create } }

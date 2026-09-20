@@ -300,14 +300,6 @@ export class TrainingConsumptionService {
       if (attendance.status !== AttendanceStatus.ATTENDED) {
         throw new ConflictException('当前考勤状态不能确认消课');
       }
-      if (!attendance.operatorId) {
-        throw new ConflictException(
-          '必须先由教练提交消课建议，再由培训主管确认入账',
-        );
-      }
-      if (attendance.operatorId === actor.sub) {
-        throw new ForbiddenException('消课建议提交人与确认人不能是同一账号');
-      }
       const enrollment = attendance.enrollment;
       if (enrollment.order?.status === OrderStatus.REFUND_PENDING) {
         throw new ConflictException(

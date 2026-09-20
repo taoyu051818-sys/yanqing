@@ -49,7 +49,7 @@ export class TrainingSettlementsService {
     return confirmSettlement(this.prisma, id, dto, actor);
   }
 
-  settleSettlement(
+  async settleSettlement(
     id: string,
     dto: TrainingSettlementActionDto,
     actor: AuthUser,

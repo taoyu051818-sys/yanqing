@@ -1,3 +1,4 @@
+import { canExecuteDirectly } from '../../common/auth/admin-execution.js';
 import { createHash } from 'node:crypto';
 import {
   BadRequestException,
@@ -214,7 +215,7 @@ export async function approveAccountAdjustment(
       if (request.status === AccountAdjustmentStatus.REJECTED) {
         throw new ConflictException('已驳回的账户调整不能入账');
       }
-      if (request.requestedById === actor.sub) {
+      if (request.requestedById === actor.sub && !canExecuteDirectly(actor)) {
         throw new ForbiddenException('账户调整申请人与复核人不能是同一账号');
       }
       await assertAdjustmentOwnerExists(tx, request.account.userId);
@@ -317,7 +318,7 @@ export async function rejectAccountAdjustment(
         '已入账的账户调整不能驳回；请提交反向调整申请',
       );
     }
-    if (request.requestedById === actor.sub) {
+    if (request.requestedById === actor.sub && !canExecuteDirectly(actor)) {
       throw new ForbiddenException('账户调整申请人与复核人不能是同一账号');
     }
     const rejected = await tx.accountAdjustmentRequest.update({

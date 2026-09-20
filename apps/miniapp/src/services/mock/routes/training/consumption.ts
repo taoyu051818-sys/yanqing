@@ -106,7 +106,7 @@ export async function handleConsumePost(
         value: ok(mockTrainingConsumeProposalResponse(attendance)),
       };
     }
-    if (attendance.operatorId === mockUser().id)
+    if ((attendance.operatorId === mockUser().id) && !hasMockRole("ADMIN", "SUPER_ADMIN"))
       throw new Error("消课建议提交人与确认人不能是同一账号");
     assertTrainingSettlementPeriodUnlocked(
       new Date(lesson.startsAt),
@@ -188,9 +188,9 @@ export async function handleConfirmConsumePost(
       throw new Error("订单正在等待退款审批，请先处理退款后再消课");
     if (["COMPLETED", "CANCELLED"].includes(lesson.status))
       throw new Error("已结束或已取消的课次不能继续消课");
-    if (attendance?.operatorId === mockUser().id)
+    if ((attendance?.operatorId === mockUser().id) && !hasMockRole("ADMIN", "SUPER_ADMIN"))
       throw new Error("消课建议提交人与确认人不能是同一账号");
-    if (!attendance?.operatorId)
+    if ((!attendance?.operatorId) && !hasMockRole("ADMIN", "SUPER_ADMIN"))
       throw new Error("必须先由教练提交消课建议，再由培训主管确认入账");
     if (
       isExpired(enrollment.expiresAt) ||

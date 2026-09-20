@@ -34,8 +34,7 @@ const { exportScopes, acting, exportReport } = toRefs(props);
 <template>
   <view>
     <view class="card notice"
-      >导出由 API 生成真实 XLSX 并写入审计。mock 模式不会伪造报表；remote
-      模式下可直接打开或转发。</view
+      >选择需要导出的业务范围，生成后可打开或转发 Excel 文件。导出操作会留下记录。</view
     >
     <view class="export-grid"
       ><button

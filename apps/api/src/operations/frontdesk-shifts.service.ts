@@ -1,3 +1,4 @@
+import { canExecuteDirectly } from '../common/auth/admin-execution.js';
 import {
   BadRequestException,
   ConflictException,
@@ -311,7 +312,10 @@ export class FrontDeskShiftsService {
   ) {
     this.assertVarianceReviewer(actor);
     const reviewReason = dto.reason?.trim() || null;
-    if (reviewReason && (reviewReason.length < 2 || reviewReason.length > 300)) {
+    if (
+      reviewReason &&
+      (reviewReason.length < 2 || reviewReason.length > 300)
+    ) {
       throw new BadRequestException('差异复核原因长度必须为2-300个字符');
     }
 
@@ -332,8 +336,13 @@ export class FrontDeskShiftsService {
           if (exactReplay) return shift;
           throw new ConflictException('现金差异已经由其他复核结果处理');
         }
-        if (shift.operatorId === actor.sub || shift.closedById === actor.sub) {
-          throw new ForbiddenException('班次操作人与关班人不能复核自己的现金差异');
+        if (
+          !canExecuteDirectly(actor) &&
+          (shift.operatorId === actor.sub || shift.closedById === actor.sub)
+        ) {
+          throw new ForbiddenException(
+            '班次操作人与关班人不能复核自己的现金差异',
+          );
         }
         if ((shift.cashVarianceCents ?? 0) !== 0 && !reviewReason) {
           throw new BadRequestException('非零现金差异必须填写复核原因');

@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { toRefs, computed } from "vue";
+import { toRefs, computed, nextTick, watch } from "vue";
+import { useUnsavedForm } from "../../../composables/use-unsaved-form";
 import { today as shanghaiDate } from "../../../../../utils/format";
 
 const props = defineProps<{
+  errorMessage?: string;
+  errorField?: string;
   canCreateSession: boolean;
   sessionClasses: any[];
   sessionClassIndex: number;
@@ -67,16 +70,21 @@ const sessionReason = computed({
   get: () => props.sessionReason,
   set: (value) => emit("update:sessionReason", value),
 });
+const { markSaved } = useUnsavedForm(() => ({ date:props.sessionDate, start:props.sessionStartTime, end:props.sessionEndTime, courts:props.selectedCourtIds, note:props.sessionNote, reason:props.sessionReason, classIndex:props.sessionClassIndex }));
+watch(() => props.actionKey, (key, previous) => { if (previous === 'create-session' && !key && !props.errorMessage) markSaved(); });
+watch(() => [props.errorField, props.errorMessage], async () => {
+  if (!props.errorField || !props.errorMessage) return;
+  await nextTick();
+  uni.pageScrollTo({ selector:`#session-field-${props.errorField}`, offsetTop:-24, duration:200 });
+});
 </script>
 
 <template>
-  <view>
+  <view class="schedule-page">
     <template v-if="canCreateSession">
-      <view class="section-title"
-        >创建培训课次 <text class="section-note">教练仅可排本人班级</text></view
-      >
+
       <view class="card creation-form">
-        <picker
+        <picker id="session-field-class"
           :range="sessionClasses"
           range-key="name"
           :value="sessionClassIndex"
@@ -88,7 +96,8 @@ const sessionReason = computed({
             ></view
           ></picker
         >
-        <view class="form-grid three-columns">
+        <text v-if="errorField === 'class'" class="field-error" role="alert">{{ errorMessage }}</text>
+        <view id="session-field-time" class="form-grid three-columns">
           <picker
             mode="date"
             :value="sessionDate"
@@ -118,7 +127,8 @@ const sessionReason = computed({
             ></picker
           >
         </view>
-        <view>
+        <view id="session-field-courts">
+          <text v-if="errorField === 'time'" class="field-error" role="alert">{{ errorMessage }}</text>
           <text class="field-label">场地（至少选择一个）</text>
           <checkbox-group class="court-grid" @change="changeSessionCourts">
             <label
@@ -143,11 +153,12 @@ const sessionReason = computed({
               }}</text>
             </label>
           </checkbox-group>
+          <text v-if="errorField === 'courts'" class="field-error" role="alert">{{ errorMessage }}</text>
           <text v-if="!sessionCourts.length" class="muted"
             >场地状态加载中或当天无可用场地。</text
           >
         </view>
-        <view
+        <view id="session-field-note"
           ><text class="field-label">课次备注（选填）</text
           ><input
             v-model="sessionNote"
@@ -155,18 +166,20 @@ const sessionReason = computed({
             maxlength="300"
             placeholder="教学重点、器材或分组说明"
         /></view>
-        <view
+        <view id="session-field-reason"
           ><text class="field-label">创建原因（必填）</text
           ><textarea
             v-model="sessionReason"
+            :focus="errorField === 'reason' && Boolean(errorMessage)"
+            :aria-invalid="errorField === 'reason' && Boolean(errorMessage)"
             class="reason-input"
             maxlength="300"
             placeholder="说明本次排课依据"
           />
+          <text v-if="errorField === 'reason'" class="field-error" role="alert">{{ errorMessage }}</text>
         </view>
-        <text class="guardrail"
-          >创建前同时校验未来时间、班级归属、封场和所有已确认场地预约；成功后课次与场地占用一并落账。</text
-        >
+        <text class="guardrail">排课成功后，将同步预留所选场地。</text>
+        <view class="save-bar"><text v-if="errorMessage" class="field-error" role="alert">{{ errorMessage }}</text>
         <button
           class="primary full-button"
           :loading="actionKey === 'create-session'"
@@ -174,10 +187,15 @@ const sessionReason = computed({
           @tap="createSession"
         >
           创建培训课次
-        </button>
+        </button></view>
       </view>
     </template>
   </view>
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>
+.schedule-page { padding-bottom:calc(180rpx + env(safe-area-inset-bottom)); }.field-error { display:block; color:#a52626; font-size:26rpx; line-height:1.5; margin-top:10rpx; }
+.save-bar { position:fixed; left:0; right:0; bottom:0; z-index:25; padding:20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom)); background:#fff; border-top:1rpx solid #e2e7e3; }.save-bar .field-error { margin:0 0 12rpx; }.save-bar button { width:100%; margin:0; }
+</style>

@@ -5,6 +5,7 @@ import { money } from "../../../../../utils/format";
 import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 
 const props = defineProps<{
+  direct?: boolean;
   loadErrors: {
     dashboard: string;
     refunds: string;
@@ -143,7 +144,7 @@ const {
       </view>
       <view
         v-if="
-          statement.isOwnCreator === true &&
+          !direct && statement.isOwnCreator === true &&
           ['PENDING_CONFIRMATION', 'CONFIRMED'].includes(statement.status)
         "
         class="locked-note"
@@ -151,7 +152,7 @@ const {
       >
       <view class="action-row">
         <button
-          v-if="statement.status === 'DRAFT'"
+          v-if="!direct && statement.status === 'DRAFT'"
           class="primary action-button"
           :disabled="loading || Boolean(actionKey)"
           @tap="changeConsignmentSettlement(statement, 'submit')"
@@ -174,7 +175,7 @@ const {
         </button>
         <button
           v-if="
-            statement.status === 'PENDING_CONFIRMATION' &&
+            !direct && statement.status === 'PENDING_CONFIRMATION' &&
             statement.isOwnCreator !== true
           "
           class="primary action-button"
@@ -190,7 +191,7 @@ const {
         <button
           v-if="
             statement.status === 'PENDING_CONFIRMATION' &&
-            statement.isOwnCreator !== true
+            (direct || statement.isOwnCreator !== true)
           "
           class="danger action-button"
           :disabled="loading || Boolean(actionKey)"
@@ -204,7 +205,7 @@ const {
         </button>
         <button
           v-if="
-            statement.status === 'CONFIRMED' && statement.isOwnCreator !== true
+            (direct ? ['DRAFT','PENDING_CONFIRMATION','CONFIRMED'].includes(statement.status) : statement.status === 'CONFIRMED' && (direct || statement.isOwnCreator !== true))
           "
           class="primary action-button"
           :disabled="loading || Boolean(actionKey)"
@@ -213,12 +214,12 @@ const {
           {{
             acting(`consignment-settle:${statement.id}`)
               ? "付款中…"
-              : "确认付款"
+              : (direct ? "确认账单并记录付款" : "确认付款")
           }}
         </button>
         <button
           v-if="
-            statement.status === 'CONFIRMED' && statement.isOwnCreator !== true
+            statement.status === 'CONFIRMED' && (direct || statement.isOwnCreator !== true)
           "
           class="danger action-button"
           :disabled="loading || Boolean(actionKey)"

@@ -88,6 +88,16 @@ export class OrdersController {
     return this.ordersOrderRefundRequests.requestRefund(id, dto, actor);
   }
 
+  @Post(':id/refunds/direct')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  directRefund(
+    @Param('id') id: string,
+    @Body() dto: RequestRefundDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.ordersOrderRefundRequests.directRefund(id, dto, actor);
+  }
+
   @Post('refunds/:refundId/approve')
   @Roles(AppRole.FINANCE, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   approveRefund(

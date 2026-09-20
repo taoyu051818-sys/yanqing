@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import OperationsTabs from "../../../components/OperationsTabs.vue";
 import type { EventDetail, InventoryItem } from "../page-types";
 
 import type { EventMatch } from "../page-types";
-import { toRefs, computed } from "vue";
+import { toRefs, computed, ref, watch } from "vue";
 import MetricCard from "../../../components/MetricCard.vue";
 import { shortDate } from "../../../../../utils/format";
 import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
@@ -155,11 +156,16 @@ const pairingRightIndex = computed({
   get: () => props.pairingRightIndex,
   set: (value) => emit("update:pairingRightIndex", value),
 });
+const detailTab = ref('summary');
+const detailTabs = computed(() => [{ key:'summary', title:'概览' }, { key:'teams', title:'报名签到' }, { key:'matches', title:'轮次比分' }, ...(props.mayOperatePrizes ? [{ key:'prizes', title:'奖品' }] : [])]);
+watch(() => props.focusedRecord, record => { if (record.startsWith('event-team:')) detailTab.value = 'teams'; else if (record.startsWith('event-match:')) detailTab.value = 'matches'; else if (record.startsWith('event-prize:')) detailTab.value = 'prizes'; }, { immediate:true, flush:'sync' });
 </script>
 
 <template>
   <view>
     <template v-if="eventDetail">
+      <OperationsTabs v-model="detailTab" :items="detailTabs" label="赛事详情分类" />
+      <template v-if="detailTab === 'summary'">
       <view class="metric-grid">
         <MetricCard
           v-for="item in metrics"
@@ -258,6 +264,8 @@ const pairingRightIndex = computed({
         </view>
       </view>
 
+      </template>
+      <template v-if="detailTab === 'teams'">
       <view class="section-title">
         报名与签到
         <text class="section-note"
@@ -342,7 +350,9 @@ const pairingRightIndex = computed({
       </view>
       <view v-if="!teams.length" class="empty card">该赛事尚无报名队伍</view>
 
-      <template v-if="eventDetail.status === 'COMPLETED' && mayOperatePrizes">
+      </template>
+      <view v-if="detailTab === 'prizes' && eventDetail.status !== 'COMPLETED'" class="empty card">赛事完成后可登记奖品发放与签收。</view>
+      <template v-if="detailTab === 'prizes' && eventDetail.status === 'COMPLETED' && mayOperatePrizes">
         <view class="section-title">
           奖品出库与签收
           <text class="section-note"
@@ -462,10 +472,11 @@ const pairingRightIndex = computed({
           </button>
         </view>
         <view v-if="!prizeAwards.length" class="empty card"
-          >尚未发放奖品。发放会原子扣减库存并写入审计。</view
+          >尚未发放奖品。登记发放后会同步扣减库存。</view
         >
       </template>
 
+      <template v-if="detailTab === 'matches'">
       <view class="round-heading">
         <view
           ><text class="section-title round-title">轮次与比分</text
@@ -614,12 +625,7 @@ const pairingRightIndex = computed({
         >第 {{ selectedRound }} 轮没有对阵记录，请刷新或检查赛事数据</view
       >
 
-      <view class="card boundary">
-        <text class="boundary-title">操作边界</text>
-        <text class="muted"
-          >前台负责签到、未确认比分和库存实物经办；赛事管理员及管理员可以发布、生成轮次、纠错和完赛。奖品只能在完赛后发放，出库即原子扣减库存，签收另留操作者和审计证据。</text
-        >
-      </view>
+      </template>
     </template>
   </view>
 </template>

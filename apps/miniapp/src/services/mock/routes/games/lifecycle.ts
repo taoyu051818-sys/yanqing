@@ -1,3 +1,4 @@
+import { executeMockActivityRefunds } from "../orders/activity-refunds";
 import { mockUser } from "../../core";
 import { getOrders, saveOrders } from "../../venue";
 import {
@@ -21,7 +22,7 @@ import { newOrderNo } from "../../policies/orders.js";
 import { gameCancellationResponse } from "../../policies/games.js";
 import type { MockRouteResult, MockRouteOptions } from "../route-contract.js";
 
-export async function handleCancelGamePost(
+async function cancelGameAndRecord(
   method: string,
   url: string,
   data: any,
@@ -71,6 +72,16 @@ export async function handleCancelGamePost(
     if (new Date(game.startsAt) <= now)
       throw new Error("球局已开赛，不能执行开赛前取消");
     const orders = getOrders();
+    const cancelledOrderIds = new Set(
+      (game.registrations || []).map((row: any) => row.orderId),
+    );
+    for (const order of orders.filter((row: any) =>
+      cancelledOrderIds.has(row.id),
+    )) {
+      for (const refund of order.refunds || [])
+        if (["REQUESTED", "APPROVED", "PROCESSING"].includes(refund.status))
+          refund.cancellationRequired = true;
+    }
     const activeRegistrations = (game.registrations || []).filter(
       (registration: any) =>
         ["WAITLISTED", "REGISTERED", "PAID", "CHECKED_IN"].includes(
@@ -135,6 +146,7 @@ export async function handleCancelGamePost(
         amountCents,
         reason: `球局取消：${reason}`,
         status: "REQUESTED",
+        cancellationRequired: true,
         originalOrderStatus,
         requestedAt: now.toISOString(),
       };
@@ -324,4 +336,22 @@ export async function handleCompleteGamePost(
     return { handled: true, value: ok({ checkedIn, reward: game.hostReward }) };
   }
   return { handled: false };
+}
+
+export async function handleCancelGamePost(
+  method: string,
+  url: string,
+  data: any,
+  options: MockRouteOptions,
+): Promise<MockRouteResult> {
+  const result = await cancelGameAndRecord(method, url, data, options);
+  if (!result.handled) return result;
+  const id = url.split("/")[2];
+  const participants =
+    getGames().find((row) => row.id === id)?.registrations || [];
+  await executeMockActivityRefunds(
+    new Set(participants.map((row: any) => row.orderId)),
+    data.reason,
+  );
+  return result;
 }

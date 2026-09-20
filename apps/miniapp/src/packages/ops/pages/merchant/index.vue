@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { onLoad, onShow, onShareAppMessage } from '@dcloudio/uni-app'
+import OperationsTabs from "../../components/OperationsTabs.vue";
 import OperationsFrame from '../../components/OperationsFrame.vue'
 import OperationTask from '../../components/OperationTask.vue'
 import { useOperationTask, reasonField } from '../../components/operation-task'
@@ -34,7 +35,7 @@ const generatedBatch = ref<{ templateName: string; codes: string[] } | null>(nul
 const showMerchantForm = ref(false)
 const showTemplateForm = ref(false)
 const dataScopeKey = ref('')
-const managementView = ref('')
+const managementView = ref('redeem')
 const managementViewHandled = ref(false)
 
 const isAdmin = computed(() => session.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role)))
@@ -164,12 +165,7 @@ async function load() {
     if (target) { selectedMerchantId.value = target.merchantId; focusedSettlementId.value = target.id; await nextTick(); uni.pageScrollTo({ selector: `#${opsDeepLinkDomId('merchant-settlement', target.id)}`, duration: 250 }) }
     else uni.showToast({ title: '未找到此结算单，可能已处理或无权查看', icon: 'none' })
   }
-  if (managementView.value === 'coupons' && !managementViewHandled.value) {
-    managementViewHandled.value = true
-    showTemplateForm.value = canCreateCampaign.value && merchantIsActive.value
-    await nextTick()
-    uni.pageScrollTo({ selector: '#coupon-management', duration: 280 })
-  }
+
 }
 
 async function runAction(key: string, action: () => Promise<unknown>, message: string) {
@@ -395,9 +391,17 @@ function canIssueTemplate(item: any) {
     Number(item.issuedCount || 0) < Number(item.issueLimit || 0)
 }
 
+const merchantTabs = computed(() => [
+  ...(canRedeem.value ? [{ key:'redeem', title:'核销' }] : []),
+  ...(canViewTemplates.value ? [{ key:'coupons', title:'券活动' }] : []),
+  ...(canViewSettlements.value ? [{ key:'settlements', title:'结算' }] : []),
+  ...(isAdmin.value ? [{ key:'merchants', title:'商户' }] : []),
+]);
+watch(merchantTabs, tabs => { if (tabs.length && !tabs.some(tab => tab.key === managementView.value)) managementView.value = tabs[0].key; });
+watch(focusedSettlementId, id => { if (id) managementView.value = 'settlements'; }, { flush:'sync' });
 onLoad((options) => {
   deepLinkQuery.value = parseOpsDeepLinkQuery(options)
-  managementView.value = typeof options?.view === 'string' ? options.view : ''
+  managementView.value = options?.view === 'coupons' ? 'coupons' : 'redeem'
 })
 onShow(load)
 </script>
@@ -405,6 +409,7 @@ onShow(load)
 <template>
   <OperationsFrame access="alliance" icon="shop" title="联盟商户" eyebrow="ALLIANCE MERCHANT" :role="roleLabel" :venue="merchant?.name || '商户账户'" :description="pageDescription">
     <OperationTask :task="task" />
+    <OperationsTabs v-model="managementView" :items="merchantTabs" label="商户业务分类" />
     <view v-if="loading" class="loading card">正在同步联盟商户、券活动与结算单…</view>
     <view v-if="loadError" class="error card"><text>{{ loadError }}</text><button class="ghost compact" :disabled="loading" @tap="load">重试</button></view>
     <view v-if="actionError" class="error card"><text>{{ actionError }}</text></view>
@@ -413,16 +418,16 @@ onShow(load)
       <text class="field-label">当前经营对象</text>
       <picker :range="merchantNames" @change="changeMerchant"><view class="picker-value">{{ merchant?.name || '选择商户' }}　›</view></picker>
     </view>
-    <view v-if="merchant" class="metric-grid"><MetricCard v-for="item in metrics" :key="item[0]" :label="item[0]" :value="item[1]" :note="item[2]" /></view>
+    <view v-if="merchant && managementView === 'merchants'" class="metric-grid"><MetricCard v-for="item in metrics" :key="item[0]" :label="item[0]" :value="item[1]" :note="item[2]" /></view>
 
-    <view v-if="canRedeem && merchant" class="section-title">唯一券核销</view>
-    <view v-if="canRedeem && merchant" class="card merchant-card">
+    <view v-if="managementView === 'redeem' && canRedeem && merchant" class="section-title">唯一券核销</view>
+    <view v-if="managementView === 'redeem' && canRedeem && merchant" class="card merchant-card">
       <view class="row"><view><text class="merchant-title">{{ merchant.name }}</text><text class="muted">{{ merchant.category || '联盟合作商户' }} · 商户自行收款，平台记录券核销和归因</text></view><text class="status" :class="merchantIsActive ? 'state-active' : 'state-disabled'">{{ merchantIsActive ? '合作中' : '已停用' }}</text></view>
       <view class="merchant-actions"><button class="primary" :disabled="Boolean(actionKey) || !merchantIsActive" @tap="scan">{{ merchantIsActive ? '扫码核销' : '商户已停用' }}</button><button class="secondary" :disabled="Boolean(actionKey) || !merchantIsActive" @tap="redeem()">手动输入</button></view>
     </view>
-    <view v-if="lastRedeemedCode" class="success card"><text class="notice-title">最近核销</text><text class="muted">券码 {{ lastRedeemedCode }} 已核销，消费归因已写入本商户台账。</text></view>
+    <view v-if="managementView === 'redeem' && lastRedeemedCode" class="success card"><text class="notice-title">最近核销</text><text class="muted">券码 {{ lastRedeemedCode }} 已核销，消费归因已写入本商户台账。</text></view>
 
-    <template v-if="canViewSettlements && merchant">
+    <template v-if="managementView === 'settlements' && canViewSettlements && merchant">
       <view class="section-title">商户结算单 <text class="section-note">{{ merchantSettlements.length }} 张</text></view>
       <view v-for="item in merchantSettlements" :id="opsDeepLinkDomId('merchant-settlement', item.id)" :key="item.id" class="card settlement-card" :class="{ 'deep-link-target': focusedSettlementId === item.id }">
         <view class="row"><view><text class="merchant-title">{{ displayPeriod(item) }}</text><text class="muted">发放 / 领取 / 核销：{{ item.issuedCount || 0 }} / {{ item.claimedCount || 0 }} / {{ item.redeemedCount || 0 }}</text></view><text class="status" :class="`state-${String(item.status).toLowerCase()}`">{{ settlementLabels[item.status] || item.status }}</text></view>
@@ -434,7 +439,7 @@ onShow(load)
       <view v-if="!loading && !merchantSettlements.length" class="empty card">当前商户还没有结算单；结算草稿由财务按实际核销归因生成。</view>
     </template>
 
-    <template v-if="canViewTemplates && merchant">
+    <template v-if="managementView === 'coupons' && canViewTemplates && merchant">
       <view id="coupon-management" class="section-title">券活动与唯一券 <text class="section-note">{{ merchantTemplates.length }} 个</text></view>
       <button v-if="canCreateCampaign" class="secondary full" :disabled="!merchantIsActive" @tap="showTemplateForm = !showTemplateForm">{{ merchantIsActive ? (showTemplateForm ? '收起券活动表单' : '新建券活动') : '商户停用期间不能新建券活动' }}</button>
       <view v-if="showTemplateForm && canCreateCampaign && merchantIsActive" class="card form-card">
@@ -474,7 +479,7 @@ onShow(load)
 
     <template v-if="canCreateCampaign">
       <view class="section-title">合作商户档案</view>
-      <view v-if="merchant" class="card lifecycle-card"><view class="row"><view><text class="merchant-title">{{ merchant.name }}</text><text class="muted">状态变更不会删除历史券码、核销和结算记录。</text></view><text class="status" :class="merchantIsActive ? 'state-active' : 'state-disabled'">{{ merchantIsActive ? 'ACTIVE' : 'DISABLED' }}</text></view><button :class="merchantIsActive ? 'danger full' : 'secondary full'" :disabled="Boolean(actionKey)" @tap="toggleMerchantStatus">{{ merchantIsActive ? '停用当前商户' : '启用当前商户' }}</button></view>
+      <view v-if="merchant" class="card lifecycle-card"><view class="row"><view><text class="merchant-title">{{ merchant.name }}</text><text class="muted">状态变更不会删除历史券码、核销和结算记录。</text></view><text class="status" :class="merchantIsActive ? 'state-active' : 'state-disabled'">{{ merchantIsActive ? '合作中' : '已停用' }}</text></view><button :class="merchantIsActive ? 'danger full' : 'secondary full'" :disabled="Boolean(actionKey)" @tap="toggleMerchantStatus">{{ merchantIsActive ? '停用当前商户' : '启用当前商户' }}</button></view>
       <button class="secondary full" @tap="showMerchantForm = !showMerchantForm">{{ showMerchantForm ? '收起商户表单' : '新建联盟商户' }}</button>
       <view v-if="showMerchantForm" class="card form-card">
         <view class="grid-2"><input v-model="merchantForm.code" class="input" maxlength="40" placeholder="商户编码" /><input v-model="merchantForm.name" class="input" maxlength="120" placeholder="商户名称" /></view>
@@ -487,8 +492,6 @@ onShow(load)
       </view>
     </template>
 
-    <view class="section-title">操作边界</view>
-    <view class="card boundary"><text class="muted">商户只见本店数据；重复核销、过期券和非本店券会被拒绝。券活动由管理员创建，商户可发行本店模板的唯一券。财务生成并提交结算单，商户只负责确认或提出有原因的争议。</text></view>
     <view v-if="!loading && !merchant" class="empty card">当前账号没有绑定可用联盟商户。</view>
   </OperationsFrame>
 </template>
@@ -524,3 +527,5 @@ onShow(load)
 .boundary { line-height:1.7; }.empty { color:#758079; text-align:center; }
 button[disabled] { opacity:.48; }
 </style>
+
+<style scoped>.error.card { position:sticky; top:0; z-index:15; }</style>

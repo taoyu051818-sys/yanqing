@@ -3,7 +3,7 @@ import { useOperationTask, validateTaskField } from './operation-task'
 vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(), onUnmounted: vi.fn() }))
 const storage = new Map<string, unknown>()
 vi.stubGlobal('document', { querySelector: () => null })
-vi.stubGlobal('uni', { getStorageSync: (key: string) => storage.get(key), pageScrollTo: vi.fn() })
+vi.stubGlobal('uni', { getStorageSync: (key: string) => storage.get(key), pageScrollTo: vi.fn(), showToast: vi.fn() })
 describe('modal operation task', () => {
   beforeEach(() => { vi.clearAllMocks(); storage.clear(); storage.set('yanqing_actor_id', 'operator-a') })
   it.each(['-1', '1.111', '1e3', 'NaN'])('rejects invalid money %s', value => {
@@ -82,3 +82,11 @@ describe('modal operation task', () => {
     expect(task.state.errors.slot).toBe('请重新选择时段')
   })
 })
+
+it('closes a one-step refund with status feedback instead of another confirmation card', async () => {
+  const task=useOperationTask();
+  task.start({title:'确认退款',description:'',confirmText:'确认退款',fields:[],successFeedback:'toast',submit:async()=>'退款处理中，无需再次审核'});
+  await task.submit();
+  expect(task.state.open).toBe(false); expect(task.state.result).toBe('');
+  expect(uni.showToast).toHaveBeenCalledWith(expect.objectContaining({title:'退款处理中，无需再次审核'}));
+});

@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import type { AuthUser } from '../../common/auth/auth-user.js';
@@ -99,9 +98,7 @@ export async function approveConsumeCorrection(
     if (correction.status !== TrainingConsumeCorrectionStatus.REQUESTED) {
       throw new ConflictException('只有待复核申请可以批准');
     }
-    if (correction.requestedById === actor.sub) {
-      throw new ForbiddenException('消课冲正申请人与复核人不能为同一账号');
-    }
+
     if (
       correction.recognition.type !== TrainingRecognitionType.CONSUME ||
       correction.recognition.reversedBy

@@ -215,6 +215,69 @@ describe('FrontDeskShiftsService', () => {
     expect(tx.auditLog.create).toHaveBeenCalledTimes(1);
   });
 
+  it.each([AppRole.ADMIN, AppRole.SUPER_ADMIN])('%s reviews its own shift variance once with audit evidence', async role => {
+    const actingAdmin = { ...administrator, roles: [role] };
+    const closed = {
+      ...openShift,
+      status: FrontDeskShiftStatus.CLOSED,
+      closedById: actingAdmin.sub,
+      operatorId: actingAdmin.sub,
+      closingCashCents: 9_500,
+      expectedCashCents: 10_000,
+      cashVarianceCents: -500,
+      varianceReviewedById: null,
+      varianceReviewedAt: null,
+      varianceReviewReason: null,
+    };
+    const reviewed = {
+      ...closed,
+      varianceReviewedById: actingAdmin.sub,
+      varianceReviewedAt: new Date('2026-08-30T04:00:00.000Z'),
+      varianceReviewReason: '短款500分，监控与收据已核对',
+    };
+    const tx = {
+      frontDeskShift: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce(closed)
+          .mockResolvedValueOnce(reviewed),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue(reviewed),
+      },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const service = new FrontDeskShiftsService({
+      $transaction: transactionRunner(tx),
+    } as never);
+    const command = { reason: '短款500分，监控与收据已核对' };
+
+    await expect(service.reviewVariance(closed.id, command, actingAdmin))
+      .resolves.toEqual(reviewed);
+    expect(tx.frontDeskShift.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: closed.id,
+        status: FrontDeskShiftStatus.CLOSED,
+        varianceReviewedById: null,
+      },
+      data: expect.objectContaining({
+        varianceReviewedById: actingAdmin.sub,
+        varianceReviewReason: command.reason,
+      }),
+    });
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'FRONT_DESK_SHIFT_VARIANCE_REVIEWED',
+        actorId: actingAdmin.sub,
+        objectId: closed.id,
+      }),
+    });
+
+    await expect(service.reviewVariance(closed.id, command, actingAdmin))
+      .resolves.toEqual(reviewed);
+    expect(tx.frontDeskShift.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.auditLog.create).toHaveBeenCalledTimes(1);
+  });
+
   it('scopes front-desk history to self while finance and administrators may select an operator', async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const service = new FrontDeskShiftsService({

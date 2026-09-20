@@ -1582,6 +1582,19 @@
   },
   {
     "controller": "OrdersController",
+    "method": "directRefund",
+    "verb": "POST",
+    "path": "/api/v1/orders/:id/refunds/direct",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "OrderRefundRequestsService",
+    "serviceMethod": "directRefund"
+  },
+  {
+    "controller": "OrdersController",
     "method": "approveRefund",
     "verb": "POST",
     "path": "/api/v1/orders/refunds/:refundId/approve",

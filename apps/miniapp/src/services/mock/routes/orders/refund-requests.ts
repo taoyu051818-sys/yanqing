@@ -13,6 +13,7 @@ import {
 } from "../../policies/orders.js";
 import { requireMockOpenFrontDeskShift } from "../../policies/front-desk.js";
 import type { MockRouteResult, MockRouteOptions } from "../route-contract.js";
+import { handleApproveRefundPost } from './refund-approval.js';
 
 export async function handleRefundPost(
   method: string,
@@ -20,6 +21,13 @@ export async function handleRefundPost(
   data: any,
   options: MockRouteOptions,
 ): Promise<MockRouteResult> {
+  const directMatch = url.match(/^\/orders\/([^/]+)\/refunds\/direct$/);
+  if (directMatch && method === 'POST') {
+    if (!hasMockRole('ADMIN', 'SUPER_ADMIN')) throw new Error('仅管理员或超级管理员可直接退款');
+    const requested = await handleRefundPost(method, `/orders/${directMatch[1]}/refunds`, data, options);
+    if (!requested.handled) throw new Error('退款申请未创建');
+    return handleApproveRefundPost(method, `/orders/refunds/${requested.value.id}/approve`, { reason:data.reason }, options);
+  }
   const refundMatch = url.match(/^\/orders\/([^/]+)\/refunds$/);
   if (refundMatch && method === "POST") {
     const orders = getOrders();

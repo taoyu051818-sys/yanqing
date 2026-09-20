@@ -1,3 +1,4 @@
+import { hasMockRole } from "../../policies/common.js";
 import { mockUser } from "../../core";
 import {
   getAccountAdjustmentRequests,
@@ -73,7 +74,7 @@ export async function handleMembersAccountAdjustmentsGet(
   return { handled: false };
 }
 
-export async function handleAccountAdjustmentCreatePost(
+async function createAdjustmentRequest(
   method: string,
   url: string,
   data: any,
@@ -173,7 +174,10 @@ export async function handleAccountAdjustmentReviewPost(
       if (request.status === "POSTED")
         throw new Error("已入账的账户调整不能驳回；请提交反向调整申请");
     }
-    if (request.requestedById === mockUser().id)
+    if (
+      request.requestedById === mockUser().id &&
+      !hasMockRole("ADMIN", "SUPER_ADMIN")
+    )
       throw new Error("账户调整申请人与复核人不能是同一账号");
 
     const now = new Date().toISOString();
@@ -265,4 +269,25 @@ export async function handleMemberAccountTransactionsGet(
     };
   }
   return { handled: false };
+}
+
+export async function handleAccountAdjustmentCreatePost(
+  method: string,
+  url: string,
+  data: any,
+  options: MockRouteOptions,
+): Promise<MockRouteResult> {
+  const result = await createAdjustmentRequest(method, url, data, options);
+  if (!result.handled) return result;
+  if (
+    hasMockRole("ADMIN", "SUPER_ADMIN") &&
+    result.value.status === "REQUESTED"
+  )
+    return handleAccountAdjustmentReviewPost(
+      "POST",
+      `/members/account-adjustments/${result.value.id}/approve`,
+      { reason: data.reason },
+      options,
+    );
+  return result;
 }

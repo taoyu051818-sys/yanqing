@@ -1,3 +1,7 @@
+import {
+  canExecuteDirectly,
+  directExecutionKey,
+} from '../common/auth/admin-execution.js';
 import { randomBytes } from 'node:crypto';
 
 import {
@@ -117,8 +121,21 @@ export class YouthTrainingRulesService {
   }
 
   async create(dto: CreateYouthTrainingRuleDto, actor: AuthUser) {
-    if (!actor.roles.includes(AppRole.ADMIN)) {
-      throw new ForbiddenException('青少年监管规则必须由 ADMIN 制单');
+    const result = await this.createDraft(dto, actor);
+    if (result.status !== 'DRAFT') return result;
+    return this.publish(
+      result.id,
+      {
+        reason: dto.reason,
+        idempotencyKey: directExecutionKey('youth-rule', dto.idempotencyKey),
+      },
+      actor,
+    );
+  }
+
+  private async createDraft(dto: CreateYouthTrainingRuleDto, actor: AuthUser) {
+    if (!canExecuteDirectly(actor)) {
+      throw new ForbiddenException('仅管理员可设置青少年培训规则');
     }
     const reason = normalizedCommandText(dto.reason, '制单原因', 2, 300);
     const idempotencyKey = normalizedCommandText(
@@ -157,9 +174,7 @@ export class YouthTrainingRulesService {
       });
     }
     if (effectiveFrom <= new Date()) {
-      throw new BadRequestException(
-        '监管规则生效时间必须晚于当前时间，以便完成异人复核',
-      );
+      throw new BadRequestException('监管规则生效时间必须晚于当前时间');
     }
 
     try {
@@ -195,7 +210,7 @@ export class YouthTrainingRulesService {
           await tx.auditLog.create({
             data: {
               actorId: actor.sub,
-              actorRole: AppRole.ADMIN,
+              actorRole: actor.roles[0],
               action: 'YOUTH_TRAINING_RULE_DRAFTED',
               objectType: 'YouthTrainingRule',
               objectId: created.id,
@@ -261,8 +276,8 @@ export class YouthTrainingRulesService {
       | typeof YouthTrainingRuleStatus.PUBLISHED
       | typeof YouthTrainingRuleStatus.REJECTED,
   ) {
-    if (!actor.roles.includes(AppRole.SUPER_ADMIN)) {
-      throw new ForbiddenException('仅 SUPER_ADMIN 可复核青少年监管规则');
+    if (!canExecuteDirectly(actor)) {
+      throw new ForbiddenException('仅管理员可发布青少年培训规则');
     }
     const reason = normalizedCommandText(dto.reason, '复核原因', 2, 300);
     const idempotencyKey = normalizedCommandText(
@@ -302,11 +317,6 @@ export class YouthTrainingRulesService {
             where: { id },
           });
           if (!current) throw new NotFoundException('青少年监管规则不存在');
-          if (current.requestedById === actor.sub) {
-            throw new ForbiddenException(
-              '监管规则制单人与复核人不能是同一账号',
-            );
-          }
           if (current.status !== YouthTrainingRuleStatus.DRAFT) {
             throw new ConflictException('监管规则已完成复核，不能重复覆盖状态');
           }
@@ -375,7 +385,7 @@ export class YouthTrainingRulesService {
           await tx.auditLog.create({
             data: {
               actorId: actor.sub,
-              actorRole: AppRole.SUPER_ADMIN,
+              actorRole: actor.roles[0],
               action:
                 target === YouthTrainingRuleStatus.PUBLISHED
                   ? 'YOUTH_TRAINING_RULE_PUBLISHED'
@@ -435,7 +445,7 @@ export class YouthTrainingRulesService {
     const rule = await this.active(at);
     if (!rule) {
       throw new ConflictException(
-        '当前没有已发布且生效的青少年培训监管规则，正式销售已阻断，请先完成 ADMIN 制单与 SUPER_ADMIN 复核发布',
+        '当前没有已发布且生效的青少年培训监管规则，正式销售已阻断，请管理员先设置并发布规则',
       );
     }
     const violations: string[] = [];

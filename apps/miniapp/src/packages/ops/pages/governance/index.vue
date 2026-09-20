@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useUnsavedForm } from "../../composables/use-unsaved-form";
 import UserGovernance from "./sections/UserGovernance.vue";
 import ParameterGovernance from "./sections/ParameterGovernance.vue";
 import RiskGovernance from "./sections/RiskGovernance.vue";
@@ -30,6 +31,7 @@ import { shortDate } from "../../../../utils/format";
 import { withPendingCreationKey } from "../../../../utils/pending-creation-key";
 
 const session = useSessionStore();
+const parameterEditor = ref(false);
 const loading = ref(false);
 const acting = ref("");
 const error = ref("");
@@ -73,6 +75,7 @@ const parameterForm = reactive({
   locked: false,
 });
 
+const { markSaved: markParameterSaved } = useUnsavedForm(() => parameterForm, () => parameterEditor.value);
 const roleOptions: Array<{ value: AppRole; label: string }> = [
   { value: "MEMBER", label: "会员" },
   { value: "FRONT_DESK", label: "前台" },
@@ -359,7 +362,8 @@ async function createParameter() {
     parameterForm.lateMinutes = "";
     parameterForm.reason = "";
     uni.showToast({ title: "业务规则新版本已创建", icon: "success" });
-    await loadCurrentTab();
+    markParameterSaved();
+    uni.navigateBack({ fail:() => uni.redirectTo({ url:'/packages/ops/pages/governance/index?view=parameters' }) });
   } catch (cause: any) {
     uni.showToast({ title: cause?.message || "参数创建失败", icon: "none" });
   } finally {
@@ -488,6 +492,9 @@ async function exportReport(scope: string) {
 }
 
 onLoad((options) => {
+  parameterEditor.value = options?.view === 'create-parameter';
+  if (options?.view === 'parameters' || parameterEditor.value) activeTab.value = 'parameters';
+  if (parameterEditor.value) uni.setNavigationBarTitle({ title:'新建业务规则' });
   detailUserId.value = typeof options?.userId === "string" ? options.userId : "";
   if (detailUserId.value) uni.setNavigationBarTitle({ title: "人员权限" });
   if (
@@ -501,6 +508,7 @@ onLoad((options) => {
 onShow(async () => {
   await session.hydrate();
   if (!hasOperationsAccess(session.roles, "governance")) return;
+  if (parameterEditor.value && !canConfigure.value) { error.value = "当前岗位无权配置业务规则"; return; }
   if (detailUserId.value && !visibleTabs.value.some(tab => tab.key === "users")) { error.value = "当前岗位无权查看人员权限"; return; }
   if (!visibleTabs.value.some((tab) => tab.key === activeTab.value))
     activeTab.value = visibleTabs.value[0]?.key || "risks";
@@ -518,7 +526,7 @@ onShow(async () => {
     role="管理员 / 财务"
     description="管理员维护组织权限和业务规则；财务仅处理风险、审计与数据导出。"
   >
-    <view v-if="!detailUserId" class="tabs governance-tabs">
+    <view v-if="!detailUserId && !parameterEditor" class="tabs governance-tabs">
       <view class="tab-row">
         <button
           v-for="tab in visibleTabs"
@@ -573,6 +581,7 @@ onShow(async () => {
     <ParameterGovernance
       v-else-if="activeTab === 'parameters'"
       :activeTab="activeTab"
+      :editing="parameterEditor"
       :canConfigure="canConfigure"
       :changeParameterDefinition="changeParameterDefinition"
       :selectedParameterDefinition="selectedParameterDefinition"

@@ -1,3 +1,4 @@
+import { ActivityRefundExecutionService } from './refund-review/activity-refund-execution.service.js';
 import { OrderQueriesService } from './queries/orders-queries.service.js';
 import { OrderPaymentsService } from './payments/orders-payments.service.js';
 import { OrderRefundRequestsService } from './refund-requests/orders-refund-requests.service.js';
@@ -17,6 +18,7 @@ import { PaymentsModule } from '../payments/payments.module.js';
     OrderPaymentsService,
     OrderRefundRequestsService,
     OrderRefundReviewService,
+    ActivityRefundExecutionService,
     PendingOrdersService,
   ],
   exports: [

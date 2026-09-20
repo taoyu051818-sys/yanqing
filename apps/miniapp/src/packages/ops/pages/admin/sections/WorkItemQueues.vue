@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DisplayWorkGroup } from "../page-types";
-import { toRefs } from "vue";
+import { computed, ref, toRefs } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import type { WorkItem } from "../../../../../services/api";
 
@@ -47,6 +47,9 @@ const {
   openGroup,
   unmappedItems,
 } = toRefs(props);
+const selectedGroup = ref('all');
+const groupChoices = computed(() => [{ key:'all', title:'全部待办' }, ...props.groupedWorkItems.filter(group => group.items.length).map(group => ({ key:group.key, title:group.title }))]);
+const visibleGroups = computed(() => props.groupedWorkItems.filter(group => group.items.length && (selectedGroup.value === 'all' || selectedGroup.value === group.key)));
 </script>
 
 <template>
@@ -73,8 +76,10 @@ const {
       <button class="secondary retry" @tap="load">重试待办</button>
     </view>
     <view v-else class="todo-list">
+      <picker :range="groupChoices" range-key="title" :value="Math.max(0, groupChoices.findIndex(group => group.key === selectedGroup))" @change="selectedGroup = groupChoices[Number($event.detail.value)].key"><view class="group-picker">{{ groupChoices.find(group => group.key === selectedGroup)?.title || '全部待办' }} ▾</view></picker>
+      <view v-if="!todoCount" class="card group-empty">当前没有待处理事项</view>
       <view
-        v-for="group in groupedWorkItems"
+        v-for="group in visibleGroups"
         :key="group.key"
         class="card todo-group"
       >
@@ -101,7 +106,7 @@ const {
               }}</text></view
             >
             <view class="item-status">
-              <StatusBadge :value="item.status" />
+              <StatusBadge :value="item.status" domain="work" />
             </view>
           </view>
           <text v-if="group.items.length > 3" class="more-hint"
@@ -113,13 +118,12 @@ const {
           {{ group.items.length ? "进入处理" : "打开业务中心" }}
         </button>
       </view>
-      <view v-if="unmappedItems.length" class="card unmapped">
+      <view v-if="unmappedItems.length && selectedGroup === 'all'" class="card unmapped">
         <text class="error-title"
           >待识别待办 {{ unmappedItems.length }} 项</text
         >
         <text class="muted"
-          >接口返回了暂未配置分组的事项，已保留在队列中；请补充 kind/group
-          映射后再分派。</text
+          >这些事项暂未分类，记录已保留，请联系管理员核对处理。</text
         >
       </view>
       <view v-if="!todoCount" class="card all-clear"
@@ -133,3 +137,5 @@ const {
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>.group-picker { background:#fff; border-radius:20rpx; padding:24rpx; min-height:88rpx; box-sizing:border-box; font-size:28rpx; }</style>

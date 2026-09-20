@@ -339,8 +339,8 @@ export async function handleReviewFrontDeskVariancePost(
       throw new Error("现金差异已经由其他复核结果处理");
     }
     if (
-      shift.operatorId === mockUser().id ||
-      shift.closedById === mockUser().id
+      (shift.operatorId === mockUser().id ||
+      shift.closedById === mockUser().id) && !hasMockRole("ADMIN", "SUPER_ADMIN")
     )
       throw new Error("班次操作人与关班人不能复核自己的现金差异");
     if (Number(shift.cashVarianceCents || 0) !== 0 && !reason)

@@ -1,19 +1,21 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
+import OperationsTabs from '../../components/OperationsTabs.vue'
 import OperationsFrame from '../../components/OperationsFrame.vue'
 import OperationTask from '../../components/OperationTask.vue'
 import { useOperationTask, reasonField } from '../../components/operation-task'
 import BookingMemberPicker from '../../../../components/BookingMemberPicker.vue'
 import { usePagedList } from '../../utils/paged-list'
 import ReasonForm from '../../../../components/ReasonForm.vue'
-import MetricCard from '../../components/MetricCard.vue'
+import AppIcon from '../../../../components/AppIcon.vue'
 import StatusBadge from '../../../../components/StatusBadge.vue'
 import { hasOperationsAccess } from '../../../../config/operations'
 import { endpoints } from '../../../../services/api'
 import { useSessionStore } from '../../../../stores/session'
 import type { MemberDirectoryItem } from '../../../../types/domain'
 import { idempotencyKey, money, shortDate, today } from '../../../../utils/format'
+import { canDirectRefund, directRefundFeedback } from '../../../../utils/refund-action'
 import { openMemberPage } from '../../../../utils/member-navigation'
 import { withPendingCreationKey } from '../../../../utils/pending-creation-key'
 import {
@@ -23,6 +25,8 @@ import {
   type OpsDeepLinkQuery,
 } from '../../utils/work-item-deep-link'
 
+const frontdeskView = ref('service')
+const frontdeskTabs = [{ key:'service', title:'现场服务' }, { key:'orders', title:'订单' }, { key:'handover', title:'交接班' }]
 const task = useOperationTask()
 const session = useSessionStore()
 const orderStatus = ref(''), orderKeyword = ref('')
@@ -30,10 +34,12 @@ const orderStatuses = [{ value: 'PAID', label: '已支付' }, { value: 'CHECKED_
 const orderQueue = usePagedList<any>((page, pageSize) => endpoints.adminOrders({ page, pageSize, businessType: 'VENUE', status: orderStatus.value || undefined, keyword: orderKeyword.value.trim() || undefined }), 20, () => JSON.stringify([orderStatus.value, orderKeyword.value.trim()]))
 const orders = orderQueue.items
 const showMemberPicker = ref(false)
+let bookingAfterSelection = false
+function closeMemberPicker() { showMemberPicker.value = false; bookingAfterSelection = false }
+function changeBookingMember() { bookingAfterSelection = false; showMemberPicker.value = true }
 const members = ref<MemberDirectoryItem[]>([])
-const availability = ref<any>(null)
 const selectedMemberId = ref('')
-watch(() => session.user?.id, () => { members.value = []; selectedMemberId.value = ''; showMemberPicker.value = false }, { flush: 'sync' })
+watch(() => session.user?.id, () => { members.value = []; selectedMemberId.value = ''; closeMemberPicker() }, { flush: 'sync' })
 const loading = ref(false)
 const fulfillment = ref<{ orderId: string; outcome: 'COMPLETED' | 'NO_SHOW'; observedAt: string } | null>(null)
 const fulfilling = ref(false)
@@ -46,7 +52,6 @@ function prepareFulfillment(order: any, outcome: 'COMPLETED' | 'NO_SHOW') {
 const loadError = ref('')
 const shiftLoaded = ref(false)
 const ordersLoaded = ref(false)
-const availabilityLoaded = ref(false)
 const shift = ref<any>(null)
 const deepLinkQuery = ref<OpsDeepLinkQuery>({})
 const deepLinkHandled = ref(false)
@@ -67,20 +72,9 @@ const venueOrders = computed(() => pendingOrders.value.filter((order) => order.b
 const paidOrders = computed(() => venueOrders.value.filter((order) => canCheckInBooking(order) && !bookingEnded(order)))
 const selectedMember = computed(() => members.value.find((member) => member.id === selectedMemberId.value) || null)
 const selectedMemberDetail = computed(() => {
-  if (!selectedMember.value) return '未选择客户，不能创建现场场地订单'
+  if (!selectedMember.value) return '未选择会员'
   return `${selectedMember.value.displayName}${selectedMember.value.phone ? ` · ${selectedMember.value.phone}` : ''}`
 })
-const freeCourts = computed(() => {
-  if (!availability.value) return 0
-  const booked = new Set((availability.value.bookings || []).map((item: any) => item.courtId))
-  return (availability.value.courts || []).filter((court: any) => court.enabled && !booked.has(court.id)).length
-})
-const metrics = computed(() => [
-  ['本页现场单', String(venueOrders.value.length), '筛选后当前已加载'],
-  ['本页待签到', String(paidOrders.value.length), '已加载场地单'],
-  ['可用场地', String(freeCourts.value), '今日资源'],
-  ['当前会员', selectedMember.value ? '已选择' : '待选择', '可搜索全部服务范围'],
-])
 
 async function load() {
   await session.hydrate()
@@ -89,11 +83,10 @@ async function load() {
   loadError.value = ''
   shiftLoaded.value = false
   ordersLoaded.value = false
-  availabilityLoaded.value = false
   const result = await Promise.allSettled([
-    endpoints.currentFrontDeskShift(), orderQueue.load(), endpoints.availability(today()),
+    endpoints.currentFrontDeskShift(), orderQueue.load(),
   ])
-  const [shiftResult, orderResult, availabilityResult] = result
+  const [shiftResult, orderResult] = result
   if (shiftResult.status === 'fulfilled') {
     shift.value = shiftResult.value
     shiftLoaded.value = true
@@ -101,14 +94,9 @@ async function load() {
   if (orderResult.status === 'fulfilled') {
     ordersLoaded.value = true
   }
-  if (availabilityResult.status === 'fulfilled') {
-    availability.value = availabilityResult.value
-    availabilityLoaded.value = true
-  }
   const failedSources = [
     shiftResult.status === 'rejected' ? '班次状态' : '',
     orderResult.status === 'rejected' ? '订单队列' : '',
-    availabilityResult.status === 'rejected' ? '场地资源' : '',
   ].filter(Boolean)
   if (failedSources.length) loadError.value = `${failedSources.join('、')}加载失败；未同步区域不会按“暂无”处理。`
   loading.value = false
@@ -141,6 +129,7 @@ function selectMember(member: MemberDirectoryItem) {
   members.value = [member, ...members.value.filter(item => item.id !== member.id)]
   selectedMemberId.value = member.id
   showMemberPicker.value = false
+  if (bookingAfterSelection) { bookingAfterSelection = false; manualOrder() }
 }
 
 function openShift() {
@@ -176,7 +165,7 @@ function closeShift() {
 
 function manualOrder() {
   if (!ensureShiftOpen()) return
-  if (!selectedMember.value) { uni.showToast({ title: '请先选择代订会员', icon: 'none' }); return }
+  if (!selectedMember.value) { bookingAfterSelection = true; showMemberPicker.value = true; return }
   openMemberPage('/pages/booking/index?mode=ASSISTED&memberId=' + encodeURIComponent(selectedMember.value.id))
 }
 
@@ -301,19 +290,25 @@ async function scanCheckIn() {
   } catch (cause: any) { uni.showToast({ title: cause.message || '扫码未识别', icon: 'none' }) }
 }
 
-async function requestRefund(order: any) {
+function requestRefund(order: any) {
   if (!ensureShiftOpen()) return
-  const modal = await uni.showModal({ title: '发起退款申请', content: `订单 ${order.orderNo} 将进入退款审核队列。` })
-  if (!modal.confirm) return
-  try {
-    await endpoints.refundOrder(order.id, {
-      amountCents: Math.max(0, Number(order.paidCents || order.payableCents || 0) - Number(order.refundedCents || 0)),
-      reason: '前台服务申请退款',
-      idempotencyKey: idempotencyKey(`refund-${order.id}`),
-    })
-    uni.showToast({ title: '已提交退款审核', icon: 'success' })
-    await load()
-  } catch (cause: any) { uni.showToast({ title: cause.message || '退款申请失败', icon: 'none' }) }
+  const direct = canDirectRefund(session.roles)
+  const amountCents = Math.max(0, Number(order.paidCents || 0) - Number(order.refundedCents || 0))
+  task.start({
+    title: direct ? '直接退款' : '申请退款',
+    description: `订单 ${order.orderNo} · ${money(amountCents)}。${direct ? '确认后按原支付方式退款，无需再去财务审核。现金订单请确认已向会员退回现金。' : '提交后由财务或管理员处理。'}`,
+    confirmText: direct ? '确认退款' : '提交申请',
+    successFeedback: direct ? 'toast' : 'dialog',
+    fields: [reasonField('退款原因', ['会员取消预约', '场馆原因取消', '重复预订'])],
+    submit: async ({ reason }) => {
+      if (!ensureShiftOpen()) throw new Error('班次状态已变化，请刷新后重试')
+      const command = { orderId:order.id, amountCents, reason, direct }
+      const result = await withPendingCreationKey('frontdesk.refund', command, idempotencyKey =>
+        (direct ? endpoints.directRefundOrder : endpoints.refundOrder)(order.id, { amountCents, reason, idempotencyKey }))
+      await load()
+      return direct ? directRefundFeedback((result as {status?:string})?.status) : '退款申请已提交'
+    },
+  })
 }
 
 function redeemCoupon() {
@@ -323,6 +318,7 @@ function redeemCoupon() {
 
 onLoad((options) => {
   deepLinkQuery.value = parseOpsDeepLinkQuery(options)
+  if (options?.focus === 'order' || options?.orderId) frontdeskView.value = 'orders'
 })
 onShow(load)
 </script>
@@ -330,34 +326,37 @@ onShow(load)
 <template>
   <OperationsFrame access="today" icon="work" title="今日营业" eyebrow="TODAY OPERATIONS" role="前台 / 值班" :shift="shiftLabel" description="先开班，再按现场队列处理签到、订单、退款申请和联盟券核销。">
     <OperationTask :task="task" />
-    <BookingMemberPicker v-if="showMemberPicker" @select="selectMember" @close="showMemberPicker = false" />
+    <BookingMemberPicker v-if="showMemberPicker" @select="selectMember" @close="closeMemberPicker" />
     <view v-if="loadError" class="load-error card"><view><text class="load-error-title">前台数据未完整同步</text><text class="muted">{{ loadError }}</text></view><button class="secondary retry" :disabled="loading" @tap="load">重新加载</button></view>
     <view class="shift card">
       <view>
         <text class="shift-title">营业班次</text>
-        <text class="muted">主馆前台 · {{ !shiftLoaded ? '班次状态未同步，现场动作已锁定' : shift ? `备用金 ${money(shift.openingCashCents)} · ${shift.operator?.displayName || session.user?.displayName}` : '现金收款与现场服务' }}</text>
+        <text class="muted">{{ !shiftLoaded ? '班次状态未同步，现场动作已锁定' : shift ? `备用金 ${money(shift.openingCashCents)} · ${shift.operator?.displayName || session.user?.displayName}` : '现金收款与现场服务' }}</text>
       </view>
       <button v-if="shiftLoaded && !shift" class="primary shift-button" @tap="openShift">开班</button>
       <text v-else-if="shiftLoaded && shiftOpen" class="pill">已开班</text>
       <text v-else-if="shiftLoaded" class="pill closed">已关班</text>
       <text v-else class="pill closed">状态未知</text>
     </view>
-    <view class="metric-grid"><MetricCard v-for="item in metrics" :key="item[0]" :label="item[0]" :value="item[1]" :note="item[2]" /></view>
-
-    <view class="section-title">现场动作</view>
-    <view class="card customer-card">
-      <view>
-        <text class="order-title">代客订场客户</text>
-        <text class="muted">{{ selectedMemberDetail }}</text>
+    <OperationsTabs v-model="frontdeskView" :items="frontdeskTabs" label="营业分类" />
+    <template v-if="frontdeskView === 'service'">
+      <view class="card service-actions">
+        <button class="primary assisted-booking" :disabled="!onsiteAllowed" @tap="manualOrder">代会员订场</button>
+        <view v-if="selectedMember" class="selected-customer">
+          <view><text class="customer-label">当前会员</text><text class="customer-name">{{ selectedMemberDetail }}</text></view>
+          <button class="secondary inline" :disabled="!onsiteAllowed" @tap="changeBookingMember">更换</button>
+        </view>
+        <view class="service-shortcuts">
+          <button class="secondary" :disabled="!onsiteAllowed" @tap="scanCheckIn">扫码签到</button>
+          <button class="secondary" :disabled="!onsiteAllowed" @tap="redeemCoupon">优惠券核销</button>
+        </view>
+        <text v-if="!onsiteAllowed" class="muted service-hint">{{ !shiftLoaded ? (loading ? '正在同步班次，请稍候。' : '班次未同步，请点击上方重新加载。') : shift ? '当前班次已关闭，请联系管理员处理。' : '请先点击上方“开班”，再办理现场业务。' }}</text>
       </view>
-      <button class="secondary" :disabled="!onsiteAllowed" @tap="showMemberPicker = true">{{ selectedMember ? '更换会员' : '搜索并选择会员' }}</button>
-    </view>
-    <view class="action-grid">
-      <button class="primary" :disabled="!onsiteAllowed" @tap="scanCheckIn">扫码签到</button>
-      <button class="secondary" :disabled="!onsiteAllowed || !selectedMember" @tap="manualOrder">为所选会员订场</button>
-      <button class="secondary" :disabled="!onsiteAllowed" @tap="redeemCoupon">联盟券核销</button>
-    </view>
-
+      <button class="card service-link" @tap="frontdeskView = 'orders'"><view><text class="order-title">查看与处理订单</text><text class="muted">搜索订单、收款、签到与退款申请</text></view><AppIcon name="chevron" :size="28" tone="muted" /></button>
+      <button class="card service-link" @tap="openMemberPage('/pages/booking/index')"><view><text class="order-title">查看场地预约</text><text class="muted">按日期查看场地和时段</text></view><AppIcon name="chevron" :size="28" tone="muted" /></button>
+    </template>
+    <template v-if="frontdeskView === 'orders'">
+      <text v-if="ordersLoaded && !orderQueue.error.value" class="muted order-summary">已加载订单：待签到 {{ paidOrders.length }} 笔 · 现场待处理 {{ venueOrders.length }} 笔</text>
     <view class="section-title">订单队列 <text class="section-note">筛选共 {{ orderQueue.total.value }} 笔 · 已加载 {{ orders.length }}</text></view>
     <view class="card">
       <text class="muted">按财务状态筛选或搜索订单号、会员姓名</text>
@@ -368,18 +367,14 @@ onShow(load)
     </view>
     <view v-for="order in venueOrders" :id="opsDeepLinkDomId('frontdesk-order', order.id)" :key="order.id" class="card order-card" :class="{ 'deep-link-target': focusedRecord === `frontdesk-order:${order.id}` }">
       <view class="row"><view><text class="order-title">{{ order.title }}</text><text class="muted">{{ order.orderNo }} · {{ order.member?.displayName || '现场会员' }}</text><text class="muted">{{ bookingTimeLabel(order) }}</text></view><StatusBadge :value="order.status" /></view>
-      <view class="order-footer"><text class="money">{{ money(order.payableCents) }}</text><view class="order-actions"><button v-if="order.status === 'PENDING'" class="primary inline" :disabled="!onsiteAllowed" @tap="collectCash(order)">现金收款</button><button v-if="canCheckInBooking(order) && !bookingEnded(order)" class="secondary inline" :disabled="!onsiteAllowed || !canOpenCheckIn(order)" @tap="checkIn(order)">{{ checkInActionLabel(order) }}</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CHECKED_IN' && bookingEnded(order)" class="primary inline" :disabled="!onsiteAllowed" @tap="prepareFulfillment(order, 'COMPLETED')">确认完成</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CONFIRMED' && bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="prepareFulfillment(order, 'NO_SHOW')">标记未到</button><button v-if="order.status === 'PAID' && !bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="requestRefund(order)">退款申请</button></view></view>
+      <view class="order-footer"><text class="money">{{ money(order.payableCents) }}</text><view class="order-actions"><button v-if="order.status === 'PENDING'" class="primary inline" :disabled="!onsiteAllowed" @tap="collectCash(order)">现金收款</button><button v-if="canCheckInBooking(order) && !bookingEnded(order)" class="secondary inline" :disabled="!onsiteAllowed || !canOpenCheckIn(order)" @tap="checkIn(order)">{{ checkInActionLabel(order) }}</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CHECKED_IN' && bookingEnded(order)" class="primary inline" :disabled="!onsiteAllowed" @tap="prepareFulfillment(order, 'COMPLETED')">确认完成</button><button v-if="order.status !== 'REFUND_PENDING' && venueBooking(order)?.status === 'CONFIRMED' && bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="prepareFulfillment(order, 'NO_SHOW')">标记未到</button><button v-if="order.status === 'PAID' && !bookingEnded(order)" class="danger inline" :disabled="!onsiteAllowed" @tap="requestRefund(order)">{{ canDirectRefund(session.roles) ? '直接退款' : '退款申请' }}</button></view></view>
       <ReasonForm v-if="fulfillment?.orderId === order.id" :key="order.id + fulfillment?.outcome" :title="fulfillment?.outcome === 'NO_SHOW' ? '确认会员未到场' : '确认场地使用完成'" :description="'订单：' + order.title + '。请根据现场核实结果选择；确认后将关单并记录操作日志。'" :reasons="fulfillment?.outcome === 'NO_SHOW' ? ['现场点名确认未到场', '联系会员确认未到场', '其他原因'] : ['巡场确认使用已结束', '会员已离场且已检查场地', '其他原因']" :busy="fulfilling" :error="fulfillmentError" confirm-text="确认并记录" @cancel="fulfillment = null" @submit="fulfill(order, $event)" />
     </view>
     <view v-if="!loading && !orderQueue.loading.value && !orderQueue.error.value && ordersLoaded && !venueOrders.length" class="empty card">{{ orders.length < orderQueue.total.value ? '当前已加载订单没有待现场处理项，可继续加载或切换状态。' : '当前筛选没有待现场处理的场地订单。' }}</view>
     <button v-if="orders.length < orderQueue.total.value" class="secondary" :loading="orderQueue.loading.value" :disabled="loading || orderQueue.loading.value" @tap="orderQueue.more()">加载更多订单</button>
 
-    <view class="section-title">场馆资源</view>
-    <view class="card resource-card">
-      <view class="row"><text class="order-title">今日可用场地</text><text class="money">{{ availabilityLoaded ? `${freeCourts} / ${availability?.courts?.length || 0}` : '未同步' }}</text></view>
-      <text class="muted">资源日历以营业日期为准；培训占场与公众预约分开统计。</text>
-    </view>
-
+    </template>
+    <template v-if="frontdeskView === 'handover'">
     <view class="section-title">交接班</view>
     <view class="card handover">
       <text v-if="!shiftLoaded" class="muted">班次状态未同步，交接与现场动作保持锁定；请重新加载后再操作。</text>
@@ -393,11 +388,14 @@ onShow(load)
         <text class="muted">交接：{{ shift.handoverNote }}；待处理订单 {{ shift.pendingSnapshot?.pendingOrders?.count || 0 }} 笔，退款 {{ shift.pendingSnapshot?.pendingRefunds?.count || 0 }} 笔。</text>
       </template>
     </view>
+    </template>
   </OperationsFrame>
 </template>
 
 <style scoped>
-.shift,.customer-card,.order-card,.resource-card,.handover { margin-top: 22rpx; }.shift { display:flex; align-items:center; justify-content:space-between; gap:20rpx; }.shift > view { min-width:0; flex:1; }.shift-title,.order-title { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; overflow-wrap:anywhere; }.shift-button { min-width: 132rpx; min-height: 88rpx; margin:0; line-height:88rpx; font-size:24rpx; }.pill.closed { color:#6f5142; background:#f3e8df; }.metric-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; margin-top:20rpx; }.customer-card { display:flex; align-items:center; justify-content:space-between; gap:20rpx; }.customer-card > view:first-child { min-width:0; flex:1; }.customer-card .muted { display:block; overflow-wrap:anywhere; }.customer-picker { min-width:132rpx; max-width:180rpx; padding:16rpx 20rpx; border:1rpx solid #bfd0c4; border-radius:14rpx; color:#17653d; text-align:center; font-size:24rpx; font-weight:700; overflow-wrap:anywhere; }.action-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14rpx; }.action-grid button { min-width:0!important; min-height:88rpx; margin:0; padding:10rpx 12rpx; font-size:24rpx; line-height:1.35; white-space:normal; }.action-grid button:last-child { grid-column:span 2; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.order-card { padding:24rpx; }.order-card .row > view { flex:1; min-width:0; }.order-card .muted { display:block; overflow-wrap:anywhere; }.order-footer { display:flex; align-items:flex-start; justify-content:space-between; gap:12rpx; margin-top:18rpx; }.order-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10rpx; }.inline { min-width:112rpx; min-height:88rpx; margin:0; padding:8rpx 14rpx; line-height:1.35; font-size:21rpx; white-space:normal; }.empty { color:#758079; text-align:center; }.resource-card .muted,.handover .muted { display:block; margin-top:12rpx; line-height:1.6; overflow-wrap:anywhere; }.handover button { width:100%; margin-top:20rpx; }.load-error { display:flex; align-items:flex-start; justify-content:space-between; gap:14rpx; margin-top:22rpx; color:#8a3636; background:#fff4f2; }.load-error > view { flex:1; min-width:0; }.load-error-title { display:block; margin-bottom:8rpx; font-size:26rpx; font-weight:800; }.load-error .muted { display:block; line-height:1.55; overflow-wrap:anywhere; }.retry { flex:0 0 auto; width:auto; margin:0; padding:0 18rpx; font-size:22rpx; }
+.shift,.order-card,.handover { margin-top: 22rpx; }.shift { display:flex; align-items:center; justify-content:space-between; gap:20rpx; }.shift > view { min-width:0; flex:1; }.shift-title,.order-title { display:block; margin-bottom:8rpx; font-size:29rpx; font-weight:800; overflow-wrap:anywhere; }.shift-button { min-width: 132rpx; min-height: 88rpx; margin:0; line-height:88rpx; font-size:24rpx; }.pill.closed { color:#6f5142; background:#f3e8df; }.customer-picker { min-width:132rpx; max-width:180rpx; padding:16rpx 20rpx; border:1rpx solid #bfd0c4; border-radius:14rpx; color:#17653d; text-align:center; font-size:24rpx; font-weight:700; overflow-wrap:anywhere; }.section-note { color:#758079; font-size:22rpx; font-weight:400; }.order-card { padding:24rpx; }.order-card .row > view { flex:1; min-width:0; }.order-card .muted { display:block; overflow-wrap:anywhere; }.order-footer { display:flex; align-items:flex-start; justify-content:space-between; gap:12rpx; margin-top:18rpx; }.order-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10rpx; }.inline { min-width:112rpx; min-height:88rpx; margin:0; padding:8rpx 14rpx; line-height:1.35; font-size:21rpx; white-space:normal; }.empty { color:#758079; text-align:center; }.handover .muted { display:block; margin-top:12rpx; line-height:1.6; overflow-wrap:anywhere; }.handover button { width:100%; margin-top:20rpx; }.load-error { display:flex; align-items:flex-start; justify-content:space-between; gap:14rpx; margin-top:22rpx; color:#8a3636; background:#fff4f2; }.load-error > view { flex:1; min-width:0; }.load-error-title { display:block; margin-bottom:8rpx; font-size:26rpx; font-weight:800; }.load-error .muted { display:block; line-height:1.55; overflow-wrap:anywhere; }.retry { flex:0 0 auto; width:auto; margin:0; padding:0 18rpx; font-size:22rpx; }
 .deep-link-target { border-color:#d69a24!important; box-shadow:0 0 0 4rpx rgba(214,154,36,.18); }
 @media (max-width:375px) { .load-error,.order-footer { flex-direction:column; }.retry { width:100%; }.order-actions { width:100%; justify-content:flex-start; } }
+
+.service-actions { display:grid; gap:24rpx; }.assisted-booking { width:100%; min-height:112rpx; margin:0; font-size:32rpx; }.service-shortcuts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20rpx; }.service-shortcuts button { width:100%; margin:0; padding:20rpx 12rpx; }.selected-customer { display:flex; align-items:center; gap:16rpx; }.selected-customer>view { flex:1; min-width:0; }.customer-label { display:block; font-size:24rpx; color:#626d66; }.customer-name { display:block; font-size:28rpx; overflow-wrap:anywhere; }.selected-customer button { width:auto; margin:0; }.service-link { width:100%; display:flex; justify-content:space-between; gap:24rpx; margin:24rpx 0 0; text-align:left; }.service-link>view { flex:1; min-width:0; }.service-link .order-title { margin-bottom:8rpx; }.service-hint { line-height:1.5; }.order-summary { margin-bottom:16rpx; }
 </style>

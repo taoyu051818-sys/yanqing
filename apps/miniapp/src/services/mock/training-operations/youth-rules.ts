@@ -1,3 +1,5 @@
+import { mockExecutionKey } from "../policies/admin-execution";
+import { hasMockRole } from "../policies/common.js";
 import { mockUser } from "../core";
 import { getYouthTrainingRules, saveYouthTrainingRules } from "../state";
 import {
@@ -65,7 +67,7 @@ export const validateMockYouthProduct = (
   const rule = activeMockYouthTrainingRule(at);
   if (!rule)
     throw new Error(
-      "当前没有已发布且生效的青少年培训监管规则，正式销售已阻断，请先完成 ADMIN 制单与 SUPER_ADMIN 复核发布",
+      "当前没有已发布且生效的青少年培训监管规则，正式销售已阻断，请管理员先设置并发布规则",
     );
   const violations: string[] = [];
   const warnings: string[] = [];
@@ -105,8 +107,8 @@ export const validateMockYouthProduct = (
   };
 };
 
-export const createYouthRule = (data: any) => {
-  requireRole("ADMIN");
+const createYouthRuleDraft = (data: any) => {
+  requireRole("ADMIN", "SUPER_ADMIN");
   const reason = requireText(data.reason, "制单原因", 2, 300);
   const idempotencyKey = requireText(data.idempotencyKey, "幂等键", 8, 100);
   const values = {
@@ -145,7 +147,7 @@ export const createYouthRule = (data: any) => {
     return youthRuleManagementView(replay);
   }
   if (!Number.isFinite(effectiveFrom.getTime()) || effectiveFrom <= new Date())
-    throw new Error("监管规则生效时间必须晚于当前时间，以便完成异人复核");
+    throw new Error("监管规则生效时间必须晚于当前时间");
   const now = new Date().toISOString();
   const rule = {
     id: newId("youth-rule"),
@@ -184,7 +186,7 @@ export const decideYouthRule = (
   decision: "publish" | "reject",
   data: any,
 ) => {
-  requireRole("SUPER_ADMIN");
+  requireRole("ADMIN", "SUPER_ADMIN");
   const reason = requireText(data.reason, "复核原因", 2, 300);
   const idempotencyKey = requireText(data.idempotencyKey, "幂等键", 8, 100);
   const target = decision === "publish" ? "PUBLISHED" : "REJECTED";
@@ -210,7 +212,10 @@ export const decideYouthRule = (
   }
   const rule = rules.find((item) => item.id === ruleId);
   if (!rule) throw new Error("青少年监管规则不存在");
-  if (rule.requestedById === mockUser().id)
+  if (
+    rule.requestedById === mockUser().id &&
+    !hasMockRole("ADMIN", "SUPER_ADMIN")
+  )
     throw new Error("监管规则制单人与复核人不能是同一账号");
   if (rule.status !== "DRAFT")
     throw new Error("监管规则已完成复核，不能重复覆盖状态");
@@ -270,4 +275,14 @@ export const decideYouthRule = (
     },
   });
   return youthRuleManagementView(rule);
+};
+
+export const createYouthRule = (data: any) => {
+  const result = createYouthRuleDraft(data);
+  return result.status === "DRAFT"
+    ? decideYouthRule(result.id, "publish", {
+        reason: data.reason,
+        idempotencyKey: mockExecutionKey("youth-rule", data.idempotencyKey),
+      })
+    : result;
 };

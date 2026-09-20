@@ -1,3 +1,4 @@
+import { canExecuteDirectly } from '../../../../../utils/admin-execution';
 import type { Ref, ComputedRef } from "vue";
 import {
   useOperationTask,
@@ -9,6 +10,7 @@ import { withPendingCreationKey } from "../../../../../utils/pending-creation-ke
 import type { ConsignmentSettlementUiAction } from "../page-types.js";
 
 interface ActionContext {
+  session?: { roles: string[] };
   consignmentPeriodStartDate: Ref<string, string>;
   consignmentPeriodEndDate: Ref<string, string>;
   actionError: Ref<string, string>;
@@ -18,6 +20,7 @@ interface ActionContext {
 }
 
 export function useFinanceConsignmentActions({
+  session,
   consignmentPeriodStartDate,
   consignmentPeriodEndDate,
   actionError,
@@ -72,7 +75,7 @@ export function useFinanceConsignmentActions({
             }),
         );
         await load();
-        return "寄售结算草稿已生成，下一步提交复核。";
+        return canExecuteDirectly(session?.roles || []) ? "账单已生成，核对金额后可直接记录付款。" : "寄售结算草稿已生成，下一步提交复核。";
       },
     });
   }
@@ -83,7 +86,7 @@ export function useFinanceConsignmentActions({
   ) {
     if (
       ["confirm", "dispute", "return", "settle"].includes(action) &&
-      settlement.isOwnCreator === true
+      settlement.isOwnCreator === true && !canExecuteDirectly(session?.roles || [])
     ) {
       actionError.value = "制单人不能复核自己的寄售账单";
       return;
@@ -98,6 +101,7 @@ export function useFinanceConsignmentActions({
     };
     task.start({
       title: "寄售结算 · " + labels[action],
+      successFeedback: canExecuteDirectly(session?.roles || []) ? "toast" : "dialog",
       description:
         consignmentSupplierName(settlement) +
         " · 应付 " +
@@ -114,7 +118,7 @@ export function useFinanceConsignmentActions({
                 key: "paymentReference",
                 label: "银行流水号或付款凭证",
                 min: 2,
-                max: 200,
+                max: 120,
               },
             ]
           : []),
