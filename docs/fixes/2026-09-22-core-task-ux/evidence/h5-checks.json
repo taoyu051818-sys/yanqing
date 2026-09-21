@@ -1,0 +1,17 @@
+{
+  "checks": [
+    "prices-375",
+    "price-editor-375",
+    "price-confirm-375",
+    "price-confirm-320",
+    "price-result-320",
+    "assisted-selection-375",
+    "assisted-review-375",
+    "assisted-result-375",
+    "refund-confirm-375",
+    "refund-confirm-320",
+    "refund-result-320"
+  ],
+  "errors": [],
+  "payment": "isolated mock only"
+}

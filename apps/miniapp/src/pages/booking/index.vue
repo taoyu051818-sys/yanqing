@@ -39,7 +39,7 @@ const canAssist = computed(() =>
 const assisted = computed(
   () => canAssist.value && bookingMode.value === "ASSISTED",
 );
-const showOverride = ref(false);
+const showBookingReview = ref(false);
 const overrideReason = ref("");
 const submitting = ref(false);
 const submissionError = ref("");
@@ -55,7 +55,8 @@ function setMode(mode: "SELF" | "ASSISTED") {
   submissionError.value = "";
   couponCode.value = "";
   showCoupon.value = false;
-  showOverride.value = false;
+  showBookingReview.value = false;
+  if (mode === "ASSISTED") showMembers.value = true;
   void load(true);
 }
 function selectMember(member: MemberDirectoryItem) {
@@ -239,7 +240,10 @@ async function load(resetSelection = false) {
 
 function choose(courtId: string, slot: CourtAvailability["slots"][number]) {
   if (loading.value || submitting.value || blockedReason(courtId, slot)) return;
-  selected.value = { courtId, slotId: slot.id };
+  selected.value =
+    selected.value?.courtId === courtId && selected.value.slotId === slot.id
+      ? null
+      : { courtId, slotId: slot.id };
   submissionError.value = "";
 }
 
@@ -248,28 +252,28 @@ let pageVisible = true;
 function leavePage() {
   pageVisible = false;
   pageGeneration++;
-  showOverride.value = false;
+  showBookingReview.value = false;
 }
 onHide(leavePage);
 onUnload(leavePage);
 
-async function submit(confirmedOverride = false) {
-  if (
-    loading.value ||
-    submitting.value ||
-    (!assisted.value && couponLoading.value)
-  )
-    return;
+async function submit(confirmedReview = false) {
+  if (submitting.value) return;
   if (!session.isAuthenticated)
     return requestMemberLogin("/pages/booking/index");
-  if (!selected.value) return;
   if (assisted.value && !targetMember.value) {
     showMembers.value = true;
     return;
   }
-  if (needsOverride.value && !confirmedOverride) {
+  if (
+    loading.value ||
+    (!assisted.value && couponLoading.value) ||
+    !selected.value
+  )
+    return;
+  if (assisted.value && !confirmedReview) {
     overrideReason.value = "";
-    showOverride.value = true;
+    showBookingReview.value = true;
     submissionError.value = "";
     return;
   }
@@ -303,7 +307,7 @@ async function submit(confirmedOverride = false) {
         endpoints.createBooking({ ...command, creationIdempotencyKey }),
     );
     if (!current()) return;
-    showOverride.value = false;
+    showBookingReview.value = false;
     if (isAssisted) {
       assistedOrder.value = {
         id: order.id,
@@ -344,6 +348,7 @@ onShow(async () => {
   if (intent?.mode === "ASSISTED" && canAssist.value) {
     setMode("ASSISTED");
     if (intent.memberId) {
+      showMembers.value = false;
       const userId = session.user?.id;
       try {
         const detail = await endpoints.member360(intent.memberId);
@@ -373,11 +378,6 @@ onShow(async () => {
       :profile="venue.profile.value"
       :error="venue.error.value"
     />
-    <view class="notice"
-      ><AppIcon name="clock" :size="30" tone="accent" /><text
-        >每格 1 小时 · 显示每小时价格</text
-      ></view
-    >
     <view class="card row">
       <view class="date-label"
         ><AppIcon name="booking" :size="32" /><text>预订日期</text></view
@@ -399,7 +399,6 @@ onShow(async () => {
       </picker>
     </view>
     <view v-if="canAssist" class="card booking-identity">
-      <text class="identity-title">为谁订场</text>
       <view class="mode-switch"
         ><button
           :class="{ active: !assisted }"
@@ -417,28 +416,6 @@ onShow(async () => {
           代会员订场
         </button></view
       >
-      <button
-        v-if="assisted"
-        class="member-select"
-        :disabled="submitting"
-        @tap="showMembers = true"
-      >
-        <view
-          ><text>{{
-            targetMember ? targetMember.displayName : "请选择代订会员"
-          }}</text
-          ><text class="muted">{{
-            targetMember
-              ? targetMember.phone || "未绑定手机号"
-              : "按姓名或手机号搜索"
-          }}</text></view
-        ><text>{{ targetMember ? "更换" : "选择会员" }}</text>
-      </button>
-      <text class="muted identity-note">{{
-        assisted
-          ? "可选择已过时、已占用及停用场次；特殊代订需填写原因，原订单继续保留，由会员付款。"
-          : "订单归你本人，可使用自己的优惠券和支付方式。"
-      }}</text>
     </view>
     <view v-if="error" class="card error"
       ><AppIcon name="warning" :size="32" tone="danger" /><text>{{
@@ -456,7 +433,7 @@ onShow(async () => {
     >
     <view v-if="data?.courts.length" class="matrix-hint"
       ><AppIcon name="info" :size="24" tone="muted" /><text
-        >左右滑动查看全部场地</text
+        >每格 1 小时 · 左右滑动查看场地</text
       ></view
     >
     <scroll-view v-if="data?.courts.length" scroll-x class="matrix-wrap">
@@ -532,7 +509,20 @@ onShow(async () => {
     />
 
     <view class="booking-dock">
-      <text v-if="selected" class="checkout-note"
+      <button
+        v-if="assisted"
+        class="dock-member"
+        :disabled="submitting"
+        @tap="showMembers = true"
+      >
+        <text>{{
+          targetMember
+            ? "代订会员：" + targetMember.displayName
+            : "第一步：选择代订会员"
+        }}</text
+        ><text>{{ targetMember ? "更换" : "选择会员" }} ›</text>
+      </button>
+      <text v-if="selected && !assisted" class="checkout-note"
         >下单后保留 10 分钟，未付款自动释放</text
       >
       <text v-if="submissionError" class="submit-error" role="alert">{{
@@ -568,28 +558,30 @@ onShow(async () => {
             ><text class="total-price">{{
               money(selectedSlot?.price?.priceCents)
             }}</text></template
-          ><text v-else class="selection-prompt">请选择场地和时段</text></view
+          ><text v-else class="selection-prompt">{{
+            assisted && !targetMember ? "先确定为谁订场" : "请选择场地和时段"
+          }}</text></view
         ><button
           class="primary checkout-button"
           :loading="submitting"
           :disabled="
-            !selected ||
-            loading ||
+            (!selected && !(assisted && !targetMember)) ||
+            (loading && !(assisted && !targetMember)) ||
             submitting ||
             (!assisted && couponLoading) ||
-            Boolean(error)
+            (Boolean(error) && !(assisted && !targetMember))
           "
           @tap="submit()"
         >
           {{
-            !selected
-              ? "先选场地"
-              : assisted && !targetMember
-                ? "选择会员"
+            assisted && !targetMember
+              ? "选择会员"
+              : !selected
+                ? "先选场地"
                 : !session.isAuthenticated
                   ? "登录后继续"
                   : assisted
-                    ? "确认代订"
+                    ? "核对代订"
                     : "确认预约"
           }}
         </button></view
@@ -667,10 +659,10 @@ onShow(async () => {
       </view></view
     >
     <ActionDialog
-      v-if="showOverride"
-      title="确认特殊代订"
+      v-if="showBookingReview"
+      :title="needsOverride ? '确认特殊代订' : '核对代订订单'"
       :busy="submitting"
-      @close="showOverride = false"
+      @close="showBookingReview = false"
     >
       <view class="override-form"
         ><text class="identity-title"
@@ -679,7 +671,7 @@ onShow(async () => {
           >{{ date }} · {{ selectedSlot ? slotRange(selectedSlot) : "" }} ·
           {{ money(selectedSlot?.price?.priceCents) }}</text
         >
-        <text class="override-note"
+        <text v-if="needsOverride" class="override-note"
           >当前场次：{{
             selected && selectedSlot
               ? unavailableReason(selected.courtId, selectedSlot) || "可订"
@@ -687,8 +679,14 @@ onShow(async () => {
           }}。已有订单和封场安排会保留，请确认现场已协调。会员须在 10
           分钟内付款。</text
         >
-        <label for="booking-override-reason">代订原因</label
+        <text v-else class="override-note"
+          >订单归所选会员，请提醒会员在“我的订单”中于 10
+          分钟内付款。最终应付金额以下单结果为准。</text
+        >
+        <label v-if="needsOverride" for="booking-override-reason"
+          >代订原因</label
         ><textarea
+          v-if="needsOverride"
           id="booking-override-reason"
           v-model="overrideReason"
           class="override-input"
@@ -706,7 +704,7 @@ onShow(async () => {
           ><button
             class="secondary"
             :disabled="submitting"
-            @tap="showOverride = false"
+            @tap="showBookingReview = false"
           >
             返回修改</button
           ><button
@@ -716,7 +714,7 @@ onShow(async () => {
               submitting ||
               loading ||
               !selected ||
-              overrideReason.trim().length < 2
+              (needsOverride && overrideReason.trim().length < 2)
             "
             @tap="submit(true)"
           >
@@ -738,9 +736,13 @@ onShow(async () => {
         aria-label="代订成功"
         ><text class="identity-title"
           >已为 {{ assistedOrder.memberName }} 保留场地</text
-        ><text class="success-copy"
-          >应付 {{ money(assistedOrder.payableCents) }}，10
-          分钟内完成付款。会员可在自己的订单中支付；现场收款请进入今日营业处理。</text
+        ><text class="success-copy">{{
+          assistedOrder.payableCents === 0
+            ? "免费场次已确认，无需付款。"
+            : "应付 " +
+              money(assistedOrder.payableCents) +
+              "，请提醒会员在 10 分钟内到“我的订单”付款。现场收款请进入今日营业处理。"
+        }}</text
         ><button class="primary" @tap="openAssistedOrder">查看现场订单</button
         ><button class="secondary" @tap="assistedOrder = null">
           继续订场
@@ -805,23 +807,6 @@ onShow(async () => {
   min-height: 48px;
   margin: 0;
 }
-.notice {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  padding: 18rpx 24rpx;
-  margin-bottom: 20rpx;
-  color: #7b5910;
-  background: #fff3d9;
-  border-radius: 18rpx;
-  font-size: 23rpx;
-}
-.notice text {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
 .date-label,
 .date {
   display: flex;
@@ -840,6 +825,28 @@ onShow(async () => {
   min-height: 460rpx;
   border-radius: 24rpx;
 }
+.dock-member {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  width: 100%;
+  margin: 0 0 12rpx;
+  padding: 12rpx 0;
+  min-height: 44px;
+  font-size: 26rpx;
+  background: transparent;
+  color: var(--color-primary);
+  text-align: left;
+}
+.dock-member text:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dock-member text:last-child {
+  flex-shrink: 0;
+}
 .matrix-hint {
   display: flex;
   align-items: center;
@@ -847,7 +854,7 @@ onShow(async () => {
   gap: 8rpx;
   margin: -2rpx 2rpx 12rpx;
   color: #68756d;
-  font-size: 21rpx;
+  font-size: 24rpx;
 }
 .matrix-wrap {
   width: 100%;
@@ -855,7 +862,7 @@ onShow(async () => {
 }
 .matrix {
   display: grid;
-  overflow: hidden;
+  overflow: visible;
   background: #fff;
   border-radius: 24rpx;
 }
@@ -939,19 +946,23 @@ onShow(async () => {
   overflow-wrap: anywhere;
 }
 .booking-page {
-  padding-bottom: calc(350rpx + env(safe-area-inset-bottom));
+  padding-bottom: calc(450rpx + env(safe-area-inset-bottom));
 }
 .identity-title {
   display: block;
   font-size: 30rpx;
   font-weight: 750;
 }
+.booking-identity {
+  padding: 12rpx;
+}
 .mode-switch {
   display: flex;
   gap: 12rpx;
-  margin: 18rpx 0;
+  margin: 0;
 }
 .mode-switch button {
+  min-height: 44px;
   flex: 1;
   margin: 0;
   padding: 16rpx;
@@ -964,28 +975,6 @@ onShow(async () => {
   color: #17653d;
   background: #e7f4eb;
   border-color: #17653d;
-}
-.identity-note {
-  display: block;
-}
-.member-select {
-  display: flex;
-  justify-content: space-between;
-  width: 100%;
-  margin: 0 0 18rpx;
-  padding: 20rpx;
-  text-align: left;
-  font-size: 28rpx;
-  background: #f7f9f6;
-  color: #17653d;
-  border: 1rpx solid #d7e1d8;
-}
-.member-select > view {
-  flex: 1;
-  min-width: 0;
-}
-.member-select text {
-  display: block;
 }
 .booking-dock {
   position: fixed;

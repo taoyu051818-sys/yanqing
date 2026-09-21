@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { AuthUser } from '../../common/auth/auth-user.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import type {
+  ApplyVenuePriceDto,
   CreatePriceRuleDto,
   CreatePriceRuleVersionDto,
   SetPriceRuleStatusDto,
@@ -15,6 +16,7 @@ import {
   createPriceRuleVersion,
   setPriceRuleStatus,
 } from './venues-pricing.commands.js';
+import { applyVenuePrice } from './apply-venue-price.js';
 
 @Injectable()
 export class VenuePricingService {
@@ -27,6 +29,9 @@ export class VenuePricingService {
   }
   listPriceRules(actor: AuthUser) {
     return listPriceRules(this.prisma, actor);
+  }
+  applyPrice(dto: ApplyVenuePriceDto, actor: AuthUser) {
+    return applyVenuePrice(this.prisma, dto, actor);
   }
   createPriceRule(dto: CreatePriceRuleDto, actor: AuthUser) {
     return createPriceRule(this.prisma, dto, actor);

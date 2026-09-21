@@ -263,6 +263,17 @@ export class CreatePriceRuleVersionDto {
   idempotencyKey: string;
 }
 
+export class ApplyVenuePriceDto extends CreatePriceRuleVersionDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  sourceRuleId?: string;
+
+  @IsOptional()
+  @IsDateString({ strict: true })
+  sourceRevision?: string;
+}
+
 export class SetPriceRuleStatusDto {
   @IsBoolean()
   enabled: boolean;

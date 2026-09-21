@@ -12,7 +12,7 @@ import ActionDialog from "../../components/ActionDialog.vue";
 import AppIcon from "../../components/AppIcon.vue";
 import GuestState from "../../components/GuestState.vue";
 import SectionEmpty from "../../components/SectionEmpty.vue";
-import ReasonForm from "../../components/ReasonForm.vue";
+import OrderRefundDialog from "./OrderRefundDialog.vue";
 import StatusBadge from "../../components/StatusBadge.vue";
 import { canDirectRefund } from "../../utils/refund-action";
 import { money } from "../../utils/format";
@@ -28,7 +28,6 @@ import {
   businessTypeIcon,
   displayBusinessType,
   orderTimeLabel,
-  refundableAmount,
   canRequestOrderRefund,
   refundStatusLabels,
 } from "./order-presentation";
@@ -92,7 +91,8 @@ const aftersales = useOrderAftersales(
   (id) => paymentConfirmation.value?.orderId === id,
   () => directRefund.value,
 );
-const { refundingId, refundError, cancelPending, refund } = aftersales;
+const { refundingId, refundError, refundFeedback, cancelPending, refund } =
+  aftersales;
 watch(
   [() => session.isAuthenticated, () => session.user?.id],
   () => {
@@ -292,6 +292,26 @@ onPullDownRefresh(() => load());
           查看并处理退款
         </button></view
       >
+      <view
+        v-if="refundFeedback?.orderId === order.id && !order.refunds?.length"
+        class="refund-result"
+        role="status"
+        aria-live="polite"
+        ><text>{{ refundFeedback.message }}</text></view
+      >
+      <button
+        v-if="
+          order.refunds?.some((item) =>
+            ['REQUESTED', 'APPROVED', 'PROCESSING'].includes(item.status),
+          ) || refundFeedback?.orderId === order.id
+        "
+        class="secondary"
+        :disabled="loading || Boolean(actionKey)"
+        :loading="loading"
+        @tap="load"
+      >
+        刷新退款进度
+      </button>
       <view v-if="order.refunds?.length" class="refund-history"
         ><text v-for="item in order.refunds" :key="item.id"
           >退款 {{ money(item.amountCents) }} ·
@@ -476,20 +496,13 @@ onPullDownRefresh(() => load());
           }}
         </button></view
       >
-      <ReasonForm
+      <OrderRefundDialog
         v-if="refundingId === order.id && canRefund(order)"
         :key="order.id"
-        :title="directRefund ? '直接退款' : '申请退款'"
-        :description="
-          '退款金额 ' +
-          money(refundableAmount(order)) +
-          (directRefund
-            ? '。确认后按原支付方式退款，无需再次审核。现金订单请确认已向会员退回现金。'
-            : '。提交后由工作人员按订单状态和退款规则审核，进度在本订单查看。')
-        "
+        :order="order"
+        :direct="directRefund"
         :busy="Boolean(actionKey)"
         :error="refundError"
-        :confirm-text="directRefund ? '确认退款' : '确认申请退款'"
         @cancel="refundingId = ''"
         @submit="refund(order, $event)"
       />
@@ -510,3 +523,15 @@ onPullDownRefresh(() => load());
   </view>
 </template>
 <style scoped src="./page.css"></style>
+
+<style scoped>
+.refund-result {
+  padding: 20rpx;
+  margin: 20rpx 0;
+  border-radius: 16rpx;
+  background: #edf6ef;
+  color: #17653d;
+  font-size: 28rpx;
+  line-height: 1.6;
+}
+</style>

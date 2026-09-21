@@ -20,6 +20,7 @@ import type { AuthUser } from '../common/auth/auth-user.js';
 import { AppRole } from '../generated/prisma/enums.js';
 import {
   AvailabilityQueryDto,
+  ApplyVenuePriceDto,
   CancelCourtClosureDto,
   CompleteVenueBookingDto,
   CreateCourtClosureDto,
@@ -134,6 +135,12 @@ export class VenuesController {
   @Roles(AppRole.FRONT_DESK, AppRole.ADMIN, AppRole.SUPER_ADMIN)
   priceRules(@CurrentUser() actor: AuthUser) {
     return this.venuesVenuePricing.listPriceRules(actor);
+  }
+
+  @Post('price-rules/apply')
+  @Roles(AppRole.ADMIN, AppRole.SUPER_ADMIN)
+  applyPrice(@Body() dto: ApplyVenuePriceDto, @CurrentUser() actor: AuthUser) {
+    return this.venuesVenuePricing.applyPrice(dto, actor);
   }
 
   @Post('price-rules')

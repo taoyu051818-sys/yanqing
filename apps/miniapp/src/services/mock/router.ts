@@ -1,3 +1,4 @@
+import { handleApplyVenuePrice } from "./routes/venues/apply-price";
 import { handleOrderTimeline } from "./routes/orders/timeline";
 import { handleVenueSettings } from "./routes/venues/settings";
 import type { AppRole } from "../../types/domain";
@@ -299,6 +300,7 @@ const domainRoutes = [
   handleVenuesPriceRulesPost,
   handlePriceRuleVersionPost,
   handlePriceRuleStatusPost,
+  handleApplyVenuePrice,
   handleVenuesAvailabilityAny,
   handleVenuesBookingsPost,
   handleOrderTimeline,
