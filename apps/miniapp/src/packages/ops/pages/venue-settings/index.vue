@@ -6,6 +6,7 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import OperationsFrame from '../../components/OperationsFrame.vue'
 import ActionDialog from '../../../../components/ActionDialog.vue'
 import { mutationCommitted } from './use-mutation'
+import LocationPrivacyDialog from './LocationPrivacyDialog.vue'
 import { useVenueLocation } from './use-location'
 import AppIcon from '../../../../components/AppIcon.vue'
 import { hourLabel, usages, useVenueSettings } from './use-settings'
@@ -17,7 +18,7 @@ const openPrices = () => uni.navigateTo({ url: '/packages/ops/pages/venue/index?
 const view = ref('profile'), courtId = ref('')
 const selectedCourt = computed(() => data.value?.courts.find(item => item.id === courtId.value))
 const editing = ref<'profile' | 'contact' | 'hours' | null>(null)
-const { choosing, hasLocation, locationMessage, chooseLocation, useTextAddress, changeAddress, resetLocationRequest } = useVenueLocation(form, () => allowed.value && !saving.value && editing.value === 'profile')
+const { choosing, hasLocation, locationMessage, needsLocationSettings, privacyVisible, privacyContractName, agreePrivacy, declinePrivacy, openLocationSettings, chooseLocation, useTextAddress, changeAddress, resetLocationRequest } = useVenueLocation(form, () => allowed.value && !saving.value && editing.value === 'profile')
 const courtQuery = ref(''), courtFilter = ref('all')
 const filteredCourts = computed(() => (data.value?.courts || []).filter(item => `${item.name} ${item.code}`.includes(courtQuery.value.trim()) && (courtFilter.value === 'all' || item.enabled === (courtFilter.value === 'enabled'))))
 const editTitles = { profile:'修改球馆信息', contact:'修改联系方式', hours:'修改营业时间' }
@@ -49,6 +50,7 @@ onShow(async () => { await session.hydrate(); if (allowed.value) void load(Boole
                 <button class="secondary" :disabled="saving || choosing" :loading="choosing" @tap="chooseLocation">{{ hasLocation ? '重新选择位置' : '地图选点' }}</button>
                 <button v-if="hasLocation" class="text-address" :disabled="saving || choosing" @tap="useTextAddress">清除定位，仅保留文字地址</button>
                 <text v-if="locationMessage" class="location-message" role="status">{{ locationMessage }}</text>
+                <button v-if="needsLocationSettings" class="secondary" :disabled="saving || choosing" @tap="openLocationSettings">打开授权设置</button>
               </view>
             </template>
             <template v-else-if="editing === 'contact'"><label for="venue-phone">球馆联系电话</label><input id="venue-phone" v-model="form.contactPhone" :disabled="saving" :maxlength="40" placeholder="填写对外联系电话" /></template>
@@ -100,6 +102,7 @@ onShow(async () => { await session.hydrate(); if (allowed.value) void load(Boole
       </view>
       <template #footer><text v-if="courtConflict" class="muted">重新加载将放弃本次修改，请核对最新信息。</text><button class="secondary" :disabled="saving" @tap="court = null">取消</button><button v-if="courtConflict" class="primary" :loading="loading" :disabled="saving || loading" @tap="reloadCourt">重新加载场地</button><button v-else class="primary" :loading="saving" :disabled="saving || loading" @tap="saveCourt">确认保存</button></template>
     </ActionDialog>
+    <LocationPrivacyDialog v-if="privacyVisible" :contract-name="privacyContractName" @agree="agreePrivacy" @decline="declinePrivacy" />
   </OperationsFrame>
 </template>
 <style scoped>
