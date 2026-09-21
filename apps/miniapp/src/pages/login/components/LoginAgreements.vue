@@ -6,7 +6,7 @@ defineEmits<{ close: []; decline: [] }>()
 <template>
   <ActionDialog :title="kind === 'terms' ? '用户服务协议' : '隐私保护指引'" @close="$emit('close')">
     <view class="agreement-copy">
-      <text class="agreement-date">更新日期：2026年9月13日</text>
+      <text class="agreement-date">更新日期：2026年9月21日</text>
       <template v-if="kind === 'terms'">
         <text class="agreement-heading">服务与选择</text>
         <text>延庆金羽羽毛球小程序提供场地预约、活动报名、订单查询及会员服务。你可以不登录浏览场地、球局和赛事；提交预约、报名及查询个人订单需要登录以确认订单归属。不同意协议时，可选择“暂不登录，继续浏览”。</text>
@@ -22,6 +22,8 @@ defineEmits<{ close: []; decline: [] }>()
         <text>不登录也能浏览公开场地、球局和赛事。你主动同意协议并选择微信登录后，我们通过微信登录凭证获取微信用户标识，用于建立账号、识别本人及关联订单。登录不要求授权手机号、头像或昵称。</text>
         <text class="agreement-heading">按功能提供的信息</text>
         <text>头像、昵称由你在资料设置中自主提供，用于会员识别及报名展示。预约、活动、培训等业务会按页面所示用途使用你填写的联系人、手机号、报名或学员信息，以及相应订单、支付、退款和签到记录。请按实际需要填写，公开浏览不要求提供这些信息。</text>
+        <text class="agreement-heading">球馆地图位置</text>
+        <text>管理员主动使用地图选点时，经同意使用位置信息选择球馆地址。系统保存管理员确认的球馆地址与坐标，用于展示球馆位置及到馆导航，不持续跟踪用户位置。拒绝授权时仍可填写文字地址；公开浏览不会主动请求定位。</text>
         <text class="agreement-heading">数据使用与保护</text>
         <text>业务数据用于履行预约和报名服务、处理支付退款、核对账务及汇总经营情况。微信登录、支付由相应微信服务支持；工作人员按岗位权限处理业务记录。活动页面可展示主理人资料及报名人数，个人订单与联系方式不随公开活动列表提供给游客。</text>
         <text class="agreement-heading">查询、更正与注销</text>
