@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { toRefs, computed } from "vue";
+import { toRefs, computed, ref, watch } from "vue";
+import { previousEvening } from "../deadline-preset";
 import { today as shanghaiDate } from "../../../../../utils/format";
 
 const props = defineProps<{
@@ -67,6 +68,12 @@ const eventSponsor = computed({
   get: () => props.eventSponsor,
   set: (value) => emit("update:eventSponsor", value),
 });
+const deadlinePreset = ref(props.registrationEndDate === previousEvening(props.eventDate)?.date && props.registrationEndTime === '20:00');
+function applyPreset() {
+  const preset = previousEvening(props.eventDate); if (!preset) return;
+  deadlinePreset.value = true; registrationEndDate.value = preset.date; registrationEndTime.value = preset.time;
+}
+watch(eventDate, () => { if (deadlinePreset.value) applyPreset(); });
 </script>
 
 <template>
@@ -75,10 +82,6 @@ const eventSponsor = computed({
       <view class="section-title">创建赛事</view>
       <view class="card create-event-form">
         <view class="form-grid">
-          <view
-            ><text class="field-label">赛事编码</text
-            ><input v-model="eventCode" class="text-input" maxlength="40"
-          /></view>
           <view
             ><text class="field-label">赛事名称</text
             ><input
@@ -109,7 +112,10 @@ const eventSponsor = computed({
             ></picker
           >
         </view>
-        <view class="form-grid">
+        <text class="field-label">报名截止</text>
+        <view class="deadline-options"><button :class="deadlinePreset ? 'primary' : 'secondary'" @tap="applyPreset">开赛前一天 20:00</button><button :class="!deadlinePreset ? 'primary' : 'secondary'" @tap="deadlinePreset = false">自定义</button></view>
+        <text v-if="deadlinePreset" class="deadline-value">{{ registrationEndDate }} {{ registrationEndTime }} 截止</text>
+        <view v-if="!deadlinePreset" class="form-grid">
           <picker
             mode="date"
             :value="registrationEndDate"
@@ -179,3 +185,5 @@ const eventSponsor = computed({
 <style scoped src="../page.css"></style>
 
 <style scoped>.create-event-form { margin-bottom:calc(150rpx + env(safe-area-inset-bottom)); }.create-save-bar { position:fixed; bottom:0; left:0; right:0; z-index:20; padding:20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom)); background:#fff; border-top:1rpx solid #e2e7e3; }.create-save-bar button { width:100%; margin:0; }</style>
+
+<style scoped>.deadline-options{display:flex;gap:12rpx;margin:12rpx 0}.deadline-options button{flex:1;min-height:48px;margin:0;font-size:26rpx;padding:16rpx 8rpx;line-height:1.6}.deadline-value{display:block;margin-bottom:24rpx;font-size:28rpx;color:var(--color-foreground)}</style>

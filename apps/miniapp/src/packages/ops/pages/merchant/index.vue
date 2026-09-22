@@ -189,7 +189,7 @@ function redeem(code?: string) {
   task.start({ title: '核销消费券', description: merchant.value.name + ' · 核对券与实际消费金额后确认。券核销后不可重复使用。',
     confirmText: '确认核销一次', fields: [
       { key: 'code', label: '消费券', initial: code?.trim(), hint: '优先使用扫码带入；无法扫码时可填写顾客出示的券码。', max: 128 },
-      { key: 'amount', kind: 'money', label: '实际成交金额（元）', initial: '0', hint: '仅作消费归因，不会自动扣款。无成交金额填0。' },
+      { key: 'amount', kind: 'money', label: '实际成交金额（元）', initial: '', hint: '仅作消费归因，不会自动扣款。无成交金额填0。' },
     ],
     submit: async values => {
       const attributedAmountCents = cents(values.amount, '成交金额')

@@ -6,17 +6,26 @@ import type {
 } from "../../../../../types/training-operations";
 import type { TrainingSessionView } from "@yanqing/shared";
 
-import TrialStudentPicker from "./TrialStudentPicker.vue";
-import BookingMemberPicker from "../../../../../components/BookingMemberPicker.vue";
-import { toRefs, computed, ref } from "vue";
+import TrialPersonSearch from "./TrialPersonSearch.vue";
+import { useUnsavedForm } from "../../../composables/use-unsaved-form";
+import { toRefs, computed, ref, watch } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import { shortDate } from "../../../../../utils/format";
 import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 
-const showMemberPicker = ref(false);
-const showStudentPicker = ref(false);
-function openSchedule() { uni.navigateTo({ url: "/packages/ops/pages/coach/index?view=create-session" }); }
+const changingPerson = ref(false),
+  showNote = ref(false);
+function openTrialForm() {
+  uni.navigateTo({ url: "/packages/ops/pages/coach/index?view=create-trial" });
+}
+function openSchedule() {
+  uni.navigateTo({
+    url: "/packages/ops/pages/coach/index?view=create-session",
+  });
+}
 const props = defineProps<{
+  formOnly: boolean;
+  errorMessage: string;
   trials: TrainingTrialView[];
   canCreateSession: boolean;
   canManageTrials: boolean;
@@ -45,7 +54,7 @@ const props = defineProps<{
   trialReason: string;
   actionKey: string;
   loading: boolean;
-  createTrial: () => Promise<void>;
+  createTrial: () => Promise<boolean | undefined>;
   focusedRecord: string;
   trialSourceLabel: (source?: string) => string;
   transitionTrial: (
@@ -121,245 +130,361 @@ const trialReason = computed({
   get: () => props.trialReason,
   set: (value) => emit("update:trialReason", value),
 });
+const { markSaved } = useUnsavedForm(
+  () => [
+    props.selectedTrialSubject?.id || "",
+    props.selectedTrialSession?.id || "",
+    props.trialSourceIndex,
+    props.trialReason,
+    props.trialLinkLead,
+    props.trialLinkLead ? props.trialLeadIndex : -1,
+  ],
+  () => props.formOnly,
+);
+watch(
+  () => props.loading,
+  (loading, previous) => {
+    if (previous && !loading && !props.selectedTrialSubject) markSaved();
+  },
+);
+function selectPerson(kind: "member" | "student" | "lead", person: any) {
+  emit(
+    "update:trialSubjectIndex",
+    kind === "member" ? 0 : kind === "lead" ? 1 : 2,
+  );
+  if (kind === "member") props.selectTrialMember(person);
+  else if (kind === "student") emit("select-student", person);
+  else
+    emit(
+      "update:trialLeadIndex",
+      props.leads.findIndex((lead) => lead.id === person.id),
+    );
+  changingPerson.value = false;
+}
+async function save() {
+  if (await props.createTrial()) {
+    markSaved();
+    uni.navigateBack();
+  }
+}
 </script>
 
 <template>
-  <view>
-    <TrialStudentPicker v-if="showStudentPicker" :students="trialStudents" @close="showStudentPicker = false" @select="emit('select-student', $event); showStudentPicker = false" />
-    <BookingMemberPicker v-if="showMemberPicker" title="选择试听会员" note="请核对会员，试听预约将关联所选会员。" @close="showMemberPicker = false" @select="selectTrialMember($event); showMemberPicker = false" />
-    <view class="section-title"
-      >试听预约与测评漏斗
-      <text class="section-note"
-        >{{ trials.length }} 条 · 状态动作留痕</text
-      ></view
+  <view :class="{ 'trial-form-page': formOnly }">
+    <template v-if="!formOnly"
+      ><view class="section-title"
+        >试听预约 <text class="section-note">{{ trials.length }} 条</text></view
+      ><button v-if="canManageTrials" class="primary" @tap="openTrialForm">
+        预约试听
+      </button></template
     >
-    <view v-if="canManageTrials" class="card creation-form">
-      <view class="form-grid">
+    <view
+      v-if="formOnly && canManageTrials"
+      class="card creation-form trial-form"
+    >
+      <text class="field-label">试听学员</text>
+      <TrialPersonSearch
+        v-if="!selectedTrialSubject || changingPerson"
+        :students="trialStudents"
+        :leads="leads"
+        @select="selectPerson"
+      />
+      <view v-else class="selected-person"
+        ><view
+          ><text>{{ selectedTrialSubject.displayName }}</text
+          ><text class="muted"
+            >{{ trialSubjectOptions[trialSubjectIndex]
+            }}{{
+              selectedTrialSubject.guardian
+                ? " · 监护人 " + selectedTrialSubject.guardian.displayName
+                : selectedTrialSubject.phone
+                  ? " · " + selectedTrialSubject.phone
+                  : ""
+            }}</text
+          ></view
+        ><button class="ghost" @tap="changingPerson = true">更换</button></view
+      >
+      <template v-if="selectedTrialSubject && !changingPerson">
+        <view
+          v-if="trialSubjectIndex === 2 && leads.length"
+          class="consent-line"
+          ><text>关联客户线索（选填）</text
+          ><switch
+            color="#17653d"
+            :checked="trialLinkLead"
+            @change="setTrialLinkLead"
+        /></view>
         <picker
-          :range="trialSubjectOptions"
-          :value="trialSubjectIndex"
-          @change="trialSubjectIndex = Number(($event.detail as any).value)"
-          ><view
-            ><text class="field-label">试听主体类型</text
-            ><view class="picker-value"
-              >{{ trialSubjectOptions[trialSubjectIndex] }} ›</view
-            ></view
-          ></picker
-        >
-        <view v-if="trialSubjectIndex === 0"><text class="field-label">会员</text><button class="picker-value" @tap="showMemberPicker = true">{{ selectedTrialSubject?.displayName || '请选择试听会员' }} ›</button></view>
-        <picker
-          v-else-if="trialSubjectIndex === 1"
+          v-if="trialSubjectIndex === 2 && trialLinkLead"
           :range="leads"
           range-key="displayName"
           :value="trialLeadIndex"
           @change="trialLeadIndex = Number(($event.detail as any).value)"
           ><view
-            ><text class="field-label">客户线索</text
+            ><text class="field-label">关联线索（选填）</text
             ><view class="picker-value"
-              >{{ selectedTrialSubject?.displayName || "暂无可用线索" }} ›</view
+              >{{ leads[trialLeadIndex]?.displayName || "请选择线索" }} ›</view
             ></view
           ></picker
-        >
-        <view v-else><text class="field-label">青少年学员</text><button class="picker-value" @tap="showStudentPicker = true">{{ selectedTrialSubject?.displayName || '输入姓名 / 选择学员' }} ›</button></view>
-      </view>
-      <view v-if="trialSubjectIndex === 2 && leads.length" class="consent-line"
-        ><text>同时关联招生线索，后续签到/转课自动沉淀跟进证据</text
-        ><switch
-          color="#17653d"
-          :checked="trialLinkLead"
-          @change="setTrialLinkLead"
-      /></view>
-      <picker
-        v-if="trialSubjectIndex === 2 && trialLinkLead"
-        :range="leads"
-        range-key="displayName"
-        :value="trialLeadIndex"
-        @change="trialLeadIndex = Number(($event.detail as any).value)"
-        ><view
-          ><text class="field-label">关联线索（选填）</text
-          ><view class="picker-value"
-            >{{ leads[trialLeadIndex]?.displayName || "请选择线索" }} ›</view
-          ></view
-        ></picker
-      >
-      <picker
-        :range="schedulableTrialSessions"
-        :value="trialSessionIndex"
-        @change="changeTrialSession"
-        ><view
-          ><text class="field-label">已有场地资源的待开课次</text
-          ><view class="picker-value"
-            >{{
-              selectedTrialSession
-                ? `${selectedTrialClass?.name || selectedTrialSession.class?.name} · ${shortDate(selectedTrialSession.startsAt)}`
-                : "暂无可预约课次"
-            }}
-            ›</view
-          ></view
-        ></picker
-      >
-      <view v-if="!schedulableTrialSessions.length" class="trial-context">
-        <text>暂无适合所选学员的课次，请先为对应课程的班级排课。</text>
-        <button v-if="canCreateSession" class="secondary" @tap="openSchedule">去排课</button>
-        <text v-else>请联系管理员或教练排课后，再预约试听。</text>
-      </view>
-      <view v-else class="trial-context">
-        <text>产品：{{ selectedTrialProduct?.name || "—" }}</text>
-        <text>班级：{{ selectedTrialClass?.name || "—" }}</text>
-        <text
-          >时段：{{
-            selectedTrialSession
-              ? `${shortDate(selectedTrialSession.startsAt)} 至 ${shortDate(selectedTrialSession.endsAt)}`
-              : "—"
-          }}</text
-        >
-      </view>
-      <view class="form-grid">
-        <view
-          ><text class="field-label">试听教练</text
-          ><view class="picker-value readonly-value">{{
-            coachDisplayName(trialCoachId)
-          }}</view></view
         >
         <picker
-          :range="trialSourceOptions"
-          range-key="label"
-          :value="trialSourceIndex"
-          @change="trialSourceIndex = Number(($event.detail as any).value)"
+          :range="schedulableTrialSessions"
+          :value="trialSessionIndex"
+          @change="changeTrialSession"
           ><view
-            ><text class="field-label">来源渠道</text
+            ><text class="field-label">上课时间</text
             ><view class="picker-value"
-              >{{ trialSourceOptions[trialSourceIndex].label }} ›</view
+              >{{
+                selectedTrialSession
+                  ? `${selectedTrialClass?.name || selectedTrialSession.class?.name} · ${shortDate(selectedTrialSession.startsAt)}`
+                  : "暂无可预约课次"
+              }}
+              ›</view
             ></view
           ></picker
         >
-      </view>
-      <view
-        ><text class="field-label">预约事实与原因（必填）</text
-        ><textarea
-          v-model="trialReason"
-          class="reason-input"
-          maxlength="300"
-          placeholder="例如：监护人电话确认周末到场试听"
-        />
-      </view>
-      <text class="guardrail"
-        >预约必须落在已有培训课次及场地占用内；同一教练或同一试听主体发生时段重叠会被服务端拒绝。</text
-      >
-      <button
-        class="primary full-button"
-        :loading="actionKey === 'create-trial'"
-        :disabled="
-          loading ||
-          Boolean(actionKey) ||
-          !selectedTrialSession ||
-          !selectedTrialSubject ||
-          !trialCoachId
-        "
-        @tap="createTrial"
-      >
-        预约试听
-      </button>
-    </view>
-    <view
-      v-for="trial in trials"
-      :id="opsDeepLinkDomId('coach-trial', trial.id)"
-      :key="trial.id"
-      class="card trial-card"
-      :class="{
-        'deep-link-target': focusedRecord === `coach-trial:${trial.id}`,
-      }"
-    >
-      <view class="row"
-        ><view
-          ><text class="trial-title">{{
-            trial.student?.displayName ||
-            trial.member?.displayName ||
-            trial.lead?.displayName ||
-            trial.trialNo
-          }}</text
-          ><text class="muted"
-            >{{ trial.trialNo }} · {{ trial.product?.name }} ·
-            {{ shortDate(trial.scheduledStartsAt) }}</text
-          ></view
-        ><StatusBadge :value="trial.status"
-      /></view>
-      <view class="trial-context"
-        ><text
-          >教练：{{
-            trial.coach?.displayName || coachDisplayName(trial.coachId)
-          }}</text
-        ><text>来源：{{ trialSourceLabel(trial.sourceChannel) }}</text
-        ><text
-          >监护人：{{ trial.guardian?.displayName || "不适用" }}</text
-        ></view
-      >
-      <view v-if="trial.assessmentDimensions?.length" class="assessment-grid">
-        <view
-          v-for="dimension in trial.assessmentDimensions"
-          :key="dimension.key"
-          ><text>{{ dimension.label }}</text
-          ><text class="score">{{ dimension.score }}/5</text></view
-        >
-        <text class="recommendation">训练建议：{{ trial.recommendation }}</text>
-      </view>
-      <view class="trial-actions">
-        <template v-if="trial.status === 'RESERVED' && canManageTrials">
-          <button
-            class="primary inline"
-            @tap="transitionTrial(trial, 'check-in')"
+        <view v-if="!schedulableTrialSessions.length" class="trial-context">
+          <text>暂无适合所选学员的课次，请先为对应课程的班级排课。</text>
+          <button v-if="canCreateSession" class="secondary" @tap="openSchedule">
+            去排课
+          </button>
+          <text v-else>请联系管理员或教练排课后，再预约试听。</text>
+        </view>
+        <view v-else class="trial-context">
+          <text>产品：{{ selectedTrialProduct?.name || "—" }}</text>
+          <text>班级：{{ selectedTrialClass?.name || "—" }}</text>
+          <text
+            >时段：{{
+              selectedTrialSession
+                ? `${shortDate(selectedTrialSession.startsAt)} 至 ${shortDate(selectedTrialSession.endsAt)}`
+                : "—"
+            }}</text
           >
-            签到
-          </button>
-          <button class="ghost inline" @tap="transitionTrial(trial, 'no-show')">
-            未到
-          </button>
-          <button class="danger inline" @tap="transitionTrial(trial, 'cancel')">
-            取消
-          </button>
-        </template>
-        <button
-          v-if="trial.status === 'CHECKED_IN' && canAssessTrials"
-          class="primary inline"
-          @tap="assessTrial(trial)"
-        >
-          提交测评
+        </view>
+        <view class="form-grid">
+          <view
+            ><text class="field-label">试听教练</text
+            ><view class="picker-value readonly-value">{{
+              coachDisplayName(trialCoachId)
+            }}</view></view
+          >
+          <picker
+            :range="trialSourceOptions"
+            range-key="label"
+            :value="trialSourceIndex"
+            @change="trialSourceIndex = Number(($event.detail as any).value)"
+            ><view
+              ><text class="field-label">来源渠道</text
+              ><view class="picker-value"
+                >{{ trialSourceOptions[trialSourceIndex].label }} ›</view
+              ></view
+            ></picker
+          >
+        </view>
+        <button class="ghost" @tap="showNote = !showNote">
+          {{ showNote ? "收起备注" : "添加备注（选填）" }}
         </button>
-        <template v-if="trial.status === 'ASSESSED' && canConvertTrials">
-          <button class="primary inline" @tap="convertTrial(trial)">
-            转正式课
-          </button>
-          <button class="danger inline" @tap="transitionTrial(trial, 'lost')">
-            确认流失
-          </button>
-        </template>
-        <template v-if="trial.status === 'NO_SHOW'">
-          <button
-            v-if="canConvertTrials"
-            class="danger inline"
-            @tap="transitionTrial(trial, 'lost')"
-          >
-            确认流失
-          </button>
-          <button
-            v-if="canManageTrials"
-            class="ghost inline"
-            @tap="transitionTrial(trial, 'cancel')"
-          >
-            关闭预约
-          </button>
-        </template>
-      </view>
-      <text v-if="trial.transitions?.length" class="audit-hint"
-        >状态证据 {{ trial.transitions.length }} 条 · 最近：{{
-          trial.transitions[trial.transitions.length - 1].reason
-        }}</text
+        <view v-if="showNote"
+          ><text class="field-label">备注（选填）</text
+          ><textarea
+            v-model="trialReason"
+            class="reason-input"
+            maxlength="300"
+            placeholder="如需补充学员情况，可在此填写"
+          />
+        </view>
+      </template>
+      <view class="trial-save"
+        ><text
+          v-if="selectedTrialSubject && selectedTrialSession && !changingPerson"
+          class="trial-review"
+          >{{ selectedTrialSubject.displayName }} ·
+          {{ shortDate(selectedTrialSession.startsAt) }} ·
+          {{ coachDisplayName(trialCoachId) }}</text
+        ><text v-if="errorMessage" class="trial-error" role="alert">{{
+          errorMessage
+        }}</text>
+        <button
+          class="primary full-button"
+          :loading="actionKey === 'create-trial'"
+          :disabled="
+            loading ||
+            Boolean(actionKey) ||
+            !selectedTrialSession ||
+            !selectedTrialSubject ||
+            !trialCoachId ||
+            changingPerson
+          "
+          @tap="save"
+        >
+          预约试听
+        </button></view
       >
     </view>
-    <view v-if="!loading && !trials.length" class="empty card"
-      >暂无试听预约；前台可从已分配场地的课次创建预约。</view
-    >
+    <template v-if="!formOnly"
+      ><view
+        v-for="trial in trials"
+        :id="opsDeepLinkDomId('coach-trial', trial.id)"
+        :key="trial.id"
+        class="card trial-card"
+        :class="{
+          'deep-link-target': focusedRecord === `coach-trial:${trial.id}`,
+        }"
+      >
+        <view class="row"
+          ><view
+            ><text class="trial-title">{{
+              trial.student?.displayName ||
+              trial.member?.displayName ||
+              trial.lead?.displayName ||
+              trial.trialNo
+            }}</text
+            ><text class="muted"
+              >{{ trial.trialNo }} · {{ trial.product?.name }} ·
+              {{ shortDate(trial.scheduledStartsAt) }}</text
+            ></view
+          ><StatusBadge :value="trial.status"
+        /></view>
+        <view class="trial-context"
+          ><text
+            >教练：{{
+              trial.coach?.displayName || coachDisplayName(trial.coachId)
+            }}</text
+          ><text>来源：{{ trialSourceLabel(trial.sourceChannel) }}</text
+          ><text
+            >监护人：{{ trial.guardian?.displayName || "不适用" }}</text
+          ></view
+        >
+        <view v-if="trial.assessmentDimensions?.length" class="assessment-grid">
+          <view
+            v-for="dimension in trial.assessmentDimensions"
+            :key="dimension.key"
+            ><text>{{ dimension.label }}</text
+            ><text class="score">{{ dimension.score }}/5</text></view
+          >
+          <text class="recommendation"
+            >训练建议：{{ trial.recommendation }}</text
+          >
+        </view>
+        <view class="trial-actions">
+          <template v-if="trial.status === 'RESERVED' && canManageTrials">
+            <button
+              class="primary inline"
+              @tap="transitionTrial(trial, 'check-in')"
+            >
+              签到
+            </button>
+            <button
+              class="ghost inline"
+              @tap="transitionTrial(trial, 'no-show')"
+            >
+              未到
+            </button>
+            <button
+              class="danger inline"
+              @tap="transitionTrial(trial, 'cancel')"
+            >
+              取消
+            </button>
+          </template>
+          <button
+            v-if="trial.status === 'CHECKED_IN' && canAssessTrials"
+            class="primary inline"
+            @tap="assessTrial(trial)"
+          >
+            提交测评
+          </button>
+          <template v-if="trial.status === 'ASSESSED' && canConvertTrials">
+            <button class="primary inline" @tap="convertTrial(trial)">
+              转正式课
+            </button>
+            <button class="danger inline" @tap="transitionTrial(trial, 'lost')">
+              确认流失
+            </button>
+          </template>
+          <template v-if="trial.status === 'NO_SHOW'">
+            <button
+              v-if="canConvertTrials"
+              class="danger inline"
+              @tap="transitionTrial(trial, 'lost')"
+            >
+              确认流失
+            </button>
+            <button
+              v-if="canManageTrials"
+              class="ghost inline"
+              @tap="transitionTrial(trial, 'cancel')"
+            >
+              关闭预约
+            </button>
+          </template>
+        </view>
+        <text v-if="trial.transitions?.length" class="audit-hint"
+          >状态证据 {{ trial.transitions.length }} 条 · 最近：{{
+            trial.transitions[trial.transitions.length - 1].reason
+          }}</text
+        >
+      </view>
+      <view v-if="!loading && !trials.length" class="empty card"
+        >暂无试听预约；前台可从已分配场地的课次创建预约。</view
+      >
+    </template>
   </view>
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>
+.trial-form-page {
+  padding-bottom: calc(170rpx + env(safe-area-inset-bottom));
+}
+.selected-person {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 20rpx 0;
+  margin-bottom: 20rpx;
+}
+.selected-person > view {
+  flex: 1;
+  min-width: 0;
+  font-size: 30rpx;
+}
+.selected-person .muted {
+  display: block;
+  margin-top: 8rpx;
+}
+.selected-person button {
+  margin: 0;
+  min-height: 44px;
+}
+.trial-save {
+  position: fixed;
+  z-index: 25;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--color-surface);
+  padding: 20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom));
+  border-top: 1rpx solid var(--color-border);
+}
+.trial-save button {
+  margin: 0;
+  width: 100%;
+  min-height: 48px;
+}
+.trial-review {
+  display: block;
+  color: var(--color-foreground);
+  font-size: 26rpx;
+  line-height: 1.5;
+  margin-bottom: 12rpx;
+}
+.trial-error {
+  display: block;
+  color: var(--color-danger);
+  font-size: 26rpx;
+  line-height: 1.6;
+  margin-bottom: 12rpx;
+}
+</style>

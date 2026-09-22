@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { TrainingProductView } from "@yanqing/shared";
 import { useCoachViewModel } from "./actions/projection.js";
 
 import { useTrainingProductForm } from "./forms/product-form";
@@ -17,6 +18,7 @@ import { useCoachLoadingActions } from "./actions/loading.js";
 
 import TrialAppointments from "./sections/TrialAppointments.vue";
 import YouthRules from "./sections/YouthRules.vue";
+import TrainingProductEditor from "./sections/TrainingProductEditor.vue";
 import TrainingProducts from "./sections/TrainingProducts.vue";
 import TrainingConfiguration from "./sections/TrainingConfiguration.vue";
 import TrainingSchedule from "./sections/TrainingSchedule.vue";
@@ -202,6 +204,10 @@ const {
   enrollments,
   trials,
 });
+// Keep the same person selected if refreshing changes directory ordering.
+watch(trialStudents, (next, previous) => { const id = previous[trialStudentIndex.value]?.id; if (id) trialStudentIndex.value = next.findIndex(item => item.id === id); }, {flush:'sync'});
+watch(trialMembers, (next, previous) => { const id = previous[trialMemberIndex.value]?.id; if (id) trialMemberIndex.value = next.findIndex(item => item.id === id); }, {flush:'sync'});
+watch(leads, (next, previous) => { const id = previous[trialLeadIndex.value]?.id; if (id) trialLeadIndex.value = next.findIndex(item => item.id === id); }, {flush:'sync'});
 watch(trialSubjectIndex, () => { trialSessionIndex.value = 0; });
 watch(() => selectedTrialClass.value?.coachId, (coachId) => {
   trialCoachId.value = coachId || "";
@@ -472,7 +478,7 @@ const {
 });
 
 
-const isCreationPage = computed(() => activeView.value.startsWith('create-'));
+const isCreationPage = computed(() => activeView.value.startsWith('create-') || activeView.value === 'edit-product');
 const coachTabs = computed(() => [
   { key:'lessons', title:'课表' }, { key:'trials', title:'试听' }, { key:'products', title:'课程' },
   ...(canConfigureTraining.value ? [{ key:'rules', title:'规则' }] : []),
@@ -485,10 +491,14 @@ const filteredLessons = computed(() => lessons.value.filter(lesson => {
 }));
 const detailLessons = computed(() => lessons.value.filter(lesson => lesson.id === lessonId.value));
 function openLesson(id: string) { uni.navigateTo({ url:`/packages/ops/pages/coach/index?lessonId=${encodeURIComponent(id)}` }); }
+function openProductEditor(product: TrainingProductView) { uni.navigateTo({url:`/packages/ops/pages/coach/index?view=edit-product&productId=${encodeURIComponent(product.id)}`}); }
 function openCreation(view: string) { uni.navigateTo({ url:`/packages/ops/pages/coach/index?view=${view}` }); }
 watch(activeView, () => { if (!isCreationPage.value && !lessonId.value) uni.pageScrollTo({ scrollTop:0, duration:0 }); });
 
-onLoad(navigation.setQuery);
+const requestedProductId = ref('');
+const editingProduct = computed(() => products.value.find(product => product.id === requestedProductId.value));
+watch(editingProduct, product => { if (product && !editingProductId.value) beginProductEdit(product); });
+onLoad(options => { navigation.setQuery(options); requestedProductId.value = typeof options?.productId === 'string' ? options.productId : ''; });
 onShow(load);
 onUnmounted(dispose);
 </script>
@@ -523,20 +533,22 @@ onUnmounted(dispose);
     <view v-if="actionMessage" class="notice card">{{ actionMessage }}</view>
 
     <TrialAppointments
-      v-if="activeView === 'trials' && !lessonId"
+      v-if="['trials', 'create-trial'].includes(activeView) && !lessonId"
+      :form-only="activeView === 'create-trial'"
+      :error-message="errorMessage"
       :trials="trials"
       :canManageTrials="canManageTrials"
       :trialSubjectOptions="trialSubjectOptions"
       v-model:trialSubjectIndex="trialSubjectIndex"
       :trialMembers="trialMembers"
-      :selectTrialMember="(member) => { trialMembers = [member, ...trialMembers.filter(item => item.id !== member.id)]; trialMemberIndex = 0 }"
+      :selectTrialMember="(member) => { trialData.selectMember(member); trialMemberIndex = 0 }"
       v-model:trialMemberIndex="trialMemberIndex"
       :selectedTrialSubject="selectedTrialSubject"
       :leads="leads"
       v-model:trialLeadIndex="trialLeadIndex"
       :trialStudents="trialStudents"
       :canCreateSession="canCreateSession"
-      @select-student="(student) => { trialStudents = [student, ...trialStudents.filter(item => item.id !== student.id)]; trialStudentIndex = 0 }"
+      @select-student="(student) => { trialData.selectStudent(student); trialStudentIndex = 0 }"
       v-model:trialStudentIndex="trialStudentIndex"
       :trialLinkLead="trialLinkLead"
       :setTrialLinkLead="setTrialLinkLead"
@@ -594,8 +606,12 @@ onUnmounted(dispose);
       :coachDisplayName="coachDisplayName"
       :canConfigureTraining="canConfigureTraining"
       :actionKey="actionKey"
-      :beginProductEdit="beginProductEdit"
+      :beginProductEdit="openProductEditor"
       :updateProduct="updateProduct"
+      :loading="loading"
+    />
+
+    <TrainingProductEditor v-if="activeView === 'edit-product' && canConfigureTraining" :product="editingProduct" :error-message="errorMessage" :action-key="actionKey" :loading="loading" :update-product="updateProduct"
       :editingProductId="editingProductId"
       v-model:editProductName="editProductName"
       v-model:editProductTotalSessions="editProductTotalSessions"
@@ -603,7 +619,6 @@ onUnmounted(dispose);
       v-model:editProductPriceYuan="editProductPriceYuan"
       v-model:editProductReason="editProductReason"
       :cancelProductEdit="cancelProductEdit"
-      :loading="loading"
     />
 
     <TrainingConfiguration
@@ -669,6 +684,7 @@ onUnmounted(dispose);
     />
 
     <LessonAttendance
+      :refresh="load"
       v-if="lessonId"
       :loading="loading"
       :activeLessons="activeLessons"

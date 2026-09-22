@@ -3,8 +3,8 @@ import { ref } from "vue";
 export function useTrainingTrialForm() {
   const trialSubjectOptions = ["会员", "客户线索", "青少年学员"];
   const trialSubjectIndex = ref(0);
-  const trialMemberIndex = ref(0);
-  const trialLeadIndex = ref(0);
+  const trialMemberIndex = ref(-1);
+  const trialLeadIndex = ref(-1);
   const trialStudentIndex = ref(-1);
   const trialSessionIndex = ref(0);
   const trialCoachId = ref("");

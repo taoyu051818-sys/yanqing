@@ -97,13 +97,13 @@ export function useCoachCatalogActions({
       const code = productCode.value.trim().toUpperCase();
       const name = productName.value.trim();
       const reason = productReason.value.trim() ? requiredReason(productReason.value) : '创建课程产品';
-      if (!code || code.length > 40 || !name || name.length > 100) {
+      if (code.length > 40 || !name || name.length > 100) {
         throw new Error(
-          "产品编码和名称不能为空，编码最多 40 字符、名称最多 100 字符。",
+          "请填写课程名称，最多 100 字。",
         );
       }
       const command = {
-        code,
+        ...(code ? { code } : {}),
         name,
         audience: audienceOptions[productAudienceIndex.value].value,
         totalSessions: positiveInteger(productTotalSessions.value, "总课次"),
@@ -198,7 +198,7 @@ export function useCoachCatalogActions({
         });
         return;
       }
-      reason = requiredReason(reason);
+      reason = reason.trim() || "修改课程设置";
       const command = isEditing
         ? {
             name: editProductName.value.trim(),

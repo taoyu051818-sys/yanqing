@@ -25,9 +25,6 @@ export function useCoachTrialData(scope: DataScope) {
       students.load(async () =>
         canManage ? await endpoints.adminTrainingStudents() : [],
       ),
-      members.load(async () =>
-        [],
-      ),
     ]);
   }
   function reset() {
@@ -37,6 +34,18 @@ export function useCoachTrialData(scope: DataScope) {
     members.reset();
   }
   return {
+    selectMember(member: MemberDirectoryItem) {
+      members.replace([
+        member,
+        ...members.data.value.filter((item) => item.id !== member.id),
+      ]);
+    },
+    selectStudent(student: TrainingStudentSummary) {
+      students.replace([
+        student,
+        ...students.data.value.filter((item) => item.id !== student.id),
+      ]);
+    },
     trials: trials.data,
     leads: leads.data,
     trialStudents: students.data,

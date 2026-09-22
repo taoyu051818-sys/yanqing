@@ -5,14 +5,15 @@ import BookingMemberPicker from '../../../../../components/BookingMemberPicker.v
 import type { MemberDirectoryItem } from '../../../../../types/domain';
 import type { TrainingStudentSummary } from '../../../../../types/training-operations';
 import { useTrialStudentRegistration } from '../forms/trial-student-registration';
-const props = defineProps<{ students: TrainingStudentSummary[] }>();
+const props = defineProps<{ students: TrainingStudentSummary[]; initialKeyword?: string; createFirst?: boolean }>();
 const emit = defineEmits<{
   (event: 'select', student: TrainingStudentSummary): void;
   (event: 'close'): void;
 }>();
-const keyword = ref(''), creating = ref(false), choosingGuardian = ref(false);
+const keyword = ref(props.initialKeyword || ''), creating = ref(Boolean(props.createFirst)), choosingGuardian = ref(false);
 const form = useTrialStudentRegistration(student => emit('select', student));
 const { name, guardian, consent, busy, error, save } = form;
+if (props.createFirst) name.value = props.initialKeyword || '';
 const matches = computed(() => props.students.filter(student =>
   student.displayName.includes(keyword.value.trim()) || student.guardian?.displayName.includes(keyword.value.trim()),
 ));

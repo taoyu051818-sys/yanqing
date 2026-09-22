@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import { venueDateKey } from "../../../../../utils/format";
 import { toRefs } from "vue";
+import { useSessionStore } from "../../../../../stores/session";
+import { hasOperationsAccess } from "../../../../../config/operations";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 
 const props = defineProps<{
@@ -58,6 +61,44 @@ const {
   closeBusinessDay,
   acting,
 } = toRefs(props);
+const session = useSessionStore();
+function blockerAction(kind: string) {
+  if (kind === "UNREVIEWED_CASH_VARIANCES")
+    return { label: "查看现金差异", route: "" };
+  if (kind === "OPEN_FRONT_DESK_SHIFTS")
+    return hasOperationsAccess(session.roles, "today")
+      ? { label: "查看前台班次", route: "/packages/ops/pages/frontdesk/index" }
+      : null;
+  if (kind === "UNFULFILLED_TRAINING_SESSIONS")
+    return hasOperationsAccess(session.roles, "training")
+      ? {
+          label: "查看培训待办",
+          route: "/packages/ops/pages/admin/index?group=training",
+        }
+      : null;
+  const before = encodeURIComponent(
+    venueDateKey(props.reconciliation?.businessDate) ||
+      props.closeBusinessPeriod().date,
+  );
+  if (kind === "PENDING_REFUNDS")
+    return {
+      label: "查看待处理退款",
+      route: `/packages/ops/pages/transactions/index?view=refunds&before=${before}`,
+    };
+  if (kind === "PENDING_PAYMENTS" || kind === "UNFULFILLED_ORDERS")
+    return {
+      label: "查看相关订单",
+      route: `/packages/ops/pages/transactions/index?view=orders&before=${before}&dateBasis=${kind === "UNFULFILLED_ORDERS" ? "usage" : "created"}`,
+    };
+  return null;
+}
+function openBlocker(kind: string) {
+  const action = blockerAction(kind);
+  if (!action) return;
+  if (!action.route)
+    uni.pageScrollTo({ selector: "#finance-shift-variances", duration: 200 });
+  else uni.navigateTo({ url: action.route });
+}
 </script>
 
 <template>
@@ -128,11 +169,20 @@ const {
         >
       </view>
       <view v-if="reconciliation?.blockers?.length" class="blocker-list">
-        <text
+        <view
           v-for="blocker in reconciliation.blockers"
           :key="blocker.kind"
-          class="blocker"
-          >{{ blocker.message }}</text
+          class="blocker-row"
+          ><text class="blocker">{{ blocker.message }}</text
+          ><button
+            v-if="blockerAction(blocker.kind)"
+            class="secondary"
+            @tap="openBlocker(blocker.kind)"
+          >
+            {{ blockerAction(blocker.kind)?.label }} ›</button
+          ><text v-else class="muted"
+            >请联系对应岗位处理后刷新日结。</text
+          ></view
         >
       </view>
       <text class="muted period-note"
@@ -161,3 +211,18 @@ const {
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>
+.blocker-row {
+  padding: 16rpx 0;
+  border-bottom: 1rpx solid var(--color-border);
+}
+.blocker-row button {
+  min-height: 44px;
+  width: 100%;
+  margin: 12rpx 0 0;
+  font-size: 26rpx;
+  text-align: left;
+  padding: 16rpx;
+}
+</style>

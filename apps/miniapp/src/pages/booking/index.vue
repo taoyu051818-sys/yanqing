@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MemberDirectorySearch from "../../components/MemberDirectorySearch.vue";
 import VenueSummary from "../../components/VenueSummary.vue";
 import { useVenueProfile } from "../../composables/use-venue-profile";
 const venue = useVenueProfile();
@@ -56,7 +57,7 @@ function setMode(mode: "SELF" | "ASSISTED") {
   couponCode.value = "";
   showCoupon.value = false;
   showBookingReview.value = false;
-  if (mode === "ASSISTED") showMembers.value = true;
+  showMembers.value = false;
   void load(true);
 }
 function selectMember(member: MemberDirectoryItem) {
@@ -417,6 +418,7 @@ onShow(async () => {
         </button></view
       >
     </view>
+    <view v-if="assisted && !targetMember" class="card inline-member-search"><text class="inline-member-title">为哪位会员订场？</text><MemberDirectorySearch :page-size="3" @select="selectMember" /></view>
     <view v-if="error" class="card error"
       ><AppIcon name="warning" :size="32" tone="danger" /><text>{{
         error
@@ -744,7 +746,7 @@ onShow(async () => {
               "，请提醒会员在 10 分钟内到“我的订单”付款。现场收款请进入今日营业处理。"
         }}</text
         ><button class="primary" @tap="openAssistedOrder">查看现场订单</button
-        ><button class="secondary" @tap="assistedOrder = null">
+        ><button class="secondary" @tap="assistedOrder = null; targetMember = null">
           继续订场
         </button></view
       ></view
@@ -1090,3 +1092,5 @@ onShow(async () => {
 }
 /* #endif */
 </style>
+
+<style scoped>.inline-member-title{display:block;font-size:30rpx;font-weight:600}.inline-member-search{padding:24rpx}</style>

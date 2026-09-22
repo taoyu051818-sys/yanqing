@@ -516,6 +516,8 @@ export const endpoints = {
     api.post(`/training/settlements/${id}/return`, data),
   voidTrainingSettlement: (id: string, data: object) =>
     api.post(`/training/settlements/${id}/void`, data),
+  trainingBatch: (sessionId: string, action: import('../types/training-batch').TrainingBatchAction, data: import('../types/training-batch').TrainingBatchCommand) =>
+    api.post<{ results: import('../types/training-batch').TrainingBatchResult[] }>(`/training/sessions/${sessionId}/batch/${action}`, data),
   consumeTraining: (sessionId: string, data: object) =>
     api.post(`/training/sessions/${sessionId}/consume`, data),
   confirmTrainingConsume: (sessionId: string, data: object) =>

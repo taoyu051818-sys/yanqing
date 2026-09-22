@@ -44,6 +44,7 @@ export class TrainingAttendanceService {
     sessionId: string,
     dto: AttendanceActionDto,
     actor: AuthUser,
+    options: { allowHistoricalOverride?: boolean } = {},
   ) {
     if (
       !actor.roles.some((role) =>
@@ -131,7 +132,7 @@ export class TrainingAttendanceService {
         action: 'TRAINING_ATTENDANCE_MARKED',
         objectType: 'TrainingAttendance',
         objectId: attendance.id,
-        overrideReason: dto.reason,
+        overrideReason: options.allowHistoricalOverride === false ? undefined : dto.reason,
         observedAt: now,
       });
       if (

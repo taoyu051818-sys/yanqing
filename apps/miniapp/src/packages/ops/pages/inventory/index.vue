@@ -436,6 +436,11 @@ const {
   isAdmin,
 });
 
+function openStockMovement(type: MovementType, context: {itemId: string; balanceId: string}) {
+  openMovementForm(type, context);
+  if (showMovementForm.value) { tab.value = 'MOVEMENT'; uni.pageScrollTo({ scrollTop:0, duration:0 }); }
+}
+
 const { load, applyInventoryDeepLink } = useInventoryLoadingActions({
   session,
   loading,
@@ -532,6 +537,7 @@ onShow(load);
       :canUseForTraining="canUseForTraining"
       :canUseForEvent="canUseForEvent"
       :openUsageForm="openUsageForm"
+      :open-movement="openStockMovement"
     />
 
     <Purchasing

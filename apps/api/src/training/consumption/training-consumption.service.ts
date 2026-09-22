@@ -220,7 +220,7 @@ export class TrainingConsumptionService {
     sessionId: string,
     dto: ConfirmTrainingConsumeDto | ConsumeTrainingDto,
     actor: AuthUser,
-    options: { auditAction?: string } = {},
+    options: { auditAction?: string; allowHistoricalOverride?: boolean } = {},
   ) {
     assertTrainingApprover(actor);
     const auditAction = options.auditAction ?? 'TRAINING_CONSUME_CONFIRMED';
@@ -331,7 +331,7 @@ export class TrainingConsumptionService {
         action: auditAction,
         objectType: 'TrainingAttendance',
         objectId: attendance.id,
-        overrideReason: explicitReason,
+        overrideReason: options.allowHistoricalOverride === false ? undefined : explicitReason,
         observedAt: now,
       });
       await assertTrainingLedgerOpen(tx, now);

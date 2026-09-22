@@ -24,6 +24,7 @@ const props = defineProps<{
   loading: boolean;
   items: any[];
   isAdmin: boolean;
+  openMovement: (type: "TRANSFER" | "LOSS", context: { itemId: string; balanceId: string }) => void;
   focusedRecord: string;
   stockItemContext: (item: any) => string;
   canUseForTraining: boolean;
@@ -142,7 +143,7 @@ const showUsageForm = computed({
           ></view
         ><text v-if="isAdmin" class="muted"
           >售价 {{ money(item.salePriceCents) }}</text
-        ><view
+        ><view v-if="isAdmin && item.enabled !== false" class="stock-batches"><view v-for="balance in (item.stockBalances || []).filter((entry: any) => Number(entry.quantity) > 0)" :key="balance.id" class="stock-batch"><text>{{ balance.location?.name || '库位' }} · {{ balance.batchCode || '默认批次' }} · {{ balance.quantity }} 件</text><view class="usage-row"><button class="secondary usage-action" :disabled="saving" @tap="openMovement('TRANSFER', {itemId:item.id, balanceId:balance.id})">调拨</button><button class="secondary usage-action" :disabled="saving" @tap="openMovement('LOSS', {itemId:item.id, balanceId:balance.id})">报损</button></view></view></view><view
           v-if="item.enabled !== false && (canUseForTraining || canUseForEvent)"
           class="usage-row"
           ><button
@@ -165,3 +166,5 @@ const showUsageForm = computed({
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>.stock-batches{margin-top:20rpx}.stock-batch{padding:20rpx 0;border-top:1rpx solid var(--color-border);font-size:26rpx;line-height:1.6}.stock-batch button{min-height:44px}</style>

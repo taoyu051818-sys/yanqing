@@ -239,12 +239,7 @@ async function createGame() {
     errorMessage.value = "报名费用必须是非负金额，最多两位小数。";
     return;
   }
-  const confirmed = await uni.showModal({
-    title: "确认创建球局草稿",
-    content: `${cleanTitle}\n${gameDate.value} ${startTime.value}-${endTime.value} · ${selectedCourt.value.name}\n${capacityOptions[capacityIndex.value]} 人 · ${money(Math.round(fee * 100))}\n创建后仍需发布才会开放报名。`,
-    confirmText: "创建草稿",
-  });
-  if (!confirmed.confirm) return;
+
   actionKey.value = "create";
   try {
     const created: any = await endpoints.createGame({

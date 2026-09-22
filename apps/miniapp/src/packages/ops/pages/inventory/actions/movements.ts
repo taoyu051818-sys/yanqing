@@ -57,7 +57,8 @@ export function useInventoryMovementsActions({
   run,
   isAdmin,
 }: ActionContext) {
-  function openMovementForm(type: MovementType) {
+  function openMovementForm(type: MovementType, context?: { itemId: string; balanceId: string }) {
+    if (!isAdmin.value || saving.value) return;
     movementType.value = type;
     movementForm.value = {
       balanceId: "",
@@ -67,6 +68,12 @@ export function useInventoryMovementsActions({
       quantity: "",
       reason: "",
     };
+    if (context) {
+      const item = activeItems.value.find(entry => entry.id === context.itemId);
+      const balance = item?.stockBalances?.find((entry: any) => entry.id === context.balanceId && Number(entry.quantity) > 0);
+      if (!balance || !activeLocations.value.some(location => location.id === balance.locationId)) { validationError('该批次已不可操作，请刷新库存后重试'); return; }
+      Object.assign(movementForm.value, { itemId: item.id, balanceId: balance.id, sourceLocationId: balance.locationId });
+    }
     showMovementForm.value = true;
   }
 

@@ -66,7 +66,7 @@ export async function handleTrainingProductsPost(
 ): Promise<MockRouteResult> {
   if (url === "/training/products" && method === "POST") {
     requireMockRole("ADMIN", "SUPER_ADMIN");
-    const code = text(data.code).toUpperCase();
+    let code = text(data.code).toUpperCase();
     const name = text(data.name);
     const audience = text(data.audience);
     const totalSessions = integer(data.totalSessions);
@@ -74,8 +74,8 @@ export async function handleTrainingProductsPost(
     const priceCents = integer(data.priceCents);
     const refundRule = data.refundRule;
     const reason = requireTrainingCreationReason(data.reason);
-    if (!code || code.length > 40 || !name || name.length > 100)
-      throw new Error("课程产品编码和名称不能为空且不能超过规定长度");
+    if (code.length > 40 || !name || name.length > 100)
+      throw new Error("请填写课程名称，编码和名称不能超过规定长度");
     if (!["ADULT", "YOUTH", "ALL"].includes(audience))
       throw new Error("课程产品适用人群无效");
     if (totalSessions < 1) throw new Error("课程总课次必须为正整数");
@@ -112,6 +112,7 @@ export async function handleTrainingProductsPost(
       includesYouthAudience(audience)
         ? validateMockYouthProduct({ totalSessions, validityDays, priceCents })
         : null;
+    code ||= newId("COURSE");
     const products = getTrainingProducts();
     if (products.some((product) => text(product.code).toUpperCase() === code))
       throw new Error("课程产品编码已存在");

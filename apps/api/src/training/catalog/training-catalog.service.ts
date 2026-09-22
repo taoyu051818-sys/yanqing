@@ -18,6 +18,7 @@ import type {
 import { orderCreationCommandHash } from '../../orders/order-creation-idempotency.js';
 import { YouthTrainingRulesService } from '../youth-training-rules.service.js';
 import {
+  serial,
   findTrainingCommandReplay,
   assertTrainingCommandReplay,
 } from '../shared/training-command-policy.js';
@@ -158,7 +159,7 @@ export class TrainingCatalogService {
           }
           const created = await tx.trainingProduct.create({
             data: {
-              code: dto.code,
+              code: dto.code?.trim() || serial("COURSE"),
               name: dto.name,
               audience: dto.audience,
               totalSessions: dto.totalSessions,

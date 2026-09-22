@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
+import { onLoad, onShow, onPullDownRefresh } from "@dcloudio/uni-app";
 import OperationsFrame from "../../components/OperationsFrame.vue";
 import OperationsTabs from "../../components/OperationsTabs.vue";
 import ActionDialog from "../../../../components/ActionDialog.vue";
@@ -44,6 +44,12 @@ const {
   load,
   changeView,
 } = data;
+onLoad(options => {
+  if (options?.view !== 'orders' && options?.view !== 'refunds') return;
+  view.value = options.view;
+  if (typeof options.before === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(options.before)) { dateFrom.value = ''; dateTo.value = options.before; }
+  if (options.dateBasis === 'usage') dateBasis.value = 'usage';
+});
 const searchText = ref("");
 let savedFilters: string[] = [];
 function showFilters() {

@@ -27,3 +27,8 @@ it('preserves the draft and shows an actionable error when saving fails', async 
   expect(form.productName.value).toBe('一对一'); expect(errorMessage.value).toContain('编码已存在');
   expect(uni.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: errorMessage.value }));
 });
+
+it('omits a blank product code and leaves generation to the server', async () => {
+ const {form, createProduct} = setup(); form.productCode.value = ''; await createProduct();
+ expect(endpoints.createTrainingProduct).toHaveBeenCalledOnce(); expect(vi.mocked(endpoints.createTrainingProduct).mock.calls[0][0]).not.toHaveProperty('code');
+});

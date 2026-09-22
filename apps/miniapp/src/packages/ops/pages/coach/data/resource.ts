@@ -20,6 +20,12 @@ export function useTrainingResource<T>(initial: () => T, scope: DataScope) {
     value.value = initial();
     error.value = "";
   }
+  function replace(next: T) {
+    generation++;
+    owner.value = scope();
+    value.value = next;
+    error.value = "";
+  }
   async function load(fetch: () => Promise<T>): Promise<boolean> {
     if (owner.value !== scope()) reset();
     const request = ++generation;
@@ -42,6 +48,7 @@ export function useTrainingResource<T>(initial: () => T, scope: DataScope) {
     ),
     error: computed(() => (owner.value === scope() ? error.value : "")),
     load,
+    replace,
     reset,
   };
 }

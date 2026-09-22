@@ -43,7 +43,7 @@ export function workspaceMenu(roles: AppRole[]): WorkspaceItem[] {
   if (hasOperationsAccess(roles, "today"))
     items.unshift({
       key: "booking",
-      title: "预订场地",
+      title: "代会员订场",
       icon: "booking",
       route: "/pages/booking/index",
       description: "预约时段、代会员订场",

@@ -8,6 +8,7 @@ import { routeMockConsignmentSettlement } from "./consignment-settlement";
 import { routeMockTrainingOperations } from "./training-operations";
 import { ok, text, expireMockPurchases } from "./policies/common.js";
 import type { MockRouteOptions } from "./routes/route-contract.js";
+import { handleTrainingBatchPost } from './routes/training/batch';
 import {
   handleParametersGet,
   handleParametersPost,
@@ -360,6 +361,7 @@ const domainRoutes = [
   handleTrainingSessionsGet,
   handleTrainingSessionsPost,
   handleTrainingPurchaseAny,
+  handleTrainingBatchPost,
   handleAttendancePost,
   handleMakeupPost,
   handleConsumePost,

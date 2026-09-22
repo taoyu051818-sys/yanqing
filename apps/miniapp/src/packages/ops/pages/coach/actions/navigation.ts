@@ -34,10 +34,10 @@ export function useCoachNavigation({
     deepLinkQuery.value = parseOpsDeepLinkQuery(options);
     deepLinkHandled.value = false;
     focusedRecord.value = "";
-    const views = ['lessons', 'trials', 'products', 'rules', 'corrections', 'create-session', 'create-product', 'create-class'];
+    const views = ['lessons', 'trials', 'products', 'rules', 'corrections', 'create-session', 'create-product', 'create-class', 'create-trial', 'edit-product'];
     activeView.value = typeof options?.view === 'string' && views.includes(options.view) ? options.view : 'lessons';
     lessonId.value = typeof options?.lessonId === 'string' ? options.lessonId : '';
-    const titles: Record<string, string> = { 'create-session':'新建课次', 'create-product':'新建课程产品', 'create-class':'新建班级', products:'课程班级' };
+    const titles: Record<string, string> = { 'create-trial':'预约试听', 'edit-product':'修改课程', 'create-session':'新建课次', 'create-product':'新建课程产品', 'create-class':'新建班级', products:'课程班级' };
     uni.setNavigationBarTitle({ title: lessonId.value ? '课次详情' : titles[activeView.value] || '培训管理' });
   }
   async function applyCoachDeepLink() {
