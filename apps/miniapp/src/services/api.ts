@@ -265,7 +265,7 @@ export const endpoints = {
       "/training/admin/students",
       guardianId ? { guardianId } : {},
     ),
-  createTrainingStudent: (data: object) => api.post("/training/students", data),
+  createTrainingStudent: (data: object) => api.post<TrainingStudentSummary>("/training/students", data),
   updateTrainingStudent: (studentId: string, data: object) =>
     api.patch(`/training/students/${studentId}`, data),
   trainingEnrollments: () => api.get<any[]>("/training/enrollments"),

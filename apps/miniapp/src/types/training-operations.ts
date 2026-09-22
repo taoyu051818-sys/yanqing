@@ -12,6 +12,7 @@ export interface TrainingLeadSummary extends PersonSummary {
   convertedMemberId: string | null;
 }
 export interface TrainingStudentSummary extends PersonSummary {
+  guardianConsentStatus?: boolean;
   guardianId: string;
   guardian: PersonSummary;
 }

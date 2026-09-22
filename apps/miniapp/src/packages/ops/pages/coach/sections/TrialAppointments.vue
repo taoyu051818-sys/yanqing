@@ -6,6 +6,7 @@ import type {
 } from "../../../../../types/training-operations";
 import type { TrainingSessionView } from "@yanqing/shared";
 
+import TrialStudentPicker from "./TrialStudentPicker.vue";
 import BookingMemberPicker from "../../../../../components/BookingMemberPicker.vue";
 import { toRefs, computed, ref } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
@@ -13,8 +14,11 @@ import { shortDate } from "../../../../../utils/format";
 import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 
 const showMemberPicker = ref(false);
+const showStudentPicker = ref(false);
+function openSchedule() { uni.navigateTo({ url: "/packages/ops/pages/coach/index?view=create-session" }); }
 const props = defineProps<{
   trials: TrainingTrialView[];
+  canCreateSession: boolean;
   canManageTrials: boolean;
   trialSubjectOptions: string[];
   trialSubjectIndex: number;
@@ -55,6 +59,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   (event: "update:trialSubjectIndex", value: number): void;
+  (event: "select-student", student: TrainingStudentSummary): void;
   (event: "update:trialMemberIndex", value: number): void;
   (event: "update:trialLeadIndex", value: number): void;
   (event: "update:trialStudentIndex", value: number): void;
@@ -120,6 +125,7 @@ const trialReason = computed({
 
 <template>
   <view>
+    <TrialStudentPicker v-if="showStudentPicker" :students="trialStudents" @close="showStudentPicker = false" @select="emit('select-student', $event); showStudentPicker = false" />
     <BookingMemberPicker v-if="showMemberPicker" title="选择试听会员" note="请核对会员，试听预约将关联所选会员。" @close="showMemberPicker = false" @select="selectTrialMember($event); showMemberPicker = false" />
     <view class="section-title"
       >试听预约与测评漏斗
@@ -154,22 +160,7 @@ const trialReason = computed({
             ></view
           ></picker
         >
-        <picker
-          v-else
-          :range="trialStudents"
-          range-key="displayName"
-          :value="trialStudentIndex"
-          @change="trialStudentIndex = Number(($event.detail as any).value)"
-          ><view
-            ><text class="field-label">青少年学员</text
-            ><view class="picker-value"
-              >{{
-                selectedTrialSubject?.displayName || "暂无已授权学员"
-              }}
-              ›</view
-            ></view
-          ></picker
-        >
+        <view v-else><text class="field-label">青少年学员</text><button class="picker-value" @tap="showStudentPicker = true">{{ selectedTrialSubject?.displayName || '输入姓名 / 选择学员' }} ›</button></view>
       </view>
       <view v-if="trialSubjectIndex === 2 && leads.length" class="consent-line"
         ><text>同时关联招生线索，后续签到/转课自动沉淀跟进证据</text
@@ -207,7 +198,12 @@ const trialReason = computed({
           ></view
         ></picker
       >
-      <view class="trial-context">
+      <view v-if="!schedulableTrialSessions.length" class="trial-context">
+        <text>暂无适合所选学员的课次，请先为对应课程的班级排课。</text>
+        <button v-if="canCreateSession" class="secondary" @tap="openSchedule">去排课</button>
+        <text v-else>请联系管理员或教练排课后，再预约试听。</text>
+      </view>
+      <view v-else class="trial-context">
         <text>产品：{{ selectedTrialProduct?.name || "—" }}</text>
         <text>班级：{{ selectedTrialClass?.name || "—" }}</text>
         <text

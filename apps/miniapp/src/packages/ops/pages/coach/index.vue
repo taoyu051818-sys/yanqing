@@ -128,6 +128,12 @@ const {
   trialLinkLead,
 } = useTrainingTrialForm();
 
+// Preserve the selected identity when a refresh changes the directory order.
+watch(trialStudents, (students, previous) => {
+  const selected = previous[trialStudentIndex.value];
+  if (selected) trialStudentIndex.value = students.findIndex(student => student.id === selected.id);
+}, { flush: 'sync' });
+
 const {
   ruleMaxSessions,
   ruleMaxValidityDays,
@@ -196,6 +202,10 @@ const {
   enrollments,
   trials,
 });
+watch(trialSubjectIndex, () => { trialSessionIndex.value = 0; });
+watch(() => selectedTrialClass.value?.coachId, (coachId) => {
+  trialCoachId.value = coachId || "";
+}, { immediate: true });
 
 async function loadCourtAvailability() {
   await courtData.refresh();
@@ -233,8 +243,6 @@ const { loading, errorMessage, load, dispose } = useCoachLoadingActions({
       sessionClassIndex.value = 0;
     if (trialSessionIndex.value >= schedulableTrialSessions.value.length)
       trialSessionIndex.value = 0;
-    if (selectedTrialClass.value?.coachId)
-      trialCoachId.value = selectedTrialClass.value.coachId;
     if (canCreateSession.value) await loadCourtAvailability();
     if (isCurrent()) await navigation.apply();
   },
@@ -527,6 +535,8 @@ onUnmounted(dispose);
       :leads="leads"
       v-model:trialLeadIndex="trialLeadIndex"
       :trialStudents="trialStudents"
+      :canCreateSession="canCreateSession"
+      @select-student="(student) => { trialStudents = [student, ...trialStudents.filter(item => item.id !== student.id)]; trialStudentIndex = 0 }"
       v-model:trialStudentIndex="trialStudentIndex"
       :trialLinkLead="trialLinkLead"
       :setTrialLinkLead="setTrialLinkLead"

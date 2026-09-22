@@ -11,7 +11,6 @@ import {
   AttendanceStatus,
   BusinessType,
   OrderStatus,
-  TrainingAudience,
   TrainingConsumeCorrectionStatus,
   TrainingEnrollmentStatus,
   TrainingRecognitionType,
@@ -221,10 +220,8 @@ export async function approveConsumeCorrection(
         },
       });
     }
-    if (
-      enrollment.product.audience === TrainingAudience.YOUTH &&
-      attendance.growthPointsAwarded > 0
-    ) {
+    // Reverse the points actually awarded, including mixed-course youth enrollments.
+    if (attendance.growthPointsAwarded > 0) {
       const growthAccount = await tx.account.findUnique({
         where: {
           userId_type: {

@@ -217,12 +217,12 @@ watch(() => props.actionKey, (key, previous) => { if (previous === `create-${pro
           /></view>
         </view>
         <view
-          ><text class="field-label">创建原因（必填）</text
+          ><text class="field-label">备注（选填）</text
           ><textarea
             v-model="productReason"
             class="reason-input"
             maxlength="300"
-            placeholder="说明定价、课次与适用人群依据"
+            placeholder="如需补充课程说明，可在此填写"
           />
         </view>
         <text class="guardrail"

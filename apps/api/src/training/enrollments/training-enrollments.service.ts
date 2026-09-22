@@ -1,3 +1,4 @@
+import { isYouthEnrollment } from '@yanqing/shared';
 import type { TrainingEnrollmentView } from '@yanqing/shared';
 import {
   Inject,
@@ -91,7 +92,7 @@ export class TrainingEnrollmentsService {
       : null;
     return enrollments.map((enrollment) => {
       const warnings: string[] = [];
-      if (enrollment.product.audience === TrainingAudience.YOUTH) {
+      if (isYouthEnrollment(enrollment)) {
         const remainingDays = Math.ceil(
           (enrollment.expiresAt.getTime() - now.getTime()) / 86_400_000,
         );
@@ -227,18 +228,20 @@ export class TrainingEnrollmentsService {
     if (!product?.enabled)
       throw new NotFoundException('培训产品不存在或已下架');
     const now = new Date();
-    const regulatoryValidation =
-      product.audience === TrainingAudience.YOUTH
-        ? await validateYouthProduct(
-            this.youthRules,
-            {
-              totalSessions: product.totalSessions,
-              validityDays: product.validityDays,
-              priceCents: product.priceCents,
-            },
-            now,
-          )
-        : null;
+    const regulatoryValidation = isYouthEnrollment({
+      product,
+      studentId: dto.studentId,
+    })
+      ? await validateYouthProduct(
+          this.youthRules,
+          {
+            totalSessions: product.totalSessions,
+            validityDays: product.validityDays,
+            priceCents: product.priceCents,
+          },
+          now,
+        )
+      : null;
     if (dto.classId) {
       const trainingClass = await this.prisma.trainingClass.findFirst({
         where: { id: dto.classId, productId: product.id, active: true },
@@ -248,6 +251,11 @@ export class TrainingEnrollmentsService {
     }
     if (product.audience === TrainingAudience.YOUTH && !dto.studentId) {
       throw new BadRequestException('青少年课程必须选择学员');
+    }
+    if (product.audience === TrainingAudience.ADULT && dto.studentId) {
+      throw new BadRequestException(
+        '成人课程不支持青少年学员，请选择青少年或不限课程',
+      );
     }
     if (dto.studentId) {
       const student = await this.prisma.student.findFirst({

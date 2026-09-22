@@ -1,0 +1,26 @@
+{
+  "verification": "pnpm verify passed; subsequent focused training checks and production WeChat build passed",
+  "full_verify": {
+    "api_unit": 946,
+    "miniapp_unit": 554,
+    "shared": 19,
+    "api_http": 47
+  },
+  "final_focused": {
+    "api_including_postgres": 128,
+    "miniapp": 35
+  },
+  "postgres_matrix": {
+    "groups": 15,
+    "passed": 384,
+    "migrations": 50,
+    "database": "isolated fresh local PostgreSQL"
+  },
+  "native_simulator": [
+    "custom reason input and submission",
+    "ALL course creation with optional note empty",
+    "student name entry, guardian selection and save back to trial form"
+  ],
+  "real_phone_verified": false,
+  "deployed": false
+}

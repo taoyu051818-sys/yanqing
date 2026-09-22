@@ -1,3 +1,4 @@
+import { isYouthEnrollment } from '@yanqing/shared';
 import {
   isTrainingApprover,
   assertTrainingApprover,
@@ -21,7 +22,6 @@ import {
   AttendanceStatus,
   OrderStatus,
   Prisma,
-  TrainingAudience,
   TrainingEnrollmentStatus,
   TrainingRecognitionType,
   TrainingSessionStatus,
@@ -375,8 +375,7 @@ export class TrainingConsumptionService {
           throw new ConflictException('消课幂等键已用于其他流水');
         }
       }
-      const growthPointsAwarded =
-        enrollment.product.audience === TrainingAudience.YOUTH ? 1 : 0;
+      const growthPointsAwarded = isYouthEnrollment(enrollment) ? 1 : 0;
 
       await tx.trainingAttendance.update({
         where: { id: attendance.id },
@@ -419,7 +418,7 @@ export class TrainingConsumptionService {
           createdAt: now,
         },
       });
-      if (enrollment.product.audience === TrainingAudience.YOUTH) {
+      if (isYouthEnrollment(enrollment)) {
         const growthAccount = await tx.account.upsert({
           where: {
             userId_type: {

@@ -181,7 +181,10 @@ export function useCoachViewModel({
     lessons.value.filter(
       (item) =>
         item.status === "SCHEDULED" &&
-        new Date(item.endsAt || item.startsAt).getTime() > Date.now(),
+        new Date(item.endsAt || item.startsAt).getTime() > Date.now() &&
+        (trialSubjectIndex.value === 2
+          ? item.class?.product?.audience !== "ADULT"
+          : item.class?.product?.audience !== "YOUTH"),
     ),
   );
 

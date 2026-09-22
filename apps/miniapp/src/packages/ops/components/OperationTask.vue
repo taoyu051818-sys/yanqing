@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { nextTick, reactive, watch } from 'vue'
+import { reactive, watch } from 'vue'
 import ActionDialog from '../../../components/ActionDialog.vue'
 import type { useOperationTask } from './operation-task'
 const props = defineProps<{ task: ReturnType<typeof useOperationTask> }>()
 const keywords = reactive<Record<string, string>>({})
 const customReasons = reactive<Record<string, boolean>>({})
 watch(() => props.task.state.open, open => { if (open) { for (const key of Object.keys(keywords)) delete keywords[key]; for (const key of Object.keys(customReasons)) delete customReasons[key] } })
-function validateEdited(key: string) {
-  if (props.task.state.errors[key]) void nextTick(() => props.task.validate(key))
-}
 function select(key: string, value: string) {
-  props.task.state.values[key] = value
-  delete props.task.state.errors[key]
+  props.task.setValue(key, value)
+}
+function inputValue(key: string, event: unknown) {
+  const value = (event as { detail?: { value?: string } }).detail?.value
+  if (typeof value === 'string') props.task.setValue(key, value)
 }
 </script>
 
@@ -35,7 +35,7 @@ function select(key: string, value: string) {
             <text>{{ task.state.values[field.key] === option.value ? '已选 · ' : '' }}{{ option.label }}</text>
             <text v-if="option.description" class="task-hint">{{ option.description }}</text>
           </button>
-          <button v-if="field.kind === 'reason' && field.options?.length" :disabled="task.state.busy" @tap="customReasons[field.key] = true; select(field.key, '')">其他原因，补充说明</button>
+          <button v-if="field.kind === 'reason' && field.options?.length" :disabled="task.state.busy" @tap="customReasons[field.key] = true; select(field.key, ''); task.focus(field.key, true)">其他原因，补充说明</button>
         </view>
         <template v-if="field.kind === 'search'">
           <text v-if="task.state.searches[field.key]?.loading" role="status" class="task-hint">正在查询可选记录…</text>
@@ -43,8 +43,8 @@ function select(key: string, value: string) {
           <text v-if="task.state.searches[field.key]?.error" class="task-error" role="alert">{{ task.state.searches[field.key].error }}</text>
           <button v-if="(field.options?.length || 0) < (task.state.searches[field.key]?.total || 0)" :disabled="task.state.busy || task.state.searches[field.key]?.loading" @tap="task.search(field.key, task.state.searches[field.key]?.keyword, true)">查看更多</button>
         </template>
-        <textarea v-if="!['choices','search','number','money'].includes(field.kind || '') && (field.kind !== 'reason' || customReasons[field.key] || !field.options?.length)" v-model="task.state.values[field.key]" :focus="task.state.focusKey === field.key" @input="validateEdited(field.key)" @blur="task.validate(field.key)" :aria-labelledby="'task-label-' + field.key" :aria-describedby="'task-error-' + field.key" :disabled="task.state.busy" :maxlength="field.max || 500" :adjust-position="false" auto-height />
-        <input v-if="field.kind === 'number' || field.kind === 'money'" v-model="task.state.values[field.key]" :focus="task.state.focusKey === field.key" @input="validateEdited(field.key)" @blur="task.validate(field.key)" :type="field.kind === 'money' ? 'digit' : 'number'" :aria-labelledby="'task-label-' + field.key" :aria-describedby="'task-error-' + field.key" :disabled="task.state.busy" maxlength="12" :adjust-position="false" />
+        <textarea v-if="!['choices','search','number','money'].includes(field.kind || '') && (field.kind !== 'reason' || customReasons[field.key] || !field.options?.length)" :id="'task-input-' + field.key" :value="task.state.values[field.key]" :focus="task.state.focusKey === field.key" @input="inputValue(field.key, $event)" @blur="task.validate(field.key)" :aria-labelledby="'task-label-' + field.key" :aria-describedby="'task-error-' + field.key" :disabled="task.state.busy" :maxlength="field.max || 500" :placeholder="'请输入' + field.label" :adjust-position="false" :cursor-spacing="24" :fixed="true" />
+        <input v-if="field.kind === 'number' || field.kind === 'money'" :id="'task-input-' + field.key" :value="task.state.values[field.key]" :focus="task.state.focusKey === field.key" @input="inputValue(field.key, $event)" @blur="task.validate(field.key)" :type="field.kind === 'money' ? 'digit' : 'number'" :aria-labelledby="'task-label-' + field.key" :aria-describedby="'task-error-' + field.key" :disabled="task.state.busy" maxlength="12" :adjust-position="false" />
         <text v-if="task.state.errors[field.key]" :id="'task-error-' + field.key" class="task-error field-error" aria-live="polite">{{ task.state.errors[field.key] }}</text>
       </view>
       <text v-if="task.state.error" class="task-error" role="alert">{{ task.state.error }}。内容已保留，可修改后重试。</text>
@@ -72,7 +72,7 @@ function select(key: string, value: string) {
 .task-options button { flex:1 1 44%; color:var(--color-muted,#5f6f65); border:1rpx solid var(--color-border); background:var(--color-surface-subtle,#f7f9f6); }
 .task-options button.selected { border-color:var(--color-primary,#17653d); background:var(--color-primary-soft,#e7f4eb); color:var(--color-primary-strong,#123f29); }
 .operation-task input,.operation-task textarea { width:100%; box-sizing:border-box; min-height:44px; margin:14rpx 0 0; padding:20rpx 22rpx; background:var(--color-surface-subtle,#f7f9f6); color:var(--color-foreground,#18221c); border:1rpx solid var(--color-border); border-radius:18rpx; font-size:28rpx; line-height:1.6; }
-.operation-task textarea { min-height:128rpx; }
+.operation-task textarea { height:160rpx; min-height:80px; }
 .task-actions,.task-search { display:flex; flex-wrap:wrap; align-items:center; gap:16rpx; }
 .task-actions button { flex:1 1 40%; min-height:48px; border-radius:22rpx; font-size:28rpx; }
 .task-actions .primary { flex-grow:1.2; }

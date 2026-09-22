@@ -5,7 +5,7 @@ export function useTrainingTrialForm() {
   const trialSubjectIndex = ref(0);
   const trialMemberIndex = ref(0);
   const trialLeadIndex = ref(0);
-  const trialStudentIndex = ref(0);
+  const trialStudentIndex = ref(-1);
   const trialSessionIndex = ref(0);
   const trialCoachId = ref("");
   const trialSourceOptions = [

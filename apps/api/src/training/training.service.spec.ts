@@ -486,11 +486,11 @@ describe('TrainingService class seat reservations', () => {
     );
   });
 
-  it('stores the exact effective youth-rule validation snapshot on the order', async () => {
+  it.each([TrainingAudience.YOUTH, TrainingAudience.ALL])('stores youth-rule validation when a child buys a %s course', async (audience) => {
     const youthProduct = {
       ...product,
       id: 'product-youth-1',
-      audience: TrainingAudience.YOUTH,
+      audience,
     };
     const regulatoryValidation = {
       ruleId: 'rule-1',
@@ -643,9 +643,9 @@ describe('TrainingService consumption workflow', () => {
     expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 
-  it('allows an administrator to confirm once and records maker/checker audit data', async () => {
+  it.each([TrainingAudience.ADULT, TrainingAudience.ALL])('consumes a %s adult enrollment without youth growth points', async (audience) => {
     const { prisma, tx, updatedAttendance } = consumePrisma(
-      attendanceFixture({ operatorId: coach.sub, feedback: '教练建议' }),
+      attendanceFixture({ operatorId: coach.sub, feedback: '教练建议', enrollment: { ...attendanceFixture().enrollment, studentId: null, product: { ...attendanceFixture().enrollment.product, audience } } }),
     );
     const service = new TrainingService(prisma as never);
 
@@ -660,6 +660,7 @@ describe('TrainingService consumption workflow', () => {
       workflowStatus: 'CONFIRMED',
     });
     expect(result).not.toHaveProperty('idempotencyKey');
+    expect(tx.accountTransaction.create).not.toHaveBeenCalled();
     expect(result).not.toHaveProperty('attendanceId');
     expect(updatedAttendance).toMatchObject({
       status: AttendanceStatus.ATTENDED,

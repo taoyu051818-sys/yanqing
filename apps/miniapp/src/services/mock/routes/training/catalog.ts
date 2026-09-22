@@ -1,3 +1,4 @@
+import { includesYouthAudience } from "@yanqing/shared";
 import {
   mockTrainingProductView,
   validateMockYouthProduct,
@@ -75,7 +76,7 @@ export async function handleTrainingProductsPost(
     const reason = requireTrainingCreationReason(data.reason);
     if (!code || code.length > 40 || !name || name.length > 100)
       throw new Error("课程产品编码和名称不能为空且不能超过规定长度");
-    if (!["ADULT", "YOUTH"].includes(audience))
+    if (!["ADULT", "YOUTH", "ALL"].includes(audience))
       throw new Error("课程产品适用人群无效");
     if (totalSessions < 1) throw new Error("课程总课次必须为正整数");
     if (validityDays < 1) throw new Error("课程有效期必须为正整数天");
@@ -108,7 +109,7 @@ export async function handleTrainingProductsPost(
         value: finishMockTrainingCreation(attempt, attempt.response, reason),
       };
     const regulatoryValidation =
-      audience === "YOUTH"
+      includesYouthAudience(audience)
         ? validateMockYouthProduct({ totalSessions, validityDays, priceCents })
         : null;
     const products = getTrainingProducts();

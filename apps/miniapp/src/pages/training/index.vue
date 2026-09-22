@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { trainingAudienceLabel } from "@yanqing/shared";
 import { computed, ref, watch } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { useSessionStore } from "../../stores/session";
@@ -57,6 +58,8 @@ const refundingId = ref("");
 const selectedProductId = ref("");
 const selectedClassId = ref("");
 const selectedStudentId = ref("");
+const purchaseFor = ref<'SELF' | 'STUDENT'>('SELF');
+const purchasingForStudent = (product: { audience: string }) => product.audience === 'YOUTH' || (product.audience === 'ALL' && purchaseFor.value === 'STUDENT');
 const purchaseError = ref("");
 const eligibleStudents = computed(() =>
   students.value.filter((item) => item.guardianConsentStatus),
@@ -80,6 +83,7 @@ function preparePurchase(product: any) {
   if (!session.isAuthenticated) return login();
   if (purchasingId.value) return;
   selectedProductId.value = product.id;
+  purchaseFor.value = product.audience === "YOUTH" ? "STUDENT" : "SELF";
   selectedClassId.value =
     product.classes?.length === 1 ? product.classes[0].id : "";
   selectedStudentId.value =
@@ -123,7 +127,7 @@ const visibleProducts = computed(() =>
   products.value.filter((item) =>
     productDetailId.value
       ? item.id === productDetailId.value
-      : audience.value === "ALL" || item.audience === audience.value,
+      : audience.value === "ALL" || item.audience === "ALL" || item.audience === audience.value,
   ),
 );
 const consumed = (item: any) =>
@@ -291,7 +295,7 @@ async function purchase(product: any) {
     return;
   }
   if (
-    product.audience === "YOUTH" &&
+    purchasingForStudent(product) &&
     !eligibleStudents.value.some((item) => item.id === selectedStudentId.value)
   ) {
     purchaseError.value = "请选择已由监护人授权的学员；没有档案时可在上方新建";
@@ -303,7 +307,7 @@ async function purchase(product: any) {
       productId: product.id,
       classId: selectedClassId.value || undefined,
       studentId:
-        product.audience === "YOUTH" ? selectedStudentId.value : undefined,
+        purchasingForStudent(product) ? selectedStudentId.value : undefined,
       sourceChannel: "MINI_PROGRAM",
     };
     const order: any = await withPendingCreationKey(
@@ -513,7 +517,7 @@ onShow(load);
       >
         <view class="row"
           ><text class="pill">{{
-            product.audience === "YOUTH" ? "青少年" : "成人"
+            trainingAudienceLabel(product.audience)
           }}</text
           ><text class="muted">有效期 {{ product.validityDays }} 天</text></view
         >
@@ -569,7 +573,14 @@ onShow(load);
               ></picker
             >
           </view>
-          <view v-if="product.audience === 'YOUTH'">
+          <view v-if="product.audience === 'ALL'" class="purchase-subject">
+            <text class="student-tip">为谁报名</text>
+            <view class="subject-options">
+              <button :class="purchaseFor === 'SELF' ? 'primary' : 'secondary'" :disabled="Boolean(purchasingId)" @tap="purchaseFor = 'SELF'; purchaseError = ''">本人</button>
+              <button :class="purchaseFor === 'STUDENT' ? 'primary' : 'secondary'" :disabled="Boolean(purchasingId)" @tap="purchaseFor = 'STUDENT'; purchaseError = ''">青少年学员</button>
+            </view>
+          </view>
+          <view v-if="purchasingForStudent(product)">
             <text class="student-tip">报名学员</text>
             <picker
               v-if="eligibleStudents.length"
@@ -886,6 +897,7 @@ onShow(load);
   </view>
 </template>
 <style scoped>
+.subject-options { display:flex; gap:16rpx; margin:16rpx 0; }.subject-options button { flex:1; margin:0; min-height:44px; font-size:28rpx; }
 .course-detail {
   padding-bottom: calc(220rpx + env(safe-area-inset-bottom));
 }

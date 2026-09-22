@@ -247,6 +247,7 @@ enum MatchStatus {
 enum TrainingAudience {
   YOUTH
   ADULT
+  ALL
 }
 
 enum TrainingEnrollmentStatus {

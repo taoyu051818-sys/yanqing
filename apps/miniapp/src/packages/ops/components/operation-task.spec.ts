@@ -90,3 +90,16 @@ it('closes a one-step refund with status feedback instead of another confirmatio
   expect(task.state.open).toBe(false); expect(task.state.result).toBe('');
   expect(uni.showToast).toHaveBeenCalledWith(expect.objectContaining({title:'退款处理中，无需再次审核'}));
 });
+
+it('submits edits through the owner command even when the component has a detached prop snapshot', async () => {
+  const task = useOperationTask(), submit = vi.fn().mockResolvedValue('已停用');
+  task.start({ title: '停用课程产品', description: '', confirmText: '确认停用', fields: [{ key: 'reason', label: '变更依据', min: 2 }], submit });
+  await task.submit();
+  const transported = { ...task, state: JSON.parse(JSON.stringify(task.state)) };
+  transported.setValue('reason', ' 调整课程安排 ');
+  expect(task.state.errors.reason).toBe('');
+  await transported.submit();
+  expect(submit).toHaveBeenCalledWith({ reason: '调整课程安排' });
+  transported.setValue('unknown', '忽略');
+  expect(task.state.values.unknown).toBeUndefined();
+});

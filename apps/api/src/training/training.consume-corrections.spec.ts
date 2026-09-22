@@ -746,7 +746,7 @@ describe('Training consume corrections', () => {
     expect(summary.venueContractContributionCents).toBe(1);
   });
 
-  it('allows the same attendance to be confirmed again at the next sequence after reversal', async () => {
+  it.each([TrainingAudience.YOUTH, TrainingAudience.ALL])('re-consumes a youth enrollment in a %s course after reversal', async (audience) => {
     const attendance = {
       id: 'attendance-1',
       sessionId: 'session-1',
@@ -772,7 +772,8 @@ describe('Training consume corrections', () => {
         confirmedRevenueCents: 178_200,
         prepaidBalanceCents: 19_800,
         refundedCents: 0,
-        product: { audience: TrainingAudience.YOUTH, unitRevenueCents: 19_800 },
+        studentId: 'student-1',
+        product: { audience, unitRevenueCents: 19_800 },
       },
       revenueRecognitions: [
         {

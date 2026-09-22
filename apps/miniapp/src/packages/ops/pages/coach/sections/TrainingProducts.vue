@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { trainingAudienceLabel } from "@yanqing/shared";
 import type { TrainingProductView } from "@yanqing/shared";
 
 import { toRefs, computed } from "vue";
@@ -91,7 +92,7 @@ const editProductReason = computed({
               :value="product.enabled === false ? 'DISABLED' : 'ACTIVE'"
           /></view>
           <text class="muted"
-            >{{ product.audience === "YOUTH" ? "青少年" : "成人" }} ·
+            >{{ trainingAudienceLabel(product.audience) }} ·
             {{ product.totalSessions }} 课次 · 有效
             {{ product.validityDays }} 天</text
           >

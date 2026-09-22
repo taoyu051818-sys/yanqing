@@ -1,0 +1,18 @@
+$ vitest run --config vitest.config.ts src/packages/ops/components/operation-task.spec.ts src/packages/ops/pages/coach
+[33mThe CJS build of Vite's Node API is deprecated. See https://vitejs.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+ RUN  v1.6.1 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/miniapp
+
+ ✓ src/packages/ops/pages/coach/data/resource.spec.ts  (5 tests) 3ms
+ ✓ src/packages/ops/components/operation-task.spec.ts  (14 tests) 12ms
+ ✓ src/packages/ops/pages/coach/actions/projection.spec.ts  (2 tests) 8ms
+ ✓ src/packages/ops/pages/coach/actions/attendance.spec.ts  (2 tests) 8ms
+ ✓ src/packages/ops/pages/coach/actions/catalog.spec.ts  (2 tests) 7ms
+ ✓ src/packages/ops/pages/coach/data/domains.spec.ts  (3 tests) 11ms
+ ✓ src/packages/ops/pages/coach/actions/loading.spec.ts  (5 tests) 212ms
+ ✓ src/packages/ops/pages/coach/forms/trial-student-registration.spec.ts  (2 tests) 3ms
+
+ Test Files  8 passed (8)
+      Tests  35 passed (35)
+   Start at  17:39:18
+   Duration  757ms (transform 366ms, setup 0ms, collect 1.01s, tests 264ms, environment 1ms, prepare 1.14s)

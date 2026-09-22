@@ -96,7 +96,7 @@ export function useCoachCatalogActions({
     try {
       const code = productCode.value.trim().toUpperCase();
       const name = productName.value.trim();
-      const reason = requiredReason(productReason.value);
+      const reason = productReason.value.trim() ? requiredReason(productReason.value) : '创建课程产品';
       if (!code || code.length > 40 || !name || name.length > 100) {
         throw new Error(
           "产品编码和名称不能为空，编码最多 40 字符、名称最多 100 字符。",
@@ -142,6 +142,7 @@ export function useCoachCatalogActions({
       }
     } catch (cause: any) {
       errorMessage.value = cause?.message || "课程产品表单校验失败。";
+      uni.showToast({ title: errorMessage.value, icon: "none", duration: 3000 });
     }
   }
 
@@ -179,7 +180,7 @@ export function useCoachCatalogActions({
               ? " · 恢复销售与开班。"
               : " · 停止后续销售，历史订单和课包不删除。"),
           confirmText: enabled ? "确认启用" : "确认停用",
-          fields: [reasonField("变更依据")],
+          fields: [reasonField("变更依据", enabled ? ["恢复课程招生"] : ["暂停招生", "课程调整"])],
           submit: async ({ reason }) => {
             await withPendingCreationKey(
               "training.product.status." + product.id,

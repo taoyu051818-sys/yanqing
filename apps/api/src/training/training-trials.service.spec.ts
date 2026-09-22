@@ -157,7 +157,7 @@ describe('TrainingTrialsService', () => {
     expect(managed[0]?.transitions[0]).not.toHaveProperty('payload');
   });
 
-  it('reserves a youth trial with lead, guardian, class and coach evidence', async () => {
+  it.each([TrainingAudience.YOUTH, TrainingAudience.ALL])('reserves a child trial in a %s course with guardian evidence', async (audience) => {
     const startsAt = new Date(Date.now() + 86_400_000);
     const dto = {
       leadId: 'lead-1',
@@ -176,7 +176,7 @@ describe('TrainingTrialsService', () => {
     prisma.trainingProduct.findUnique.mockResolvedValue({
       id: 'product-1',
       enabled: true,
-      audience: TrainingAudience.YOUTH,
+      audience,
     });
     prisma.trainingClass.findUnique.mockResolvedValue({
       id: 'class-1',

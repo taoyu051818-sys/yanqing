@@ -95,8 +95,8 @@ export function useCoachTrialsActions({
       if (!subject) throw new Error("请选择试听主体。");
       if (!trialCoachId.value.trim())
         throw new Error("所选班级尚未配置试听教练，请先完善班级人员。");
-      if (trialSubjectIndex.value === 2 && product.audience !== "YOUTH") {
-        throw new Error("青少年学员只能预约青少年培训产品。");
+      if (trialSubjectIndex.value === 2 && product.audience === "ADULT") {
+        throw new Error("请选择青少年或不限人群的课程。");
       }
       if (trialSubjectIndex.value !== 2 && product.audience === "YOUTH") {
         throw new Error("青少年产品必须选择已授权学员。");

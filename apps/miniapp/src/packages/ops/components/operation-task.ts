@@ -73,9 +73,16 @@ export function useOperationTask() {
     const field = state.fields.find(item => item.key === key)
     if (field) state.errors[key] = validateTaskField(field.optionsFor ? { ...field, options: field.optionsFor(state.values) } : field, (state.values[key] || '').trim())
   }
-  function focus(key: string) {
+  // Inputs call the owner instead of mutating a component prop. This also
+  // avoids combining v-model and input handlers in the WeChat event bridge.
+  function setValue(key: string, value: string) {
+    if (!state.open || state.busy || !state.fields.some(field => field.key === key)) return
+    state.values[key] = value
+    if (state.errors[key]) validate(key)
+  }
+  function focus(key: string, input = false) {
     state.focusKey = ''; state.scrollTarget = ''
-    void nextTick(() => { state.focusKey = key; state.scrollTarget = 'task-field-' + key })
+    void nextTick(() => { state.focusKey = key; state.scrollTarget = (input ? 'task-input-' : 'task-field-') + key })
   }
   async function submit() {
     if (!state.open || !definition || state.busy) return
@@ -96,7 +103,7 @@ export function useOperationTask() {
     finally { state.busy = false }
   }
   function cancel() { if (!state.busy) { generation++; state.open = false; state.result = ''; definition = undefined; state.values = {}; state.searches = {}; state.focusKey = ''; state.scrollTarget = '' } }
-  return { state, start, submit, cancel, search, validate, focus }
+  return { state, start, submit, cancel, search, validate, focus, setValue }
 }
 export const reasonField = (label = '原因', options: string[] = []): TaskField => ({
   key: 'reason', label, kind: 'reason', min: 2, max: 300,
