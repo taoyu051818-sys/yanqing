@@ -1,0 +1,2350 @@
+$ pnpm --dir apps/api test:core-lifecycle
+$ node scripts/verify-core-lifecycle.mjs
+
+[核心验收 shared] 订场、支付、代订、报名、候补、库存、会员权益、退款、账本及权限的一致性
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_price_ux_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+(node:32431) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32439) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32450) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32462) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32467) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32474) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32481) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32489) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32500) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32504) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32507) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32518) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32552) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:32602) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  14 passed (14)
+      Tests  239 passed (239)
+   Start at  11:20:55
+   Duration  21.18s (transform 1.25s, setup 0ms, import 8.18s, tests 11.62s, environment 1ms)
+
+
+[核心验收 training] 微信与余额退款后，课包余额、历史消课、未来名单和席位同步
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_training_aa09813a2a05_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+(node:32699) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  11:21:20
+   Duration  6.00s (transform 1.64s, setup 0ms, import 2.74s, tests 3.09s, environment 0ms)
+
+
+[核心验收 reporting] 经营摘要、使用率、退款净额与实际订单一致
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_reporting_44be681d4f10_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+(node:32887) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  11:21:34
+   Duration  4.24s (transform 1.66s, setup 0ms, import 3.18s, tests 835ms, environment 0ms)
+
+
+[核心验收 boss_events] 关键事件和老板摘要可见性、去重及权限
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_boss_events_a9af02c6f43e_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+[Nest] 33043  - 09/22/2026, 11:21:41 AM   ERROR [BossService] Business event scan failed
+[Nest] 33043  - 09/22/2026, 11:21:41 AM   ERROR [BossService] Business event scan failed
+[Nest] 33043  - 09/22/2026, 11:21:41 AM   ERROR [BossService] Business event scan failed
+[Nest] 33043  - 09/22/2026, 11:21:42 AM   ERROR [BossService] Business event scan failed
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  11:21:40
+   Duration  1.11s (transform 238ms, setup 0ms, import 467ms, tests 391ms, environment 0ms)
+
+
+[核心验收 amounts] 支付金额、免费订单及混合现金赠送余额边界
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_amounts_eece8c9a5d40_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+(node:33145) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+   Start at  11:21:44
+   Duration  2.22s (transform 734ms, setup 0ms, import 1.42s, tests 641ms, environment 0ms)
+
+
+[核心验收 refund_fixes] 持久退款审批、出站重试、回调补偿及累计充值回收
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_refund_fixes_0d3c73bbde68_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+(node:33225) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[Nest] 33225  - 09/22/2026, 11:21:49 AM    WARN [WechatRefundDispatch] 退款 cmuc3y7zv001emxvk0cqih5hu 同步未完成，将按原退款单号重试
+[Nest] 33225  - 09/22/2026, 11:21:49 AM    WARN [WechatRefundDispatch] 退款 cmuc3y80k001rmxvklzqbg0ut 同步未完成，将按原退款单号重试
+[Nest] 33225  - 09/22/2026, 11:21:49 AM    WARN [WechatRefundDispatch] 退款 cmuc3y8100022mxvkv4up4wz2 同步未完成，将按原退款单号重试
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  11:21:48
+   Duration  1.89s (transform 668ms, setup 0ms, import 1.13s, tests 626ms, environment 0ms)
+
+
+[核心验收 activity_fixes] 活动取消退款义务、会员退出响应、场地履约、联盟更正与摘要口径
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_activity_fixes_01894c5872b3_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+(node:33306) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[Nest] 33306  - 09/22/2026, 11:21:53 AM    WARN [WechatRefundDispatch] 退款 cmuc3yakw000dp6vkaksc7fks 同步未完成，将按原退款单号重试
+[Nest] 33306  - 09/22/2026, 11:21:53 AM    WARN [WechatRefundDispatch] 退款 cmuc3yanm000yp6vkzmn6mw74 同步未完成，将按原退款单号重试
+[Nest] 33306  - 09/22/2026, 11:21:53 AM    WARN [WechatRefundDispatch] 退款 cmuc3yant0011p6vk8x3tdm66 同步未完成，将按原退款单号重试
+[Nest] 33306  - 09/22/2026, 11:21:53 AM    WARN [WechatRefundDispatch] 退款 cmuc3yapl001rp6vkxpfminu2 同步未完成，将按原退款单号重试
+[Nest] 33306  - 09/22/2026, 11:21:53 AM    WARN [WechatRefundDispatch] 退款 cmuc3yaqw002ep6vk0cyqriid 同步未完成，将按原退款单号重试
+[Nest] 33306  - 09/22/2026, 11:21:53 AM    WARN [WechatRefundDispatch] 退款 cmuc3yar1002hp6vkmb6oec24 同步未完成，将按原退款单号重试
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  11:21:52
+   Duration  1.72s (transform 408ms, setup 0ms, import 829ms, tests 746ms, environment 0ms)
+
+
+[核心验收 training_inventory_fixes] 培训更正、分成计算、盘点并发、历史批次及低库存
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_training_inventory_fixes_994808634a65_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+(node:33422) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  11:21:55
+   Duration  2.73s (transform 1.13s, setup 0ms, import 1.79s, tests 829ms, environment 0ms)
+
+
+[核心验收 privacy_search_fixes] 注销头像撤销与可重试清理、订单搜索范围及分页
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_privacy_search_fixes_4787e5032563_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+(node:33516) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  2 passed (2)
+      Tests  8 passed (8)
+   Start at  11:22:00
+   Duration  1.58s (transform 217ms, setup 0ms, import 724ms, tests 662ms, environment 0ms)
+
+
+[核心验收 venue_settings] 球馆公开资料、营业时段、场地设置与预约一致性，以及确认改价的事务、并发和幂等边界
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_venue_settings_e6569f2e9fbd_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+(node:33607) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  2 passed (2)
+      Tests  10 passed (10)
+   Start at  11:22:03
+   Duration  1.39s (transform 250ms, setup 0ms, import 571ms, tests 632ms, environment 0ms)
+
+
+[核心验收 training_courts] 场地删除与培训排课并发、历史排课保留和幂等重试
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_training_courts_c31ae8d488de_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  11:22:08
+   Duration  829ms (transform 247ms, setup 0ms, import 421ms, tests 294ms, environment 0ms)
+
+
+[核心验收 availability_history] 场地与营业时段历史口径、旧版本并发写入、修改后历史数据稳定
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_availability_history_461e276918f5_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+
+ Test Files  2 passed (2)
+      Tests  7 passed (7)
+   Start at  11:22:10
+   Duration  1.40s (transform 250ms, setup 0ms, import 598ms, tests 586ms, environment 0ms)
+
+
+[核心验收 availability_migration] 真实旧版本数据库迁移、审计历史回填、历史触发器事务回滚
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  11:22:13
+   Duration  1.73s (transform 16ms, setup 0ms, import 35ms, tests 1.55s, environment 0ms)
+
+
+[核心验收 admin_execution] 管理员直接结算的事务回滚与并发、青训自行发布、活动退款任务租约和重启恢复
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_admin_execution_66bd4d3a4a0f_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+(node:33985) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:34010) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  3 passed (3)
+      Tests  24 passed (24)
+   Start at  11:22:17
+   Duration  2.72s (transform 456ms, setup 0ms, import 1.22s, tests 1.10s, environment 0ms)
+
+
+[核心验收 order_timeline] 订单与流水：跨日收退款、账户口径、游标分页、个人权限与使用日期查询
+$ prisma migrate deploy
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "yanqing_core_order_timeline_bdc4d08d128a_test", schema "public" at "127.0.0.1:55441"
+
+49 migrations found in prisma/migrations
+
+Applying migration `20260827191000_init`
+Applying migration `20260829120000_refund_idempotency`
+Applying migration `20260829233000_reconciliation_period`
+Applying migration `20260829234500_referral_reward_uniqueness`
+Applying migration `20260829235500_host_reward_uniqueness`
+Applying migration `20260829240000_active_court_booking_index`
+Applying migration `20260830091500_training_seat_reservation`
+Applying migration `20260830093000_event_prize_awards`
+Applying migration `20260830094500_customer_leads`
+Applying migration `20260830100000_inventory_operations`
+Applying migration `20260830101500_order_creation_idempotency`
+Applying migration `20260830103000_account_adjustment_approval`
+Applying migration `20260830103500_account_adjustment_review_constraints`
+Applying migration `20260830104500_training_consume_corrections`
+Applying migration `20260830110000_frontdesk_shifts`
+Applying migration `20260830113000_venue_closures`
+Applying migration `20260830114000_frontdesk_shift_gate_payment_operator`
+Applying migration `20260830143000_data_erasure_requests`
+Applying migration `20260830160000_event_waitlist_cancellation`
+Applying migration `20260830173000_training_trials_youth_rules`
+Applying migration `20260830180000_event_registration_cancellation`
+Applying migration `20260830190000_order_fulfillment`
+Applying migration `20260830193000_game_cancellation`
+Applying migration `20260830200000_consignment_settlements`
+Applying migration `20260830201000_recharge_plans_refund_origin`
+Applying migration `20260830202000_commercial_master_data`
+Applying migration `20260830210000_referral_bilateral_rewards`
+Applying migration `20260901010000_referral_invites`
+Applying migration `20260901020000_event_partner_authorization`
+Applying migration `20260902190000_operating_share_parameter`
+Applying migration `20260905150000_hourly_venue_slots`
+Applying migration `20260905160000_event_team_signup`
+Applying migration `20260905180000_coupon_booking_scope`
+Applying migration `20260905193000_admin_browser_sessions`
+Applying migration `20260907090000_boss_briefing_events`
+Applying migration `20260908110000_late_payment_compensation`
+Applying migration `20260908140000_registration_boundaries`
+Applying migration `20260908160000_training_future_roster`
+Applying migration `20260908173000_alliance_settlement_overlap`
+Applying migration `20260908190000_training_settlement_sources_and_makeup`
+Applying migration `20260908200000_reporting_consistency`
+Applying migration `20260908230000_admin_booking_override`
+Applying migration `20260912150000_training_contribution_numeric`
+Applying migration `20260912151000_activity_cancellation_refund_obligation`
+Applying migration `20260912153000_avatar_deletion_tasks`
+Applying migration `20260919000000_court_soft_delete`
+Applying migration `20260919010000_availability_history`
+Applying migration `20260920090000_activity_refund_jobs`
+Applying migration `20260920091000_admin_workflow_constraints`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260827191000_init/
+    └─ migration.sql
+  └─ 20260829120000_refund_idempotency/
+    └─ migration.sql
+  └─ 20260829233000_reconciliation_period/
+    └─ migration.sql
+  └─ 20260829234500_referral_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829235500_host_reward_uniqueness/
+    └─ migration.sql
+  └─ 20260829240000_active_court_booking_index/
+    └─ migration.sql
+  └─ 20260830091500_training_seat_reservation/
+    └─ migration.sql
+  └─ 20260830093000_event_prize_awards/
+    └─ migration.sql
+  └─ 20260830094500_customer_leads/
+    └─ migration.sql
+  └─ 20260830100000_inventory_operations/
+    └─ migration.sql
+  └─ 20260830101500_order_creation_idempotency/
+    └─ migration.sql
+  └─ 20260830103000_account_adjustment_approval/
+    └─ migration.sql
+  └─ 20260830103500_account_adjustment_review_constraints/
+    └─ migration.sql
+  └─ 20260830104500_training_consume_corrections/
+    └─ migration.sql
+  └─ 20260830110000_frontdesk_shifts/
+    └─ migration.sql
+  └─ 20260830113000_venue_closures/
+    └─ migration.sql
+  └─ 20260830114000_frontdesk_shift_gate_payment_operator/
+    └─ migration.sql
+  └─ 20260830143000_data_erasure_requests/
+    └─ migration.sql
+  └─ 20260830160000_event_waitlist_cancellation/
+    └─ migration.sql
+  └─ 20260830173000_training_trials_youth_rules/
+    └─ migration.sql
+  └─ 20260830180000_event_registration_cancellation/
+    └─ migration.sql
+  └─ 20260830190000_order_fulfillment/
+    └─ migration.sql
+  └─ 20260830193000_game_cancellation/
+    └─ migration.sql
+  └─ 20260830200000_consignment_settlements/
+    └─ migration.sql
+  └─ 20260830201000_recharge_plans_refund_origin/
+    └─ migration.sql
+  └─ 20260830202000_commercial_master_data/
+    └─ migration.sql
+  └─ 20260830210000_referral_bilateral_rewards/
+    └─ migration.sql
+  └─ 20260901010000_referral_invites/
+    └─ migration.sql
+  └─ 20260901020000_event_partner_authorization/
+    └─ migration.sql
+  └─ 20260902190000_operating_share_parameter/
+    └─ migration.sql
+  └─ 20260905150000_hourly_venue_slots/
+    └─ migration.sql
+  └─ 20260905160000_event_team_signup/
+    └─ migration.sql
+  └─ 20260905180000_coupon_booking_scope/
+    └─ migration.sql
+  └─ 20260905193000_admin_browser_sessions/
+    └─ migration.sql
+  └─ 20260907090000_boss_briefing_events/
+    └─ migration.sql
+  └─ 20260908110000_late_payment_compensation/
+    └─ migration.sql
+  └─ 20260908140000_registration_boundaries/
+    └─ migration.sql
+  └─ 20260908160000_training_future_roster/
+    └─ migration.sql
+  └─ 20260908173000_alliance_settlement_overlap/
+    └─ migration.sql
+  └─ 20260908190000_training_settlement_sources_and_makeup/
+    └─ migration.sql
+  └─ 20260908200000_reporting_consistency/
+    └─ migration.sql
+  └─ 20260908230000_admin_booking_override/
+    └─ migration.sql
+  └─ 20260912150000_training_contribution_numeric/
+    └─ migration.sql
+  └─ 20260912151000_activity_cancellation_refund_obligation/
+    └─ migration.sql
+  └─ 20260912153000_avatar_deletion_tasks/
+    └─ migration.sql
+  └─ 20260919000000_court_soft_delete/
+    └─ migration.sql
+  └─ 20260919010000_availability_history/
+    └─ migration.sql
+  └─ 20260920090000_activity_refund_jobs/
+    └─ migration.sql
+  └─ 20260920091000_admin_workflow_constraints/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+(node:34099) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  11:22:22
+   Duration  1.43s (transform 221ms, setup 0ms, import 613ms, tests 466ms, environment 0ms)
+
+
+所选核心验收分组全部通过：shared, training, reporting, boss_events, amounts, refund_fixes, activity_fixes, training_inventory_fixes, privacy_search_fixes, venue_settings, training_courts, availability_history, availability_migration, admin_execution, order_timeline。微信外部接口使用测试替身，真机与真实支付仍须现场验收。

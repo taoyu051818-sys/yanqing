@@ -200,12 +200,14 @@ const {
         <text class="label">生效时间</text>
         <view class="date-options"
           ><button
+            class="date-option"
             :aria-pressed="form.date === today()"
             :class="{ selected: form.date === today() }"
             @tap="form.date = today()"
           >
             今天起</button
           ><picker
+            class="date-option"
             mode="date"
             :start="today()"
             :value="form.date"

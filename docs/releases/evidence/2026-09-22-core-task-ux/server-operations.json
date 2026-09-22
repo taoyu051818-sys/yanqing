@@ -1,0 +1,67 @@
+{
+  "verified": true,
+  "readOnly": true,
+  "checkedAt": "2026-09-22T03:27:37.200Z",
+  "checks": [
+    {
+      "path": "/orders/admin/ledger?scope=EXTERNAL&pageSize=2",
+      "status": 200
+    },
+    {
+      "path": "/orders/admin/ledger?scope=EXTERNAL&pageSize=2&cursor=REDACTED",
+      "status": 200
+    },
+    {
+      "path": "/orders/admin/ledger?scope=ACCOUNTS&pageSize=2",
+      "status": 200
+    },
+    {
+      "path": "/orders/admin/refunds?status=ALL&pageSize=2",
+      "status": 200
+    },
+    {
+      "path": "/orders/me/ledger?pageSize=2",
+      "status": 200
+    },
+    {
+      "path": "/orders/me/next",
+      "status": 200
+    },
+    {
+      "path": "/venues/price-rules/manage",
+      "status": 200
+    },
+    {
+      "path": "/venues/time-slots/manage",
+      "status": 200
+    },
+    {
+      "path": "/venues/availability/assisted?date=2026-09-22",
+      "status": 200
+    },
+    {
+      "path": "/venues/price-rules/apply",
+      "invalidInputRejected": true
+    },
+    {
+      "path": "/orders/admin/all?dateFrom=2026-09-22&dateTo=2026-09-22&dateBasis=usage&pageSize=2",
+      "status": 200
+    },
+    {
+      "path": "/orders/admin/ledger",
+      "anonymousDenied": true
+    },
+    {
+      "path": "/orders/admin/refunds",
+      "anonymousDenied": true
+    },
+    {
+      "path": "/orders/me/ledger",
+      "anonymousDenied": true
+    },
+    {
+      "path": "/orders/me/next",
+      "anonymousDenied": true
+    }
+  ]
+}
