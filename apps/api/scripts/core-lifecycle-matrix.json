@@ -77,10 +77,11 @@
     ]
   },
   "venue_settings": {
-    "purpose": "球馆公开资料、营业时段、场地设置与预约一致性",
+    "purpose": "球馆公开资料、营业时段、场地设置与预约一致性，以及确认改价的事务、并发和幂等边界",
     "isolated": true,
     "files": [
-      "test/venue-settings.integration.spec.ts"
+      "test/venue-settings.integration.spec.ts",
+      "test/apply-venue-price.integration.spec.ts"
     ]
   },
   "training_courts": {
