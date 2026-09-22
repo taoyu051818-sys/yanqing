@@ -1,0 +1,29 @@
+{
+  "verified": true,
+  "checkedAt": "2026-09-22T03:27:15.702Z",
+  "checks": 5,
+  "results": [
+    {
+      "path": "/health/ready",
+      "status": 200,
+      "revision": "6aaa68bcb7c760ad64e76a1a4d61ccc575be2bdb",
+      "database": "ok"
+    },
+    {
+      "path": "/venues/profile",
+      "status": 200
+    },
+    {
+      "path": "/venues/availability?date=2026-09-22",
+      "status": 200
+    },
+    {
+      "path": "/games/public",
+      "status": 200
+    },
+    {
+      "path": "/events",
+      "status": 200
+    }
+  ]
+}

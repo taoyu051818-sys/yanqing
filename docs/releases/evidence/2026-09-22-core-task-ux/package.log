@@ -1,0 +1,4 @@
+$ pnpm --dir apps/api build
+$ pnpm --dir ../../packages/shared build && nest build
+$ tsc
+{"commit": "6aaa68bcb7c760ad64e76a1a4d61ccc575be2bdb", "archive": "/tmp/yanqing-core-task-deploy-20260922/package/release.tgz", "sha256": "f35a72466b349c2af2cb6d7582a313a20bd684957c46902307d3cbe4028ab8eb"}

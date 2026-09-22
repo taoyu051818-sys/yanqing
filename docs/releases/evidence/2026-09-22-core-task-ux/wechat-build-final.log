@@ -1,0 +1,44 @@
+$ uni build -p mp-weixin && node scripts/check-wechat-package.mjs && node scripts/check-wechat-location.mjs
+Compiler version: 5.24（vue3）
+Compiling...
+
+uni-app 有新版本发布，请执行 `npx @dcloudio/uvm@latest` 更新，更新日志详见：https://download1.dcloud.net.cn/hbuilderx/changelog/5.26.2026091802.html
+​Browserslist: browsers data (caniuse-lite) is 8 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme​
+DONE  Build complete.
+Run method: open Weixin Mini Program Devtools, import dist/build/mp-weixin run.
+{
+  "ok": true,
+  "remote": true,
+  "mainBytes": 783454,
+  "totalBytes": 1756276,
+  "mediaCount": 171,
+  "largestMedia": [
+    {
+      "name": "static/share/miniapp-card.jpg",
+      "bytes": 130066
+    },
+    {
+      "name": "static/share/competition-card.jpg",
+      "bytes": 83154
+    },
+    {
+      "name": "static/logo.png",
+      "bytes": 4023
+    },
+    {
+      "name": "static/tabbar/activity-active.png",
+      "bytes": 1903
+    },
+    {
+      "name": "static/tabbar/activity.png",
+      "bytes": 1888
+    }
+  ],
+  "unusedMainJs": [],
+  "oversizedMedia": [],
+  "mockFiles": [],
+  "problems": []
+}
+PASS compiled WeChat location: user-triggered native call and address/coordinate fill

@@ -1,0 +1,13 @@
+PASS compiled API starts against restored database
+PASS development login and anonymous orders are blocked
+PASS another member cannot read this order
+PASS balance payment confirms booking and exact replay debits once
+PASS member and management order queries are available
+PASS refund restores balance once and releases its booking
+PASS unpaid cancellation releases its held booking
+PASS cancelled order cannot be paid again
+PASS database outage returns 503 while process liveness remains 200
+PASS readiness recovers after isolated database connectivity returns
+{"passed":10,"isolated":true}
+{"status":"verified","directory":"/home/ubuntu/yanqing-domain/backups/verified/20260922T032238759Z-0d3c9030","commit":"6aaa68bcb7c760ad64e76a1a4d61ccc575be2bdb","database":"yanqing_domain_acceptance","dumpSha256":"7c7396db91a82ee38cd5c5e1c89ec170701ec5f437c6f9eeb2a6f9cddb4681ff","migrations":49,"restored":true,"rehearsal":true,"completedAt":"2026-09-22T03:22:51.661Z"}
+PREPARED commit=6aaa68bcb7c760ad64e76a1a4d61ccc575be2bdb receipt=/home/ubuntu/yanqing-domain/ops/receipts/6aaa68bcb7c760ad64e76a1a4d61ccc575be2bdb

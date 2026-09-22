@@ -1,0 +1,5 @@
+Archived 11 deployment build directories from 2026-09-08/09; tar comparison passed before originals removed.
+Archive: /home/ubuntu/yanqing-domain/release-archives/20260922-releases-sep08-09.tgz
+SHA256: 849903426b30227da9d09e5212d3c3d060a5f1334f956ab78f8294de01fbc000
+Available disk: 2.4 GB -> 3.8 GB; usage: 92% -> 87%.
+Current and recent releases, shared dependencies, database backups and storage retained.
