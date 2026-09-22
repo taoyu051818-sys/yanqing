@@ -123,3 +123,29 @@ export interface TrainingEnrollmentView<D = string> {
   attendances: TrainingAttendanceView<D>[];
   regulatoryWarnings: string[];
 }
+
+/** Guardian-owned student record returned by the training API. */
+export interface TrainingStudentView<D = string> {
+  id: string;
+  displayName: string;
+  guardianId: string;
+  guardianConsentStatus: boolean;
+  birthMonth: D | null;
+  guardian: { id: string; displayName: string };
+}
+
+export interface CreateTrainingStudentCommand {
+  displayName: string;
+  birthMonth?: string;
+  guardianConsentStatus: boolean;
+  guardianId?: string;
+  authorizationNote?: string;
+}
+
+export interface PurchaseTrainingCommand {
+  productId: string;
+  classId?: string;
+  studentId?: string;
+  sourceChannel?: string;
+  creationIdempotencyKey?: string;
+}

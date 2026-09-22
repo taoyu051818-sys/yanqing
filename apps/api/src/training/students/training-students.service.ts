@@ -1,3 +1,4 @@
+import type { TrainingStudentView } from '@yanqing/shared';
 import { hasAnyRole } from '../training-access.js';
 import {
   Inject,
@@ -21,7 +22,11 @@ const STUDENT_STAFF_ROLES: readonly AppRole[] = [
 export class TrainingStudentsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async listStudents(actor: AuthUser, all = false, guardianId?: string) {
+  async listStudents(
+    actor: AuthUser,
+    all = false,
+    guardianId?: string,
+  ): Promise<TrainingStudentView<Date>[]> {
     if (all && !hasAnyRole(actor, STUDENT_STAFF_ROLES)) {
       throw new ForbiddenException('仅前台或管理员可查看全部学员档案');
     }
@@ -40,7 +45,10 @@ export class TrainingStudentsService {
     });
   }
 
-  async createStudent(dto: CreateStudentDto, actor: AuthUser) {
+  async createStudent(
+    dto: CreateStudentDto,
+    actor: AuthUser,
+  ): Promise<TrainingStudentView<Date>> {
     const displayName = dto.displayName.trim();
     if (!displayName) throw new BadRequestException('学员姓名不能为空');
     const guardianId = dto.guardianId?.trim() || actor.sub;

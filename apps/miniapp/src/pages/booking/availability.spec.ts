@@ -1,17 +1,19 @@
-import { readFileSync } from 'node:fs'
-import ts from 'typescript'
+import * as vue from 'vue'
+import { loadTaskScript } from '../../test-utils/sfc-script'
 import { describe, expect, it } from 'vitest'
 
-// Exercise the actual SFC loader with controllable transport completion order.
+// Exercise the complete task, including computed selection, with controlled transport timing.
 function fixture() {
-  const source=readFileSync(new URL('./index.vue',import.meta.url),'utf8')
-  const loader=source.slice(source.indexOf('let availabilitySequence'),source.indexOf('\nfunction choose('))
-  const js=ts.transpileModule(loader,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
-  const date={value:'2026-09-09'},data={value:null as any},loading={value:false},error={value:''},selected={value:null}
   const pending: Record<string,{resolve:(data:unknown)=>void;reject:(cause:Error)=>void}>={}
   const endpoints={availability:(day:string)=>new Promise((resolve,reject)=>{pending[day]={resolve,reject}})}
-  const load=new Function('date','data','loading','error','selected','endpoints','assisted',js+';return load')(date,data,loading,error,selected,endpoints,{value:false})
-  return {date,data,loading,error,pending,load}
+  const { useBookingAvailability } = loadTaskScript(new URL('./use-booking-availability.ts', import.meta.url), id => {
+    if (id === 'vue') return vue
+    if (id.endsWith('/services/api')) return { endpoints }
+    if (id.endsWith('/utils/format')) return { today: () => '2026-09-09' }
+    throw new Error(id)
+  })
+  const task = useBookingAvailability({ assisted: vue.ref(false), isSubmitting: () => false, onSelectionChange: () => {} })
+  return { ...task, pending }
 }
 describe('booking date query ownership',()=>{
   it('ignores an old success arriving after the selected date response',async()=>{

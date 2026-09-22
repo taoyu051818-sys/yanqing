@@ -1,3 +1,4 @@
+import type { PublicEventView, PublicEventDetail } from '@yanqing/shared';
 import { EVENT_SEAT_STATUSES } from '../registration/event-registration-policy.js';
 import {
   assertEventConfiguration,
@@ -48,7 +49,7 @@ const parseDate = (value: unknown, field: string): Date => {
 export class EventCatalogService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async list() {
+  async list(): Promise<PublicEventView<Date>[]> {
     const events = await this.prisma.event.findMany({
       where: {
         status: {
@@ -92,7 +93,7 @@ export class EventCatalogService {
     }));
   }
 
-  async detail(eventId: string) {
+  async detail(eventId: string): Promise<PublicEventDetail<Date>> {
     const event = await this.prisma.event
       .findFirstOrThrow({
         where: {
