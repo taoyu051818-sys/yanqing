@@ -224,3 +224,19 @@
   flex-shrink: 0;
   font-size: 24rpx;
 }
+
+.price-list { background:#fff; border-radius:20rpx; overflow:hidden; margin-bottom:24rpx; }
+.price-row + .price-row { border-top:1px solid #e5e9e6; }
+.price-row-main { display:flex; align-items:center; gap:4rpx; padding:12rpx 16rpx; }
+.price-row-edit { flex:1; min-width:0; display:flex; align-items:center; gap:16rpx; background:transparent; padding:12rpx 0; margin:0; text-align:left; line-height:1.5; color:#20252b; }
+.price-row-edit[disabled] { color:#20252b; background:transparent; }
+.price-row-copy { flex:1; min-width:0; display:flex; flex-direction:column; }
+.price-row-value { display:flex; flex-direction:column; text-align:right; flex-shrink:0; }
+.price-row .name { font-size:15px; }
+.price-row .amount { font-size:17px; }
+.price-row .muted { font-size:12px; }
+.row-chevron { color:#626d66; }
+.price-details-button { margin:0; padding:0 8rpx; min-width:44px; min-height:44px; font-size:13px; background:transparent; color:#17653d; }
+.price-row .price-more { padding:8rpx 24rpx 24rpx; }
+
+.price-row-edit::after, .price-details-button::after { border:0; }

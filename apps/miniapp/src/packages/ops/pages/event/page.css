@@ -556,3 +556,6 @@ button[disabled] {
     gap: 8rpx;
   }
 }
+
+.text-input, .form-input, .reason-input, .picker-value, .field-label { font-size:15px; font-size:max(28rpx, 15px); }
+@media (max-width:360px) { .form-grid.three-columns { grid-template-columns:1fr 1fr; } .form-grid.three-columns > :first-child { grid-column:1 / -1; } }

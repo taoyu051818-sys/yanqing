@@ -1,4 +1,6 @@
-import { requiredReason, positiveInteger, yuanToCents } from "./validation";
+import { ref } from "vue";
+import { automaticCode } from "../../../utils/automatic-code";
+import { requiredReason, positiveInteger, yuanToCents, trainingField, TrainingFieldError } from "./validation";
 import type { TrainingProductView } from "@yanqing/shared";
 import type { Ref, ComputedRef } from "vue";
 import {
@@ -90,15 +92,21 @@ export function useCoachCatalogActions({
   weekdayOptions,
   coachOptions,
 }: ActionContext) {
+  const catalogValidationField = ref('');
+  function clearCatalogError() { errorMessage.value = ''; catalogValidationField.value = ''; }
+  function reportFormError(cause: unknown, fallback: string) {
+    catalogValidationField.value = cause instanceof TrainingFieldError ? cause.field : '';
+    errorMessage.value = cause instanceof Error ? cause.message : fallback;
+  }
   async function createProduct() {
     if (!canConfigureTraining.value || actionKey.value) return;
-    errorMessage.value = "";
+    clearCatalogError();
     try {
       const code = productCode.value.trim().toUpperCase();
       const name = productName.value.trim();
-      const reason = productReason.value.trim() ? requiredReason(productReason.value) : '创建课程产品';
+      const reason = productReason.value.trim() ? trainingField('productReason', () => requiredReason(productReason.value)) : '创建课程产品';
       if (code.length > 40 || !name || name.length > 100) {
-        throw new Error(
+        throw new TrainingFieldError("productName",
           "请填写课程名称，最多 100 字。",
         );
       }
@@ -106,9 +114,9 @@ export function useCoachCatalogActions({
         ...(code ? { code } : {}),
         name,
         audience: audienceOptions[productAudienceIndex.value].value,
-        totalSessions: positiveInteger(productTotalSessions.value, "总课次"),
-        validityDays: positiveInteger(productValidityDays.value, "有效期天数"),
-        priceCents: yuanToCents(productPriceYuan.value, "课程售价", true),
+        totalSessions: trainingField("productTotalSessions", () => positiveInteger(productTotalSessions.value, "总课次")),
+        validityDays: trainingField("productValidityDays", () => positiveInteger(productValidityDays.value, "有效期天数")),
+        priceCents: trainingField("productPriceYuan", () => yuanToCents(productPriceYuan.value, "课程售价", true)),
         refundRule: {
           beforeStart: "FULL_REFUND",
           afterStart: "REFUND_UNUSED_SESSIONS",
@@ -141,8 +149,7 @@ export function useCoachCatalogActions({
         productReason.value = "";
       }
     } catch (cause: any) {
-      errorMessage.value = cause?.message || "课程产品表单校验失败。";
-      uni.showToast({ title: errorMessage.value, icon: "none", duration: 3000 });
+      reportFormError(cause, "课程产品表单校验失败。");
     }
   }
 
@@ -167,7 +174,7 @@ export function useCoachCatalogActions({
     enabled = product.enabled !== false,
   ) {
     if (!canConfigureTraining.value || actionKey.value) return;
-    errorMessage.value = "";
+    clearCatalogError();
     try {
       const isEditing = editingProductId.value === product.id;
       let reason = editProductReason.value;
@@ -252,20 +259,20 @@ export function useCoachCatalogActions({
 
   async function createClass() {
     if (!canConfigureTraining.value || actionKey.value) return;
-    errorMessage.value = "";
+    clearCatalogError();
     try {
       const product = selectedClassProduct.value;
       const code = classCode.value.trim().toUpperCase();
       const name = className.value.trim();
-      const reason = requiredReason(classReason.value);
+      const reason = classReason.value.trim() ? trainingField('classReason', () => requiredReason(classReason.value)) : '创建培训班级';
       if (!product) throw new Error("请先创建并选择一个有效课程产品。");
-      if (!code || code.length > 40 || !name || name.length > 100) {
-        throw new Error(
-          "班级编码和名称不能为空，编码最多 40 字符、名称最多 100 字符。",
+      if (code.length > 40 || !name || name.length > 100) {
+        throw new TrainingFieldError("className",
+          "请填写班级名称，最多 100 字。",
         );
       }
       if (classEndTime.value <= classStartTime.value) {
-        throw new Error("班级常规结束时间必须晚于开始时间。");
+        throw new TrainingFieldError("classEndTime", "结束时间必须晚于开始时间。");
       }
       const command = {
         code,
@@ -278,21 +285,15 @@ export function useCoachCatalogActions({
           startsAt: classStartTime.value,
           endsAt: classEndTime.value,
         },
-        capacity: positiveInteger(classCapacity.value, "班级容量", 1, 100),
-        coachCostCents: yuanToCents(classCoachCostYuan.value, "教练单课成本"),
-        assistantCostCents: yuanToCents(
-          classAssistantCostYuan.value,
-          "助教单课成本",
-        ),
-        materialCostCents: yuanToCents(
-          classMaterialCostYuan.value,
-          "单课物料成本",
-        ),
+        capacity: trainingField("classCapacity", () => positiveInteger(classCapacity.value, "班级容量", 1, 100)),
+        coachCostCents: trainingField("classCoachCostYuan", () => yuanToCents(classCoachCostYuan.value, "教练单课成本")),
+        assistantCostCents: trainingField("classAssistantCostYuan", () => yuanToCents(classAssistantCostYuan.value, "助教单课成本")),
+        materialCostCents: trainingField("classMaterialCostYuan", () => yuanToCents(classMaterialCostYuan.value, "单课物料成本")),
         reason,
       };
       const modal = await uni.showModal({
         title: "确认创建培训班级",
-        content: `${name}\n${product.name} · ${weekdayOptions[classWeekdayIndex.value]} ${classStartTime.value}-${classEndTime.value}\n容量 ${command.capacity} 人 · 原因：${reason}`,
+        content: `${name}\n${product.name} · ${weekdayOptions[classWeekdayIndex.value]} ${classStartTime.value}-${classEndTime.value}\n容量 ${command.capacity} 人\n每课成本：教练 ${money(command.coachCostCents)} · 助教 ${money(command.assistantCostCents)} · 物料 ${money(command.materialCostCents)}`,
         confirmText: "确认创建",
       });
       if (!modal.confirm) return;
@@ -306,6 +307,7 @@ export function useCoachCatalogActions({
             (creationIdempotencyKey) =>
               endpoints.createTrainingClass({
                 ...command,
+                code: code || automaticCode("CLS", creationIdempotencyKey),
                 creationIdempotencyKey,
               }),
           ),
@@ -316,7 +318,7 @@ export function useCoachCatalogActions({
         classReason.value = "";
       }
     } catch (cause: any) {
-      errorMessage.value = cause?.message || "培训班级表单校验失败。";
+      reportFormError(cause, "培训班级表单校验失败。");
     }
   }
 
@@ -330,6 +332,8 @@ export function useCoachCatalogActions({
       coachOptions.value[Number(event.detail.value)]?.id || "";
   }
   return {
+    catalogValidationField,
+    clearCatalogError,
     createProduct,
     beginProductEdit,
     cancelProductEdit,

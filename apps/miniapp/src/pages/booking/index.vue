@@ -87,9 +87,10 @@ const showAllDay = ref(false);
 const visibleSlots = computed(() =>
   !data.value
     ? []
-    : assisted.value || showAllDay.value || date.value !== today()
+    : showAllDay.value || date.value !== today()
       ? data.value.slots
-      : data.value.slots.filter((slot) => slotTimes(slot).start > Date.now()),
+      : data.value.slots.filter((slot) =>
+          (assisted.value ? slotTimes(slot).end : slotTimes(slot).start) > Date.now()),
 );
 const data = ref<CourtAvailability | null>(null);
 const loading = ref(false);
@@ -427,7 +428,7 @@ onShow(async () => {
     >
     <view v-if="loading && !data" class="matrix-skeleton skeleton" />
     <view
-      v-if="data?.courts.length && date === today() && !assisted"
+      v-if="data?.courts.length && date === today()"
       class="day-toggle"
       ><button :aria-pressed="showAllDay" @tap="showAllDay = !showAllDay">
         {{ showAllDay ? "只看接下来时段" : "查看全天（含已过时）" }}

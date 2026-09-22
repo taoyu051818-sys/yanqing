@@ -1,0 +1,73 @@
+{
+  "checks": [
+    {
+      "name": "course-name-error",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/coach/index?view=create-product"
+    },
+    {
+      "name": "course-price-error",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/coach/index?view=create-product"
+    },
+    {
+      "name": "course-created",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/coach/index?view=create-product"
+    },
+    {
+      "name": "class-simple",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/coach/index?view=create-class"
+    },
+    {
+      "name": "scheduling-320",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/coach/index?view=create-session"
+    },
+    {
+      "name": "purchase-task",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/inventory/index?form=purchase"
+    },
+    {
+      "name": "item-task",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/inventory/index?form=master&masterType=ITEM"
+    },
+    {
+      "name": "loss-task",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/inventory/index?form=movement&movementType=LOSS"
+    },
+    {
+      "name": "stocktake-task",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/inventory/index?form=stocktake"
+    },
+    {
+      "name": "recharge-simple",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/members/index?form=recharge"
+    },
+    {
+      "name": "membership-simple",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/members/index?form=product"
+    },
+    {
+      "name": "merchant-redeem",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/merchant/index?view=redeem"
+    },
+    {
+      "name": "analytics-simple",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/admin/index?view=analytics"
+    },
+    {
+      "name": "price-list",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/venue/index?view=pricing"
+    },
+    {
+      "name": "event-pending-first",
+      "url": "http://127.0.0.1:5198/#/packages/ops/pages/event/index?eventId=event-golden"
+    },
+    {
+      "name": "booking-upcoming",
+      "url": "http://127.0.0.1:5198/#/pages/booking/index"
+    },
+    {
+      "name": "booking-all-day",
+      "url": "http://127.0.0.1:5198/#/pages/booking/index"
+    }
+  ],
+  "errors": []
+}

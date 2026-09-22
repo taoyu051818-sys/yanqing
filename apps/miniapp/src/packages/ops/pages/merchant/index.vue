@@ -401,7 +401,7 @@ watch(merchantTabs, tabs => { if (tabs.length && !tabs.some(tab => tab.key === m
 watch(focusedSettlementId, id => { if (id) managementView.value = 'settlements'; }, { flush:'sync' });
 onLoad((options) => {
   deepLinkQuery.value = parseOpsDeepLinkQuery(options)
-  managementView.value = options?.view === 'coupons' ? 'coupons' : 'redeem'
+  managementView.value = ['coupons', 'merchants', 'settlements'].includes(options?.view || '') ? options!.view! : 'redeem'
 })
 onShow(load)
 </script>
@@ -477,7 +477,7 @@ onShow(load)
       </view>
     </template>
 
-    <template v-if="canCreateCampaign">
+    <template v-if="canCreateCampaign && managementView === 'merchants'">
       <view class="section-title">合作商户档案</view>
       <view v-if="merchant" class="card lifecycle-card"><view class="row"><view><text class="merchant-title">{{ merchant.name }}</text><text class="muted">状态变更不会删除历史券码、核销和结算记录。</text></view><text class="status" :class="merchantIsActive ? 'state-active' : 'state-disabled'">{{ merchantIsActive ? '合作中' : '已停用' }}</text></view><button :class="merchantIsActive ? 'danger full' : 'secondary full'" :disabled="Boolean(actionKey)" @tap="toggleMerchantStatus">{{ merchantIsActive ? '停用当前商户' : '启用当前商户' }}</button></view>
       <button class="secondary full" @tap="showMerchantForm = !showMerchantForm">{{ showMerchantForm ? '收起商户表单' : '新建联盟商户' }}</button>

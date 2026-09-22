@@ -1,0 +1,109 @@
+$ vitest run --config vitest.config.ts
+The CJS build of Vite's Node API is deprecated. See https://vitejs.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.
+
+ RUN  v1.6.1 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/miniapp
+
+ ✓ src/pages/order/order-flows.spec.ts  (19 tests) 159ms
+ ✓ src/services/mock/training-trials-youth-rules.spec.ts  (4 tests) 3183ms
+ ✓ src/services/mock/consignment-settlement.spec.ts  (3 tests) 4914ms
+ ✓ src/services/mock/community-operations.spec.ts  (9 tests) 5942ms
+ ✓ src/services/mock/event-waitlist-cancellation.spec.ts  (4 tests) 5970ms
+ ✓ src/packages/ops/pages/venue-settings/use-location.spec.ts  (19 tests) 27ms
+ ✓ src/services/mock/alliance-operations.spec.ts  (6 tests) 9686ms
+ ✓ src/services/mock/training-command-response-privacy.spec.ts  (3 tests) 2567ms
+ ✓ src/services/session-lifecycle.spec.ts  (25 tests) 6419ms
+ ✓ src/services/mock/financial-hardening.spec.ts  (21 tests) 10536ms
+ ✓ src/services/mock/admin-execution.spec.ts  (12 tests) 5031ms
+ ✓ src/utils/member-journey.spec.ts  (26 tests) 32ms
+ ✓ src/packages/ops/pages/venue-settings/use-settings.spec.ts  (15 tests) 135ms
+ ✓ src/services/mock/inventory-master-and-goods.spec.ts  (3 tests) 4583ms
+ ✓ src/services/mock/governance-operations.spec.ts  (6 tests) 4244ms
+ ✓ src/services/mock/venue-hourly.spec.ts  (13 tests) 3819ms
+ ✓ src/services/mock/commercial-master-data.spec.ts  (4 tests) 3255ms
+ ✓ src/services/mock/event-signup.spec.ts  (10 tests) 5277ms
+ ✓ src/services/mock/referral-binding.spec.ts  (6 tests) 5426ms
+ ✓ src/pages/order/payment-confirmation.spec.ts  (3 tests) 54ms
+ ✓ src/packages/ops/components/operation-task.spec.ts  (14 tests) 21ms
+ ✓ src/services/mock/venue-public-projection.spec.ts  (2 tests) 1244ms
+ ✓ src/pages/guest-browsing.spec.ts  (17 tests) 1651ms
+ ✓ src/packages/ops/pages/inventory/actions/batches.spec.ts  (4 tests) 10ms
+ ✓ src/packages/ops/pages/coach/data/domains.spec.ts  (3 tests) 12ms
+ ✓ src/utils/payment-confirmation.spec.ts  (14 tests) 33ms
+ ✓ src/pages/community/community-state.spec.ts  (5 tests) 527ms
+stderr | src/packages/ops/pages/frontdesk/queues.spec.ts > loads older refunds from a server-filtered paginated queue instead of filtering the first all-orders page
+[Vue warn]: onUnmounted is called when there is no active component instance to be associated with. Lifecycle injection APIs can only be used during execution of setup(). If you are using async setup(), make sure to register lifecycle hooks before the first await statement.
+
+ ✓ src/packages/ops/pages/frontdesk/queues.spec.ts  (5 tests) 527ms
+ ✓ src/services/http-authentication.spec.ts  (10 tests) 1157ms
+ ✓ src/services/mock/management-response-privacy.spec.ts  (2 tests) 506ms
+ ✓ src/services/mock/game-detail.spec.ts  (5 tests) 3033ms
+ ✓ src/packages/ops/pages/coach/actions/loading.spec.ts  (5 tests) 237ms
+ ✓ src/services/mock/training-configuration.spec.ts  (3 tests) 2890ms
+ ✓ src/pages/booking/assisted-review.spec.ts  (3 tests) 680ms
+ ✓ src/utils/work-item-deep-link.spec.ts  (14 tests) 6ms
+ ✓ src/packages/ops/pages/members/member-navigation.spec.ts  (3 tests) 367ms
+ ✓ src/services/mock/venue-closures.spec.ts  (2 tests) 2266ms
+ ✓ src/services/mock/privacy.spec.ts  (3 tests) 2509ms
+ ✓ src/packages/ops/pages/inventory/use-task-page.spec.ts  (5 tests) 7ms
+ ✓ src/packages/ops/pages/coach/actions/batch.spec.ts  (4 tests) 5ms
+ ✓ src/services/mock/work-item-deep-links.spec.ts  (3 tests) 737ms
+ ✓ src/packages/ops/pages/coach/actions/catalog.spec.ts  (5 tests) 9ms
+ ✓ src/packages/ops/pages/coach/data/resource.spec.ts  (6 tests) 3ms
+ ✓ src/packages/ops/pages/transactions/use-transactions.spec.ts  (3 tests) 5ms
+ ✓ src/packages/ops/config/governance.spec.ts  (18 tests) 5ms
+ ✓ src/packages/ops/composables/use-unsaved-form.spec.ts  (4 tests) 57ms
+ ✓ src/services/mock/venue-settings.spec.ts  (4 tests) 4254ms
+ ✓ src/services/mock/journey-closeout.spec.ts  (4 tests) 2009ms
+ ✓ src/pages/login/use-login-consent.spec.ts  (6 tests) 13ms
+ ✓ src/services/mock/order-command-response-privacy.spec.ts  (2 tests) 924ms
+ ✓ src/utils/pending-creation-key.spec.ts  (6 tests) 5ms
+ ✓ src/utils/game-detail.spec.ts  (6 tests) 5ms
+ ✓ src/packages/ops/pages/coach/actions/projection.spec.ts  (2 tests) 8ms
+ ✓ src/config/operations.spec.ts  (8 tests) 6ms
+ ✓ src/stores/session.referral-attribution.spec.ts  (3 tests) 13ms
+ ✓ src/utils/format.spec.ts  (5 tests) 5ms
+ ✓ src/services/mock/router.spec.ts  (18 tests) 24484ms
+ ✓ src/services/referral-attribution.spec.ts  (6 tests) 7ms
+ ✓ src/packages/ops/pages/coach/actions/attendance.spec.ts  (2 tests) 12ms
+ ✓ src/packages/ops/pages/members/member-selection.spec.ts  (1 test) 271ms
+ ✓ src/packages/ops/pages/members/membership-benefits.spec.ts  (1 test) 248ms
+ ✓ src/services/mock/coupon-payment.spec.ts  (2 tests) 1272ms
+ ✓ src/services/mock/operations-access.spec.ts  (9 tests) 3364ms
+ ✓ src/services/mock/apply-price.spec.ts  (2 tests) 662ms
+ ✓ src/packages/ops/pages/coach/forms/trial-student-registration.spec.ts  (2 tests) 9ms
+ ✓ src/services/mock/direct-refund.spec.ts  (7 tests) 2135ms
+ ✓ src/utils/operations-runtime.spec.ts  (16 tests) 3898ms
+ ✓ src/services/mock/free-venue-cancellation.spec.ts  (3 tests) 1389ms
+ ✓ src/config/workspace.spec.ts  (10 tests) 14ms
+ ✓ src/config/work-items.spec.ts  (5 tests) 3ms
+ ✓ src/services/mock/auth-session-projection.spec.ts  (1 test) 308ms
+ ✓ src/pages/booking/booking-lifecycle.spec.ts  (1 test) 972ms
+ ✓ src/packages/ops/pages/finance/actions/refunds.spec.ts  (5 tests) 6ms
+ ✓ src/stores/session-profile.spec.ts  (2 tests) 70ms
+ ✓ src/packages/ops/pages/venue/price-editor.spec.ts  (3 tests) 6ms
+ ✓ src/utils/event-detail.spec.ts  (4 tests) 5ms
+ ✓ src/packages/ops/pages/finance/refund-queue-summary.spec.ts  (3 tests) 2ms
+ ✓ src/packages/ops/utils/paged-list.spec.ts  (3 tests) 10ms
+ ✓ src/packages/ops/pages/finance/actions/alliance.spec.ts  (1 test) 24ms
+ ✓ src/utils/booking-coupons.spec.ts  (7 tests) 17ms
+ ✓ src/pages/booking/availability.spec.ts  (2 tests) 187ms
+ ✓ src/utils/automatic-code.spec.ts  (1 test) 7ms
+ ✓ src/utils/training-refund.spec.ts  (3 tests) 3ms
+ ✓ src/stores/session-roles.spec.ts  (4 tests) 15ms
+ ✓ src/packages/ops/pages/event/actions/loading.spec.ts  (1 test) 6ms
+ ✓ src/packages/ops/pages/inventory/task-route.spec.ts  (2 tests) 5ms
+ ✓ src/services/mock/member-journey.spec.ts  (2 tests) 281ms
+ ✓ src/config/status-labels.spec.ts  (3 tests) 2ms
+ ✓ src/packages/ops/config/event-presentation.spec.ts  (1 test) 3ms
+ ✓ src/pages/order/refund-preview.spec.ts  (1 test) 2ms
+ ✓ src/services/api-feedback.spec.ts  (2 tests) 3ms
+ ✓ src/utils/coupon-invitation.spec.ts  (5 tests) 4ms
+ ✓ src/stores/session-recovery.spec.ts  (4 tests) 5ms
+ ✓ src/packages/ops/pages/event/actions/participation.spec.ts  (2 tests) 3ms
+ ✓ src/packages/ops/utils/admin-login.spec.ts  (5 tests) 5ms
+ ✓ src/packages/ops/pages/event/deadline-preset.spec.ts  (6 tests) 2ms
+
+ Test Files  96 passed (96)
+      Tests  577 passed (577)
+   Start at  22:11:44
+   Duration  30.86s (transform 7.61s, setup 5ms, collect 34.54s, tests 146.73s, environment 22ms, prepare 14.34s)

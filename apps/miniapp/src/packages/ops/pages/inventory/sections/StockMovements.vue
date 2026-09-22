@@ -4,6 +4,7 @@ import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 import type { Tab, MovementType } from "../page-types.js";
 
 const props = defineProps<{
+  formOnly?: boolean;
   errorMessage: string;
   tab: Tab;
   canOperate: boolean;
@@ -77,7 +78,7 @@ const showMovementForm = computed({
 <template>
   <view>
     <template v-if="!errorMessage && tab === 'MOVEMENT'">
-      <view v-if="canOperate" class="create-row"
+      <view v-if="canOperate && !formOnly" class="create-row"
         ><button
           class="secondary create-half"
           @tap="openMovementForm('TRANSFER')"
@@ -96,7 +97,7 @@ const showMovementForm = computed({
               >核对商品、来源库位与批次，再填写本次数量。</text
             ></view
           >
-          <button class="link-button" @tap="showMovementForm = false">
+          <button v-if="!formOnly" class="link-button" @tap="showMovementForm = false">
             取消
           </button>
         </view>
@@ -161,6 +162,7 @@ const showMovementForm = computed({
           "
         />
         <button
+          v-if="!formOnly"
           class="primary form-submit"
           :loading="saving"
           :disabled="saving"
@@ -169,6 +171,7 @@ const showMovementForm = computed({
           确认建立{{ movementType === "TRANSFER" ? "调拨" : "报损" }}单
         </button>
       </view>
+      <template v-if="!formOnly">
       <view v-if="!loading && !operations.length" class="card empty"
         >暂无调拨或报损单。</view
       >
@@ -204,6 +207,7 @@ const showMovementForm = computed({
           {{ movementActionLabel(document) }}
         </button></view
       >
+      </template>
     </template>
   </view>
 </template>

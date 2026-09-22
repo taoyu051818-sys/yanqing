@@ -16,7 +16,7 @@ it('keeps the loaded customer, confirmation and adjustment target together despi
     if (id.endsWith('/stores/session')) return { useSessionStore: () => ({ roles: ['ADMIN'], user: { id: 'admin' } }) }
     if (id.endsWith('/components/operation-task')) return { useOperationTask: () => ({ start: (value: unknown) => { task = value } }), reasonField: () => ({}) }
     if (id.endsWith('/utils/paged-list')) return { usePagedList: () => ({ items: vue.ref([]), total: vue.ref(0) }) }
-    if (id.endsWith('/utils/format')) return { money: String }
+    if (id.endsWith('/utils/format')) return { money: String, today: () => '2026-09-22' }
     if (id.endsWith('/utils/pending-creation-key')) return { withPendingCreationKey: (_scope: unknown, _command: unknown, submit: (key: string) => unknown) => submit('adjustment-command') }
     if (id.endsWith('.vue') || id.includes('/utils/') || id.endsWith('/config/operations')) return {}
     throw new Error(id)

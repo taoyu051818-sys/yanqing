@@ -9,6 +9,7 @@ import { idempotencyKey, venueDateKey } from "../../../../../utils/format";
 import type { MasterType } from "../page-types.js";
 
 interface ActionContext {
+  reportError?: (message: string) => void;
   masterType: Ref<MasterType, MasterType>;
   showMasterForm: Ref<boolean, boolean>;
   detailId: Ref<string, string>;
@@ -22,6 +23,7 @@ interface ActionContext {
 }
 
 export function useInventoryCatalogActions({
+  reportError,
   masterType,
   showMasterForm,
   detailId,
@@ -162,7 +164,7 @@ export function useInventoryCatalogActions({
   async function submitMasterForm() {
     const form = masterForm.value;
     if (!String(form.reason || "").trim())
-      return uni.showToast({ title: "请填写变更原因", icon: "none" });
+      return reportError ? reportError("请填写变更原因") : uni.showToast({ title: "请填写变更原因", icon: "none" });
     const confirm = await uni.showModal({
       title: editingMaster.value ? "确认保存资料" : "确认新增资料",
       content: `${form.reason}\n关键变更将写入审计日志。`,
@@ -203,6 +205,7 @@ export function useInventoryCatalogActions({
       uni.showToast({ title: "资料已保存", icon: "success" });
       await load();
     } catch (cause: any) {
+      if (reportError) { reportError(cause.message || "请核对字段和当前版本"); return; }
       uni.showModal({
         title: "资料未保存",
         content: cause.message || "请核对字段和当前版本",

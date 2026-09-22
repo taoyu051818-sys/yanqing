@@ -286,7 +286,6 @@ async function runCreation(
     return true;
   } catch (cause: any) {
     errorMessage.value = cause?.message || "培训经营配置创建失败。";
-    uni.showToast({ title: errorMessage.value, icon: "none" });
     return false;
   } finally {
     uni.hideLoading();
@@ -295,6 +294,8 @@ async function runCreation(
 }
 
 const {
+  catalogValidationField,
+  clearCatalogError,
   createProduct,
   beginProductEdit,
   cancelProductEdit,
@@ -517,7 +518,7 @@ onUnmounted(dispose);
     <LessonList v-if="activeView === 'lessons' && !lessonId" v-model:filter="lessonFilter" v-model:search="lessonSearch" :lessons="filteredLessons" :loading="loading" :can-create="canCreateSession" :students-for="studentsFor" @open="openLesson" @create="openCreation('create-session')" />
     <view v-if="lessonId && !loading && !detailLessons.length" class="card empty">未找到该课次，可能已移除或当前账号无权查看。</view>
 
-    <view v-if="errorMessage && !sessionValidationField" class="card error-panel">
+    <view v-if="errorMessage && !sessionValidationField && !['create-product', 'create-class'].includes(activeView)" class="card error-panel">
       <view
         ><text class="panel-title">操作未完成</text
         ><text class="muted">{{ errorMessage }}</text></view
@@ -624,6 +625,8 @@ onUnmounted(dispose);
     <TrainingConfiguration
       v-if="['create-product', 'create-class'].includes(activeView) && canConfigureTraining"
       :form-type="activeView === 'create-product' ? 'product' : 'class'"
+      :error-field="catalogValidationField"
+      @clear-error="clearCatalogError"
       :error-message="errorMessage"
       :canConfigureTraining="canConfigureTraining"
       v-model:productCode="productCode"

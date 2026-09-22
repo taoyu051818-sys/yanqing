@@ -5,6 +5,7 @@ import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 import type { Tab, UsageType } from "../page-types.js";
 
 const props = defineProps<{
+  formOnly?: boolean;
   errorMessage: string;
   tab: Tab;
   showUsageForm: boolean;
@@ -73,7 +74,7 @@ const showUsageForm = computed({
               >商品由经办人从库存卡片发起，关联业务与数量必须逐项确认。</text
             >
           </view>
-          <button class="link-button" @tap="showUsageForm = false">取消</button>
+          <button v-if="!formOnly" class="link-button" @tap="showUsageForm = false">取消</button>
         </view>
         <text class="field-label">领用商品</text>
         <view class="picker-field readonly-field">{{
@@ -113,6 +114,7 @@ const showUsageForm = computed({
           placeholder="请输入正整数"
         />
         <button
+          v-if="!formOnly"
           class="primary form-submit"
           :loading="saving"
           :disabled="saving"
@@ -121,6 +123,7 @@ const showUsageForm = computed({
           确认领用并过账
         </button>
       </view>
+      <template v-if="!formOnly">
       <view v-if="!loading && !items.length" class="card empty">{{
         isAdmin ? "暂无库存 SKU，请先维护基础资料。" : "当前没有低库存预警。"
       }}</view>
@@ -161,6 +164,7 @@ const showUsageForm = computed({
           </button></view
         ></view
       >
+      </template>
     </template>
   </view>
 </template>

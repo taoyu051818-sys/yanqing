@@ -38,3 +38,12 @@ export function yuanToCents(value: string, label: string, positive = false) {
   }
   return cents;
 }
+
+export class TrainingFieldError extends Error {
+  constructor(public field: string, message: string) { super(message); }
+}
+export function trainingField<T>(field: string, validate: () => T): T {
+  try { return validate(); } catch (cause) {
+    throw new TrainingFieldError(field, cause instanceof Error ? cause.message : '请检查填写内容');
+  }
+}

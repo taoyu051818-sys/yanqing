@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import OptionalDateField from "../../../components/OptionalDateField.vue";
 import { toRefs, computed } from "vue";
 import { money } from "../../../../../utils/format";
 import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 import type { Tab, MasterType } from "../page-types.js";
 
 const props = defineProps<{
+  formOnly?: boolean;
   errorMessage: string;
   tab: Tab;
   masterType: MasterType;
@@ -79,7 +81,7 @@ const showMasterForm = computed({
 <template>
   <view>
     <template v-if="!errorMessage && tab === 'MASTER'">
-      <view class="master-toolbar">
+      <view v-if="!formOnly" class="master-toolbar">
         <view class="master-kind-row">
           <button
             v-for="entry in [
@@ -146,7 +148,7 @@ const showMasterForm = computed({
                   : "库位"
             }}</text
           >
-          <button class="link-button" @tap="showMasterForm = false">
+          <button v-if="!formOnly" class="link-button" @tap="showMasterForm = false">
             取消
           </button>
         </view>
@@ -243,12 +245,8 @@ const showMasterForm = computed({
               ><input v-model="masterForm.batchCode" class="field"
             /></view>
           </view>
-          <text class="field-label">效期（可空，YYYY-MM-DD）</text>
-          <input
-            v-model="masterForm.expiresAt"
-            class="field"
-            placeholder="2027-12-31"
-          />
+          <text class="field-label">有效期（选填）</text>
+          <OptionalDateField v-model="masterForm.expiresAt" :disabled="saving" />
         </template>
 
         <template v-else-if="masterType === 'SUPPLIER'">
@@ -340,6 +338,7 @@ const showMasterForm = computed({
           placeholder="说明新增或修改原因，写入审计日志"
         />
         <button
+          v-if="!formOnly"
           class="primary form-submit"
           :loading="saving"
           :disabled="saving"
@@ -349,6 +348,7 @@ const showMasterForm = computed({
         </button>
       </view>
 
+      <template v-if="!formOnly">
       <view
         v-for="record in masterRecords"
         :id="opsDeepLinkDomId('inventory-master', record.id)"
@@ -497,6 +497,7 @@ const showMasterForm = computed({
       <view v-if="!loading && !masterRecords.length" class="card empty"
         >当前筛选下暂无基础资料。</view
       >
+      </template>
     </template>
   </view>
 </template>

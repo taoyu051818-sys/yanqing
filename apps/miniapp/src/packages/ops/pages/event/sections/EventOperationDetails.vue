@@ -156,6 +156,15 @@ const pairingRightIndex = computed({
   get: () => props.pairingRightIndex,
   set: (value) => emit("update:pairingRightIndex", value),
 });
+const showPairingCorrection = ref(false);
+const showCompletedMatches = ref(false);
+const pendingMatches = computed(() => props.visibleMatches.filter(match => !['CONFIRMED', 'CORRECTED'].includes(match.status)));
+const completedMatches = computed(() => props.visibleMatches.filter(match => ['CONFIRMED', 'CORRECTED'].includes(match.status)));
+const displayedMatches = computed(() => [
+  ...pendingMatches.value,
+  ...(showCompletedMatches.value || !pendingMatches.value.length ? completedMatches.value : completedMatches.value.filter(match => props.focusedRecord === `event-match:${match.id}`)),
+]);
+watch(() => props.selectedRound, () => { showPairingCorrection.value = false; showCompletedMatches.value = false; });
 const detailTab = ref('summary');
 const detailTabs = computed(() => [{ key:'summary', title:'概览' }, { key:'teams', title:'报名签到' }, { key:'matches', title:'轮次比分' }, ...(props.mayOperatePrizes ? [{ key:'prizes', title:'奖品' }] : [])]);
 watch(() => props.focusedRecord, record => { if (record.startsWith('event-team:')) detailTab.value = 'teams'; else if (record.startsWith('event-match:')) detailTab.value = 'matches'; else if (record.startsWith('event-prize:')) detailTab.value = 'prizes'; }, { immediate:true, flush:'sync' });
@@ -504,9 +513,12 @@ watch(() => props.focusedRecord, record => { if (record.startsWith('event-team:'
         </scroll-view>
       </view>
 
+      <button v-if="mayManageEvent && selectedRound === currentRound && currentRoundMatches.length" class="secondary secondary-disclosure" :aria-expanded="showPairingCorrection" @tap="showPairingCorrection = !showPairingCorrection">
+        {{ showPairingCorrection ? '收起配对设置' : '配对设置' }}{{ pairingsEditable ? '' : ' · 已锁定' }}
+      </button>
       <view
         v-if="
-          mayManageEvent &&
+          showPairingCorrection && mayManageEvent &&
           selectedRound === currentRound &&
           currentRoundMatches.length
         "
@@ -518,7 +530,7 @@ watch(() => props.focusedRecord, record => { if (record.startsWith('event-team:'
             >仅在本轮任何实际对阵尚未录分前，可选择两场互换第二支队伍；轮空也可参与互换。</text
           ></view
         >
-        <view class="pairing-picker-grid">
+        <view v-if="pairingsEditable" class="pairing-picker-grid">
           <picker
             :range="pairingOptions"
             :value="pairingLeftIndex"
@@ -545,6 +557,7 @@ watch(() => props.focusedRecord, record => { if (record.startsWith('event-team:'
           </picker>
         </view>
         <button
+          v-if="pairingsEditable"
           class="secondary pairing-button"
           :loading="actionKey === `pairings:${eventDetail.id}:${currentRound}`"
           :disabled="
@@ -562,8 +575,10 @@ watch(() => props.focusedRecord, record => { if (record.startsWith('event-team:'
         >
       </view>
 
+      <view v-if="pendingMatches.length" class="section-title">待录分 {{ pendingMatches.length }} 场</view>
+      <view v-else-if="completedMatches.length" class="section-title">本轮已完成 {{ completedMatches.length }} 场</view>
       <view
-        v-for="match in visibleMatches"
+        v-for="match in displayedMatches"
         :id="opsDeepLinkDomId('event-match', match.id)"
         :key="match.id"
         class="card match-card"
@@ -620,6 +635,7 @@ watch(() => props.focusedRecord, record => { if (record.startsWith('event-team:'
           </button>
         </view>
       </view>
+      <button v-if="pendingMatches.length && completedMatches.length" class="secondary secondary-disclosure" :aria-expanded="showCompletedMatches" @tap="showCompletedMatches = !showCompletedMatches">{{ showCompletedMatches ? '收起' : '查看' }}已完成对阵（{{ completedMatches.length }}）</button>
       <view v-if="currentRound === 0" class="empty card">尚未生成首轮对阵</view>
       <view v-else-if="!visibleMatches.length" class="empty card"
         >第 {{ selectedRound }} 轮没有对阵记录，请刷新或检查赛事数据</view
@@ -631,3 +647,5 @@ watch(() => props.focusedRecord, record => { if (record.startsWith('event-team:'
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>.secondary-disclosure { width:100%; min-height:44px; margin:16rpx 0; font-size:15px; text-align:left; }</style>

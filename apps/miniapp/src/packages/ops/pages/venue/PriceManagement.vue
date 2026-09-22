@@ -64,59 +64,21 @@ const {
           >设置价格后，会员才能按对应时段订场。</text
         ></view
       >
-      <view v-for="rule in currentRules" :key="rule.id" class="card price-item">
-        <view class="item-heading"
-          ><text class="name">{{
-            rule.timeSlot?.label || "未单独定价的时段"
-          }}</text
-          ><text class="status">{{ priceStatus(rule) }}</text></view
-        >
-        <view class="amount-line"
-          ><text class="amount">{{ money(rule.priceCents) }}</text
-          ><text class="muted">
-            / {{ rule.timeSlot ? "场次" : "计价时段" }}</text
-          ><text v-if="rule.newcomerPriceCents != null" class="newcomer"
-            >新客 {{ money(rule.newcomerPriceCents) }}</text
-          ></view
-        >
-        <text class="muted block"
-          >{{ weekdayLabel(rule.weekdayMask) }} ·
-          {{ venueDateKey(rule.effectiveFrom) }} 起{{
-            rule.effectiveTo
-              ? "，至 " + venueDateKey(rule.effectiveTo) + " 前"
-              : ""
-          }}</text
-        >
-        <view class="price-actions">
-          <button
-            v-if="canManage"
-            class="secondary edit-button"
-            @tap="open(rule.id)"
-          >
-            修改价格
-          </button>
-          <button
-            v-if="canManage"
-            class="disclosure"
-            :aria-expanded="expandedId === rule.id"
-            @tap="expandedId = expandedId === rule.id ? '' : rule.id"
-          >
-            {{ expandedId === rule.id ? "收起其他操作" : "其他操作" }}
-          </button>
+      <view class="price-list">
+        <view v-for="rule in currentRules" :key="rule.id" class="price-row">
+          <view class="price-row-main">
+            <button class="price-row-edit" :disabled="!canManage" :aria-label="'修改' + (rule.timeSlot?.label || '默认') + '价格'" @tap="open(rule.id)">
+              <view class="price-row-copy"><text class="name">{{ rule.timeSlot?.label || '默认价格' }}</text><text class="muted">{{ weekdayLabel(rule.weekdayMask) }} · {{ priceStatus(rule) }}</text></view>
+              <view class="price-row-value"><text class="amount">{{ money(rule.priceCents) }}</text><text v-if="rule.newcomerPriceCents != null" class="muted">新客 {{ money(rule.newcomerPriceCents) }}</text></view><text v-if="canManage" class="row-chevron">›</text>
+            </button>
+            <button class="price-details-button" :aria-expanded="expandedId === rule.id" :aria-label="(rule.timeSlot?.label || '默认价格') + '详情'" @tap="expandedId = expandedId === rule.id ? '' : rule.id">{{ expandedId === rule.id ? '收起' : '详情' }}</button>
+          </view>
+          <view v-if="expandedId === rule.id" class="price-more">
+            <text class="muted">{{ rule.name }} · {{ venueDateKey(rule.effectiveFrom) }} 起{{ rule.effectiveTo ? '，至 ' + venueDateKey(rule.effectiveTo) + ' 前' : '，长期有效' }}</text>
+            <text class="muted">{{ rule.timeSlot ? '每场次' : '每计价时段' }}计价 · 版本 {{ rule.version }}</text>
+            <button v-if="canManage" class="secondary" :disabled="busy" @tap="stoppingPrice = rule; error = '';">停用此价格</button>
+          </view>
         </view>
-        <view v-if="expandedId === rule.id" class="price-more"
-          ><text class="muted">{{ rule.name }} · 版本 {{ rule.version }}</text
-          ><button
-            class="secondary"
-            :disabled="busy"
-            @tap="
-              stoppingPrice = rule;
-              error = '';
-            "
-          >
-            停用此价格
-          </button></view
-        >
       </view>
       <button
         v-if="otherRules.length"

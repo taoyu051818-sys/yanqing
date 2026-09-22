@@ -19,7 +19,7 @@ function page() {
     if (id.endsWith('/utils/paged-list')) return { usePagedList: () => ({ items: vue.ref([]), total: vue.ref(0), load: listLoad }) }
     if (id.endsWith('/config/operations')) return { hasOperationsAccess: () => true }
     if (id.endsWith('/utils/work-item-deep-link')) return { parseOpsDeepLinkQuery: () => ({}) }
-    if (id.endsWith('/utils/format')) return { money: String }
+    if (id.endsWith('/utils/format')) return { money: String, today: () => '2026-09-22' }
     if (id.endsWith('.vue') || id.includes('/utils/')) return {}
     throw new Error(id)
   })

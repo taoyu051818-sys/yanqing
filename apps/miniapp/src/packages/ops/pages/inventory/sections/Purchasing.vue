@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import OptionalDateField from "../../../components/OptionalDateField.vue";
 import { toRefs, computed } from "vue";
 import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 import type { Tab } from "../page-types.js";
 
 const props = defineProps<{
+  formOnly?: boolean;
   errorMessage: string;
   tab: Tab;
   canOperate: boolean;
@@ -73,7 +75,7 @@ const showPurchaseForm = computed({
 <template>
   <view>
     <template v-if="!errorMessage && tab === 'PURCHASE'">
-      <button v-if="canOperate" class="primary create" @tap="openPurchaseForm">
+      <button v-if="canOperate && !formOnly" class="primary create" @tap="openPurchaseForm">
         新建采购单
       </button>
       <view v-if="showPurchaseForm" class="card operation-form">
@@ -81,10 +83,10 @@ const showPurchaseForm = computed({
           <view
             ><text class="title">新建采购单</text
             ><text class="muted"
-              >供应商、商品和收货库位均不预选，请由经办人逐项确认。</text
+              >选择供应商与商品，核对本次数量和收货库位。</text
             ></view
           >
-          <button class="link-button" @tap="showPurchaseForm = false">
+          <button v-if="!formOnly" class="link-button" @tap="showPurchaseForm = false">
             取消
           </button>
         </view>
@@ -122,7 +124,7 @@ const showPurchaseForm = computed({
           }}</view></picker
         >
         <text class="field-label">本批采购批次</text><input v-model="purchaseForm.batchCode" @blur="syncPurchaseBatch" class="field" maxlength="80" placeholder="核对实物批次" />
-        <text class="field-label">本批有效期（无效期可留空）</text><input v-model="purchaseForm.expiresAt" class="field" maxlength="10" placeholder="YYYY-MM-DD" />
+        <text class="field-label">本批有效期（选填）</text><OptionalDateField v-model="purchaseForm.expiresAt" :disabled="saving" />
         <text class="muted">批次与效期会随采购收货入库，请以本批实物为准。</text>
         <text class="field-label">采购数量</text>
         <input
@@ -132,6 +134,7 @@ const showPurchaseForm = computed({
           placeholder="请输入正整数"
         />
         <button
+          v-if="!formOnly"
           class="primary form-submit"
           :loading="saving"
           :disabled="saving"
@@ -140,6 +143,7 @@ const showPurchaseForm = computed({
           确认建立采购单
         </button>
       </view>
+      <template v-if="!formOnly">
       <view v-if="!loading && !purchaseOrders.length" class="card empty"
         >暂无采购单。</view
       >
@@ -174,6 +178,7 @@ const showPurchaseForm = computed({
           {{ purchaseActionLabel(order) }}
         </button></view
       >
+      </template>
     </template>
   </view>
 </template>

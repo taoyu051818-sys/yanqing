@@ -109,7 +109,7 @@ const metrics = computed(() => [
     percent(dashboard.value?.venue?.primeUtilizationRate),
     "晚高峰与夜场",
   ],
-  ["RevPAH", money(dashboard.value?.venue?.revpahCents), "每可售场地小时收入"],
+  ["每场地小时收入", money(dashboard.value?.venue?.revpahCents), "每可售场地小时收入"],
   [
     "已实现收入",
     money(dashboard.value?.revenue?.realizedRevenueCents),

@@ -386,3 +386,12 @@
   border-color: #d69a24 !important;
   box-shadow: 0 0 0 4rpx rgba(214, 154, 36, 0.18);
 }
+
+/* Keep scheduling choices legible on narrow phones. */
+.court-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.court-choice { font-size:15px; min-height:48px; }
+.court-choice .court-usage { font-size:12px; }
+@media (max-width: 360px) {
+  .form-grid.three-columns { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  .form-grid.three-columns > :first-child { grid-column:1 / -1; }
+}

@@ -187,7 +187,7 @@ function openBlocker(kind: string) {
       </view>
       <text class="muted period-note"
         >只关已结束的营业日；当天数据保持实时。关账快照不可覆盖，未处理支付、退款、履约或消课等源业务会进入
-        REVIEW；培训、联盟和寄售周期结算作为财务待办，不锁死每日关账。</text
+        待处理状态；培训、联盟和寄售周期结算作为财务待办，不锁死每日关账。</text
       >
       <button
         v-if="canFinanceAction && reconciliation?.status !== 'LOCKED'"

@@ -4,6 +4,7 @@ import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 import type { Tab } from "../page-types.js";
 
 const props = defineProps<{
+  formOnly?: boolean;
   direct?: boolean;
   errorMessage: string;
   tab: Tab;
@@ -53,7 +54,7 @@ const showStocktakeForm = computed({
 <template>
   <view>
     <template v-if="!errorMessage && tab === 'STOCKTAKE'">
-      <button v-if="canOperate" class="primary create" @tap="openStocktakeForm">
+      <button v-if="canOperate && !formOnly" class="primary create" @tap="openStocktakeForm">
         新建盘点单
       </button>
       <view v-if="showStocktakeForm" class="card operation-form">
@@ -64,7 +65,7 @@ const showStocktakeForm = computed({
               >盘点库位不自动带入，避免误盘其他仓位。</text
             ></view
           >
-          <button class="link-button" @tap="showStocktakeForm = false">
+          <button v-if="!formOnly" class="link-button" @tap="showStocktakeForm = false">
             取消
           </button>
         </view>
@@ -88,6 +89,7 @@ const showStocktakeForm = computed({
           placeholder="例如：月末例行盘点"
         />
         <button
+          v-if="!formOnly"
           class="primary form-submit"
           :loading="saving"
           :disabled="saving"
@@ -96,6 +98,7 @@ const showStocktakeForm = computed({
           确认建立盘点单
         </button>
       </view>
+      <template v-if="!formOnly">
       <view v-if="!loading && !stocktakes.length" class="card empty"
         >暂无盘点单。</view
       >
@@ -145,6 +148,7 @@ const showStocktakeForm = computed({
           }}
         </button></view
       >
+      </template>
     </template>
   </view>
 </template>
