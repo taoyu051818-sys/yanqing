@@ -1,0 +1,18 @@
+$ vitest run --config vitest.config.ts src/packages/ops/pages/venue/price-editor.spec.ts src/services/mock/apply-price.spec.ts src/pages/booking src/pages/order
+[33mThe CJS build of Vite's Node API is deprecated. See https://vitejs.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+ RUN  v1.6.1 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/miniapp
+
+ ✓ src/packages/ops/pages/venue/price-editor.spec.ts  (3 tests) 10ms
+ ✓ src/pages/order/order-flows.spec.ts  (19 tests) 147ms
+ ✓ src/pages/order/refund-preview.spec.ts  (1 test) 5ms
+ ✓ src/pages/booking/availability.spec.ts  (2 tests) 145ms
+ ✓ src/pages/booking/booking-lifecycle.spec.ts  (1 test) 374ms
+ ✓ src/pages/order/payment-confirmation.spec.ts  (3 tests) 49ms
+ ✓ src/pages/booking/assisted-review.spec.ts  (3 tests) 645ms
+ ✓ src/services/mock/apply-price.spec.ts  (2 tests) 710ms
+
+ Test Files  8 passed (8)
+      Tests  34 passed (34)
+   Start at  02:02:19
+   Duration  6.15s (transform 7.74s, setup 2ms, collect 23.69s, tests 2.08s, environment 2ms, prepare 2.13s)

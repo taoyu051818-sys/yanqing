@@ -18,6 +18,7 @@ export function useOrderAftersales(
   const { actionKey } = scope;
   const refundingId = ref("");
   const refundError = ref("");
+  const refundFeedback = ref<{ orderId: string; message: string } | null>(null);
   async function cancelPending(order: OrderView) {
     if (actionKey.value || isConfirming(order.id)) return;
     const current = scope.capture();
@@ -66,6 +67,7 @@ export function useOrderAftersales(
     const action = scope.begin("refund:" + order.id);
     if (!action) return;
     refundError.value = "";
+    refundFeedback.value = null;
     try {
       const direct = canRefundDirectly();
       const command = {
@@ -88,6 +90,12 @@ export function useOrderAftersales(
       );
       if (!action.isCurrent()) return;
       refundingId.value = "";
+      refundFeedback.value = {
+        orderId: order.id,
+        message: direct
+          ? directRefundFeedback((result as { status?: string })?.status)
+          : "退款申请已提交，等待工作人员处理",
+      };
       uni.showToast({
         title: direct
           ? directRefundFeedback((result as { status?: string })?.status)
@@ -107,6 +115,14 @@ export function useOrderAftersales(
   function reset() {
     refundingId.value = "";
     refundError.value = "";
+    refundFeedback.value = null;
   }
-  return { refundingId, refundError, cancelPending, refund, reset };
+  return {
+    refundingId,
+    refundError,
+    refundFeedback,
+    cancelPending,
+    refund,
+    reset,
+  };
 }

@@ -1887,6 +1887,19 @@
   },
   {
     "controller": "VenuesController",
+    "method": "applyPrice",
+    "verb": "POST",
+    "path": "/api/v1/venues/price-rules/apply",
+    "roles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "VenuePricingService",
+    "serviceMethod": "applyPrice"
+  },
+  {
+    "controller": "VenuesController",
     "method": "createPriceRule",
     "verb": "POST",
     "path": "/api/v1/venues/price-rules",

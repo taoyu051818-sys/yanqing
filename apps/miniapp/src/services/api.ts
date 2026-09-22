@@ -14,6 +14,8 @@ import type {
 } from "../types/training-operations";
 import type {
   OrderView,
+  ApplyVenuePriceCommand,
+  VenuePriceRule,
   LedgerPage,
   RefundTimelinePage,
   OrderPage,
@@ -139,7 +141,8 @@ export const endpoints = {
   availability: (date: string) =>
     api.get<CourtAvailability>("/venues/availability", { date }),
   venueTimeSlots: () => api.get<any[]>("/venues/time-slots/manage"),
-  managePriceRules: () => api.get<any[]>("/venues/price-rules/manage"),
+  managePriceRules: () => api.get<VenuePriceRule[]>("/venues/price-rules/manage"),
+  applyVenuePrice: (data: ApplyVenuePriceCommand) => api.post<VenuePriceRule>("/venues/price-rules/apply", data),
   createPriceRule: (data: object) => api.post("/venues/price-rules", data),
   createPriceRuleVersion: (id: string, data: object) =>
     api.post(`/venues/price-rules/${id}/versions`, data),

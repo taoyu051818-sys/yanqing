@@ -1,0 +1,2 @@
+$ pnpm --dir ../../packages/shared build && nest build
+$ tsc
