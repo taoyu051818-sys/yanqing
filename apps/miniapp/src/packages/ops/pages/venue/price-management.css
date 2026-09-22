@@ -125,7 +125,7 @@
   color: #17653d;
   font-size: 26rpx;
 }
-.date-options > * {
+.date-option {
   flex: 1;
   min-width: 0;
 }
