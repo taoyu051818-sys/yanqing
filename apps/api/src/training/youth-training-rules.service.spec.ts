@@ -95,7 +95,21 @@ describe('YouthTrainingRulesService', () => {
         validityDays: 90,
         priceCents: 100_000,
       }),
-    ).rejects.toThrow('正式销售已阻断');
+    ).rejects.toThrow('培训管理「限制」');
+  });
+
+  it('explains when the existing published rule will become effective', async () => {
+    prisma.youthTrainingRule.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        effectiveFrom: new Date('2026-09-24T01:00:00Z'),
+      });
+    await expect(
+      service.validateProduct(
+        { totalSessions: 12, validityDays: 120, priceCents: 128000 },
+        new Date('2026-09-23T10:00:00Z'),
+      ),
+    ).rejects.toThrow('9/24 09:00');
   });
 
   it('hard-blocks configured violations without inventing any statutory value', async () => {
@@ -179,70 +193,99 @@ describe('YouthTrainingRulesService', () => {
     expectSafeRuleResponse(listed);
   });
 
-  it('creates and publishes an ADMIN rule idempotently with both audit records', async () => {
-    const dto = {
-      maxTotalSessions: 20,
-      maxValidityDays: 180,
-      maxContractAmountCents: 300_000,
-      warningThresholdDays: 30,
-      hardBlock: true,
-      effectiveFrom: new Date(Date.now() + 3_600_000).toISOString(),
-      reason: '依据当前经营合规要求制单',
-      idempotencyKey: 'youth-rule-draft-001',
-    };
-    let persistedDraft: Record<string, unknown>;
-    prisma.youthTrainingRule.findUnique.mockImplementation(async ({ where }: any) => {
-      if (!persistedDraft) return null;
-      if (where.id === persistedDraft.id || where.requestIdempotencyKey === persistedDraft.requestIdempotencyKey || (where.decisionIdempotencyKey && where.decisionIdempotencyKey === persistedDraft.decisionIdempotencyKey)) return persistedDraft;
-      return null;
-    });
-    prisma.youthTrainingRule.updateMany.mockImplementation(async ({ data }: any) => { Object.assign(persistedDraft, data, { reviewedBy: { id: admin.sub, displayName: admin.displayName } }); return { count: 1 }; });
-    prisma.youthTrainingRule.findUniqueOrThrow.mockImplementation(async () => persistedDraft);
-    prisma.youthTrainingRule.create.mockImplementation(({ data }: any) => {
-      persistedDraft = {
-        id: 'rule-draft',
-        requestedBy: { id: admin.sub, displayName: admin.displayName },
-        status: YouthTrainingRuleStatus.DRAFT,
-        reviewReason: null,
-        reviewedById: null,
-        decisionIdempotencyKey: null,
-        decisionCommandHash: null,
-        reviewedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        ...data,
-      };
-      return persistedDraft;
-    });
-
-    const created = await service.create(dto, admin);
-    expect(created).toMatchObject({
-      id: 'rule-draft',
-      status: YouthTrainingRuleStatus.PUBLISHED,
-      isOwnRequester: true,
-      requestedBy: { displayName: admin.displayName },
-    });
-    expectSafeRuleResponse(created);
-    expect(prisma.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'YOUTH_TRAINING_RULE_PUBLISHED', actorId: admin.sub }) });
-    expect(prisma.youthTrainingRule.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        requestedById: admin.sub,
-        requestIdempotencyKey: dto.idempotencyKey,
+  it.each([false, true])(
+    'creates and publishes an ADMIN rule idempotently (immediate=%s)',
+    async (immediate) => {
+      const dto = {
+        maxTotalSessions: 20,
+        maxValidityDays: 180,
+        maxContractAmountCents: 300_000,
+        warningThresholdDays: 30,
         hardBlock: true,
-      }),
-    });
-    expect(prisma.auditLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        action: 'YOUTH_TRAINING_RULE_DRAFTED',
-        requestId: dto.idempotencyKey,
-      }),
-    });
+        ...(immediate
+          ? { effectiveImmediately: true }
+          : { effectiveFrom: new Date(Date.now() + 3_600_000).toISOString() }),
+        reason: '依据当前经营合规要求制单',
+        idempotencyKey: 'youth-rule-draft-001',
+      };
+      let persistedDraft: Record<string, unknown>;
+      prisma.youthTrainingRule.findUnique.mockImplementation(
+        async ({ where }: any) => {
+          if (!persistedDraft) return null;
+          if (
+            where.id === persistedDraft.id ||
+            where.requestIdempotencyKey ===
+              persistedDraft.requestIdempotencyKey ||
+            (where.decisionIdempotencyKey &&
+              where.decisionIdempotencyKey ===
+                persistedDraft.decisionIdempotencyKey)
+          )
+            return persistedDraft;
+          return null;
+        },
+      );
+      prisma.youthTrainingRule.updateMany.mockImplementation(
+        async ({ data }: any) => {
+          Object.assign(persistedDraft, data, {
+            reviewedBy: { id: admin.sub, displayName: admin.displayName },
+          });
+          return { count: 1 };
+        },
+      );
+      prisma.youthTrainingRule.findUniqueOrThrow.mockImplementation(
+        async () => persistedDraft,
+      );
+      prisma.youthTrainingRule.create.mockImplementation(({ data }: any) => {
+        persistedDraft = {
+          id: 'rule-draft',
+          requestedBy: { id: admin.sub, displayName: admin.displayName },
+          status: YouthTrainingRuleStatus.DRAFT,
+          reviewReason: null,
+          reviewedById: null,
+          decisionIdempotencyKey: null,
+          decisionCommandHash: null,
+          reviewedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          ...data,
+        };
+        return persistedDraft;
+      });
 
-    prisma.youthTrainingRule.findUnique.mockResolvedValue(persistedDraft!);
-    const replay = await service.create(dto, admin);
-    expect(replay).toEqual(created);
-    expectSafeRuleResponse(replay);
-  });
+      const created = await service.create(dto, admin);
+      expect(created).toMatchObject({
+        id: 'rule-draft',
+        status: YouthTrainingRuleStatus.PUBLISHED,
+        isOwnRequester: true,
+        requestedBy: { displayName: admin.displayName },
+      });
+      expectSafeRuleResponse(created);
+      expect(prisma.auditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          action: 'YOUTH_TRAINING_RULE_PUBLISHED',
+          actorId: admin.sub,
+        }),
+      });
+      expect(prisma.youthTrainingRule.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          requestedById: admin.sub,
+          requestIdempotencyKey: dto.idempotencyKey,
+          hardBlock: true,
+        }),
+      });
+      expect(prisma.auditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          action: 'YOUTH_TRAINING_RULE_DRAFTED',
+          requestId: dto.idempotencyKey,
+        }),
+      });
+
+      prisma.youthTrainingRule.findUnique.mockResolvedValue(persistedDraft!);
+      const replay = await service.create(dto, admin);
+      expect(replay).toEqual(created);
+      expectSafeRuleResponse(replay);
+    },
+  );
 
   it('preserves compare-and-set publication and version boundaries', async () => {
     const future = new Date(Date.now() + 3_600_000);
@@ -364,10 +407,16 @@ describe('YouthTrainingRulesService', () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(committedDraft);
     prisma.$transaction.mockRejectedValueOnce({ code: 'P2034' });
-    prisma.youthTrainingRule.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(committedDraft);
+    prisma.youthTrainingRule.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(committedDraft);
     prisma.youthTrainingRule.findFirst.mockResolvedValue(null);
     prisma.youthTrainingRule.updateMany.mockResolvedValue({ count: 1 });
-    prisma.youthTrainingRule.findUniqueOrThrow.mockResolvedValue({ ...committedDraft, status: YouthTrainingRuleStatus.PUBLISHED, reviewedById: admin.sub });
+    prisma.youthTrainingRule.findUniqueOrThrow.mockResolvedValue({
+      ...committedDraft,
+      status: YouthTrainingRuleStatus.PUBLISHED,
+      reviewedById: admin.sub,
+    });
     const recoveredDraft = await service.create(createDto, admin);
     expect(recoveredDraft).toMatchObject({
       id: 'race-draft',
@@ -425,14 +474,21 @@ describe('YouthTrainingRulesService', () => {
       .mockResolvedValueOnce(draft);
     prisma.youthTrainingRule.findFirst.mockResolvedValue(null);
     prisma.youthTrainingRule.updateMany.mockResolvedValue({ count: 1 });
-    prisma.youthTrainingRule.findUniqueOrThrow.mockResolvedValue({ ...draft, status: YouthTrainingRuleStatus.PUBLISHED, reviewedById: reviewer.sub });
+    prisma.youthTrainingRule.findUniqueOrThrow.mockResolvedValue({
+      ...draft,
+      status: YouthTrainingRuleStatus.PUBLISHED,
+      reviewedById: reviewer.sub,
+    });
     await expect(
       service.publish(
         'draft-1',
         { reason: '本人尝试复核', idempotencyKey: 'publish-rule-self' },
         reviewer,
       ),
-    ).resolves.toMatchObject({ status: YouthTrainingRuleStatus.PUBLISHED, isOwnRequester: true });
+    ).resolves.toMatchObject({
+      status: YouthTrainingRuleStatus.PUBLISHED,
+      isOwnRequester: true,
+    });
 
     prisma.youthTrainingRule.findUnique.mockReset();
     prisma.youthTrainingRule.findUnique

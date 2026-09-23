@@ -5,6 +5,7 @@ import { validate } from 'class-validator';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { YouthTrainingRulesService } from '../src/training/youth-training-rules.service.js';
 import { TrainingService } from './support/training-service-fixture.js';
+import { CreateYouthTrainingRuleDto } from '../src/training/training-operations.dto.js';
 import { CreateTrainingProductDto } from '../src/training/training.dto.js';
 import type { AuthUser } from '../src/common/auth/auth-user.js';
 import type { TrainingProduct } from '../src/generated/prisma/client.js';
@@ -59,7 +60,10 @@ describe.skipIf(!url)(
       training = new TrainingService(db, new YouthTrainingRulesService(db));
     });
     afterAll(async () => {
-      if (ruleId) await db.youthTrainingRule.delete({ where: { id: ruleId } });
+      if (ruleId)
+        await db.youthTrainingRule.deleteMany({
+          where: { requestedById: admin.sub },
+        });
       await db?.$disconnect();
     });
     it('accepts ALL through DTO, persists the product without an optional reason and replays it', async () => {
@@ -158,6 +162,68 @@ describe.skipIf(!url)(
           stranger,
         ),
       ).rejects.toThrow('学员不存在或监护人授权未完成');
+    });
+    it('publishes immediately between the current and scheduled rules, preserves boundaries and replays once', async () => {
+      const service = new YouthTrainingRulesService(db);
+      const scheduledTime = new Date(Date.now() + 86400000);
+      const values = {
+        maxTotalSessions: 100,
+        maxValidityDays: 999,
+        maxContractAmountCents: 9999900,
+        warningThresholdDays: 60,
+        hardBlock: false,
+        reason: '管理员设置课包限制',
+      };
+      const future = await service.create(
+        {
+          ...values,
+          effectiveFrom: scheduledTime.toISOString(),
+          idempotencyKey: key(),
+        },
+        admin,
+      );
+      const dto = Object.assign(new CreateYouthTrainingRuleDto(), {
+        ...values,
+        effectiveImmediately: true,
+        idempotencyKey: key(),
+      });
+      expect(await validate(dto)).toEqual([]);
+      const current = await service.create(dto, admin);
+      expect(current.effectiveFrom.getTime()).toBeLessThanOrEqual(Date.now());
+      expect(current.effectiveTo).toEqual(scheduledTime);
+      expect((await service.active())?.id).toBe(current.id);
+      expect((await service.active(scheduledTime))?.id).toBe(future.id);
+      expect((await service.create(dto, admin)).id).toBe(current.id);
+      expect(
+        await db.youthTrainingRule.count({
+          where: { requestIdempotencyKey: dto.idempotencyKey },
+        }),
+      ).toBe(1);
+      expect(
+        (
+          await db.youthTrainingRule.findUniqueOrThrow({
+            where: { id: ruleId },
+          })
+        ).effectiveTo,
+      ).toEqual(current.effectiveFrom);
+      const replayBefore = await db.youthTrainingRule.findUniqueOrThrow({
+        where: { id: future.id },
+      });
+      expect(replayBefore.effectiveFrom).toEqual(scheduledTime);
+      expect(replayBefore.maxValidityDays).toBe(999);
+      await expect(
+        service.create({ ...dto, maxValidityDays: 998 }, admin),
+      ).rejects.toThrow('幂等键');
+      await expect(
+        service.create(
+          {
+            ...dto,
+            idempotencyKey: key(),
+            effectiveFrom: scheduledTime.toISOString(),
+          },
+          admin,
+        ),
+      ).rejects.toThrow('无需指定');
     });
   },
 );

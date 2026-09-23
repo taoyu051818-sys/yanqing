@@ -254,6 +254,19 @@ describe("miniapp mock youth training rules", () => {
     return outcome.value;
   };
 
+  it("uses configured limits immediately without discarding the scheduled version", async () => {
+    await timedRequest('POST', '/auth/dev-login', { role: 'ADMIN' });
+    const data = { maxTotalSessions: 100, maxValidityDays: 999, maxContractAmountCents: 9999900, warningThresholdDays: 60, hardBlock: false, reason: '管理员设置课包限制' };
+    const future = await timedRequest('POST', '/training/youth-rules', { ...data, effectiveFrom: '2026-08-31T01:00:00Z', idempotencyKey: 'scheduled-rule-key' });
+    const command = { ...data, effectiveImmediately: true, idempotencyKey: 'immediate-rule-key' };
+    const current = await timedRequest('POST', '/training/youth-rules', command);
+    expect(current.effectiveTo).toBe(future.effectiveFrom);
+    expect((await timedRequest('GET', '/training/youth-rules/active')).id).toBe(current.id);
+    expect((await timedRequest('POST', '/training/youth-rules', command)).id).toBe(current.id);
+    vi.setSystemTime(new Date(future.effectiveFrom));
+    expect((await timedRequest('GET', '/training/youth-rules/active')).id).toBe(future.id);
+  });
+
   it("blocks youth sales without a rule, then lets the administrator publish and snapshots the configured version", async () => {
     await timedRequest("POST", "/auth/dev-login", { role: "ADMIN" });
     await expect(

@@ -17,6 +17,7 @@ import { useCoachNavigation } from "./actions/navigation";
 import { useCoachLoadingActions } from "./actions/loading.js";
 
 import TrialAppointments from "./sections/TrialAppointments.vue";
+import YouthRuleNotice from "./sections/YouthRuleNotice.vue";
 import YouthRules from "./sections/YouthRules.vue";
 import TrainingProductEditor from "./sections/TrainingProductEditor.vue";
 import TrainingProducts from "./sections/TrainingProducts.vue";
@@ -142,6 +143,7 @@ const {
   ruleMaxAmountYuan,
   ruleWarningDays,
   ruleHardBlock,
+  ruleEffectiveImmediately,
   ruleEffectiveDate,
   ruleEffectiveTime,
   ruleReason,
@@ -418,7 +420,8 @@ const { setRuleHardBlock, createYouthRule, decideYouthRule } =
     ruleMaxValidityDays,
     ruleMaxAmountYuan,
     ruleWarningDays,
-    ruleEffectiveDate,
+    ruleEffectiveImmediately,
+  ruleEffectiveDate,
     ruleEffectiveTime,
     runCreation: (...args: Parameters<typeof runCreation>) =>
       runCreation(...args),
@@ -482,7 +485,7 @@ const {
 const isCreationPage = computed(() => activeView.value.startsWith('create-') || activeView.value === 'edit-product');
 const coachTabs = computed(() => [
   { key:'lessons', title:'课表' }, { key:'trials', title:'试听' }, { key:'products', title:'课程' },
-  ...(canConfigureTraining.value ? [{ key:'rules', title:'规则' }] : []),
+  ...(canConfigureTraining.value ? [{ key:'rules', title:'限制' }] : []),
   { key:'corrections', title:'复核', count:requestedCorrections.value.length },
 ]);
 const filteredLessons = computed(() => lessons.value.filter(lesson => {
@@ -585,6 +588,7 @@ onUnmounted(dispose);
       v-model:ruleMaxValidityDays="ruleMaxValidityDays"
       v-model:ruleMaxAmountYuan="ruleMaxAmountYuan"
       v-model:ruleWarningDays="ruleWarningDays"
+      v-model:ruleEffectiveImmediately="ruleEffectiveImmediately"
       v-model:ruleEffectiveDate="ruleEffectiveDate"
       v-model:ruleEffectiveTime="ruleEffectiveTime"
       :ruleHardBlock="ruleHardBlock"
@@ -592,11 +596,15 @@ onUnmounted(dispose);
       v-model:ruleReason="ruleReason"
       :actionKey="actionKey"
       :loading="loading"
+      :error-message="errorMessage"
       :createYouthRule="createYouthRule"
       :youthRules="youthRules"
       :canReviewYouthRule="canReviewYouthRule"
       :decideYouthRule="decideYouthRule"
     />
+
+    <YouthRuleNotice v-if="['products', 'create-product', 'edit-product'].includes(activeView) && canConfigureTraining && !activeYouthRule && !loading"
+      :active-rule="activeYouthRule" :rules="youthRules" @settings="openCreation('rules')" />
 
     <view v-if="activeView === 'products' && !lessonId && canConfigureTraining" class="creation-shortcuts"><button class="primary" @tap="openCreation('create-product')">新增课程</button><button class="secondary" @tap="openCreation('create-class')">新增班级</button></view>
     <TrainingProducts

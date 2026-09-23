@@ -127,6 +127,7 @@ export class YouthTrainingRulesService {
       result.id,
       {
         reason: dto.reason,
+        effectiveImmediately: dto.effectiveImmediately,
         idempotencyKey: directExecutionKey('youth-rule', dto.idempotencyKey),
       },
       actor,
@@ -144,7 +145,15 @@ export class YouthTrainingRulesService {
       8,
       100,
     );
-    const effectiveFrom = new Date(dto.effectiveFrom);
+    if (dto.effectiveImmediately && dto.effectiveFrom !== undefined) {
+      throw new BadRequestException('立即生效时无需指定生效时间');
+    }
+    const effectiveFrom = dto.effectiveImmediately
+      ? new Date()
+      : new Date(dto.effectiveFrom ?? '');
+    if (!Number.isFinite(effectiveFrom.getTime())) {
+      throw new BadRequestException('请选择立即生效或指定有效的生效时间');
+    }
     if (dto.warningThresholdDays > dto.maxValidityDays) {
       throw new BadRequestException('到期预警阈值不能超过最大有效期限');
     }
@@ -155,7 +164,7 @@ export class YouthTrainingRulesService {
       maxContractAmountCents: dto.maxContractAmountCents,
       warningThresholdDays: dto.warningThresholdDays,
       hardBlock: dto.hardBlock,
-      effectiveFrom,
+      effectiveFrom: dto.effectiveImmediately ? 'IMMEDIATE' : effectiveFrom,
       reason,
     });
     const replay = await this.prisma.youthTrainingRule.findUnique({
@@ -173,7 +182,7 @@ export class YouthTrainingRulesService {
         requestedByDisplayName: actor.displayName,
       });
     }
-    if (effectiveFrom <= new Date()) {
+    if (!dto.effectiveImmediately && effectiveFrom <= new Date()) {
       throw new BadRequestException('监管规则生效时间必须晚于当前时间');
     }
 
@@ -287,6 +296,7 @@ export class YouthTrainingRulesService {
       100,
     );
     const decisionCommandHash = orderCreationCommandHash({
+      ...(dto.effectiveImmediately ? { effectiveImmediately: true } : {}),
       kind: 'YOUTH_TRAINING_RULE_DECIDE',
       ruleId: id,
       target,
@@ -321,8 +331,12 @@ export class YouthTrainingRulesService {
             throw new ConflictException('监管规则已完成复核，不能重复覆盖状态');
           }
           const now = new Date();
+          const effectiveFrom = dto.effectiveImmediately
+            ? now
+            : current.effectiveFrom;
+          let effectiveTo = current.effectiveTo;
           if (target === YouthTrainingRuleStatus.PUBLISHED) {
-            if (current.effectiveFrom <= now) {
+            if (!dto.effectiveImmediately && effectiveFrom <= now) {
               throw new ConflictException(
                 '规则预定生效时间已过，请重新制单以避免追溯生效',
               );
@@ -335,10 +349,10 @@ export class YouthTrainingRulesService {
                     YouthTrainingRuleStatus.SUPERSEDED,
                   ],
                 },
-                effectiveFrom: { lt: current.effectiveFrom },
+                effectiveFrom: { lt: effectiveFrom },
                 OR: [
                   { effectiveTo: null },
-                  { effectiveTo: { gt: current.effectiveFrom } },
+                  { effectiveTo: { gt: effectiveFrom } },
                 ],
               },
               orderBy: { effectiveFrom: 'desc' },
@@ -347,20 +361,28 @@ export class YouthTrainingRulesService {
               where: {
                 id: { not: current.id },
                 status: YouthTrainingRuleStatus.PUBLISHED,
-                effectiveFrom: { gte: current.effectiveFrom },
+                effectiveFrom: { gte: effectiveFrom },
               },
+              orderBy: { effectiveFrom: 'asc' },
             });
-            if (conflictingFuture) {
+            if (
+              conflictingFuture &&
+              (!dto.effectiveImmediately ||
+                conflictingFuture.effectiveFrom <= effectiveFrom)
+            ) {
               throw new ConflictException(
                 '已有同时间或更晚生效的已发布规则，请先处理版本顺序',
               );
             }
+            // Fill the interval until the next scheduled version without changing it.
+            if (dto.effectiveImmediately)
+              effectiveTo = conflictingFuture?.effectiveFrom ?? null;
             if (previous) {
               await tx.youthTrainingRule.update({
                 where: { id: previous.id },
                 data: {
                   status: YouthTrainingRuleStatus.SUPERSEDED,
-                  effectiveTo: current.effectiveFrom,
+                  effectiveTo: effectiveFrom,
                 },
               });
             }
@@ -369,6 +391,9 @@ export class YouthTrainingRulesService {
             where: { id, status: YouthTrainingRuleStatus.DRAFT },
             data: {
               status: target,
+              ...(target === YouthTrainingRuleStatus.PUBLISHED
+                ? { effectiveFrom, effectiveTo }
+                : {}),
               reviewReason: reason,
               reviewedById: actor.sub,
               reviewedAt: now,
@@ -399,7 +424,8 @@ export class YouthTrainingRulesService {
                 status: target,
                 version: current.version,
                 decisionCommandHash,
-                effectiveFrom: current.effectiveFrom.toISOString(),
+                effectiveFrom: decided.effectiveFrom.toISOString(),
+                effectiveTo: decided.effectiveTo?.toISOString() ?? null,
               } as never,
             },
           });
@@ -444,8 +470,28 @@ export class YouthTrainingRulesService {
   ): Promise<YouthProductValidation> {
     const rule = await this.active(at);
     if (!rule) {
+      const scheduled = await this.prisma.youthTrainingRule.findFirst({
+        where: {
+          status: YouthTrainingRuleStatus.PUBLISHED,
+          effectiveFrom: { gt: at },
+        },
+        orderBy: { effectiveFrom: 'asc' },
+        select: { effectiveFrom: true },
+      });
+      const scheduledTime =
+        scheduled &&
+        new Intl.DateTimeFormat('zh-CN', {
+          timeZone: 'Asia/Shanghai',
+          month: 'numeric',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hourCycle: 'h23',
+        }).format(scheduled.effectiveFrom);
       throw new ConflictException(
-        '当前没有已发布且生效的青少年培训监管规则，正式销售已阻断，请管理员先设置并发布规则',
+        scheduledTime
+          ? `课包限制已发布，将于北京时间 ${scheduledTime} 生效。若现在需要使用，请到培训管理「限制」沿用配置并选择立即生效。`
+          : '当前没有已发布且生效的课包限制。请到培训管理「限制」设置一次，即可用于青少年和不限课程。',
       );
     }
     const violations: string[] = [];

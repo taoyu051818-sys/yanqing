@@ -17,6 +17,7 @@ interface ActionContext {
   ruleMaxValidityDays: Ref<string, string>;
   ruleMaxAmountYuan: Ref<string, string>;
   ruleWarningDays: Ref<string, string>;
+  ruleEffectiveImmediately: Ref<boolean>;
   ruleEffectiveDate: Ref<string, string>;
   ruleEffectiveTime: Ref<string, string>;
   runCreation: (
@@ -39,6 +40,7 @@ export function useCoachRulesActions({
   ruleMaxValidityDays,
   ruleMaxAmountYuan,
   ruleWarningDays,
+  ruleEffectiveImmediately,
   ruleEffectiveDate,
   ruleEffectiveTime,
   runCreation,
@@ -54,7 +56,9 @@ export function useCoachRulesActions({
   async function createYouthRule() {
     if (!canDraftYouthRule.value || actionKey.value) return;
     try {
-      const reason = requiredReason(ruleReason.value);
+      const reason = requiredReason(
+        ruleReason.value.trim() || "管理员设置课包限制",
+      );
       const command = {
         maxTotalSessions: positiveInteger(ruleMaxSessions.value, "最大总课时"),
         maxValidityDays: positiveInteger(
@@ -72,21 +76,21 @@ export function useCoachRulesActions({
           0,
         ),
         hardBlock: ruleHardBlock.value,
-        effectiveFrom: `${ruleEffectiveDate.value}T${ruleEffectiveTime.value}:00+08:00`,
+        ...(ruleEffectiveImmediately.value
+          ? { effectiveImmediately: true }
+          : {
+              effectiveFrom: `${ruleEffectiveDate.value}T${ruleEffectiveTime.value}:00+08:00`,
+            }),
         reason,
       };
       if (command.warningThresholdDays > command.maxValidityDays) {
         throw new Error("到期预警阈值不能超过最大有效期限。");
       }
-      const confirmation = await uni.showModal({
-        title: "发布青训规则",
-        content: `所有数值均来自本次管理员配置，不代表系统内置法定值。\n生效：${ruleEffectiveDate.value} ${ruleEffectiveTime.value}\n确认后按生效时间启用，无需另一账号复核。`,
-        confirmText: "确认发布",
-      });
-      if (!confirmation.confirm) return;
       const succeeded = await runCreation(
         "create-youth-rule",
-        "规则已发布，将按生效时间启用。",
+        ruleEffectiveImmediately.value
+          ? "课包限制已立即生效。"
+          : "课包限制已发布，将按指定时间生效。",
         () =>
           withPendingCreationKey(
             "training.youth-rule.create",
@@ -99,11 +103,13 @@ export function useCoachRulesActions({
         ruleMaxSessions.value = "";
         ruleMaxValidityDays.value = "";
         ruleMaxAmountYuan.value = "";
-        ruleWarningDays.value = "";
+        ruleWarningDays.value = "0";
         ruleReason.value = "";
       }
+      return succeeded;
     } catch (cause: any) {
-      errorMessage.value = cause?.message || "监管规则表单校验失败。";
+      errorMessage.value = cause?.message || "课包限制表单校验失败。";
+      return false;
     }
   }
 
