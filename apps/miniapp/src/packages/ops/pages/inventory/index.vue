@@ -32,7 +32,14 @@ import { useInventoryUsageActions } from "./actions/usage.js";
 import { useInventoryPurchasingActions } from "./actions/purchasing.js";
 import { useInventoryStocktakingActions } from "./actions/stocktaking.js";
 import { useInventoryMovementsActions } from "./actions/movements.js";
+import { useInventoryTaskPage } from './use-task-page';
+import { inventoryTaskUrl, parseInventoryTask, taskTabs, type InventoryTask, type InventoryTaskRoute } from './task-route';
 const task = useOperationTask();
+const taskRoute = ref<InventoryTaskRoute | null>(null);
+const taskRouteError = ref('');
+function openTask(form: InventoryTask, context: Record<string, string> = {}) {
+  uni.navigateTo({ url: inventoryTaskUrl(form, context) });
+}
 
 const session = useSessionStore();
 
@@ -288,6 +295,7 @@ async function run(action: () => Promise<unknown>, message: string) {
     await load();
     return true;
   } catch (cause: any) {
+    if (taskRoute.value) { taskError.value = cause.message || "请检查填写内容后重试"; return false; }
     uni.showModal({
       title: "操作未完成",
       content: cause.message || "请检查单据状态",
@@ -315,7 +323,8 @@ const usageReferenceNames = computed(() =>
 );
 
 function validationError(title: string) {
-  uni.showToast({ title, icon: "none" });
+  if (taskRoute.value) taskError.value = title;
+  else uni.showToast({ title, icon: "none" });
   return null;
 }
 
@@ -336,6 +345,7 @@ const {
   loadMasterDetail,
   toggleMasterStatus,
 } = useInventoryCatalogActions({
+  reportError: (message) => { validationError(message); },
   masterType,
   showMasterForm,
   detailId,
@@ -436,6 +446,10 @@ const {
   isAdmin,
 });
 
+function openStockMovement(type: MovementType, context: {itemId: string; balanceId: string}) {
+  openTask('movement', { movementType:type, ...context });
+}
+
 const { load, applyInventoryDeepLink } = useInventoryLoadingActions({
   session,
   loading,
@@ -458,30 +472,68 @@ const { load, applyInventoryDeepLink } = useInventoryLoadingActions({
   focusedRecord,
 });
 
+const { taskReady, taskError, taskTitle, returnToList, cancelTask, submitTask, loadPage } = useInventoryTaskPage({
+  route: taskRoute, tab, saving, loading, loadError: errorMessage, isAdmin, load,
+  forms: {
+    purchase: { snapshot: () => purchaseForm.value, open: openPurchaseForm, submit: submitPurchaseOrder, visible: showPurchaseForm },
+    stocktake: { snapshot: () => stocktakeForm.value, open: openStocktakeForm, submit: submitStocktake, visible: showStocktakeForm },
+    master: {
+      snapshot: () => masterForm.value, submit: submitMasterForm, visible: showMasterForm,
+      open: route => {
+        masterType.value = route.masterType;
+        const records = route.masterType === 'ITEM' ? items.value : route.masterType === 'SUPPLIER' ? suppliers.value : locations.value;
+        const record = records.find(item => item.id === route.source);
+        if (route.source && !record) throw new Error('这份资料已不存在，请返回列表刷新。');
+        openMasterForm(record);
+      },
+    },
+    movement: {
+      snapshot: () => movementForm.value, submit: submitMovement, visible: showMovementForm,
+      open: route => {
+        if (route.itemId && !activeItems.value.some(item => item.id === route.itemId)) throw new Error('商品已停用或不存在，请返回列表刷新。');
+        if (route.balanceId && !activeItems.value.find(item => item.id === route.itemId)?.stockBalances?.some((balance: any) => balance.id === route.balanceId && balance.quantity > 0)) throw new Error('该批次已无可用库存，请返回列表刷新。');
+        openMovementForm(route.movementType, route.itemId ? { itemId:route.itemId, balanceId:route.balanceId } : undefined);
+      },
+    },
+    usage: {
+      snapshot: () => usageForm.value, submit: submitUsage, visible: showUsageForm,
+      open: route => {
+        const item = activeItems.value.find(item => item.id === route.itemId);
+        if (!item) throw new Error('商品已停用或不存在，请返回库存列表重新选择。');
+        openUsageForm(item, route.usageType);
+      },
+    },
+  },
+});
 onLoad((options) => {
+  try { taskRoute.value = parseInventoryTask(options); } catch (cause) { taskRouteError.value = (cause as Error).message; }
+  if (taskRoute.value) {
+    tab.value = taskTabs[taskRoute.value.form];
+    uni.setNavigationBarTitle({ title:taskTitle.value });
+  } else if (['STOCK', 'PURCHASE', 'STOCKTAKE', 'MOVEMENT', 'MASTER'].includes(options?.view || '')) tab.value = options!.view as Tab;
   deepLinkQuery.value = parseOpsDeepLinkQuery(options);
   const focus = deepLinkQuery.value.focus;
-  if (focus === "purchase") tab.value = "PURCHASE";
-  else if (focus === "stocktake") tab.value = "STOCKTAKE";
-  else if (focus === "movement") tab.value = "MOVEMENT";
-  else if (focus === "master") tab.value = "MASTER";
-  else if (focus) tab.value = "STOCK";
+  if (focus === 'purchase') tab.value = 'PURCHASE';
+  else if (focus === 'stocktake') tab.value = 'STOCKTAKE';
+  else if (focus === 'movement') tab.value = 'MOVEMENT';
+  else if (focus === 'master') tab.value = 'MASTER';
+  else if (focus) tab.value = 'STOCK';
 });
-
-onShow(load);
+onShow(loadPage);
 </script>
 
 <template>
   <OperationsFrame
     access="inventory"
     icon="inventory"
-    title="库存作业中心"
+    :title="taskTitle"
+    :class="{ 'inventory-task-page': Boolean(taskRoute) }"
     eyebrow="INVENTORY OPERATIONS"
     role="前台预警 / 管理员作业"
     description="前台仅查看低库存预警；完整库存、进价、供应商与采购作业仅向管理员开放。"
   >
     <OperationTask :task="task" />
-    <view class="metric-grid"
+    <view v-if="!taskRoute && !taskRouteError" class="metric-grid"
       ><MetricCard
         v-for="metric in metrics"
         :key="metric[0]"
@@ -489,7 +541,7 @@ onShow(load);
         :value="metric[1]"
         :note="metric[2]"
     /></view>
-    <scroll-view scroll-x class="tabs"
+    <scroll-view v-if="!taskRoute && !taskRouteError" scroll-x class="tabs"
       ><view class="tab-row"
         ><button
           v-for="entry in inventoryTabs"
@@ -505,13 +557,15 @@ onShow(load);
 
     <view v-if="errorMessage" class="card state-card error-state">
       <text>{{ errorMessage }}</text>
-      <button class="secondary state-action" @tap="load">重新加载</button>
+      <button class="secondary state-action" @tap="loadPage">重新加载</button>
     </view>
     <view v-else-if="loading" class="card state-card"
       >正在加载库存资料与作业单…</view
     >
 
-    <StockUsage
+    <view v-if="taskRouteError || (taskRoute && !taskReady && taskError)" class="card state-card error-state"><text>{{ taskRouteError || taskError }}</text><button class="secondary" @tap="returnToList">返回库存列表</button></view>
+    <template v-if="!taskRouteError && (!taskRoute || taskReady)">
+    <StockUsage :form-only="Boolean(taskRoute)"
       v-if="!errorMessage && tab === 'STOCK'"
       :errorMessage="errorMessage"
       :tab="tab"
@@ -531,15 +585,16 @@ onShow(load);
       :stockItemContext="stockItemContext"
       :canUseForTraining="canUseForTraining"
       :canUseForEvent="canUseForEvent"
-      :openUsageForm="openUsageForm"
+      :openUsageForm="(item, type) => openTask('usage', { itemId:item.id, usageType:type })"
+      :open-movement="openStockMovement"
     />
 
-    <Purchasing
+    <Purchasing :form-only="Boolean(taskRoute)"
       v-else-if="!errorMessage && tab === 'PURCHASE'"
       :errorMessage="errorMessage"
       :tab="tab"
       :canOperate="canOperate"
-      :openPurchaseForm="openPurchaseForm"
+      :openPurchaseForm="() => openTask('purchase')"
       v-model:showPurchaseForm="showPurchaseForm"
       :supplierNames="supplierNames"
       :selectPurchaseSupplier="selectPurchaseSupplier"
@@ -562,12 +617,12 @@ onShow(load);
       :purchaseAction="purchaseAction"
     />
 
-    <Stocktaking :direct="canExecuteDirectly(session.roles)"
+    <Stocktaking :form-only="Boolean(taskRoute)" :direct="canExecuteDirectly(session.roles)"
       v-else-if="!errorMessage && tab === 'STOCKTAKE'"
       :errorMessage="errorMessage"
       :tab="tab"
       :canOperate="canOperate"
-      :openStocktakeForm="openStocktakeForm"
+      :openStocktakeForm="() => openTask('stocktake')"
       v-model:showStocktakeForm="showStocktakeForm"
       :locationNames="locationNames"
       :selectStocktakeLocation="selectStocktakeLocation"
@@ -583,12 +638,12 @@ onShow(load);
       :stocktakeAction="stocktakeAction"
     />
 
-    <StockMovements
+    <StockMovements :form-only="Boolean(taskRoute)"
       v-else-if="!errorMessage && tab === 'MOVEMENT'"
       :errorMessage="errorMessage"
       :tab="tab"
       :canOperate="canOperate"
-      :openMovementForm="openMovementForm"
+      :openMovementForm="type => openTask('movement', { movementType:type })"
       v-model:showMovementForm="showMovementForm"
       :movementType="movementType"
       :activeItemNames="activeItemNames"
@@ -612,7 +667,7 @@ onShow(load);
       :movementActionLabel="movementActionLabel"
       :movementAction="movementAction"
     />
-    <InventoryCatalog
+    <InventoryCatalog :form-only="Boolean(taskRoute)"
       v-else-if="!errorMessage && tab === 'MASTER'"
       :errorMessage="errorMessage"
       :tab="tab"
@@ -622,7 +677,7 @@ onShow(load);
       v-model:masterStatus="masterStatus"
       :isAdmin="isAdmin"
       :saving="saving"
-      :openMasterForm="openMasterForm"
+      :openMasterForm="record => openTask('master', { masterType, source:record?.id || '' })"
       v-model:showMasterForm="showMasterForm"
       :editingMaster="editingMaster"
       :masterForm="masterForm"
@@ -641,17 +696,23 @@ onShow(load);
       :masterDetail="masterDetail"
       :loading="loading"
     />
-    <view
-      v-if="
-        !loading &&
-        ((tab === 'PURCHASE' && !purchaseOrders.length) ||
-          (tab === 'STOCKTAKE' && !stocktakes.length) ||
-          (tab === 'MOVEMENT' && !operations.length))
-      "
-      class="card empty"
-      >暂无单据，从上方建立第一张作业单。</view
-    >
+    </template>
+    <view v-if="taskRoute && taskReady && !errorMessage" class="task-footer">
+      <text v-if="taskError" class="task-error" role="alert">{{ taskError }}</text>
+      <view class="task-footer-actions"><button class="secondary" :disabled="saving" @tap="cancelTask">取消</button><button class="primary" :loading="saving" :disabled="saving || loading || !isAdmin" @tap="submitTask">{{ taskRoute.form === 'usage' ? '确认领用' : '保存' }}</button></view>
+    </view>
   </OperationsFrame>
 </template>
 
 <style scoped src="./page.css"></style>
+
+<style scoped>
+.inventory-task-page { padding-bottom:calc(180rpx + env(safe-area-inset-bottom)); }
+.task-footer { position:fixed; left:0; right:0; bottom:0; z-index:25; padding:20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom)); background:#fff; border-top:1px solid #e2e7e3; }
+.task-footer-actions { display:flex; gap:20rpx; }
+.task-footer-actions button { margin:0; flex:1; min-height:48px; font-size:16px; }
+.task-footer-actions .primary { flex:2; }
+.task-error { display:block; color:#a52626; font-size:14px; line-height:1.5; margin-bottom:16rpx; }
+.tabs .tab { min-height:44px; font-size:14px; }
+.inventory-task-page :deep(.field), .inventory-task-page :deep(.picker-field), .inventory-task-page :deep(.field-label) { font-size:15px; }
+</style>

@@ -20,10 +20,12 @@
     ]
   },
   "training": {
-    "purpose": "微信与余额退款后，课包余额、历史消课、未来名单和席位同步",
+    "purpose": "微信与余额退款后，课包余额、历史消课、未来名单和席位同步；批量签到与消课的部分成功、并发和幂等性",
     "isolated": true,
     "files": [
-      "test/training-refund-roster.integration.spec.ts"
+      "test/training-refund-roster.integration.spec.ts",
+      "test/training-audience.integration.spec.ts",
+      "test/training-batch.integration.spec.ts"
     ]
   },
   "reporting": {

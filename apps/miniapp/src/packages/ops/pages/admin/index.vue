@@ -66,9 +66,10 @@ const showAnalytics = computed(
   () => canViewDashboard.value && activeView.value === "analytics",
 );
 
+const selectedGroup = ref("");
 const groupedWorkItems = computed<DisplayWorkGroup[]>(() =>
   workGroupDefinitions
-    .filter((group) => canSee(group.roles))
+    .filter((group) => canSee(group.roles) && (!selectedGroup.value || group.key === selectedGroup.value))
     .map((group) => ({
       ...group,
       route: workGroupRoute(group, session.roles),
@@ -108,7 +109,7 @@ const metrics = computed(() => [
     percent(dashboard.value?.venue?.primeUtilizationRate),
     "晚高峰与夜场",
   ],
-  ["RevPAH", money(dashboard.value?.venue?.revpahCents), "每可售场地小时收入"],
+  ["每场地小时收入", money(dashboard.value?.venue?.revpahCents), "每可售场地小时收入"],
   [
     "已实现收入",
     money(dashboard.value?.revenue?.realizedRevenueCents),
@@ -429,6 +430,7 @@ async function load() {
 }
 
 onLoad((query) => {
+  if (typeof query?.group === "string" && workGroupDefinitions.some(group => group.key === query.group && canSee(group.roles))) selectedGroup.value = query.group;
   if (query?.view === "analytics") activeView.value = "analytics";
 });
 onShow(load);
@@ -465,8 +467,9 @@ onShow(load);
       :decisionPanels="decisionPanels"
     />
 
+    <view v-if="selectedGroup" class="notice card"><text>当前显示{{ workGroupDefinitions.find(group => group.key === selectedGroup)?.title }}待办</text><button class="secondary" @tap="selectedGroup = ''">查看全部待办</button></view>
     <WorkItemQueues
-      v-else
+      v-if="!showAnalytics"
       :loading="loading"
       :todoCount="todoCount"
       :workItemsNotice="workItemsNotice"

@@ -1,21 +1,67 @@
 # 系统架构
 
-## 组件
+## 运行结构与目录
 
-```mermaid
-flowchart LR
-  M["uni-app 微信小程序"] -->|HTTPS / JWT| A["NestJS API"]
-  A --> G["全局认证与角色守卫"]
-  G --> D["Prisma 事务与领域服务"]
-  D --> P[("PostgreSQL")]
-  A --> X["微信登录/支付适配配置"]
-  A --> E["Excel 导出"]
-  D --> U["审计日志与风险事件"]
+系统采用模块化单体：小程序和 PC 后台调用同一套 API，订单、支付、账本和占场状态在同一数据库事务边界内处理。现阶段不拆微服务，避免为跨服务一致性增加额外成本。
+
+```text
+apps/
+  api/src/                 NestJS 业务模块、控制器、领域服务与基础设施
+  api/prisma/              数据模型、迁移、种子数据
+  api/test/                跨模块验收、架构边界与数据库集成测试
+  miniapp/src/
+    pages/                 会员页面与各页面的任务模块
+    packages/ops/          按业务领域组织的经营工作台分包
+    components/            多页面复用的界面组件
+    composables/           多页面复用的组合式逻辑
+    services/endpoints/    按领域划分的接口：订场、订单、培训、赛事等
+    services/api.ts        保持调用兼容的薄聚合入口
+    services/http.ts       网络、身份、错误与 mock/remote 分流
+    services/mock/         本地演示和回归测试数据实现
+    stores/                会话等跨页面状态
+    types/                 客户端专用视图与辅助类型
+    utils/                 无页面状态的工具与展示规则
+  admin/src/               独立 Vue 3 PC 后台
+packages/shared/src/       跨端契约及不依赖框架的纯领域规则
+legacy/web/               独立依赖与构建配置的 Next.js 历史视觉原型
+deploy/                   生产打包、部署和运行维护脚本
+docs/                     架构、接口、发布和验收记录
 ```
 
-`packages/shared` 保存不依赖框架的业务规则，API 与自动化测试共同使用。金额统一使用整数分；比例使用基点，2000 基点即 20%。
+`apps/api`、`apps/miniapp`、`apps/admin` 是正式应用。`legacy/web` 未接入正式 API，不属于业务验收或部署路径，生产应用不得引用它。根 `package.json` 负责工作区命令和图标生成工具；原型专用的 Next/React 页面依赖与配置由 `legacy/web/package.json` 管理。单独运行 `pnpm build:legacy-web` 可验证原型。
 
-仓库根目录保留的 Next.js 页面是上游视觉原型，使用本地演示状态，未接入 NestJS API。正式会员端与 B 端经营中心均位于同一 uni-app 微信小程序内，并按角色与数据范围呈现；部署和验收不得把 Next.js 原型当作已联调的 Web 管理后台。
+## 代码边界
+
+- API 控制器负责协议、DTO 校验和权限入口；领域服务处理业务规则与事务。订场、培训、赛事、订单、支付退款等模块分别拥有自己的业务过程。
+- `packages/shared` 保存前后端共同使用的请求/响应契约和纯规则，不依赖 Vue、NestJS 或 Prisma。时间契约使用泛型：API 返回 `Date`，客户端接收 JSON 字符串。
+- 已统一的关键契约包括订单、支付、培训课程/报名/学员、场地价格、公开赛事、会员优惠券。服务端返回值与客户端请求泛型共同引用契约，字段变动由类型检查发现；运行时输入校验仍由 DTO 和业务服务负责。
+- `services/endpoints` 只负责本领域的 HTTP 操作，不持有页面状态，也不反向引用 `services/api.ts` 或互相引用。聚合入口保证既有页面无需为目录调整改写调用方式。
+- 页面负责路由、生命周期及任务组合；任务模块拥有自己的草稿、校验、提交状态和重置逻辑。共享组件不直接访问特定业务接口。
+- 不为每个函数建立新层。只有独立变化、独立状态或跨页面复用的职责才提取；金额、退款、状态流转等规则只保留一个权威实现。
+
+小程序显式声明 PostCSS 构建依赖，工作区通过 `packageExtensions` 补足 uni-app CLI 发布包漏写的运行时依赖，避免借用原型的根目录依赖。H5 容器在安装前复制共享包清单，并先构建共享包。
+
+## 会员页面的任务组织
+
+| 页面 | 任务模块 | 页面保留的职责 |
+|---|---|---|
+| 培训 | `use-student-registration`、`use-course-purchase`、`use-training-refund` | 课程/个人记录加载、路由、任务组合 |
+| 订场 | `use-booking-availability`、`use-booking-coupons` | 自订/代订身份、核对与下单、页面离开后的导航保护 |
+| 赛事报名 | `use-team-signup-form` | 邀请链接、赛事读取、报名提交和微信分享 |
+
+培训收入展示计算放在 `enrollment-presentation.ts`；页面样式放在相邻的 scoped CSS。经营台赛事加载直接引用 `EventSummary`、`EventDetail`、`EventTeam` 等命名类型，避免复制几百行展开后的 Vue Ref 类型。
+
+账号变更会清空个人草稿和优惠券选择。异步购买、学员创建和退费结果只作用于发起请求的会话；订场日期和优惠券刷新使用请求序号，旧请求不能覆盖新结果。相关回归测试执行真实页面或任务模块，只替换网络和微信原生适配器。
+
+## 验证与维护
+
+- `pnpm lint`：API 静态检查及共享包、小程序类型检查。
+- `pnpm verify`：运维脚本、共享规则、API/小程序/PC 测试、API E2E 及正式应用构建。
+- `pnpm test:core-lifecycle`：显式指定隔离数据库后的核心流程验收；CI 运行全部分组。矩阵覆盖测试要求每个集成测试文件恰好注册一次，防止新增测试被遗漏。
+- `workspace-boundaries.spec.ts`：阻止生产代码引用历史原型，以及接口模块反向引用聚合入口或其他接口领域。
+- `core-architecture.spec.ts`：继续约束订单状态唯一写入口、支付业务效果、事务和关键依赖边界。
+
+这些检查不代表所有业务都已无缺陷，也不替代真机微信验收。剩余 `any` 和较大的经营页面应随对应业务改动逐步收紧；不为了文件行数继续机械拆分。
 
 ## 业务账本
 

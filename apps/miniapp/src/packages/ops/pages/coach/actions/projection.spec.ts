@@ -64,7 +64,7 @@ function model() {
     enrollments,
     trials: ref([]),
   };
-  return { enrollments, view: useCoachViewModel(context) };
+  return { enrollments, context, view: useCoachViewModel(context) };
 }
 describe("training view against enrollment API contract", () => {
   it("counts consumedSessions from API responses and reacts to a confirmed correction", () => {
@@ -77,3 +77,14 @@ describe("training view against enrollment API contract", () => {
     expect(consumed.value).toBe("3");
   });
 });
+
+ it('offers mixed trial sessions to both adults and children, excluding mismatched courses', () => {
+  const { context, view } = model();
+  context.lessons.value = ['ADULT', 'YOUTH', 'ALL'].map(audience => ({
+    id: audience, status: 'SCHEDULED', startsAt: new Date(Date.now() + 3600000).toISOString(),
+    endsAt: new Date(Date.now() + 7200000).toISOString(), class: { product: { audience } },
+  })) as never;
+  expect(view.schedulableTrialSessions.value.map(item => item.id)).toEqual(['ADULT', 'ALL']);
+  context.trialSubjectIndex.value = 2;
+  expect(view.schedulableTrialSessions.value.map(item => item.id)).toEqual(['YOUTH', 'ALL']);
+ });

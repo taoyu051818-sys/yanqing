@@ -12,3 +12,6 @@
 docs/assets
 *.log
 .DS_Store
+
+# Historical prototype is excluded from production build contexts.
+legacy/

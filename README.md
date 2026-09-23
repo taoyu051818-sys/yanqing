@@ -1,10 +1,10 @@
 # 延庆金羽羽毛球会员生态系统
 
-面向延庆羽毛球馆的全栈业务系统，覆盖会员及前台、教练、球局主理人、赛事、联盟商户、财务和管理员等运营角色。会员与员工移动端采用 uni-app + Vue 3 微信小程序，集中管理使用独立 Vue 3 PC 后台；两端共用 NestJS + Prisma + PostgreSQL。仓库根目录的 Next.js 界面是上游原型参考，不连接本系统 API，不属于生产运行路径或业务验收范围。
+面向延庆羽毛球馆的全栈业务系统，覆盖会员及前台、教练、球局主理人、赛事、联盟商户、财务和管理员等运营角色。会员与员工移动端采用 uni-app + Vue 3 微信小程序，集中管理使用独立 Vue 3 PC 后台；两端共用 NestJS + Prisma + PostgreSQL。`legacy/web` 中的 Next.js 界面是上游原型参考，不连接本系统 API，不属于生产运行路径或业务验收范围。
 
 ## 已实现范围
 
-- 20 片场地、17 个一小时时段（07:00–24:00）、版本化价格规则、10 分钟锁场、支付后确认、扫码签到和到期履约确认。
+- 可配置场地数量、营业时间、地址与位置、版本化价格规则；支持 10 分钟锁场、支付后确认、扫码签到和到期履约确认。具体数量和时间以球馆配置为准。
 - 会员等级、版本化会员产品与充值计划、现金本金/赠送余额/羽毛球币/成人赛事积分/青少年成长积分五账户隔离；充值金额与赠送额只取服务端当前有效计划。
 - 一层直接推荐分享入口、冷/热启动归因、登录后一次性绑定；有效首单观察期结束后邀请人和新客按独立参数获得羽球币，双方流水和经营转化均可追溯。
 - 主理人申请与审批、球局创建/报名/签到、按实际到场人数结算激励。
@@ -25,8 +25,8 @@
 apps/api       NestJS API、Prisma 模型、迁移与种子数据
 apps/miniapp   uni-app 微信小程序
 apps/admin     Vue 3 独立 PC 管理后台（/admin/）
-packages/shared 可测试的金额、账户、瑞士制、让分等领域规则
-app            上游 Next.js 视觉原型（非生产客户端、非验收对象）
+packages/shared 跨端 API 契约与可测试的金额、账户、瑞士制等纯领域规则
+legacy/web     独立 Next.js 视觉原型包（非生产客户端、非业务验收对象）
 docs           架构、接口、部署、安全和验收文档
 ```
 
@@ -79,12 +79,12 @@ V1 支持人员查询与超级管理员授权、五类业务配置、待办概�
 
 ```bash
 pnpm verify        # 领域规则、API 单元/E2E、API 构建、小程序与 PC 后台构建
-pnpm verify:full   # 额外确认上游 Next.js 视觉原型仍可构建
+pnpm verify:full   # 额外确认 legacy/web 视觉原型仍可构建
 pnpm build         # 构建 NestJS API、微信小程序与 PC 后台
 pnpm build:legacy-web # 单独构建非生产的上游视觉原型
 ```
 
-2026-09-01 当前代码门禁为 shared 13/13、API 单元/服务 616/616、小程序 151/151、健康接口 E2E 1/1；全新 PostgreSQL 已应用 29/29 个迁移，`migrate status` 最新且 Schema diff 为空。种子化验收库已用真实 HTTP/数据库回放充值、订场并发、库存不足、履约退款、角色权限、前台隐私和赛事搭档授权/完赛封账。后续仍以当次命令实际日志为准。微信开发者工具测试号不支持上传且不能代替真机验收；须按 [docs/acceptance.md](docs/acceptance.md) 和 [docs/wechat-devtools.md](docs/wechat-devtools.md) 逐项记录。
+回归结果以本次命令输出为准。核心数据库流程还需要单独执行 `pnpm test:core-lifecycle`，必须显式提供指向本地、库名以 `_test` 结尾的 `TEST_DATABASE_URL`；CI 会执行完整矩阵。可使用 `pnpm test:core-lifecycle --group training` 单独验证培训退费、适用人群及批量签到/消课。测试替身不能代替真实微信登录、支付、分享；真机验收按 [docs/acceptance.md](docs/acceptance.md) 记录。
 
 ## 生产部署
 

@@ -44,7 +44,7 @@ const {
 </script>
 
 <template>
-  <view>
+  <view id="finance-shift-variances">
     <view class="section-title">
       前台现金差异复核
       <text class="section-note">{{

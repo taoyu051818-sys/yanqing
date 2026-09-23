@@ -9,7 +9,8 @@ import {
 } from "../../../utils/work-item-deep-link";
 import type {
   EventStatus,
-  MatchStatus,
+  EventTeam,
+  EventMatch,
   EventSummary,
   EventDetail,
   InventoryItem,
@@ -17,322 +18,31 @@ import type {
 } from "../page-types.js";
 
 interface ActionContext {
-  selectedEventId: Ref<string, string>;
-  loading: Ref<boolean, boolean>;
-  errorMessage: Ref<string, string>;
+  selectedEventId: Ref<string>;
+  loading: Ref<boolean>;
+  errorMessage: Ref<string>;
   session: ReturnType<typeof useSessionStore>;
   mayViewEvent: ComputedRef<boolean>;
-  eventList: Ref<
-    {
-      id: string;
-      code?: string | undefined;
-      name: string;
-      status: EventStatus;
-      startsAt?: string | undefined;
-      minimumPeople?: number | undefined;
-      capacityPeople?: number | undefined;
-      totalRounds?: number | undefined;
-      currentRound?: number | undefined;
-      _count?: { teams?: number | undefined } | undefined;
-    }[],
-    | EventSummary[]
-    | {
-        id: string;
-        code?: string | undefined;
-        name: string;
-        status: EventStatus;
-        startsAt?: string | undefined;
-        minimumPeople?: number | undefined;
-        capacityPeople?: number | undefined;
-        totalRounds?: number | undefined;
-        currentRound?: number | undefined;
-        _count?: { teams?: number | undefined } | undefined;
-      }[]
-  >;
-  eventDetail: Ref<
-    {
-      teams?:
-        | {
-            id: string;
-            name: string;
-            playerAName: string;
-            playerBName: string;
-            playerAPhone?: string | null | undefined;
-            playerBPhone?: string | null | undefined;
-            captainPlays?: boolean | undefined;
-            status: string;
-            category?: string | undefined;
-            points?: number | undefined;
-            wins?: number | undefined;
-            losses?: number | undefined;
-            scoreDiff?: number | undefined;
-            finalRank?: number | null | undefined;
-            paymentDueAt?: string | null | undefined;
-            waitlistedAt?: string | null | undefined;
-            cancelReason?: string | null | undefined;
-            cancelRequestedAt?: string | null | undefined;
-            cancellationPending?: boolean | undefined;
-            cancellationResolvedAt?: string | null | undefined;
-            order?: { status?: string | undefined } | null | undefined;
-          }[]
-        | undefined;
-      matches?:
-        | {
-            id: string;
-            round: number;
-            courtLabel?: string | null | undefined;
-            teamAId: string;
-            teamBId: string | null;
-            startingScoreA: number;
-            startingScoreB: number;
-            scoreA: number | null;
-            scoreB: number | null;
-            status: MatchStatus;
-            correctionReason?: string | null | undefined;
-          }[]
-        | undefined;
-      prizePool?: (Record<string, unknown> | null) | undefined;
-      id: string;
-      code?: string | undefined;
-      name: string;
-      status: EventStatus;
-      startsAt?: string | undefined;
-      minimumPeople?: number | undefined;
-      capacityPeople?: number | undefined;
-      totalRounds?: number | undefined;
-      currentRound?: number | undefined;
-      _count?: { teams?: number | undefined } | undefined;
-    } | null,
-    | EventDetail
-    | {
-        teams?:
-          | {
-              id: string;
-              name: string;
-              playerAName: string;
-              playerBName: string;
-              playerAPhone?: string | null | undefined;
-              playerBPhone?: string | null | undefined;
-              captainPlays?: boolean | undefined;
-              status: string;
-              category?: string | undefined;
-              points?: number | undefined;
-              wins?: number | undefined;
-              losses?: number | undefined;
-              scoreDiff?: number | undefined;
-              finalRank?: number | null | undefined;
-              paymentDueAt?: string | null | undefined;
-              waitlistedAt?: string | null | undefined;
-              cancelReason?: string | null | undefined;
-              cancelRequestedAt?: string | null | undefined;
-              cancellationPending?: boolean | undefined;
-              cancellationResolvedAt?: string | null | undefined;
-              order?: { status?: string | undefined } | null | undefined;
-            }[]
-          | undefined;
-        matches?:
-          | {
-              id: string;
-              round: number;
-              courtLabel?: string | null | undefined;
-              teamAId: string;
-              teamBId: string | null;
-              startingScoreA: number;
-              startingScoreB: number;
-              scoreA: number | null;
-              scoreB: number | null;
-              status: MatchStatus;
-              correctionReason?: string | null | undefined;
-            }[]
-          | undefined;
-        prizePool?: (Record<string, unknown> | null) | undefined;
-        id: string;
-        code?: string | undefined;
-        name: string;
-        status: EventStatus;
-        startsAt?: string | undefined;
-        minimumPeople?: number | undefined;
-        capacityPeople?: number | undefined;
-        totalRounds?: number | undefined;
-        currentRound?: number | undefined;
-        _count?: { teams?: number | undefined } | undefined;
-      }
-    | null
-  >;
+  eventList: Ref<EventSummary[]>;
+  eventDetail: Ref<EventDetail | null>;
   mayOperatePrizes: ComputedRef<boolean>;
-  prizeAwards: Ref<
-    {
-      id: string;
-      awardName: string;
-      finalRank: number;
-      recipientNames: string[];
-      quantity: number;
-      status: "ISSUED" | "RECEIVED";
-      receivedByName?: string | null | undefined;
-      team?:
-        | { id: string; name: string; finalRank?: number | undefined }
-        | undefined;
-      inventoryItem?: { id: string; sku: string; name: string } | undefined;
-      operator?: { displayName: string } | undefined;
-      signedBy?: { displayName: string } | null | undefined;
-    }[],
-    | EventPrizeAward[]
-    | {
-        id: string;
-        awardName: string;
-        finalRank: number;
-        recipientNames: string[];
-        quantity: number;
-        status: "ISSUED" | "RECEIVED";
-        receivedByName?: string | null | undefined;
-        team?:
-          | { id: string; name: string; finalRank?: number | undefined }
-          | undefined;
-        inventoryItem?: { id: string; sku: string; name: string } | undefined;
-        operator?: { displayName: string } | undefined;
-        signedBy?: { displayName: string } | null | undefined;
-      }[]
-  >;
-  inventoryItems: Ref<
-    {
-      id: string;
-      sku: string;
-      name: string;
-      stock: number;
-      enabled?: boolean | undefined;
-    }[],
-    | InventoryItem[]
-    | {
-        id: string;
-        sku: string;
-        name: string;
-        stock: number;
-        enabled?: boolean | undefined;
-      }[]
-  >;
-  completedTeams: ComputedRef<
-    {
-      id: string;
-      name: string;
-      playerAName: string;
-      playerBName: string;
-      playerAPhone?: string | null | undefined;
-      playerBPhone?: string | null | undefined;
-      captainPlays?: boolean | undefined;
-      status: string;
-      category?: string | undefined;
-      points?: number | undefined;
-      wins?: number | undefined;
-      losses?: number | undefined;
-      scoreDiff?: number | undefined;
-      finalRank?: number | null | undefined;
-      paymentDueAt?: string | null | undefined;
-      waitlistedAt?: string | null | undefined;
-      cancelReason?: string | null | undefined;
-      cancelRequestedAt?: string | null | undefined;
-      cancellationPending?: boolean | undefined;
-      cancellationResolvedAt?: string | null | undefined;
-      order?: { status?: string | undefined } | null | undefined;
-    }[]
-  >;
-  selectedPrizeTeamId: Ref<string, string>;
-  availablePrizeItems: ComputedRef<
-    {
-      id: string;
-      sku: string;
-      name: string;
-      stock: number;
-      enabled?: boolean | undefined;
-    }[]
-  >;
-  selectedPrizeItemId: Ref<string, string>;
-  selectedRound: Ref<number, number>;
-  pairingLeftIndex: Ref<number, number>;
-  pairingRightIndex: Ref<number, number>;
-  currentRoundMatches: ComputedRef<
-    {
-      id: string;
-      round: number;
-      courtLabel?: string | null | undefined;
-      teamAId: string;
-      teamBId: string | null;
-      startingScoreA: number;
-      startingScoreB: number;
-      scoreA: number | null;
-      scoreB: number | null;
-      status: MatchStatus;
-      correctionReason?: string | null | undefined;
-    }[]
-  >;
+  prizeAwards: Ref<EventPrizeAward[]>;
+  inventoryItems: Ref<InventoryItem[]>;
+  completedTeams: ComputedRef<EventTeam[]>;
+  selectedPrizeTeamId: Ref<string>;
+  availablePrizeItems: ComputedRef<InventoryItem[]>;
+  selectedPrizeItemId: Ref<string>;
+  selectedRound: Ref<number>;
+  pairingLeftIndex: Ref<number>;
+  pairingRightIndex: Ref<number>;
+  currentRoundMatches: ComputedRef<EventMatch[]>;
   causeMessage: (cause: unknown, fallback: string) => string;
-  deepLinkQuery: Ref<
-    {
-      focus?: string | undefined;
-      id?: string | undefined;
-      orderId?: string | undefined;
-      eventId?: string | undefined;
-      gameId?: string | undefined;
-      sessionId?: string | undefined;
-      attendanceId?: string | undefined;
-      userId?: string | undefined;
-      round?: string | undefined;
-    },
-    | OpsDeepLinkQuery
-    | {
-        focus?: string | undefined;
-        id?: string | undefined;
-        orderId?: string | undefined;
-        eventId?: string | undefined;
-        gameId?: string | undefined;
-        sessionId?: string | undefined;
-        attendanceId?: string | undefined;
-        userId?: string | undefined;
-        round?: string | undefined;
-      }
-  >;
-  deepLinkHandled: Ref<boolean, boolean>;
-  matches: ComputedRef<
-    {
-      id: string;
-      round: number;
-      courtLabel?: string | null | undefined;
-      teamAId: string;
-      teamBId: string | null;
-      startingScoreA: number;
-      startingScoreB: number;
-      scoreA: number | null;
-      scoreB: number | null;
-      status: MatchStatus;
-      correctionReason?: string | null | undefined;
-    }[]
-  >;
-  teams: ComputedRef<
-    {
-      id: string;
-      name: string;
-      playerAName: string;
-      playerBName: string;
-      playerAPhone?: string | null | undefined;
-      playerBPhone?: string | null | undefined;
-      captainPlays?: boolean | undefined;
-      status: string;
-      category?: string | undefined;
-      points?: number | undefined;
-      wins?: number | undefined;
-      losses?: number | undefined;
-      scoreDiff?: number | undefined;
-      finalRank?: number | null | undefined;
-      paymentDueAt?: string | null | undefined;
-      waitlistedAt?: string | null | undefined;
-      cancelReason?: string | null | undefined;
-      cancelRequestedAt?: string | null | undefined;
-      cancellationPending?: boolean | undefined;
-      cancellationResolvedAt?: string | null | undefined;
-      order?: { status?: string | undefined } | null | undefined;
-    }[]
-  >;
-  focusedRecord: Ref<string, string>;
-  actionKey: Ref<string, string>;
+  deepLinkQuery: Ref<OpsDeepLinkQuery>;
+  deepLinkHandled: Ref<boolean>;
+  matches: ComputedRef<EventMatch[]>;
+  teams: ComputedRef<EventTeam[]>;
+  focusedRecord: Ref<string>;
+  actionKey: Ref<string>;
 }
 
 export function useEventLoadingActions({
@@ -399,7 +109,7 @@ export function useEventLoadingActions({
         eventDetail.value = null;
         prizeAwards.value = [];
         inventoryItems.value = [];
-        throw new Error('未找到该赛事，可能已删除或无权查看，请返回赛事列表。');
+        throw new Error("未找到该赛事，可能已删除或无权查看，请返回赛事列表。");
       }
       eventDetail.value = selected
         ? ((await endpoints.managedEvent(selected.id)) as EventDetail)

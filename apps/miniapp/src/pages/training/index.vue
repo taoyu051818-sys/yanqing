@@ -1,4 +1,24 @@
 <script setup lang="ts">
+import type {
+  TrainingProductView,
+  TrainingEnrollmentView,
+  TrainingStudentView,
+} from "@yanqing/shared";
+import type { TrainingTrialView } from "../../types/training-operations";
+import { useStudentRegistration } from "./use-student-registration";
+import { useCoursePurchase } from "./use-course-purchase";
+import { useTrainingRefund } from "./use-training-refund";
+import {
+  consumed,
+  refundedCents,
+  unusedPrepaidCents,
+  confirmedRevenueCents,
+  receivedPrepaidCents,
+  canRequestRefund,
+  paymentComposition,
+} from "./enrollment-presentation";
+
+import { trainingAudienceLabel } from "@yanqing/shared";
 import { computed, ref, watch } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { useSessionStore } from "../../stores/session";
@@ -17,24 +37,18 @@ import ReasonForm from "../../components/ReasonForm.vue";
 import StatusBadge from "../../components/StatusBadge.vue";
 import { endpoints } from "../../services/api";
 import { money, shortDate } from "../../utils/format";
-import { withPendingCreationKey } from "../../utils/pending-creation-key";
-import {
-  parseYuanToCents,
-  pendingTrainingRefundCents,
-  trainingRefundLimitCents,
-} from "../../utils/training-refund";
 
 const productDetailId = ref(""),
   enrollmentDetailId = ref("");
 const showingDetail = computed(() =>
   Boolean(productDetailId.value || enrollmentDetailId.value),
 );
-function viewCourse(product: any) {
+function viewCourse(product: TrainingProductView) {
   uni.navigateTo({
     url: "/pages/training/index?productId=" + encodeURIComponent(product.id),
   });
 }
-function viewEnrollment(item: any) {
+function viewEnrollment(item: TrainingEnrollmentView) {
   uni.navigateTo({
     url:
       "/pages/training/index?tab=mine&enrollmentId=" +
@@ -44,29 +58,13 @@ function viewEnrollment(item: any) {
 const session = useSessionStore();
 const audience = ref("ALL");
 const expandedEnrollments = ref<Record<string, boolean>>({});
-const products = ref<any[]>([]);
-const enrollments = ref<any[]>([]);
-const students = ref<any[]>([]);
-const trials = ref<any[]>([]);
+const products = ref<TrainingProductView[]>([]);
+const enrollments = ref<TrainingEnrollmentView[]>([]);
+const students = ref<TrainingStudentView[]>([]);
+const trials = ref<TrainingTrialView[]>([]);
 const tab = ref<"products" | "mine" | "trials">("products");
 const loading = ref(false);
 const error = ref("");
-const savingStudent = ref(false);
-const purchasingId = ref("");
-const refundingId = ref("");
-const selectedProductId = ref("");
-const selectedClassId = ref("");
-const selectedStudentId = ref("");
-const purchaseError = ref("");
-const eligibleStudents = computed(() =>
-  students.value.filter((item) => item.guardianConsentStatus),
-);
-const refundItemId = ref("");
-const refundMaximum = ref(0);
-const refundOrder = ref<any>(null);
-const refundError = ref("");
-const customRefund = ref(false);
-const refundAmount = ref("");
 function login() {
   return requestMemberLogin(
     "/pages/training/index?tab=" +
@@ -75,34 +73,6 @@ function login() {
         ? "&productId=" + encodeURIComponent(productDetailId.value)
         : ""),
   );
-}
-function preparePurchase(product: any) {
-  if (!session.isAuthenticated) return login();
-  if (purchasingId.value) return;
-  selectedProductId.value = product.id;
-  selectedClassId.value =
-    product.classes?.length === 1 ? product.classes[0].id : "";
-  selectedStudentId.value =
-    eligibleStudents.value.length === 1 ? eligibleStudents.value[0].id : "";
-  purchaseError.value = "";
-  if (product.audience === "YOUTH" && !eligibleStudents.value.length) {
-    audience.value = "YOUTH";
-    showStudentForm.value = true;
-    uni.pageScrollTo({ scrollTop: 0, duration: 200 });
-  }
-}
-const showStudentForm = ref(false);
-const defaultBirthMonth = `${new Date().getFullYear() - 10}-01`;
-const studentForm = ref({
-  displayName: "",
-  birthMonth: defaultBirthMonth,
-  guardianConsentStatus: false,
-});
-const maxBirthMonth = computed(() => new Date().toISOString().slice(0, 7));
-function openStudentForm() {
-  if (!session.isAuthenticated) return login();
-  showStudentForm.value = true;
-  uni.pageScrollTo({ scrollTop: 0, duration: 200 });
 }
 
 onLoad((query) => {
@@ -123,84 +93,70 @@ const visibleProducts = computed(() =>
   products.value.filter((item) =>
     productDetailId.value
       ? item.id === productDetailId.value
-      : audience.value === "ALL" || item.audience === audience.value,
+      : audience.value === "ALL" ||
+        item.audience === "ALL" ||
+        item.audience === audience.value,
   ),
 );
-const consumed = (item: any) =>
-  Number(item.consumedSessions ?? item.usedSessions ?? 0);
-const refundedCents = (item: any) => Number(item.refundedCents || 0);
-const unusedPrepaidCents = (item: any) => Number(item.prepaidBalanceCents || 0);
-const confirmedRevenueCents = (item: any) => {
-  if (
-    item.confirmedRevenueCents !== undefined &&
-    item.confirmedRevenueCents !== null
-  ) {
-    return Number(item.confirmedRevenueCents);
-  }
-  const contractAmount = Number(
-    item.totalAmountCents ?? item.product?.priceCents ?? 0,
-  );
-  return Math.max(
-    0,
-    contractAmount - unusedPrepaidCents(item) - refundedCents(item),
-  );
-};
-const receivedPrepaidCents = (item: any) => {
-  if (item.status === "PENDING_PAYMENT") return 0;
-  return (
-    confirmedRevenueCents(item) + unusedPrepaidCents(item) + refundedCents(item)
-  );
-};
-const canRequestRefund = (item: any) =>
-  Boolean(item.orderId) &&
-  unusedPrepaidCents(item) > 0 &&
-  ["ACTIVE", "PARTIALLY_REFUNDED"].includes(String(item.status));
-const paymentLabels: Record<string, string> = {
-  WECHAT: "微信支付",
-  OFFLINE_CASH: "线下现金",
-  CASH_PRINCIPAL: "现金本金账户",
-  GIFT_BALANCE: "赠送余额",
-  BADMINTON_COIN: "羽球币",
-  COUPON: "优惠券",
-};
-const paymentComposition = (order: any) => {
-  const payments = (Array.isArray(order.payments) ? order.payments : [])
-    .filter((payment: any) =>
-      ["SUCCEEDED", "REFUNDED"].includes(String(payment.status)),
-    )
-    .map(
-      (payment: any) =>
-        `${paymentLabels[payment.channel] || payment.channel} ${money(payment.amountCents)}`,
-    );
-  if (payments.length) return payments.join(" + ");
-  const channel = order.paymentChannel;
-  return channel ? paymentLabels[channel] || channel : "以原支付渠道为准";
-};
-const setBirthMonth = (event: any) => {
-  studentForm.value.birthMonth = String(event.detail.value);
-};
-const setConsent = (event: any) => {
-  studentForm.value.guardianConsentStatus = Boolean(event.detail.value);
-};
+const {
+  purchasingId,
+  selectedProductId,
+  selectedClassId,
+  selectedStudentId,
+  purchaseFor,
+  purchasingForStudent,
+  purchaseError,
+  eligibleStudents,
+  preparePurchase,
+  purchase,
+  resetPurchase,
+} = useCoursePurchase({
+  students,
+  login,
+  onNeedsStudent: () => {
+    audience.value = "YOUTH";
+    openStudentForm();
+  },
+});
+const {
+  savingStudent,
+  showStudentForm,
+  studentForm,
+  maxBirthMonth,
+  setBirthMonth,
+  setConsent,
+  openStudentForm,
+  createStudent,
+  resetStudent,
+} = useStudentRegistration({
+  login,
+  reload: load,
+  onCreated: (id) => {
+    selectedStudentId.value = id;
+  },
+});
+const {
+  refundingId,
+  refundItemId,
+  refundMaximum,
+  refundOrder,
+  refundError,
+  customRefund,
+  refundAmount,
+  prepareRefund,
+  requestTrainingRefund,
+  resetRefund,
+} = useTrainingRefund({ login, reload: load });
+
 function clearPrivateState() {
   students.value = [];
   enrollments.value = [];
   trials.value = [];
-  selectedProductId.value = "";
-  selectedStudentId.value = "";
-  selectedClassId.value = "";
-  showStudentForm.value = false;
   expandedEnrollments.value = {};
-  studentForm.value = {
-    displayName: "",
-    birthMonth: defaultBirthMonth,
-    guardianConsentStatus: false,
-  };
-  refundItemId.value = "";
-  refundOrder.value = null;
-  refundError.value = "";
-  purchaseError.value = "";
   memberError.value = "";
+  resetStudent();
+  resetPurchase();
+  resetRefund();
 }
 const memberError = ref("");
 watch(useAccessToken(), clearPrivateState, { flush: "sync" });
@@ -244,156 +200,6 @@ async function load() {
   }
 }
 
-async function createStudent() {
-  if (!session.isAuthenticated) return login();
-  if (savingStudent.value) return;
-  const displayName = studentForm.value.displayName.trim();
-  if (!displayName)
-    return uni.showToast({ title: "请填写学员姓名", icon: "none" });
-  if (!studentForm.value.guardianConsentStatus) {
-    return uni.showToast({ title: "需由监护人确认授权", icon: "none" });
-  }
-  savingStudent.value = true;
-  try {
-    const created: any = await endpoints.createTrainingStudent({
-      displayName,
-      birthMonth: `${studentForm.value.birthMonth}-01T00:00:00.000Z`,
-      guardianConsentStatus: true,
-    });
-    studentForm.value = {
-      displayName: "",
-      birthMonth: defaultBirthMonth,
-      guardianConsentStatus: false,
-    };
-    showStudentForm.value = false;
-    await load();
-    selectedStudentId.value =
-      created?.id ||
-      eligibleStudents.value[eligibleStudents.value.length - 1]?.id ||
-      "";
-    uni.showToast({ title: "学员档案已建立", icon: "success" });
-  } catch (cause: any) {
-    uni.showToast({ title: cause.message, icon: "none" });
-  } finally {
-    savingStudent.value = false;
-  }
-}
-
-async function purchase(product: any) {
-  if (!session.isAuthenticated) return login();
-  if (purchasingId.value) return;
-  purchaseError.value = "";
-  if (
-    product.classes?.length &&
-    !product.classes.some((item: any) => item.id === selectedClassId.value)
-  ) {
-    purchaseError.value = "请先选择上课班级";
-    return;
-  }
-  if (
-    product.audience === "YOUTH" &&
-    !eligibleStudents.value.some((item) => item.id === selectedStudentId.value)
-  ) {
-    purchaseError.value = "请选择已由监护人授权的学员；没有档案时可在上方新建";
-    return;
-  }
-  purchasingId.value = product.id;
-  try {
-    const command = {
-      productId: product.id,
-      classId: selectedClassId.value || undefined,
-      studentId:
-        product.audience === "YOUTH" ? selectedStudentId.value : undefined,
-      sourceChannel: "MINI_PROGRAM",
-    };
-    const order: any = await withPendingCreationKey(
-      "training.purchase",
-      command,
-      (creationIdempotencyKey) =>
-        endpoints.purchaseTraining({ ...command, creationIdempotencyKey }),
-    );
-    await openMemberPage(
-      "/pages/order/index?id=" + encodeURIComponent(order.id),
-    );
-  } catch (cause: any) {
-    purchaseError.value = cause.message || "报名失败，请重试";
-  } finally {
-    purchasingId.value = "";
-  }
-}
-
-async function prepareRefund(item: any) {
-  if (!session.isAuthenticated) return login();
-  if (refundingId.value) return;
-  refundItemId.value = item.id;
-  refundingId.value = item.id;
-  refundError.value = "";
-  refundOrder.value = null;
-  customRefund.value = false;
-  refundMaximum.value = 0;
-  try {
-    const order: any = await endpoints.order(item.orderId);
-    if (
-      pendingTrainingRefundCents(order) > 0 ||
-      order.status === "REFUND_PENDING"
-    ) {
-      refundError.value =
-        "已有退费申请处理中，请在订单查看进度，处理结束后再申请。";
-      return;
-    }
-    refundMaximum.value = trainingRefundLimitCents(item, order);
-    if (refundMaximum.value <= 0) {
-      refundError.value =
-        "当前没有可退的未使用课时余额；如消课记录有误，请联系教练或前台。";
-      return;
-    }
-    refundAmount.value = (refundMaximum.value / 100).toFixed(2);
-    refundOrder.value = order;
-  } catch (cause: any) {
-    refundError.value = cause.message || "可退金额未同步，请重试";
-  } finally {
-    refundingId.value = "";
-  }
-}
-async function requestTrainingRefund(item: any, reason: string) {
-  if (!session.isAuthenticated) return login();
-  if (!refundOrder.value || refundingId.value || refundItemId.value !== item.id)
-    return;
-  const amountCents = customRefund.value
-    ? parseYuanToCents(refundAmount.value)
-    : refundMaximum.value;
-  if (
-    amountCents === null ||
-    amountCents <= 0 ||
-    amountCents > refundMaximum.value
-  ) {
-    refundError.value =
-      "请输入 0.01 至 " + (refundMaximum.value / 100).toFixed(2) + " 元";
-    return;
-  }
-  refundingId.value = item.id;
-  refundError.value = "";
-  try {
-    const command = { orderId: item.orderId, amountCents, reason };
-    await withPendingCreationKey("training.refund", command, (idempotencyKey) =>
-      endpoints.refundOrder(item.orderId, {
-        amountCents,
-        reason,
-        idempotencyKey,
-      }),
-    );
-    refundItemId.value = "";
-    uni.showToast({ title: "退费申请已提交", icon: "success" });
-    await load();
-    await openMemberPage(
-      "/pages/order/index?id=" + encodeURIComponent(item.orderId),
-    );
-  } catch (cause: any) {
-    refundError.value = cause.message || "退费申请失败，请重试";
-  } finally {
-    refundingId.value = "";
-  }
-}
 onShow(load);
 </script>
 <template>
@@ -513,7 +319,7 @@ onShow(load);
       >
         <view class="row"
           ><text class="pill">{{
-            product.audience === "YOUTH" ? "青少年" : "成人"
+            trainingAudienceLabel(product.audience)
           }}</text
           ><text class="muted">有效期 {{ product.validityDays }} 天</text></view
         >
@@ -569,7 +375,32 @@ onShow(load);
               ></picker
             >
           </view>
-          <view v-if="product.audience === 'YOUTH'">
+          <view v-if="product.audience === 'ALL'" class="purchase-subject">
+            <text class="student-tip">为谁报名</text>
+            <view class="subject-options">
+              <button
+                :class="purchaseFor === 'SELF' ? 'primary' : 'secondary'"
+                :disabled="Boolean(purchasingId)"
+                @tap="
+                  purchaseFor = 'SELF';
+                  purchaseError = '';
+                "
+              >
+                本人
+              </button>
+              <button
+                :class="purchaseFor === 'STUDENT' ? 'primary' : 'secondary'"
+                :disabled="Boolean(purchasingId)"
+                @tap="
+                  purchaseFor = 'STUDENT';
+                  purchaseError = '';
+                "
+              >
+                青少年学员
+              </button>
+            </view>
+          </view>
+          <view v-if="purchasingForStudent(product)">
             <text class="student-tip">报名学员</text>
             <picker
               v-if="eligibleStudents.length"
@@ -640,14 +471,7 @@ onShow(load);
         >
         <text class="remaining"
           >剩余
-          {{
-            Math.max(
-              0,
-              Number(
-                item.remainingSessions ?? item.totalSessions - consumed(item),
-              ),
-            )
-          }}
+          {{ Math.max(0, Number(item.totalSessions - consumed(item))) }}
           次课</text
         >
         <view class="progress"
@@ -741,7 +565,8 @@ onShow(load);
               class="secondary"
               @tap="
                 openMemberPage(
-                  '/pages/order/index?id=' + encodeURIComponent(item.orderId),
+                  '/pages/order/index?id=' +
+                    encodeURIComponent(item.orderId || ''),
                 )
               "
             >
@@ -885,394 +710,4 @@ onShow(load);
     </template>
   </view>
 </template>
-<style scoped>
-.course-detail {
-  padding-bottom: calc(220rpx + env(safe-area-inset-bottom));
-}
-.course-dock {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 30;
-  padding: 20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom));
-  background: white;
-  border-top: 1rpx solid var(--color-border);
-}
-.course-dock text {
-  display: block;
-  font-size: 26rpx;
-}
-.course-dock button {
-  margin: 12rpx 0 0;
-  width: 100%;
-}
-.enroll-form {
-  display: grid;
-  gap: 20rpx;
-  margin-top: 22rpx;
-  padding: 24rpx;
-  border: 1rpx solid var(--color-border);
-  border-radius: 20rpx;
-  background: var(--color-surface-subtle);
-}
-.enroll-form button,
-.refund-amount button {
-  width: 100%;
-  margin: 0;
-  padding: 18rpx 12rpx;
-  font-size: 26rpx;
-}
-.form-error {
-  color: var(--color-danger);
-  line-height: 1.6;
-}
-.refund-amount {
-  display: grid;
-  gap: 16rpx;
-}
-.refund-amount button[aria-pressed="true"] {
-  outline: 2rpx solid var(--color-primary);
-}
-
-.audience-tabs {
-  display: flex;
-  gap: 12rpx;
-  margin-bottom: 22rpx;
-}
-.audience-tabs button {
-  flex: 1;
-  margin: 0;
-  font-size: 24rpx;
-  color: var(--color-muted);
-  background: transparent;
-}
-.audience-tabs .selected {
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-}
-.remaining {
-  display: block;
-  margin-top: 22rpx;
-  color: var(--color-primary);
-  font-size: 36rpx;
-  font-weight: 800;
-}
-.details-toggle {
-  width: 100%;
-  margin: 16rpx 0 0;
-  color: var(--color-muted);
-  background: transparent;
-  font-size: 24rpx;
-}
-.course-intro {
-  padding: 28rpx;
-  margin-bottom: 22rpx;
-  color: rgba(255, 255, 255, 0.78);
-  background: linear-gradient(135deg, #173e2a, #236d47);
-  border-radius: 28rpx;
-  font-size: 23rpx;
-  line-height: 1.7;
-}
-.banner-title {
-  display: block;
-  margin-bottom: 10rpx;
-  color: #fff;
-  font-size: 31rpx;
-  font-weight: 800;
-}
-.tabs {
-  display: flex;
-  gap: 12rpx;
-  padding: 8rpx;
-  margin-bottom: 22rpx;
-  background: #e7ece8;
-  border-radius: 22rpx;
-}
-.tabs button {
-  flex: 1;
-  width: 100%;
-  padding: 16rpx 6rpx;
-  margin: 0;
-  background: transparent;
-  color: var(--color-muted);
-  font-size: 26rpx;
-  text-align: center;
-}
-.tabs .active {
-  background: #fff;
-  border-radius: 17rpx;
-  font-weight: 700;
-}
-.title {
-  display: block;
-  margin: 24rpx 0 16rpx;
-  font-size: 33rpx;
-  font-weight: 800;
-}
-.title.compact {
-  margin: 0;
-}
-.details {
-  display: flex;
-  gap: 28rpx;
-  color: #6e776f;
-  font-size: 24rpx;
-}
-.footer {
-  margin-top: 26rpx;
-}
-.buy {
-  min-width: 180rpx;
-  margin: 0;
-}
-.progress {
-  height: 12rpx;
-  margin: 28rpx 0 12rpx;
-  overflow: hidden;
-  background: #edf0ed;
-  border-radius: 99rpx;
-}
-.progress view {
-  height: 100%;
-  background: #1b7045;
-  border-radius: inherit;
-}
-.training-ledger {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12rpx;
-  margin-top: 20rpx;
-}
-.training-ledger view {
-  padding: 18rpx;
-  background: #f4f7f4;
-  border-radius: 16rpx;
-}
-.ledger-label {
-  display: block;
-  color: #728077;
-  font-size: 21rpx;
-}
-.ledger-value {
-  display: block;
-  margin-top: 8rpx;
-  color: #264e39;
-  font-size: 27rpx;
-  font-weight: 800;
-}
-.ledger-value.confirmed {
-  color: #17653d;
-}
-.ledger-value.refunded {
-  color: #9a4b3f;
-}
-.ledger-note {
-  display: block;
-  margin-top: 14rpx;
-  color: #7a725c;
-  font-size: 21rpx;
-  line-height: 1.55;
-}
-.refund-actions {
-  display: flex;
-  gap: 18rpx;
-  align-items: center;
-  margin-top: 18rpx;
-  padding-top: 18rpx;
-  border-top: 1rpx solid #edf0ed;
-}
-.refund-limit {
-  flex: 1;
-  color: #7a725c;
-  font-size: 20rpx;
-  line-height: 1.5;
-}
-.refund-button {
-  flex: none;
-  min-width: 218rpx;
-  margin: 0;
-  padding: 0 18rpx;
-  font-size: 22rpx;
-}
-.feedback {
-  padding: 18rpx;
-  margin-top: 20rpx;
-  color: #5c685f;
-  background: #f4f7f4;
-  border-radius: 16rpx;
-  font-size: 23rpx;
-}
-.student-card {
-  margin-bottom: 22rpx;
-}
-.student-title {
-  display: block;
-  font-size: 29rpx;
-  font-weight: 800;
-}
-.student-tip {
-  display: block;
-  margin-top: 7rpx;
-  color: #728077;
-  font-size: 22rpx;
-}
-.mini {
-  flex: none;
-  min-width: 132rpx;
-  margin: 0;
-  padding: 0 18rpx;
-  font-size: 23rpx;
-  line-height: 58rpx;
-}
-.student-list {
-  margin-top: 20rpx;
-  border-top: 1rpx solid #edf0ed;
-}
-.student-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 18rpx 0;
-  border-bottom: 1rpx solid #edf0ed;
-  font-size: 25rpx;
-}
-.consent-ok {
-  color: #17653d;
-}
-.consent-warn {
-  color: #a66417;
-}
-.empty-student {
-  padding: 18rpx 0 2rpx;
-}
-.student-form {
-  padding-top: 20rpx;
-}
-.student-form input,
-.picker-row {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 82rpx;
-  padding: 21rpx 24rpx;
-  margin-bottom: 16rpx;
-  background: #f4f7f4;
-  border-radius: 16rpx;
-  font-size: 25rpx;
-}
-.picker-row {
-  display: flex;
-  justify-content: space-between;
-}
-.consent-row {
-  display: flex;
-  gap: 18rpx;
-  align-items: center;
-  color: #5c685f;
-  font-size: 22rpx;
-  line-height: 1.55;
-}
-.consent-row text {
-  flex: 1;
-}
-.save-student {
-  margin-top: 20rpx;
-}
-.regulatory-warning {
-  display: grid;
-  gap: 8rpx;
-  margin-top: 16rpx;
-  padding: 16rpx;
-  color: #965220;
-  background: #fff4e8;
-  border-radius: 14rpx;
-  font-size: 21rpx;
-}
-.trial-result {
-  margin-bottom: 20rpx;
-}
-.trial-coach,
-.privacy-note {
-  display: block;
-  margin-top: 15rpx;
-  color: #69766d;
-  font-size: 21rpx;
-}
-.trial-scores {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10rpx;
-  margin-top: 18rpx;
-}
-.trial-scores view {
-  display: grid;
-  gap: 6rpx;
-  padding: 16rpx;
-  color: #355641;
-  background: #eef5f0;
-  border-radius: 14rpx;
-  font-size: 21rpx;
-}
-.trial-scores view text:nth-child(2) {
-  color: #17653d;
-  font-size: 27rpx;
-  font-weight: 800;
-}
-.dimension-note {
-  color: #778078;
-  font-size: 19rpx;
-  line-height: 1.45;
-}
-.trial-recommendation {
-  display: grid;
-  gap: 9rpx;
-  margin-top: 16rpx;
-  padding: 18rpx;
-  color: #405b4a;
-  background: #f4f7f4;
-  border-radius: 14rpx;
-  font-size: 23rpx;
-  line-height: 1.6;
-}
-.recommendation-title {
-  font-weight: 800;
-}
-.load-error {
-  display: flex;
-  align-items: center;
-  gap: 18rpx;
-  color: #9a3e36;
-  background: #fff4f2;
-}
-.load-error text {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-.retry {
-  flex: 0 0 auto;
-  min-height: 64rpx;
-  margin: 0;
-  padding: 0 22rpx;
-  line-height: 64rpx;
-  font-size: 23rpx;
-}
-@media (max-width: 360px) {
-  .load-error,
-  .refund-actions,
-  .student-card > .row {
-    align-items: stretch;
-    flex-wrap: wrap;
-  }
-  .load-error .retry,
-  .refund-button {
-    width: 100%;
-  }
-  .refund-limit {
-    flex-basis: 100%;
-  }
-  .trial-scores {
-    grid-template-columns: 1fr;
-  }
-}
-</style>
+<style scoped src="./training.css"></style>

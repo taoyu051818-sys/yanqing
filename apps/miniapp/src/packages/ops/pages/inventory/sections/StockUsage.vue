@@ -5,6 +5,7 @@ import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 import type { Tab, UsageType } from "../page-types.js";
 
 const props = defineProps<{
+  formOnly?: boolean;
   errorMessage: string;
   tab: Tab;
   showUsageForm: boolean;
@@ -24,6 +25,7 @@ const props = defineProps<{
   loading: boolean;
   items: any[];
   isAdmin: boolean;
+  openMovement: (type: "TRANSFER" | "LOSS", context: { itemId: string; balanceId: string }) => void;
   focusedRecord: string;
   stockItemContext: (item: any) => string;
   canUseForTraining: boolean;
@@ -72,7 +74,7 @@ const showUsageForm = computed({
               >商品由经办人从库存卡片发起，关联业务与数量必须逐项确认。</text
             >
           </view>
-          <button class="link-button" @tap="showUsageForm = false">取消</button>
+          <button v-if="!formOnly" class="link-button" @tap="showUsageForm = false">取消</button>
         </view>
         <text class="field-label">领用商品</text>
         <view class="picker-field readonly-field">{{
@@ -112,6 +114,7 @@ const showUsageForm = computed({
           placeholder="请输入正整数"
         />
         <button
+          v-if="!formOnly"
           class="primary form-submit"
           :loading="saving"
           :disabled="saving"
@@ -120,6 +123,7 @@ const showUsageForm = computed({
           确认领用并过账
         </button>
       </view>
+      <template v-if="!formOnly">
       <view v-if="!loading && !items.length" class="card empty">{{
         isAdmin ? "暂无库存 SKU，请先维护基础资料。" : "当前没有低库存预警。"
       }}</view>
@@ -142,7 +146,7 @@ const showUsageForm = computed({
           ></view
         ><text v-if="isAdmin" class="muted"
           >售价 {{ money(item.salePriceCents) }}</text
-        ><view
+        ><view v-if="isAdmin && item.enabled !== false" class="stock-batches"><view v-for="balance in (item.stockBalances || []).filter((entry: any) => Number(entry.quantity) > 0)" :key="balance.id" class="stock-batch"><text>{{ balance.location?.name || '库位' }} · {{ balance.batchCode || '默认批次' }} · {{ balance.quantity }} 件</text><view class="usage-row"><button class="secondary usage-action" :disabled="saving" @tap="openMovement('TRANSFER', {itemId:item.id, balanceId:balance.id})">调拨</button><button class="secondary usage-action" :disabled="saving" @tap="openMovement('LOSS', {itemId:item.id, balanceId:balance.id})">报损</button></view></view></view><view
           v-if="item.enabled !== false && (canUseForTraining || canUseForEvent)"
           class="usage-row"
           ><button
@@ -160,8 +164,11 @@ const showUsageForm = computed({
           </button></view
         ></view
       >
+      </template>
     </template>
   </view>
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>.stock-batches{margin-top:20rpx}.stock-batch{padding:20rpx 0;border-top:1rpx solid var(--color-border);font-size:26rpx;line-height:1.6}.stock-batch button{min-height:44px}</style>

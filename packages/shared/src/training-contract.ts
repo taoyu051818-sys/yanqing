@@ -1,5 +1,20 @@
 import type { OrderStatus } from "./order-contract.js";
-export type TrainingAudience = "YOUTH" | "ADULT";
+export type TrainingAudience = "YOUTH" | "ADULT" | "ALL";
+export function trainingAudienceLabel(audience: TrainingAudience): string {
+  return { YOUTH: "青少年", ADULT: "成人", ALL: "不限" }[audience];
+}
+export function includesYouthAudience(audience: string): boolean {
+  return audience === "YOUTH" || audience === "ALL";
+}
+/** A mixed course is a youth enrollment only when a child is enrolled. */
+export function isYouthEnrollment(enrollment: {
+  product?: { audience?: string } | null;
+  studentId?: string | null;
+}): boolean {
+  return enrollment.product?.audience === "YOUTH" ||
+    (enrollment.product?.audience === "ALL" && Boolean(enrollment.studentId));
+}
+
 export interface TrainingClassSummary {
   id: string;
   name: string;
@@ -107,4 +122,30 @@ export interface TrainingEnrollmentView<D = string> {
   order: { status: OrderStatus } | null;
   attendances: TrainingAttendanceView<D>[];
   regulatoryWarnings: string[];
+}
+
+/** Guardian-owned student record returned by the training API. */
+export interface TrainingStudentView<D = string> {
+  id: string;
+  displayName: string;
+  guardianId: string;
+  guardianConsentStatus: boolean;
+  birthMonth: D | null;
+  guardian: { id: string; displayName: string };
+}
+
+export interface CreateTrainingStudentCommand {
+  displayName: string;
+  birthMonth?: string;
+  guardianConsentStatus: boolean;
+  guardianId?: string;
+  authorizationNote?: string;
+}
+
+export interface PurchaseTrainingCommand {
+  productId: string;
+  classId?: string;
+  studentId?: string;
+  sourceChannel?: string;
+  creationIdempotencyKey?: string;
 }

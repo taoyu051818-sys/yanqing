@@ -11,6 +11,7 @@ export function useTrainingProductForm() {
   const audienceOptions = [
     { label: "成人", value: "ADULT" },
     { label: "青少年", value: "YOUTH" },
+    { label: "不限", value: "ALL" },
   ];
   const editingProductId = ref("");
   const editProductName = ref("");

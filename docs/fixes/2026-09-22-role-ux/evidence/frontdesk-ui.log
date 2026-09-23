@@ -1,0 +1,56 @@
+member selected 延庆会员小林
+会员 · 13800000005
+更换
+trial records [
+  { memberId: 'member-1', sessionId: 'session-1', status: 'RESERVED' }
+]
+trial saved without a second confirmation
+assisted picker selected inline
+stock 商品库存
+库存 SKU
+3
+低库存 1
+待审批采购
+0
+制单与审批分离
+待复核盘点
+0
+差异过账
+待过账单据
+0
+调拨 / 报损
+库存
+采购收货
+盘点
+调拨报损
+基础资料
+金羽训练羽毛球
+BALL-001 · 自营 · 安全线 20
+36
+售价 ¥88.00
+主仓 · DEFAULT · 36 件
+调拨
+报损
+培训领用
+赛事领用
+专业吸汗手胶
+GRIP-001 · 寄售 · 安全线 10
+8
+售价 ¥15.00
+主仓 · DEFAULT · 8 件
+调拨
+报损
+培训领用
+赛事领用
+运动电解质饮料
+DRINK-001 · 自营 · 安全线 15
+42
+售价 ¥8.00
+主仓 · DEFAULT · 42 件
+调拨
+报损
+培训领用
+赛事领用
+stock context prefilled
+finance date context retained
+PASS other role flows

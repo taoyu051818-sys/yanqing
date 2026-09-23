@@ -1,0 +1,10 @@
+$ vitest run src/training test/training-audience.integration.spec.ts
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 /Users/mac/Documents/Codex/2026-08-27/https-github-com-taoyu051818-sys-yanqing/work/yanqing/apps/api
+
+
+ Test Files  15 passed (15)
+      Tests  128 passed (128)
+   Start at  17:35:13
+   Duration  2.78s (transform 3.24s, setup 0ms, import 10.52s, tests 831ms, environment 5ms)

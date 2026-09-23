@@ -89,9 +89,10 @@ class AuditedTrainingCreationDto {
 }
 
 export class CreateTrainingProductDto extends AuditedTrainingCreationDto {
+  @IsOptional()
   @IsString()
   @MaxLength(40)
-  code: string;
+  code?: string;
 
   @IsString()
   @MaxLength(100)

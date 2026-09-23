@@ -1,4 +1,3 @@
-import { requiredReason } from "./validation";
 import type { TrainingEnrollmentView } from "@yanqing/shared";
 import type { Ref, ComputedRef } from "vue";
 import {
@@ -89,14 +88,14 @@ export function useCoachTrialsActions({
       const trainingClass = selectedTrialClass.value;
       const product = selectedTrialProduct.value;
       const subject = selectedTrialSubject.value;
-      const reason = requiredReason(trialReason.value);
+      const reason = trialReason.value.trim() || "预约试听";
       if (!trialSession || !trainingClass || !product)
         throw new Error("请先选择已有场地资源的待开课次。");
       if (!subject) throw new Error("请选择试听主体。");
       if (!trialCoachId.value.trim())
         throw new Error("所选班级尚未配置试听教练，请先完善班级人员。");
-      if (trialSubjectIndex.value === 2 && product.audience !== "YOUTH") {
-        throw new Error("青少年学员只能预约青少年培训产品。");
+      if (trialSubjectIndex.value === 2 && product.audience === "ADULT") {
+        throw new Error("请选择青少年或不限人群的课程。");
       }
       if (trialSubjectIndex.value !== 2 && product.audience === "YOUTH") {
         throw new Error("青少年产品必须选择已授权学员。");
@@ -119,12 +118,6 @@ export function useCoachTrialsActions({
           command.leadId = leads.value[trialLeadIndex.value].id;
         }
       }
-      const confirmed = await uni.showModal({
-        title: "确认预约试听",
-        content: `${subject.displayName} · ${product.name}\n${shortDate(trialSession.startsAt)} · 教练 ${coachDisplayName(command.coachId)}\n原因：${reason}`,
-        confirmText: "确认预约",
-      });
-      if (!confirmed.confirm) return;
       const succeeded = await runCreation(
         "create-trial",
         "试听预约已进入待到场队列。",
@@ -137,6 +130,7 @@ export function useCoachTrialsActions({
           ),
       );
       if (succeeded) trialReason.value = "";
+      return succeeded;
     } catch (cause: any) {
       errorMessage.value = cause?.message || "试听预约校验失败。";
     }

@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - legacy/*
 
 allowBuilds:
   '@prisma/engines': true
@@ -38,3 +39,10 @@ minimumReleaseAgeExclude:
 
 overrides:
   hono: 4.12.25
+
+# uni-cli-shared imports PostCSS at runtime but publishes it only as a devDependency.
+# Declare the missing edge so isolated workspace installs do not depend on root hoisting.
+packageExtensions:
+  '@dcloudio/uni-cli-shared@3.0.0-5020420260813003':
+    dependencies:
+      postcss: 8.5.26

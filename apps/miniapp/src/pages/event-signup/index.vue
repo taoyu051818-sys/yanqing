@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import type { PublicEventDetail } from "@yanqing/shared";
+import { useTeamSignupForm } from "./use-team-signup-form";
+import { computed, ref, watch } from "vue";
 import { onLoad, onShow, onShareAppMessage } from "@dcloudio/uni-app";
 import { useAccessToken } from "../../services/auth-session";
 import AppIcon from "../../components/AppIcon.vue";
@@ -13,7 +15,6 @@ import {
 import { withPendingCreationKey } from "../../utils/pending-creation-key";
 import {
   eventSignupPath,
-  participantError,
   participantPhone,
   rememberTeamInvite,
   pendingTeamInvite,
@@ -22,42 +23,31 @@ import {
 import { money, shortDate } from "../../utils/format";
 import { eventDetailPath } from "../../utils/event-detail";
 import { SHARE_CARD_IMAGES } from "../../config/share";
-import type { DoublesCategory, TeamInviteView } from "../../types/event-signup";
+import type { TeamInviteView } from "../../types/event-signup";
 
 const session = useSessionStore();
 const id = ref(""),
-  code = ref(""),
-  mode = ref<"MANUAL" | "INVITE">("MANUAL");
-const event = ref<Record<string, any> | null>(null);
+  code = ref("");
+const event = ref<PublicEventDetail | null>(null);
 const invite = ref<TeamInviteView | null>(null);
 const loading = ref(false),
   busy = ref(false),
   error = ref(""),
   result = ref("");
-const consent = ref(false),
-  captainPlays = ref(true);
 const registration = ref<any>(null);
-const form = reactive({
-  name: "",
-  playerAName: "",
-  playerAPhone: "",
-  playerBName: "",
-  playerBPhone: "",
-});
-const fieldErrors = reactive<Record<string, string>>({});
-const category = ref<DoublesCategory>("MIXED_DOUBLES");
-const categories: Array<{ value: DoublesCategory; label: string }> = [
-  { value: "MEN_DOUBLES", label: "男双" },
-  { value: "WOMEN_DOUBLES", label: "女双" },
-  { value: "MIXED_DOUBLES", label: "混双" },
-];
-const participants = [
-  { label: "选手一", name: "playerAName", phone: "playerAPhone" },
-  { label: "选手二", name: "playerBName", phone: "playerBPhone" },
-] as const;
-const visibleParticipants = computed(() =>
-  mode.value === "MANUAL" ? participants : participants.slice(0, 1),
-);
+const {
+  mode,
+  consent,
+  captainPlays,
+  form,
+  fieldErrors,
+  category,
+  categories,
+  visibleParticipants,
+  checkParticipant,
+  validate,
+  resetForm,
+} = useTeamSignupForm(error);
 const activeRegistration = computed(
   () =>
     registration.value &&
@@ -117,11 +107,7 @@ watch(
   () => {
     registration.value = null;
     invite.value = null;
-    consent.value = false;
-    Object.keys(form).forEach((key) => {
-      form[key as keyof typeof form] = "";
-    });
-    error.value = "";
+    resetForm();
     result.value = "";
   },
   { flush: "sync" },
@@ -162,39 +148,6 @@ async function load() {
   } finally {
     loading.value = false;
   }
-}
-function checkParticipant(which: "playerAName" | "playerBName") {
-  const phoneKey = which === "playerAName" ? "playerAPhone" : "playerBPhone";
-  const issue = participantError(form[which], form[phoneKey]);
-  fieldErrors[which] = !form[which].trim() ? "请填写选手姓名" : "";
-  fieldErrors[phoneKey] = form[which].trim() ? issue : "";
-  return issue;
-}
-function validate(receiver = false) {
-  error.value = "";
-  let issue = "";
-  if (!receiver && !form.name.trim()) {
-    fieldErrors.name = "请填写队伍名称";
-    issue = fieldErrors.name;
-  }
-  if (!receiver) issue ||= checkParticipant("playerAName");
-  if (receiver || mode.value === "MANUAL")
-    issue ||= checkParticipant("playerBName");
-  if (
-    !receiver &&
-    mode.value === "MANUAL" &&
-    participantPhone(form.playerAPhone) === participantPhone(form.playerBPhone)
-  )
-    issue ||= "两位选手不能使用相同的联系电话";
-  if (!consent.value)
-    issue ||= receiver
-      ? "请先确认同意组队及报名信息使用说明"
-      : "请先确认已征得两位选手同意";
-  if (issue) {
-    error.value = issue;
-    uni.showToast({ title: issue, icon: "none" });
-  }
-  return !issue;
 }
 async function createInvite() {
   if (busy.value || !validate()) return;
@@ -741,232 +694,4 @@ onShareAppMessage(() => ({
   </view>
 </template>
 
-<style scoped>
-.signup-page {
-  padding-bottom: calc(210rpx + env(safe-area-inset-bottom)) !important;
-}
-.signup-submit {
-  position: fixed;
-  left: 28rpx;
-  right: 28rpx;
-  width: calc(100% - 56rpx) !important;
-  bottom: calc(20rpx + env(safe-area-inset-bottom));
-  z-index: 25;
-  box-shadow: 0 0 0 16rpx white;
-}
-.signup-page {
-  padding: 24rpx 24rpx calc(40rpx + env(safe-area-inset-bottom));
-  color: var(--color-foreground);
-}
-.panel {
-  padding: 28rpx;
-  margin-bottom: 24rpx;
-  border: 1rpx solid var(--color-border);
-  border-radius: 24rpx;
-  background: var(--color-surface);
-}
-.panel > text,
-.summary > text {
-  display: block;
-  overflow-wrap: anywhere;
-}
-.eyebrow {
-  color: var(--color-primary);
-  font-size: 26rpx;
-  font-weight: 650;
-}
-.title {
-  font-size: 40rpx;
-  font-weight: 750;
-  margin: 12rpx 0;
-  line-height: 1.4;
-}
-.heading {
-  display: block;
-  font-size: 32rpx;
-  font-weight: 700;
-}
-.muted {
-  color: var(--color-muted);
-  font-size: 28rpx;
-  line-height: 1.65;
-  margin-top: 12rpx;
-}
-.price-row {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 12rpx;
-  margin-top: 16rpx;
-}
-.price {
-  font-size: 40rpx;
-  font-weight: 750;
-  color: var(--color-primary);
-}
-.price-row .muted {
-  margin: 0;
-}
-.mode-row,
-.category-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16rpx;
-  margin-top: 20rpx;
-}
-.mode {
-  flex: 1 1 220rpx;
-  min-width: 0;
-  margin: 0;
-  border: 2rpx solid var(--color-border);
-  color: var(--color-muted);
-  background: var(--color-surface);
-}
-.category-row .mode {
-  flex-basis: 140rpx;
-}
-.mode.selected {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
-}
-button {
-  font-size: 28rpx;
-  padding: 24rpx 18rpx;
-  border-radius: 16rpx;
-  overflow-wrap: anywhere;
-  cursor: pointer;
-}
-.primary,
-.secondary {
-  width: 100%;
-  margin-top: 20rpx;
-}
-.primary {
-  background: var(--color-primary);
-  color: #fff;
-}
-.secondary {
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-}
-.back-link {
-  color: var(--color-muted);
-  background: transparent;
-  margin: 12rpx 0 0;
-  width: 100%;
-}
-label:not(.consent),
-.field-label {
-  display: block;
-  font-size: 28rpx;
-  margin: 24rpx 0 12rpx;
-  font-weight: 600;
-}
-input {
-  display: block;
-  width: 100%;
-  min-height: 48px !important;
-  height: 96rpx;
-  padding: 12rpx 20rpx;
-  border: 2rpx solid var(--color-border);
-  border-radius: 14rpx;
-  background: var(--color-surface-subtle);
-  font-size: 32rpx;
-}
-.consent {
-  display: flex;
-  align-items: flex-start;
-  gap: 12rpx;
-  margin-top: 24rpx;
-  padding: 12rpx 0;
-  min-height: 44px;
-  font-size: 28rpx;
-  line-height: 1.65;
-}
-.consent checkbox {
-  flex: 0 0 auto;
-}
-.consent text {
-  flex: 1;
-  min-width: 0;
-}
-.field-error {
-  color: var(--color-danger);
-  font-size: 26rpx;
-  margin-top: 8rpx;
-}
-.error-panel {
-  padding: 24rpx;
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-  border-radius: 20rpx;
-  overflow-wrap: anywhere;
-}
-.notice {
-  display: flex;
-  gap: 16rpx;
-  padding: 24rpx;
-  margin-bottom: 24rpx;
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  border-radius: 20rpx;
-}
-.notice text {
-  flex: 1;
-  min-width: 0;
-}
-.identity {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-}
-.identity-copy {
-  min-width: 0;
-  flex: 1;
-  overflow-wrap: anywhere;
-}
-.identity-copy text {
-  display: block;
-}
-.avatar {
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 50%;
-  flex: 0 0 96rpx;
-}
-.fallback {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-primary-soft);
-}
-.team-name {
-  margin-top: 24rpx;
-  font-size: 32rpx;
-  font-weight: 650;
-}
-.state {
-  margin-top: 20rpx;
-  color: var(--color-primary);
-  font-size: 30rpx;
-  font-weight: 700;
-}
-.summary {
-  margin: 20rpx 0;
-  padding: 20rpx;
-  border-radius: 16rpx;
-  background: var(--color-surface-subtle);
-  line-height: 1.8;
-}
-button:focus-visible,
-input:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-@media (prefers-reduced-motion: reduce) {
-  button {
-    transition: none;
-  }
-}
-</style>
+<style scoped src="./event-signup.css"></style>

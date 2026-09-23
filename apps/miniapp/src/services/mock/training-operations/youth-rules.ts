@@ -126,14 +126,20 @@ const createYouthRuleDraft = (data: any) => {
     typeof data.hardBlock !== "boolean"
   )
     throw new Error("监管规则字段必须完整，预警阈值不能超过最大有效期限");
-  const effectiveFrom = new Date(String(data.effectiveFrom || ""));
+  if (data.effectiveImmediately && data.effectiveFrom !== undefined)
+    throw new Error("立即生效时无需指定生效时间");
+  const effectiveFrom = data.effectiveImmediately
+    ? new Date()
+    : new Date(String(data.effectiveFrom || ""));
   if (!Number.isFinite(effectiveFrom.getTime()))
     throw new Error("监管规则生效时间格式无效");
   const command = {
     kind: "YOUTH_TRAINING_RULE_CREATE",
     ...values,
     hardBlock: data.hardBlock,
-    effectiveFrom: effectiveFrom.toISOString(),
+    effectiveFrom: data.effectiveImmediately
+      ? "IMMEDIATE"
+      : effectiveFrom.toISOString(),
     reason,
   };
   const hash = commandHash(command);
@@ -146,7 +152,7 @@ const createYouthRuleDraft = (data: any) => {
       throw new Error("监管规则制单幂等键已用于其他命令");
     return youthRuleManagementView(replay);
   }
-  if (!Number.isFinite(effectiveFrom.getTime()) || effectiveFrom <= new Date())
+  if (!data.effectiveImmediately && effectiveFrom <= new Date())
     throw new Error("监管规则生效时间必须晚于当前时间");
   const now = new Date().toISOString();
   const rule = {
@@ -191,6 +197,7 @@ export const decideYouthRule = (
   const idempotencyKey = requireText(data.idempotencyKey, "幂等键", 8, 100);
   const target = decision === "publish" ? "PUBLISHED" : "REJECTED";
   const hash = commandHash({
+    ...(data.effectiveImmediately ? { effectiveImmediately: true } : {}),
     kind: "YOUTH_TRAINING_RULE_DECIDE",
     ruleId,
     target,
@@ -221,16 +228,28 @@ export const decideYouthRule = (
     throw new Error("监管规则已完成复核，不能重复覆盖状态");
   const now = new Date();
   if (target === "PUBLISHED") {
-    if (new Date(rule.effectiveFrom) <= now)
+    if (data.effectiveImmediately) rule.effectiveFrom = now.toISOString();
+    if (!data.effectiveImmediately && new Date(rule.effectiveFrom) <= now)
       throw new Error("规则预定生效时间已过，请重新制单以避免追溯生效");
-    const conflicting = rules.find(
-      (item) =>
-        item.id !== rule.id &&
-        item.status === "PUBLISHED" &&
-        new Date(item.effectiveFrom) >= new Date(rule.effectiveFrom),
-    );
-    if (conflicting)
+    const conflicting = [...rules]
+      .sort(
+        (a, b) =>
+          new Date(a.effectiveFrom).getTime() -
+          new Date(b.effectiveFrom).getTime(),
+      )
+      .find(
+        (item) =>
+          item.id !== rule.id &&
+          item.status === "PUBLISHED" &&
+          new Date(item.effectiveFrom) >= new Date(rule.effectiveFrom),
+      );
+    if (
+      conflicting &&
+      (!data.effectiveImmediately || new Date(conflicting.effectiveFrom) <= now)
+    )
       throw new Error("已有同时间或更晚生效的已发布规则，请先处理版本顺序");
+    if (data.effectiveImmediately)
+      rule.effectiveTo = conflicting?.effectiveFrom ?? null;
     const previous = rules
       .filter(
         (item) =>
@@ -282,6 +301,7 @@ export const createYouthRule = (data: any) => {
   return result.status === "DRAFT"
     ? decideYouthRule(result.id, "publish", {
         reason: data.reason,
+        effectiveImmediately: data.effectiveImmediately,
         idempotencyKey: mockExecutionKey("youth-rule", data.idempotencyKey),
       })
     : result;

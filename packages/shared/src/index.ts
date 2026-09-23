@@ -18,3 +18,6 @@ export type {
 export * from "./error-contract.js";
 
 export * from "./transaction-contract.js";
+
+export * from "./event-contract.js";
+export * from "./coupon-contract.js";

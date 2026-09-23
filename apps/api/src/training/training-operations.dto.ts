@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer'
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -14,108 +14,109 @@ import {
   Min,
   MinLength,
   ValidateNested,
-} from 'class-validator'
+  ValidateIf,
+} from 'class-validator';
 
 import {
   SourceChannel,
   TrainingTrialStatus,
   YouthTrainingRuleStatus,
-} from '../generated/prisma/enums.js'
+} from '../generated/prisma/enums.js';
 
 export class TrainingTrialQueryDto {
   @IsOptional()
   @IsEnum(TrainingTrialStatus)
-  status?: TrainingTrialStatus
+  status?: TrainingTrialStatus;
 
   @IsOptional()
   @IsDateString()
-  from?: string
+  from?: string;
 
   @IsOptional()
   @IsDateString()
-  to?: string
+  to?: string;
 }
 
 export class CreateTrainingTrialDto {
   @IsOptional()
   @IsString()
-  leadId?: string
+  leadId?: string;
 
   @IsOptional()
   @IsString()
-  studentId?: string
+  studentId?: string;
 
   @IsOptional()
   @IsString()
-  memberId?: string
+  memberId?: string;
 
   @IsString()
-  productId: string
-
-  @IsOptional()
-  @IsString()
-  classId?: string
+  productId: string;
 
   @IsOptional()
   @IsString()
-  sessionId?: string
+  classId?: string;
+
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
 
   @IsString()
-  coachId: string
+  coachId: string;
 
   @IsEnum(SourceChannel)
-  sourceChannel: SourceChannel
+  sourceChannel: SourceChannel;
 
   @IsDateString()
-  scheduledStartsAt: string
+  scheduledStartsAt: string;
 
   @IsDateString()
-  scheduledEndsAt: string
+  scheduledEndsAt: string;
 
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason: string
+  reason: string;
 
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  idempotencyKey: string
+  idempotencyKey: string;
 }
 
 export class TrainingTrialActionDto {
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason: string
+  reason: string;
 
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  idempotencyKey: string
+  idempotencyKey: string;
 }
 
 export class TrainingTrialDimensionDto {
   @IsString()
   @MinLength(1)
   @MaxLength(40)
-  key: string
+  key: string;
 
   @IsString()
   @MinLength(1)
   @MaxLength(80)
-  label: string
+  label: string;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(5)
-  score: number
+  score: number;
 
   @IsOptional()
   @IsString()
   @MaxLength(300)
-  note?: string
+  note?: string;
 }
 
 export class AssessTrainingTrialDto extends TrainingTrialActionDto {
@@ -124,66 +125,78 @@ export class AssessTrainingTrialDto extends TrainingTrialActionDto {
   @ArrayMaxSize(20)
   @ValidateNested({ each: true })
   @Type(() => TrainingTrialDimensionDto)
-  dimensions: TrainingTrialDimensionDto[]
+  dimensions: TrainingTrialDimensionDto[];
 
   @IsString()
   @MinLength(2)
   @MaxLength(500)
-  recommendation: string
+  recommendation: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(1000)
-  note?: string
+  note?: string;
 }
 
 export class ConvertTrainingTrialDto extends TrainingTrialActionDto {
   @IsString()
-  enrollmentId: string
+  enrollmentId: string;
 }
 
 export class CreateYouthTrainingRuleDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  maxTotalSessions: number
+  maxTotalSessions: number;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  maxValidityDays: number
+  maxValidityDays: number;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  maxContractAmountCents: number
+  maxContractAmountCents: number;
 
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  warningThresholdDays: number
+  warningThresholdDays: number;
 
   @IsBoolean()
-  hardBlock: boolean
+  hardBlock: boolean;
 
+  @IsOptional()
+  @IsBoolean()
+  effectiveImmediately?: boolean;
+
+  @ValidateIf(
+    (dto) =>
+      dto.effectiveImmediately !== true || dto.effectiveFrom !== undefined,
+  )
   @IsDateString()
-  effectiveFrom: string
+  effectiveFrom?: string;
 
   @IsString()
   @MinLength(2)
   @MaxLength(300)
-  reason: string
+  reason: string;
 
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  idempotencyKey: string
+  idempotencyKey: string;
 }
 
-export class DecideYouthTrainingRuleDto extends TrainingTrialActionDto {}
+export class DecideYouthTrainingRuleDto extends TrainingTrialActionDto {
+  @IsOptional()
+  @IsBoolean()
+  effectiveImmediately?: boolean;
+}
 
 export class YouthTrainingRuleQueryDto {
   @IsOptional()
   @IsEnum(YouthTrainingRuleStatus)
-  status?: YouthTrainingRuleStatus
+  status?: YouthTrainingRuleStatus;
 }

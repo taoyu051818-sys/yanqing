@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { openMemberPage } from "../../utils/member-navigation";
 import { computed, ref, watch } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import AppIcon from "../../components/AppIcon.vue";
@@ -93,7 +94,7 @@ watch(tabs, (available) => {
     activeTab.value = "today";
 });
 function openRoute(route: string) {
-  if (route === "/pages/booking/index") uni.switchTab({ url: route });
+  if (route === "/pages/booking/index") openMemberPage(route + "?mode=ASSISTED");
   else uni.navigateTo({ url: route });
 }
 function openWork(item: WorkItem) {

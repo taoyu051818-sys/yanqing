@@ -83,3 +83,10 @@ describe("training response ownership", () => {
     expect(resource.data.value).toEqual([]);
   });
 });
+
+it('keeps an explicitly selected directory record when an older fetch resolves', async () => {
+  const scope=ref('admin'); const resource=useTrainingResource<string[]>(()=>[],()=>scope.value);
+  const old=deferred<string[]>(); const pending=resource.load(()=>old.promise);
+  resource.replace(['selected-person']); old.resolve(['old-person']); await pending;
+  expect(resource.data.value).toEqual(['selected-person']); scope.value='other'; expect(resource.data.value).toEqual([]);
+});

@@ -1,3 +1,4 @@
+import type { MemberCouponView } from '@yanqing/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -36,7 +37,10 @@ import {
   assertAllianceCommandReplay,
 } from '../shared/alliance-policy.js';
 
-export async function listMyCoupons(prisma: PrismaService, actor: AuthUser) {
+export async function listMyCoupons(
+  prisma: PrismaService,
+  actor: AuthUser,
+): Promise<MemberCouponView<Date>[]> {
   const coupons = await prisma.couponCode.findMany({
     where: { holderId: actor.sub },
     // A member only needs the benefit and public partner identity.  Never

@@ -1,3 +1,4 @@
+import { isYouthEnrollment } from "@yanqing/shared";
 import { mockUser } from "../core";
 import { getOrders, saveOrders } from "../venue";
 import {
@@ -349,7 +350,7 @@ export const postMockTrainingConsume = (
     0,
     Number(enrollment.prepaidBalanceCents || 0) - recognized,
   );
-  if (enrollment.product?.audience === "YOUTH") {
+  if (isYouthEnrollment(enrollment)) {
     enrollment.growthPointsBalance =
       Number(enrollment.growthPointsBalance || 0) + 1;
   }
@@ -373,7 +374,7 @@ export const postMockTrainingConsume = (
     consumedSessions: 1,
     consumedAt: new Date().toISOString(),
     confirmedRevenueCents: recognized,
-    growthPointsAwarded: enrollment.product?.audience === "YOUTH" ? 1 : 0,
+    growthPointsAwarded: isYouthEnrollment(enrollment) ? 1 : 0,
     operatorId: mockUser().id,
     revenueRecognitions: [
       ...(attendance.revenueRecognitions || []),

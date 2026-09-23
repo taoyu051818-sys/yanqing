@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useBookingCoupons } from "./use-booking-coupons";
+import { useBookingAvailability } from "./use-booking-availability";
+import MemberDirectorySearch from "../../components/MemberDirectorySearch.vue";
 import VenueSummary from "../../components/VenueSummary.vue";
 import { useVenueProfile } from "../../composables/use-venue-profile";
 const venue = useVenueProfile();
@@ -14,17 +17,14 @@ import {
   isAuthSessionCurrent,
 } from "../../services/auth-session";
 import { useSessionStore } from "../../stores/session";
-import type {
-  CourtAvailability,
-  MemberDirectoryItem,
-} from "../../types/domain";
+import type { MemberDirectoryItem } from "../../types/domain";
 import { money, today } from "../../utils/format";
 import { withPendingCreationKey } from "../../utils/pending-creation-key";
 import {
   requestMemberLogin,
   openMemberPage,
 } from "../../utils/member-navigation";
-import { selectableBookingCoupons } from "../../utils/booking-coupons";
+
 import { consumeBookingIntent } from "../../utils/member-navigation";
 
 const session = useSessionStore();
@@ -56,7 +56,7 @@ function setMode(mode: "SELF" | "ASSISTED") {
   couponCode.value = "";
   showCoupon.value = false;
   showBookingReview.value = false;
-  if (mode === "ASSISTED") showMembers.value = true;
+  showMembers.value = false;
   void load(true);
 }
 function selectMember(member: MemberDirectoryItem) {
@@ -81,171 +81,41 @@ watch(canAssist, (allowed) => {
     showMembers.value = false;
   }
 });
-const date = ref(today());
-const showAllDay = ref(false);
-const visibleSlots = computed(() =>
-  !data.value
-    ? []
-    : assisted.value || showAllDay.value || date.value !== today()
-      ? data.value.slots
-      : data.value.slots.filter((slot) => slotTimes(slot).start > Date.now()),
-);
-const data = ref<CourtAvailability | null>(null);
-const loading = ref(false);
-const selected = ref<{ courtId: string; slotId: string } | null>(null);
-const couponCode = ref("");
-const showCoupon = ref(false);
-const coupons = ref<any[]>([]);
-const couponError = ref("");
-const couponLoading = ref(false);
-const couponOptions = computed(() => selectableBookingCoupons(coupons.value));
-const selectedCoupon = computed(() =>
-  couponOptions.value.find((item) => item.code === couponCode.value),
-);
-async function loadCoupons(requestedId = "") {
-  coupons.value = [];
-  couponError.value = "";
-  if (!session.isAuthenticated) {
-    couponCode.value = "";
-    return;
-  }
-  couponLoading.value = true;
-  try {
-    coupons.value = await endpoints.myCoupons();
-    if (requestedId)
-      couponCode.value =
-        couponOptions.value.find((item) => item.id === requestedId)?.code || "";
-    if (couponCode.value && !selectedCoupon.value) {
-      couponCode.value = "";
-      couponError.value = "原优惠券当前不可用，已取消选择。";
-    }
-    if (requestedId && !couponCode.value)
-      couponError.value = "这张券当前不可用，请选择其他券或不使用优惠券。";
-  } catch {
-    couponCode.value = "";
-    couponError.value = "券包暂未同步，可重试或不使用优惠券继续预约。";
-  } finally {
-    couponLoading.value = false;
-  }
-}
-const error = ref("");
-
-const selectedSlot = computed(() =>
-  data.value?.slots.find((slot) => slot.id === selected.value?.slotId),
-);
-const selectedCourt = computed(() =>
-  data.value?.courts.find((court) => court.id === selected.value?.courtId),
-);
-
-function slotRange(slot: CourtAvailability["slots"][number]) {
-  const format = (minutes: number) =>
-    `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-  return `${format(slot.startMinutes)}-${format(slot.endMinutes)}`;
-}
-
-function slotTimes(slot: CourtAvailability["slots"][number]) {
-  const atMinutes = (minutes: number) => {
-    return (
-      new Date(`${date.value}T00:00:00+08:00`).getTime() + minutes * 60_000
-    );
-  };
-  const start = atMinutes(slot.startMinutes);
-  const rawEnd = atMinutes(slot.endMinutes);
-  return { start, end: rawEnd <= start ? rawEnd + 86_400_000 : rawEnd };
-}
-
-function isBooked(courtId: string, slot: CourtAvailability["slots"][number]) {
-  const { start, end } = slotTimes(slot);
-  return Boolean(
-    data.value?.bookings.some(
-      (booking) =>
-        booking.courtId === courtId &&
-        new Date(booking.startsAt).getTime() < end &&
-        new Date(booking.endsAt).getTime() > start,
-    ),
-  );
-}
-
-function isClosed(courtId: string, slot: CourtAvailability["slots"][number]) {
-  const { start, end } = slotTimes(slot);
-  return Boolean(
-    data.value?.closures.some(
-      (closure) =>
-        closure.courtId === courtId &&
-        closure.status === "ACTIVE" &&
-        new Date(closure.startsAt).getTime() < end &&
-        new Date(closure.endsAt).getTime() > start,
-    ),
-  );
-}
-
-function unavailableReason(
-  courtId: string,
-  slot: CourtAvailability["slots"][number],
-) {
-  const court = data.value?.courts.find((item) => item.id === courtId);
-  if (!slot.price) return "未定价";
-  if (!court?.enabled || !slot.enabled) return "不可售";
-  if (court.usage === "MAINTENANCE") return "维护中";
-  if (court.usage === "TRAINING") return "培训专用";
-  if (slotTimes(slot).start <= Date.now()) return "已过时段";
-  if (isClosed(courtId, slot)) return "已封场";
-  if (isBooked(courtId, slot)) return "已占用";
-  return "";
-}
-
-function blockedReason(
-  courtId: string,
-  slot: CourtAvailability["slots"][number],
-) {
-  if (!slot.price) return "未定价";
-  return assisted.value ? "" : unavailableReason(courtId, slot);
-}
-const needsOverride = computed(() =>
-  Boolean(
-    assisted.value &&
-    selected.value &&
-    selectedSlot.value &&
-    unavailableReason(selected.value.courtId, selectedSlot.value),
-  ),
-);
-
-let availabilitySequence = 0;
-async function load(resetSelection = false) {
-  const run = ++availabilitySequence;
-  const requestedDate = date.value;
-  loading.value = true;
-  error.value = "";
-  if (resetSelection) selected.value = null;
-  try {
-    const availability = await (assisted.value
-      ? endpoints.assistedAvailability(requestedDate)
-      : endpoints.availability(requestedDate));
-    if (run !== availabilitySequence || requestedDate !== date.value) return;
-    data.value = availability;
-    if (
-      selected.value &&
-      (!selectedSlot.value ||
-        blockedReason(selected.value.courtId, selectedSlot.value))
-    ) {
-      selected.value = null;
-      uni.showToast({ title: "原时段已不可订，请重新选择", icon: "none" });
-    }
-  } catch (cause: any) {
-    if (run === availabilitySequence) error.value = cause.message;
-  } finally {
-    if (run === availabilitySequence) loading.value = false;
-  }
-}
-
-function choose(courtId: string, slot: CourtAvailability["slots"][number]) {
-  if (loading.value || submitting.value || blockedReason(courtId, slot)) return;
-  selected.value =
-    selected.value?.courtId === courtId && selected.value.slotId === slot.id
-      ? null
-      : { courtId, slotId: slot.id };
-  submissionError.value = "";
-}
+const {
+  date,
+  showAllDay,
+  visibleSlots,
+  data,
+  loading,
+  selected,
+  error,
+  selectedSlot,
+  selectedCourt,
+  slotRange,
+  slotTimes,
+  isBooked,
+  isClosed,
+  unavailableReason,
+  blockedReason,
+  needsOverride,
+  load,
+  choose,
+} = useBookingAvailability({
+  assisted,
+  isSubmitting: () => submitting.value,
+  onSelectionChange: () => {
+    submissionError.value = "";
+  },
+});
+const {
+  couponCode,
+  showCoupon,
+  couponError,
+  couponLoading,
+  couponOptions,
+  selectedCoupon,
+  loadCoupons,
+} = useBookingCoupons();
 
 let pageGeneration = 0;
 let pageVisible = true;
@@ -300,7 +170,7 @@ async function submit(confirmedReview = false) {
         ? { memberId: customer!.id }
         : { couponCode: couponCode.value || undefined }),
     };
-    const order: any = await withPendingCreationKey(
+    const order = await withPendingCreationKey(
       isAssisted ? "venue.booking.assisted" : "venue.booking.member",
       command,
       (creationIdempotencyKey) =>
@@ -417,6 +287,10 @@ onShow(async () => {
         </button></view
       >
     </view>
+    <view v-if="assisted && !targetMember" class="card inline-member-search"
+      ><text class="inline-member-title">为哪位会员订场？</text
+      ><MemberDirectorySearch :page-size="3" @select="selectMember"
+    /></view>
     <view v-if="error" class="card error"
       ><AppIcon name="warning" :size="32" tone="danger" /><text>{{
         error
@@ -424,9 +298,7 @@ onShow(async () => {
       ><button class="secondary" @tap="load()">重试</button></view
     >
     <view v-if="loading && !data" class="matrix-skeleton skeleton" />
-    <view
-      v-if="data?.courts.length && date === today() && !assisted"
-      class="day-toggle"
+    <view v-if="data?.courts.length && date === today()" class="day-toggle"
       ><button :aria-pressed="showAllDay" @tap="showAllDay = !showAllDay">
         {{ showAllDay ? "只看接下来时段" : "查看全天（含已过时）" }}
       </button></view
@@ -744,7 +616,13 @@ onShow(async () => {
               "，请提醒会员在 10 分钟内到“我的订单”付款。现场收款请进入今日营业处理。"
         }}</text
         ><button class="primary" @tap="openAssistedOrder">查看现场订单</button
-        ><button class="secondary" @tap="assistedOrder = null">
+        ><button
+          class="secondary"
+          @tap="
+            assistedOrder = null;
+            targetMember = null;
+          "
+        >
           继续订场
         </button></view
       ></view
@@ -752,341 +630,15 @@ onShow(async () => {
   </view>
 </template>
 
+<style scoped src="./booking.css"></style>
+
 <style scoped>
-.slot-label,
-.head:first-child {
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  background: #fff;
-}
-.head:first-child {
-  z-index: 3;
-  background: #1b5c39;
-}
-.day-toggle button {
-  min-height: 44px;
-  padding: 8rpx 0;
-  margin: 0;
-  background: transparent;
-  font-size: 26rpx;
-  color: var(--color-primary);
-}
-.checkout-note {
-  display: block;
-  font-size: 24rpx;
-  color: var(--color-muted);
-  margin-bottom: 10rpx;
-}
-.override-form {
-  display: flex;
-  flex-direction: column;
-  gap: 20rpx;
-  line-height: 1.6;
-}
-.override-note {
-  color: var(--color-text-secondary, #5f6e64);
-  font-size: 25rpx;
-}
-.override-input {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 144rpx;
-  height: 160rpx;
-  padding: 20rpx;
-  border: 1px solid var(--color-border);
-  border-radius: 16rpx;
-  background: var(--color-surface-subtle, #f7f9f6);
-}
-.override-actions {
-  display: flex;
-  gap: 16rpx;
-}
-.override-actions button {
-  flex: 1;
-  min-height: 48px;
-  margin: 0;
-}
-.date-label,
-.date {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-}
-.date-label {
-  font-weight: 700;
-}
-.date {
-  color: #17653d;
-  font-weight: 700;
-}
-.matrix-skeleton {
-  width: 100%;
-  min-height: 460rpx;
-  border-radius: 24rpx;
-}
-.dock-member {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
-  width: 100%;
-  margin: 0 0 12rpx;
-  padding: 12rpx 0;
-  min-height: 44px;
-  font-size: 26rpx;
-  background: transparent;
-  color: var(--color-primary);
-  text-align: left;
-}
-.dock-member text:first-child {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.dock-member text:last-child {
-  flex-shrink: 0;
-}
-.matrix-hint {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8rpx;
-  margin: -2rpx 2rpx 12rpx;
-  color: #68756d;
-  font-size: 24rpx;
-}
-.matrix-wrap {
-  width: 100%;
-  padding-bottom: 20rpx;
-}
-.matrix {
-  display: grid;
-  overflow: visible;
-  background: #fff;
-  border-radius: 24rpx;
-}
-.cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 104rpx;
-  padding: 8rpx;
-  border-right: 1rpx solid #edf0ed;
-  border-bottom: 1rpx solid #edf0ed;
-  box-sizing: border-box;
-  font-size: 22rpx;
-  line-height: 1.5;
-}
-.head {
-  position: sticky;
-  top: 0;
-  color: #fff;
-  background: #1b5c39;
-  font-weight: 700;
-}
-.slot-label {
-  padding: 8rpx;
-  font-weight: 700;
-}
-.court {
-  color: #17653d;
-  background: #f1f8f3;
-}
-.court.disabled {
-  color: #9ca49f;
-  background: #f2f3f2;
-}
-.court.override {
-  color: var(--color-primary-strong, #123f29);
-  background: var(--color-accent-soft, #fff3d9);
-}
-.court.selected {
-  color: #fff;
-  background: #17653d;
-  box-shadow: inset 0 0 0 4rpx #c9ac54;
-}
-.coupon-picker {
-  display: grid;
-  gap: 16rpx;
-  margin: 20rpx 0;
-  height: 42vh;
-}
-.coupon-picker button {
-  margin: 0;
-  padding: 16rpx;
-  font-size: 25rpx;
-}
-.coupon-picker button[aria-pressed="true"] {
-  outline: 2rpx solid var(--color-primary);
-}
-.coupon-picker .muted {
-  line-height: 1.6;
-}
-.coupon-toggle {
-  flex-shrink: 0;
-  margin: 0;
-  padding: 10rpx 16rpx;
-  font-size: 24rpx;
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
-  border-radius: 16rpx;
-}
-.error {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  color: #ae2f2f;
-  background: #fff0ef;
-}
-.error text {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.booking-page {
-  padding-bottom: calc(450rpx + env(safe-area-inset-bottom));
-}
-.identity-title {
+.inline-member-title {
   display: block;
   font-size: 30rpx;
-  font-weight: 750;
+  font-weight: 600;
 }
-.booking-identity {
-  padding: 12rpx;
+.inline-member-search {
+  padding: 24rpx;
 }
-.mode-switch {
-  display: flex;
-  gap: 12rpx;
-  margin: 0;
-}
-.mode-switch button {
-  min-height: 44px;
-  flex: 1;
-  margin: 0;
-  padding: 16rpx;
-  font-size: 28rpx;
-  color: #5f6f65;
-  background: #f0f3ef;
-  border: 2rpx solid transparent;
-}
-.mode-switch button.active {
-  color: #17653d;
-  background: #e7f4eb;
-  border-color: #17653d;
-}
-.booking-dock {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 30;
-  padding: 18rpx 28rpx calc(18rpx + env(safe-area-inset-bottom));
-  background: #fff;
-  border-top: 1rpx solid #dce5dd;
-  box-shadow: 0 -8rpx 28rpx rgba(18, 63, 41, 0.08);
-  box-sizing: border-box;
-}
-.selection-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
-  padding-bottom: 12rpx;
-}
-.selection-summary > view {
-  flex: 1;
-  min-width: 0;
-}
-.selection-title {
-  display: block;
-  font-size: 26rpx;
-  font-weight: 700;
-}
-.selection-summary .muted {
-  display: block;
-  font-size: 22rpx;
-}
-.checkout-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20rpx;
-}
-.checkout-price {
-  flex: 1;
-  min-width: 0;
-}
-.checkout-price > text {
-  display: block;
-}
-.checkout-price .muted {
-  font-size: 22rpx;
-}
-.total-price {
-  color: #17653d;
-  font-size: 42rpx;
-  font-weight: 800;
-  line-height: 1.25;
-}
-.checkout-button {
-  flex: 0 0 240rpx;
-  margin: 0;
-  min-height: 88rpx;
-  border-radius: 18rpx;
-}
-.selection-prompt {
-  font-size: 28rpx;
-  font-weight: 650;
-  color: #5f6f65;
-}
-.submit-error {
-  display: block;
-  max-height: 110rpx;
-  overflow-y: auto;
-  padding-bottom: 12rpx;
-  color: #a52626;
-  font-size: 24rpx;
-  line-height: 1.5;
-}
-.booking-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  background: rgba(15, 31, 21, 0.42);
-  display: flex;
-  align-items: flex-end;
-}
-.booking-sheet {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 28rpx 28rpx calc(28rpx + env(safe-area-inset-bottom));
-  border-radius: 28rpx 28rpx 0 0;
-  background: #fff;
-}
-.sheet-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 32rpx;
-  font-weight: 750;
-}
-.sheet-heading button {
-  margin: 0;
-}
-.success-copy {
-  display: block;
-  margin: 24rpx 0;
-  font-size: 28rpx;
-  line-height: 1.6;
-}
-.booking-sheet > .secondary {
-  margin-top: 18rpx;
-}
-/* #ifdef H5 */
-.booking-dock {
-  bottom: var(--window-bottom, 50px);
-}
-/* #endif */
 </style>

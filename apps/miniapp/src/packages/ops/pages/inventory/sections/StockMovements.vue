@@ -4,6 +4,7 @@ import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 import type { Tab, MovementType } from "../page-types.js";
 
 const props = defineProps<{
+  formOnly?: boolean;
   errorMessage: string;
   tab: Tab;
   canOperate: boolean;
@@ -77,7 +78,7 @@ const showMovementForm = computed({
 <template>
   <view>
     <template v-if="!errorMessage && tab === 'MOVEMENT'">
-      <view v-if="canOperate" class="create-row"
+      <view v-if="canOperate && !formOnly" class="create-row"
         ><button
           class="secondary create-half"
           @tap="openMovementForm('TRANSFER')"
@@ -93,10 +94,10 @@ const showMovementForm = computed({
             ><text class="title"
               >新建{{ movementType === "TRANSFER" ? "调拨" : "报损" }}单</text
             ><text class="muted"
-              >商品与库位不自动带入，请核对后提交。</text
+              >核对商品、来源库位与批次，再填写本次数量。</text
             ></view
           >
-          <button class="link-button" @tap="showMovementForm = false">
+          <button v-if="!formOnly" class="link-button" @tap="showMovementForm = false">
             取消
           </button>
         </view>
@@ -152,6 +153,7 @@ const showMovementForm = computed({
         <text class="field-label"
           >{{ movementType === "TRANSFER" ? "调拨" : "报损" }}原因</text
         >
+        <view class="reason-presets"><button v-for="reason in (movementType === 'LOSS' ? ['破损', '过期', '盘查损耗'] : ['补充前台库存', '调整存放库位'])" :key="reason" class="secondary" :disabled="saving" @tap="movementForm.reason = reason">{{ reason }}</button></view>
         <input
           v-model="movementForm.reason"
           class="field"
@@ -160,6 +162,7 @@ const showMovementForm = computed({
           "
         />
         <button
+          v-if="!formOnly"
           class="primary form-submit"
           :loading="saving"
           :disabled="saving"
@@ -168,6 +171,7 @@ const showMovementForm = computed({
           确认建立{{ movementType === "TRANSFER" ? "调拨" : "报损" }}单
         </button>
       </view>
+      <template v-if="!formOnly">
       <view v-if="!loading && !operations.length" class="card empty"
         >暂无调拨或报损单。</view
       >
@@ -203,8 +207,11 @@ const showMovementForm = computed({
           {{ movementActionLabel(document) }}
         </button></view
       >
+      </template>
     </template>
   </view>
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>.reason-presets{display:flex;gap:12rpx;flex-wrap:wrap;margin:12rpx 0}.reason-presets button{margin:0;min-height:44px;font-size:26rpx;padding:12rpx 20rpx}</style>

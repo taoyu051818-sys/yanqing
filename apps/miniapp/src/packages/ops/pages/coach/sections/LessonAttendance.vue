@@ -7,13 +7,15 @@ import type {
 } from "@yanqing/shared";
 
 import type { useSessionStore } from "../../../../../stores/session";
-import { toRefs } from "vue";
+import { ref, toRefs, watch } from "vue";
+import LessonBatchControls from "./LessonBatchControls.vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import { money, shortDate } from "../../../../../utils/format";
 import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 
 const props = defineProps<{
   loading: boolean;
+  refresh: () => Promise<void>;
   activeLessons: TrainingSessionView[];
   lessons: TrainingSessionView[];
   focusedRecord: string;
@@ -120,10 +122,21 @@ const {
   complete,
   lessonWindowState,
 } = toRefs(props);
+const arrivalDraft = ref<string[]>([]), batchBusy = ref(false);
+watch(() => props.session.user?.id, () => { arrivalDraft.value = []; });
+function queueArrival(lesson: TrainingSessionView, student: TrainingEnrollmentView) {
+  if (batchBusy.value) return;
+  if (props.lessonWindowState(lesson, 'attendanceWindow') !== 'OPEN') { props.mark(lesson, student, 'ATTENDED'); return; }
+  arrivalDraft.value = arrivalDraft.value.includes(student.id) ? arrivalDraft.value.filter(id => id !== student.id) : [...arrivalDraft.value, student.id];
+}
+function batchCandidates(lesson: TrainingSessionView, kind: 'proposal' | 'confirmation') {
+  if (!props.isConsumableLesson(lesson) || (kind === 'proposal' ? !props.canProposeConsume : !props.isChecker || props.lessonWindowState(lesson, 'completionWindow') !== 'OPEN')) return [];
+  return props.studentsFor(lesson).filter((student: TrainingEnrollmentView) => props.isActiveEnrollment(student) && !props.isRefundPending(student) && props.attendanceStatus(lesson, student) === 'ATTENDED' && !props.activeRecognition(lesson, student) && !props.attendanceFor(lesson, student)?.consumedSessions && (kind === 'proposal' ? !props.hasPendingProposal(lesson, student) : true));
+}
 </script>
 
 <template>
-  <view class="lesson-detail">
+  <view class="lesson-detail" :class="{ 'has-attendance-draft': arrivalDraft.length }">
     <view class="section-title"
       >学员与点名
       <text class="section-note">{{
@@ -150,6 +163,7 @@ const {
           ></view
         ><StatusBadge :value="lesson.status"
       /></view>
+      <LessonBatchControls :lesson="lesson" :students="studentsFor(lesson)" :proposals="batchCandidates(lesson, 'proposal')" :confirmations="batchCandidates(lesson, 'confirmation')" v-model:selected-arrivals="arrivalDraft" @update:busy="batchBusy = $event" :refresh="refresh" />
       <view v-if="studentsFor(lesson).length" class="student-list">
         <view
           v-for="student in studentsFor(lesson)"
@@ -212,19 +226,22 @@ const {
             >
               <button
                 class="secondary inline"
-                @tap="mark(lesson, student, 'ATTENDED')"
+                :class="{ 'arrival-selected': arrivalDraft.includes(student.id) }"
+                :aria-pressed="arrivalDraft.includes(student.id)"
+                :disabled="batchBusy"
+                @tap="queueArrival(lesson, student)"
               >
-                到场
+                {{ arrivalDraft.includes(student.id) ? '到场 · 待保存' : '到场' }}
               </button>
               <button
                 class="ghost inline"
-                @tap="mark(lesson, student, 'ABSENT')"
+                :disabled="batchBusy || arrivalDraft.includes(student.id)" @tap="mark(lesson, student, 'ABSENT')"
               >
                 缺席
               </button>
               <button
                 class="ghost inline"
-                @tap="mark(lesson, student, 'LEAVE')"
+                :disabled="batchBusy || arrivalDraft.includes(student.id)" @tap="mark(lesson, student, 'LEAVE')"
               >
                 请假
               </button>
@@ -239,7 +256,7 @@ const {
                 !attendanceFor(lesson, student)?.consumedSessions
               "
               class="secondary inline"
-              @tap="propose(lesson, student)"
+              :disabled="batchBusy || arrivalDraft.length > 0" @tap="propose(lesson, student)"
             >
               提交消课建议
             </button>
@@ -254,7 +271,7 @@ const {
               "
               class="primary inline"
               :disabled="
-                (!canExecuteDirectly(session.roles) && attendanceFor(lesson, student)?.operatorId ===
+                batchBusy || arrivalDraft.length > 0 || (!canExecuteDirectly(session.roles) && attendanceFor(lesson, student)?.operatorId ===
                   session.user?.id) ||
                 !canUseLessonWindow(lesson, 'completionWindow')
               "
@@ -291,7 +308,7 @@ const {
               class="pending-text"
               >请安排补课</text
             >
-            <button v-if="canScheduleMakeup(lesson, student)" class="secondary inline" @tap="scheduleMakeup(lesson, student)">安排补课</button>
+            <button v-if="canScheduleMakeup(lesson, student)" class="secondary inline" :disabled="batchBusy || arrivalDraft.length > 0" @tap="scheduleMakeup(lesson, student)">安排补课</button>
             <button
               v-if="
                 canRequestCorrection &&
@@ -299,7 +316,7 @@ const {
                 !activeCorrection(activeRecognition(lesson, student).id)
               "
               class="danger inline"
-              @tap="requestCorrection(lesson, student)"
+              :disabled="batchBusy || arrivalDraft.length > 0" @tap="requestCorrection(lesson, student)"
             >
               {{ canExecuteDirectly(session.roles) ? "撤销消课" : "申请冲正" }}
             </button>
@@ -320,7 +337,7 @@ const {
         v-if="canCreateSession && isConsumableLesson(lesson)"
         class="primary finish"
         :disabled="
-          hasUnresolvedAttendance(lesson) ||
+          batchBusy || arrivalDraft.length > 0 || hasUnresolvedAttendance(lesson) ||
           !canUseLessonWindow(lesson, 'completionWindow')
         "
         @tap="complete(lesson)"
@@ -345,3 +362,5 @@ const {
 <style scoped>
 .lesson-detail { padding-bottom:calc(140rpx + env(safe-area-inset-bottom)); }.lesson-detail .finish { position:fixed; bottom:env(safe-area-inset-bottom); left:28rpx; right:28rpx; width:auto; margin:0; z-index:20; box-shadow:0 0 0 28rpx #fff; }
 </style>
+
+<style scoped>.has-attendance-draft{padding-bottom:calc(150rpx + env(safe-area-inset-bottom))}.arrival-selected{background:#17653d!important;color:#fff!important}</style>

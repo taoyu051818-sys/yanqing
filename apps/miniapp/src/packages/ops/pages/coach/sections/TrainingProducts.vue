@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { trainingAudienceLabel } from "@yanqing/shared";
 import type { TrainingProductView } from "@yanqing/shared";
 
-import { toRefs, computed } from "vue";
+import { toRefs, computed, ref } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
 import { money } from "../../../../../utils/format";
 
@@ -17,21 +18,7 @@ const props = defineProps<{
     product: TrainingProductView,
     enabled?: boolean,
   ) => Promise<void>;
-  editingProductId: string;
-  editProductName: string;
-  editProductTotalSessions: string;
-  editProductValidityDays: string;
-  editProductPriceYuan: string;
-  editProductReason: string;
-  cancelProductEdit: () => void;
   loading: boolean;
-}>();
-const emit = defineEmits<{
-  (event: "update:editProductName", value: string): void;
-  (event: "update:editProductTotalSessions", value: string): void;
-  (event: "update:editProductValidityDays", value: string): void;
-  (event: "update:editProductPriceYuan", value: string): void;
-  (event: "update:editProductReason", value: string): void;
 }>();
 const {
   activeProducts,
@@ -42,30 +29,18 @@ const {
   actionKey,
   beginProductEdit,
   updateProduct,
-  editingProductId,
-  cancelProductEdit,
   loading,
 } = toRefs(props);
-const editProductName = computed({
-  get: () => props.editProductName,
-  set: (value) => emit("update:editProductName", value),
-});
-const editProductTotalSessions = computed({
-  get: () => props.editProductTotalSessions,
-  set: (value) => emit("update:editProductTotalSessions", value),
-});
-const editProductValidityDays = computed({
-  get: () => props.editProductValidityDays,
-  set: (value) => emit("update:editProductValidityDays", value),
-});
-const editProductPriceYuan = computed({
-  get: () => props.editProductPriceYuan,
-  set: (value) => emit("update:editProductPriceYuan", value),
-});
-const editProductReason = computed({
-  get: () => props.editProductReason,
-  set: (value) => emit("update:editProductReason", value),
-});
+const keyword = ref("");
+const status = ref("ACTIVE");
+const shownProducts = computed(() =>
+  props.products.filter(
+    (product) =>
+      (status.value === "ALL" ||
+        (product.enabled !== false) === (status.value === "ACTIVE")) &&
+      product.name.toLowerCase().includes(keyword.value.trim().toLowerCase()),
+  ),
+);
 </script>
 
 <template>
@@ -77,10 +52,31 @@ const editProductReason = computed({
         {{ activeClasses.length }} 个有效班</text
       ></view
     >
-    <scroll-view v-if="products.length" scroll-x class="product-scroll">
+    <input
+      v-model="keyword"
+      class="form-input"
+      placeholder="搜索课程名称"
+      aria-label="搜索课程"
+    />
+    <view class="status-filters"
+      ><button
+        v-for="option in [
+          { value: 'ACTIVE', label: '在售' },
+          { value: 'DISABLED', label: '已停用' },
+          { value: 'ALL', label: '全部' },
+        ]"
+        :key="option.value"
+        :class="{ selected: status === option.value }"
+        :aria-pressed="status === option.value"
+        @tap="status = option.value"
+      >
+        {{ option.label }}
+      </button></view
+    >
+    <view v-if="shownProducts.length">
       <view class="product-row">
         <view
-          v-for="product in products"
+          v-for="product in shownProducts"
           :key="product.id"
           class="card product-card"
           :class="{ 'product-disabled': product.enabled === false }"
@@ -91,7 +87,7 @@ const editProductReason = computed({
               :value="product.enabled === false ? 'DISABLED' : 'ACTIVE'"
           /></view>
           <text class="muted"
-            >{{ product.audience === "YOUTH" ? "青少年" : "成人" }} ·
+            >{{ trainingAudienceLabel(product.audience) }} ·
             {{ product.totalSessions }} 课次 · 有效
             {{ product.validityDays }} 天</text
           >
@@ -135,72 +131,44 @@ const editProductReason = computed({
               {{ product.enabled === false ? "重新启用" : "停止销售" }}
             </button>
           </view>
-          <view
-            v-if="canConfigureTraining && editingProductId === product.id"
-            class="product-edit"
-            @tap.stop
-          >
-            <view
-              ><text class="field-label">产品名称</text
-              ><input
-                v-model="editProductName"
-                class="form-input"
-                maxlength="100"
-            /></view>
-            <view class="form-grid"
-              ><view
-                ><text class="field-label">总课次</text
-                ><input
-                  v-model="editProductTotalSessions"
-                  class="form-input"
-                  type="number" /></view
-              ><view
-                ><text class="field-label">有效期（天）</text
-                ><input
-                  v-model="editProductValidityDays"
-                  class="form-input"
-                  type="number" /></view
-            ></view>
-            <view
-              ><text class="field-label">售价（元）</text
-              ><input
-                v-model="editProductPriceYuan"
-                class="form-input"
-                type="digit"
-            /></view>
-            <view
-              ><text class="field-label">变更原因（必填）</text
-              ><textarea
-                v-model="editProductReason"
-                class="reason-input"
-                maxlength="300"
-                placeholder="说明调价、课次或有效期变更依据"
-              />
-            </view>
-            <view class="product-actions"
-              ><button
-                class="secondary inline"
-                :disabled="Boolean(actionKey)"
-                @tap="cancelProductEdit"
-              >
-                取消</button
-              ><button
-                class="primary inline"
-                :loading="actionKey === `product-update:${product.id}`"
-                :disabled="Boolean(actionKey)"
-                @tap="updateProduct(product, product.enabled !== false)"
-              >
-                保存设置
-              </button></view
-            >
-          </view>
         </view>
       </view>
-    </scroll-view>
+    </view>
     <view v-else-if="!loading" class="empty card"
-      >暂无课程产品，管理员可在下方创建首个产品。</view
+      >没有符合条件的课程，可调整搜索或新增课程。</view
     >
   </view>
 </template>
 
 <style scoped src="../page.css"></style>
+
+<style scoped>
+.product-row {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+.product-card {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0;
+}
+.status-filters {
+  display: flex;
+  gap: 12rpx;
+  margin: 16rpx 0 24rpx;
+}
+.status-filters button {
+  flex: 1;
+  min-height: 44px;
+  font-size: 28rpx;
+  margin: 0;
+  background: var(--color-surface);
+}
+.status-filters .selected {
+  background: var(--color-primary);
+  color: #fff;
+}
+</style>

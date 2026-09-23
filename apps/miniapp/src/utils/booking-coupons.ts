@@ -1,5 +1,12 @@
+import type { MemberCouponView } from "@yanqing/shared";
+
+type CouponCandidate = Pick<MemberCouponView, "status" | "code" | "expiresAt"> & {
+  template?: Partial<Omit<MemberCouponView["template"], "merchant">> & { merchant?: { status?: string } };
+  bookingUsage?: { eligible: boolean };
+};
+
 // Only pre-filter known-invalid coupons. Price and period rules remain server-owned.
-export function selectableBookingCoupons(coupons: any[], now = Date.now()) {
+export function selectableBookingCoupons<T extends CouponCandidate>(coupons: T[], now = Date.now()) {
   return coupons.filter(coupon => {
     const template = coupon.template
     return coupon.status === 'CLAIMED' && Boolean(coupon.code) && new Date(coupon.expiresAt).getTime() > now &&

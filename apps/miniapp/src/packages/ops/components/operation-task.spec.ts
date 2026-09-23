@@ -31,7 +31,8 @@ describe('modal operation task', () => {
     expect(task.state.values.reason).toBe('已现场核查')
     expect(task.state.error).toContain('状态已变化')
     await task.submit()
-    expect(task.state.result).toBe('处理成功')
+    expect(task.state.open).toBe(false)
+    expect(uni.showToast).toHaveBeenCalledWith(expect.objectContaining({title:'处理成功'}))
   })
   it('blocks duplicate clicks and an identity change before commit', async () => {
     const task = useOperationTask()
@@ -67,7 +68,7 @@ describe('modal operation task', () => {
   it('keeps the dialog open during submission and dismisses the completed result explicitly', async () => {
     const task = useOperationTask()
     let finish!: (value: string) => void
-    task.start({ title: '批准', description: '', confirmText: '确认', fields: [], submit: () => new Promise(done => { finish = done }) })
+    task.start({ title: '批准', description: '', confirmText: '确认', fields: [], successFeedback:'dialog', submit: () => new Promise(done => { finish = done }) })
     const pending = task.submit(); task.cancel()
     expect(task.state.open).toBe(true)
     finish('已批准'); await pending
@@ -89,4 +90,17 @@ it('closes a one-step refund with status feedback instead of another confirmatio
   await task.submit();
   expect(task.state.open).toBe(false); expect(task.state.result).toBe('');
   expect(uni.showToast).toHaveBeenCalledWith(expect.objectContaining({title:'退款处理中，无需再次审核'}));
+});
+
+it('submits edits through the owner command even when the component has a detached prop snapshot', async () => {
+  const task = useOperationTask(), submit = vi.fn().mockResolvedValue('已停用');
+  task.start({ title: '停用课程产品', description: '', confirmText: '确认停用', fields: [{ key: 'reason', label: '变更依据', min: 2 }], submit });
+  await task.submit();
+  const transported = { ...task, state: JSON.parse(JSON.stringify(task.state)) };
+  transported.setValue('reason', ' 调整课程安排 ');
+  expect(task.state.errors.reason).toBe('');
+  await transported.submit();
+  expect(submit).toHaveBeenCalledWith({ reason: '调整课程安排' });
+  transported.setValue('unknown', '忽略');
+  expect(task.state.values.unknown).toBeUndefined();
 });

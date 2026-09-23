@@ -1,3 +1,5 @@
+import { isYouthEnrollment } from "@yanqing/shared";
+import { includesYouthAudience } from "@yanqing/shared";
 import { mockUser } from "../core";
 import { getOrders } from "../venue";
 import {
@@ -68,7 +70,7 @@ export const decorateMockTrainingEnrollment = (
   operational = false,
 ) => {
   const warnings: string[] = [];
-  if (enrollment.product?.audience === "YOUTH") {
+  if (isYouthEnrollment(enrollment)) {
     const remainingDays = Math.ceil(
       (new Date(enrollment.expiresAt).getTime() - Date.now()) / 86_400_000,
     );
@@ -355,7 +357,7 @@ export const updateTrainingProduct = (productId: string, data: any) => {
     return product;
   }
   const regulatoryValidation =
-    product.audience === "YOUTH" && next.enabled
+    includesYouthAudience(product.audience) && next.enabled
       ? validateMockYouthProduct(next)
       : null;
   const before = { ...product };

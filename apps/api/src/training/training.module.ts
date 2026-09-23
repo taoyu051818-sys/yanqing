@@ -1,6 +1,8 @@
 import { TrainingTrialBookingService } from './trials/booking/training-trials-booking.service.js';
 import { TrainingTrialFollowUpService } from './trials/follow-up/training-trials-follow-up.service.js';
 import { Module } from '@nestjs/common';
+import { TrainingBatchController } from './batch/training-batch.controller.js';
+import { TrainingBatchService } from './batch/training-batch.service.js';
 import { TrainingCatalogService } from './catalog/training-catalog.service.js';
 import { TrainingStudentsService } from './students/training-students.service.js';
 import { TrainingEnrollmentsService } from './enrollments/training-enrollments.service.js';
@@ -26,6 +28,7 @@ import { YouthTrainingRulesService } from './youth-training-rules.service.js';
 
 @Module({
   controllers: [
+    TrainingBatchController,
     TrainingCatalogController,
     TrainingStudentsController,
     TrainingEnrollmentsController,
@@ -38,6 +41,7 @@ import { YouthTrainingRulesService } from './youth-training-rules.service.js';
     YouthTrainingRulesController,
   ],
   providers: [
+    TrainingBatchService,
     TrainingCatalogService,
     TrainingStudentsService,
     TrainingEnrollmentsService,

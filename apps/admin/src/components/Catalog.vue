@@ -327,7 +327,7 @@ onMounted(load);
             <td>
               {{
                 kind === 'training'
-                  ? (row.audience === 'YOUTH' ? '青少年' : '成人') +
+                  ? (row.audience === 'ALL' ? '不限' : row.audience === 'YOUTH' ? '青少年' : '成人') +
                     ' · ' +
                     row.totalSessions +
                     ' 次课'
@@ -425,6 +425,7 @@ onMounted(load);
               >培训对象<select v-model="draft.audience">
                 <option value="ADULT">成人</option>
                 <option value="YOUTH">青少年</option>
+                <option value="ALL">不限</option>
               </select></label
             >
             <div class="form-grid">

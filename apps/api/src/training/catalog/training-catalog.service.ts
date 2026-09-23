@@ -1,3 +1,4 @@
+import { includesYouthAudience } from '@yanqing/shared';
 import type { TrainingProductView } from '@yanqing/shared';
 import {
   Inject,
@@ -8,11 +9,7 @@ import {
 } from '@nestjs/common';
 import type { AuthUser } from '../../common/auth/auth-user.js';
 import { PrismaService } from '../../database/prisma.service.js';
-import {
-  AppRole,
-  Prisma,
-  TrainingAudience,
-} from '../../generated/prisma/client.js';
+import { AppRole, Prisma } from '../../generated/prisma/client.js';
 import type {
   CreateTrainingClassDto,
   CreateTrainingProductDto,
@@ -21,6 +18,7 @@ import type {
 import { orderCreationCommandHash } from '../../orders/order-creation-idempotency.js';
 import { YouthTrainingRulesService } from '../youth-training-rules.service.js';
 import {
+  serial,
   findTrainingCommandReplay,
   assertTrainingCommandReplay,
 } from '../shared/training-command-policy.js';
@@ -133,70 +131,88 @@ export class TrainingCatalogService {
         throw new ConflictException('培训产品幂等记录对应的对象不存在');
       return existing;
     }
-    const regulatoryValidation =
-      dto.audience === TrainingAudience.YOUTH
-        ? await validateYouthProduct(this.youthRules, {
-            totalSessions: dto.totalSessions,
-            validityDays: dto.validityDays,
-            priceCents: dto.priceCents,
-          })
-        : null;
+    const regulatoryValidation = includesYouthAudience(dto.audience)
+      ? await validateYouthProduct(this.youthRules, {
+          totalSessions: dto.totalSessions,
+          validityDays: dto.validityDays,
+          priceCents: dto.priceCents,
+        })
+      : null;
 
-    return this.prisma.$transaction(
-      async (tx) => {
-        const concurrentReplay = await findTrainingCommandReplay(tx, requestId);
-        if (concurrentReplay) {
-          const objectId = assertTrainingCommandReplay(concurrentReplay, {
-            actor,
-            action: 'TRAINING_PRODUCT_CREATED',
-            objectType: 'TrainingProduct',
-            commandHash,
-          });
-          return tx.trainingProduct.findUniqueOrThrow({
-            where: { id: objectId },
-          });
-        }
-        const created = await tx.trainingProduct.create({
-          data: {
-            code: dto.code,
-            name: dto.name,
-            audience: dto.audience,
-            totalSessions: dto.totalSessions,
-            validityDays: dto.validityDays,
-            priceCents: dto.priceCents,
-            unitRevenueCents,
-            refundRule: dto.refundRule as never,
-          },
-        });
-        await tx.auditLog.create({
-          data: {
-            actorId: actor.sub,
-            actorRole: trainingActorRole(actor, TRAINING_CONFIGURATION_ROLES),
-            action: 'TRAINING_PRODUCT_CREATED',
-            objectType: 'TrainingProduct',
-            objectId: created.id,
-            oldValue: { exists: false } as never,
-            newValue: {
-              commandHash,
-              code: created.code,
-              name: created.name,
-              audience: created.audience,
-              totalSessions: created.totalSessions,
-              validityDays: created.validityDays,
-              priceCents: created.priceCents,
-              unitRevenueCents: created.unitRevenueCents,
-              refundRule: created.refundRule,
-              enabled: created.enabled,
-              regulatoryValidation,
-            } as never,
-            reason,
+    return this.prisma
+      .$transaction(
+        async (tx) => {
+          const concurrentReplay = await findTrainingCommandReplay(
+            tx,
             requestId,
-          },
-        });
-        return created;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+          );
+          if (concurrentReplay) {
+            const objectId = assertTrainingCommandReplay(concurrentReplay, {
+              actor,
+              action: 'TRAINING_PRODUCT_CREATED',
+              objectType: 'TrainingProduct',
+              commandHash,
+            });
+            return tx.trainingProduct.findUniqueOrThrow({
+              where: { id: objectId },
+            });
+          }
+          const created = await tx.trainingProduct.create({
+            data: {
+              code: dto.code?.trim() || serial("COURSE"),
+              name: dto.name,
+              audience: dto.audience,
+              totalSessions: dto.totalSessions,
+              validityDays: dto.validityDays,
+              priceCents: dto.priceCents,
+              unitRevenueCents,
+              refundRule: dto.refundRule as never,
+            },
+          });
+          await tx.auditLog.create({
+            data: {
+              actorId: actor.sub,
+              actorRole: trainingActorRole(actor, TRAINING_CONFIGURATION_ROLES),
+              action: 'TRAINING_PRODUCT_CREATED',
+              objectType: 'TrainingProduct',
+              objectId: created.id,
+              oldValue: { exists: false } as never,
+              newValue: {
+                commandHash,
+                code: created.code,
+                name: created.name,
+                audience: created.audience,
+                totalSessions: created.totalSessions,
+                validityDays: created.validityDays,
+                priceCents: created.priceCents,
+                unitRevenueCents: created.unitRevenueCents,
+                refundRule: created.refundRule,
+                enabled: created.enabled,
+                regulatoryValidation,
+              } as never,
+              reason,
+              requestId,
+            },
+          });
+          return created;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+      .catch(async (cause: unknown) => {
+        if (
+          cause &&
+          typeof cause === 'object' &&
+          'code' in cause &&
+          cause.code === 'P2002'
+        ) {
+          const existing = await this.prisma.trainingProduct.findUnique({
+            where: { code: dto.code },
+          });
+          if (existing)
+            throw new ConflictException('课程产品编码已存在，请更换编码后保存');
+        }
+        throw cause;
+      });
   }
 
   async updateProduct(
@@ -243,7 +259,7 @@ export class TrainingCatalogService {
       return this.prisma.trainingProduct.findUniqueOrThrow({ where: { id } });
     }
     const regulatoryValidation =
-      current.audience === TrainingAudience.YOUTH && next.enabled
+      includesYouthAudience(current.audience) && next.enabled
         ? await validateYouthProduct(this.youthRules, next)
         : null;
 

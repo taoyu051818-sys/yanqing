@@ -1,3 +1,4 @@
+import { isYouthEnrollment } from "@yanqing/shared";
 import { mockUser } from "../../core";
 import { getOrders, saveOrders } from "../../venue";
 import {
@@ -113,13 +114,15 @@ export async function handleTrainingPurchaseAny(
     );
     if (!product) throw new Error("培训产品不存在或已下架");
     const youthRegulatoryValidation =
-      product.audience === "YOUTH"
+      isYouthEnrollment({ product, studentId: data.studentId })
         ? validateMockYouthProduct({
             totalSessions: Number(product.totalSessions),
             validityDays: Number(product.validityDays),
             priceCents: Number(product.priceCents),
           })
         : null;
+    if (product.audience === "ADULT" && data.studentId)
+      throw new Error("成人课程不支持青少年学员，请选择青少年或不限课程");
     if (product.audience === "YOUTH" && !data.studentId)
       throw new Error("青少年课程必须选择学员");
     if (data.studentId) {

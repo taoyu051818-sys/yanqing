@@ -137,12 +137,7 @@ export function useEventCatalogActions({
       errorMessage.value = "报名费必须是非负金额，最多两位小数。";
       return;
     }
-    const confirmed = await uni.showModal({
-      title: "确认创建赛事草稿",
-      content: `${name}\n${eventDate.value} ${eventTime.value} 开赛\n${capacityPeople} 人封顶 · 24 人成赛 · 固定五轮\n创建后仍需复核并发布。`,
-      confirmText: "创建草稿",
-    });
-    if (!confirmed.confirm) return;
+
     actionKey.value = "create-event";
     uni.showLoading({ title: "创建中", mask: true });
     try {
