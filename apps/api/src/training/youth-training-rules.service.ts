@@ -360,7 +360,12 @@ export class YouthTrainingRulesService {
             const conflictingFuture = await tx.youthTrainingRule.findFirst({
               where: {
                 id: { not: current.id },
-                status: YouthTrainingRuleStatus.PUBLISHED,
+                status: {
+                  in: [
+                    YouthTrainingRuleStatus.PUBLISHED,
+                    YouthTrainingRuleStatus.SUPERSEDED,
+                  ],
+                },
                 effectiveFrom: { gte: effectiveFrom },
               },
               orderBy: { effectiveFrom: 'asc' },
@@ -472,7 +477,12 @@ export class YouthTrainingRulesService {
     if (!rule) {
       const scheduled = await this.prisma.youthTrainingRule.findFirst({
         where: {
-          status: YouthTrainingRuleStatus.PUBLISHED,
+          status: {
+            in: [
+              YouthTrainingRuleStatus.PUBLISHED,
+              YouthTrainingRuleStatus.SUPERSEDED,
+            ],
+          },
           effectiveFrom: { gt: at },
         },
         orderBy: { effectiveFrom: 'asc' },

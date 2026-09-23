@@ -46,6 +46,15 @@ export function auditWechatPackage(directory, { remote = true } = {}) {
     if (files.has(config)) refs.push(...componentDependencies(name, JSON.parse(read(config))))
     graph.set(name, refs)
   }
+  // WeChat's WXSS compiler rejects a bare pseudo-class after a combinator,
+  // even though browser CSS and the uni-app build accept it.
+  for (const name of files.keys()) {
+    if (!name.endsWith('.wxss')) continue
+    const css = read(name).replace(/\/\*[\s\S]*?\*\//g, '')
+    if (/[>+~]\s*:[a-z-]+(?:\([^)]*\))?[^{}]*\{/.test(css)) {
+      problems.add('Unsupported WXSS selector (use an explicit class): ' + name)
+    }
+  }
   const mainRoots = ['app.js', ...(app.pages || []).map(name => name + '.js'), ...componentDependencies('app.js', app)]
   // Declared worker scripts are entry points rather than require() dependencies.
   if (typeof app.workers === 'string') mainRoots.push(...[...files.keys()].filter(name => name.startsWith(app.workers.replace(/\/$/, '') + '/') && name.endsWith('.js')))

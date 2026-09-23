@@ -393,5 +393,5 @@
 .court-choice .court-usage { font-size:12px; }
 @media (max-width: 360px) {
   .form-grid.three-columns { grid-template-columns:repeat(2, minmax(0,1fr)); }
-  .form-grid.three-columns > :first-child { grid-column:1 / -1; }
+  .form-grid.three-columns > .form-grid-lead { grid-column:1 / -1; }
 }

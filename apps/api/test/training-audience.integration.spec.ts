@@ -182,6 +182,22 @@ describe.skipIf(!url)(
         },
         admin,
       );
+      const laterTime = new Date(scheduledTime.getTime() + 86400000);
+      const later = await service.create(
+        {
+          ...values,
+          effectiveFrom: laterTime.toISOString(),
+          idempotencyKey: key(),
+        },
+        admin,
+      );
+      expect(
+        (
+          await db.youthTrainingRule.findUniqueOrThrow({
+            where: { id: future.id },
+          })
+        ).status,
+      ).toBe('SUPERSEDED');
       const dto = Object.assign(new CreateYouthTrainingRuleDto(), {
         ...values,
         effectiveImmediately: true,
@@ -193,6 +209,7 @@ describe.skipIf(!url)(
       expect(current.effectiveTo).toEqual(scheduledTime);
       expect((await service.active())?.id).toBe(current.id);
       expect((await service.active(scheduledTime))?.id).toBe(future.id);
+      expect((await service.active(laterTime))?.id).toBe(later.id);
       expect((await service.create(dto, admin)).id).toBe(current.id);
       expect(
         await db.youthTrainingRule.count({

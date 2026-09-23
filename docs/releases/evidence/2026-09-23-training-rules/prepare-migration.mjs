@@ -41,7 +41,7 @@ async function fingerprint(connection){return withDb(connection,async db=>{
 });}
 async function audienceCheck(connection){return withDb(connection,async db=>{
  const values=(await db.query(`SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='TrainingAudience' ORDER BY e.enumsortorder`)).rows.map(row=>row.enumlabel);
- assert.deepEqual(values,['ADULT','YOUTH','ALL']);return values;
+ assert.deepEqual(values,['YOUTH','ADULT','ALL']);return values;
 });}
 function migrate(connection,log){run(process.execPath,[candidate+'/apps/api/node_modules/prisma/build/index.js','migrate','deploy'],{cwd:candidate+'/apps/api',env:{...process.env,DATABASE_URL:connection},log});}
 try{
