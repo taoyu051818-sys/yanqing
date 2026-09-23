@@ -4,10 +4,11 @@ export function nextYouthRule<T extends YouthTrainingRuleView>(
   rules: T[],
   now = Date.now(),
 ): T | undefined {
+  // A superseded version can still be scheduled before its successor starts.
   return rules
     .filter(
       (rule) =>
-        rule.status === "PUBLISHED" && Date.parse(rule.effectiveFrom) > now,
+        ["PUBLISHED", "SUPERSEDED"].includes(rule.status) && Date.parse(rule.effectiveFrom) > now,
     )
     .sort(
       (a, b) => Date.parse(a.effectiveFrom) - Date.parse(b.effectiveFrom),

@@ -240,7 +240,7 @@ export const decideYouthRule = (
       .find(
         (item) =>
           item.id !== rule.id &&
-          item.status === "PUBLISHED" &&
+          ["PUBLISHED", "SUPERSEDED"].includes(item.status) &&
           new Date(item.effectiveFrom) >= new Date(rule.effectiveFrom),
       );
     if (
