@@ -19,7 +19,7 @@ tar -xzf "$archive" --no-same-owner -C "$candidate"
 (cd "$candidate" && sha256sum -c FILES.sha256 > "$receipt/files-verified.log")
 test "$("$node" -p "JSON.parse(require('fs').readFileSync(process.argv[1])).commit" "$candidate/RELEASE.json")" = "$commit"
 export PATH=/opt/node-v24.19.0/bin:$PATH
-(cd "$candidate" && pnpm --filter api... install --frozen-lockfile > "$receipt/dependencies.log" 2>&1)
+(cd "$candidate" && pnpm --filter api... install --frozen-lockfile --registry=https://registry.npmmirror.com > "$receipt/dependencies.log" 2>&1)
 (cd "$candidate" && sha256sum -c FILES.sha256 > "$receipt/files-after-install.log")
 printf '%s\n' "$previous" > "$receipt/previous-release"
 cp /etc/systemd/system/yanqing-api.service.d/90-release.conf "$receipt/90-release.conf"

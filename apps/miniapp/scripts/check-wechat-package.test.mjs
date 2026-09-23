@@ -69,3 +69,13 @@ test('rejects main-to-subpackage and cross-subpackage static imports', t => {
   }))
   assert(cross.problems.some(problem => problem.startsWith('Invalid static subpackage dependency: packages/admin/')))
 })
+
+test('rejects bare pseudo-class selectors that fail WeChat upload compilation', t => {
+  const root = fixture(t, { 'packages/ops/pages/index.wxss': '@media (max-width:360px){.form-grid.data-v-test>:first-child{grid-column:1 / -1}}' })
+  assert.equal(auditWechatPackage(root).ok, false)
+  assert(auditWechatPackage(root).problems.some(problem => problem.includes('Unsupported WXSS selector')))
+})
+test('accepts explicit grid classes and ignores commented selectors', t => {
+  const root = fixture(t, { 'packages/ops/pages/index.wxss': '/* .grid > :first-child {} */ .grid > .form-grid-lead{grid-column:1 / -1}' })
+  assert.equal(auditWechatPackage(root).ok, true)
+})

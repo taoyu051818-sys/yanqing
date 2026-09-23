@@ -98,7 +98,7 @@ watch(() => [props.errorField, props.errorMessage], async () => {
         >
         <text v-if="errorField === 'class'" class="field-error" role="alert">{{ errorMessage }}</text>
         <view id="session-field-time" class="form-grid three-columns">
-          <picker
+          <picker class="form-grid-lead"
             mode="date"
             :value="sessionDate"
             :start="shanghaiDate()"

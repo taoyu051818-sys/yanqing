@@ -314,7 +314,7 @@ function changed() { emit('clear-error'); }
             /><text v-if="errorField === 'className'" class="field-error" role="alert">{{ errorMessage }}</text></view>
           </view>
           <view class="form-grid three-columns">
-            <picker
+            <picker class="form-grid-lead"
               :range="weekdayOptions"
               :value="classWeekdayIndex"
               @change="classWeekdayIndex = Number(($event.detail as any).value)"
@@ -377,7 +377,7 @@ function changed() { emit('clear-error'); }
             ></picker
           >
           <view class="form-grid three-columns">
-            <view
+            <view class="form-grid-lead"
               ><text class="field-label">教练成本/课（元）</text
               ><input id="training-classCoachCostYuan" :focus="focusField === 'classCoachCostYuan'" :aria-invalid="errorField === 'classCoachCostYuan'" @input="changed" @blur="focusField = ''"
                 v-model="classCoachCostYuan"
@@ -489,7 +489,7 @@ function changed() { emit('clear-error'); }
 
 <style scoped>
 .creation-form .form-grid.three-columns { grid-template-columns:repeat(2, minmax(0, 1fr)); }
-.creation-form .form-grid.three-columns > :first-child { grid-column:1 / -1; }
+.creation-form .form-grid.three-columns > .form-grid-lead { grid-column:1 / -1; }
 .creation-form .form-input, .creation-form .picker-value, .creation-form .field-label { font-size:15px; font-size:max(28rpx, 15px); }
 .creation-form .field-error { display:block; margin:8rpx 0 16rpx; color:#a52626; font-size:14px; }
 </style>
