@@ -21,6 +21,28 @@ export type PaymentStatus =
   "CREATED" | "PROCESSING" | "SUCCEEDED" | "FAILED" | "CLOSED" | "REFUNDED";
 export type RefundStatus =
   "REQUESTED" | "APPROVED" | "REJECTED" | "PROCESSING" | "SUCCEEDED" | "FAILED";
+export interface PayOrderCommand {
+  channel: PaymentChannel;
+  expectedDebitAmount?: number;
+  idempotencyKey: string;
+}
+export interface CancelPendingOrderCommand {
+  idempotencyKey: string;
+  reason?: string;
+}
+export interface RequestRefundCommand {
+  amountCents: number;
+  reason: string;
+  idempotencyKey?: string;
+}
+export interface ReviewRefundCommand {
+  reason: string;
+}
+/** Mutation receipts identify the refund even when the subsequent order refresh fails. */
+export interface RefundResult {
+  id: string;
+  status: RefundStatus;
+}
 export interface OrderItemView {
   id: string;
   itemType: string;

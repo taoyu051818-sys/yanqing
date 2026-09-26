@@ -19,6 +19,17 @@ export function useOrderAftersales(
   const refundingId = ref("");
   const refundError = ref("");
   const refundFeedback = ref<{ orderId: string; message: string } | null>(null);
+  const awaitingRefunds = ref<Record<string, string>>({});
+  const awaitingRefund = (orderId: string) => Boolean(awaitingRefunds.value[orderId]);
+  const canStartRefund = (order: OrderView) =>
+    !awaitingRefund(order.id) && canRequestOrderRefund(order, canRefundDirectly());
+  function syncRefunds(orders: readonly OrderView[]) {
+    for (const order of orders) {
+      const refundId = awaitingRefunds.value[order.id];
+      if (refundId && order.refunds?.some((item) => item.id === refundId))
+        delete awaitingRefunds.value[order.id];
+    }
+  }
   async function cancelPending(order: OrderView) {
     if (actionKey.value || isConfirming(order.id)) return;
     const current = scope.capture();
@@ -62,7 +73,7 @@ export function useOrderAftersales(
     }
   }
   async function refund(order: OrderView, reason: string) {
-    if (actionKey.value || !canRequestOrderRefund(order, canRefundDirectly()))
+    if (actionKey.value || !canStartRefund(order))
       return;
     const action = scope.begin("refund:" + order.id);
     if (!action) return;
@@ -89,20 +100,29 @@ export function useOrderAftersales(
           ),
       );
       if (!action.isCurrent()) return;
+      // A successful command is final even if the following GET fails. Only a
+      // server snapshot containing this receipt can release the local guard.
+      awaitingRefunds.value[order.id] = result.id;
       refundingId.value = "";
       refundFeedback.value = {
         orderId: order.id,
         message: direct
-          ? directRefundFeedback((result as { status?: string })?.status)
+          ? directRefundFeedback(result.status)
           : "退款申请已提交，等待工作人员处理",
       };
       uni.showToast({
         title: direct
-          ? directRefundFeedback((result as { status?: string })?.status)
+          ? directRefundFeedback(result.status)
           : "申请已提交",
         icon: "none",
       });
-      await load();
+      try {
+        await load();
+      } catch {
+        // Refresh errors must not turn an accepted refund into a retryable form.
+        if (action.isCurrent() && refundFeedback.value)
+          refundFeedback.value.message += "，订单进度暂未同步，请刷新查看";
+      }
     } catch (cause: unknown) {
       if (!action.isCurrent()) return;
       const failure = orderFailure(cause);
@@ -116,11 +136,15 @@ export function useOrderAftersales(
     refundingId.value = "";
     refundError.value = "";
     refundFeedback.value = null;
+    awaitingRefunds.value = {};
   }
   return {
     refundingId,
     refundError,
     refundFeedback,
+    awaitingRefund,
+    canStartRefund,
+    syncRefunds,
     cancelPending,
     refund,
     reset,

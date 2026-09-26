@@ -2,7 +2,25 @@
 
 本文是当前仓库的微信小程序导入、联调和实机验收手册。它针对 `apps/miniapp` 的 uni-app + Vue 3 工程；微信开发者工具导入的必须是 uni-app 编译产物，不是仓库根目录、`apps/miniapp` 或 `apps/miniapp/src`。
 
-本轮实际操作使用 [2026-09-10 核心业务真机验收工作单](acceptance-2026-09-10-core-phone.md)，按订场、支付退款、代订、活动分享和摘要核对分组记录。历史测试数量和迁移数字不能作为本轮通过依据。
+本轮岗位操作验收使用 [2026-09-26 工作单](acceptance-2026-09-26-role-workflows.md)。历史测试数量和迁移数字不能作为本轮通过依据；旧工作单中的异人退款审核要求已不适用于管理员直接退款。
+
+## 统一发布与版本核对
+
+小程序版本由 `apps/miniapp/package.json` 和 `manifest.json` 一致校验。编译会生成 `release-info.json`，包含源码提交、版本、数据模式、接口地址和构建时间；“我的 → 关于金羽会员”同时展示实际微信版本与构建标识，游客可访问。
+
+提交本次源码并通过检查后执行：
+
+```bash
+pnpm release:miniapp:prepare
+# 按现有流程部署同一提交的 API，再执行：
+pnpm release:miniapp:upload
+```
+
+prepare 强制构建正式接口的 remote 包，核对 AppID、包内依赖、WXSS 原生编译，并记录包摘要。upload 拒绝脏源码、旧包、包内容变化、模拟模式和未就绪到同一提交的服务器；微信 CLI 上传版本直接取构建版本，不再手写另一套版本号。
+
+机器回执保存到 `output/releases/<版本>-<提交>/miniapp-release.json`。回执中的 `upload`、`experienceVersion`、`deviceAcceptance` 分别记录，上传成功不能自动改成体验版已选或真机已通过。微信后台需要明确选择该版本，再由验收人员记录实机结果；不要用“检查服务连接”当作检查小程序更新。
+
+本机需要微信开发者工具；非默认安装可设置 `WECHAT_CLI` 和 `WECHAT_WXSS_COMPILER`。日常本地开发仍可直接使用 dev/build 命令，上述两个命令用于正式远端包交付。
 
 ## 当前构建基线
 

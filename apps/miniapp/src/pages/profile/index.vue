@@ -42,6 +42,7 @@ const personalServices = [
   { icon: "share", title: "邀请好友", url: "/pages/invite/index" },
 ];
 const openWorkbench = () => uni.navigateTo({ url: "/pages/workspace/index" });
+const openAbout = () => uni.navigateTo({ url: '/pages/settings/index?section=about' });
 const openTestTools = () =>
   uni.navigateTo({ url: "/packages/admin/pages/switch/index" });
 onShow(async () => {
@@ -133,6 +134,7 @@ onShareTimeline(() => ({
         :size="28"
       />
     </button>
+    <button class="about-entry" @tap="openAbout">关于金羽会员</button>
     <view v-if="isTestEnvironment" class="test-tools"
       ><button @tap="showTestTools = !showTestTools">
         开发验收工具 {{ showTestTools ? "收起" : "展开" }}</button
@@ -143,6 +145,7 @@ onShareTimeline(() => ({
   </view>
 </template>
 <style scoped>
+.about-entry { width: 100%; min-height: 48px; margin-top: 24rpx; background: transparent; color: var(--color-muted); font-size: 26rpx; }
 .profile-card {
   display: flex;
   align-items: center;

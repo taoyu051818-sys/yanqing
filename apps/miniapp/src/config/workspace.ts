@@ -24,6 +24,37 @@ export function canViewOperatingData(roles: AppRole[]) {
     ["FINANCE", "ADMIN", "SUPER_ADMIN"].includes(role),
   );
 }
+
+/** Task shortcuts are intentional by role; adding a menu item must not displace them. */
+export function workspaceShortcuts(roles: AppRole[]): WorkspaceItem[] {
+  const menu = workspaceMenu(roles);
+  const training = menu.find((item) => item.key === "training");
+  const tasks = training
+    ? [
+        { ...training, key: "trial-create", title: "预约试听", route: training.route + "?view=create-trial" },
+        { ...training, key: "trial-followup", title: "试听跟进", route: training.route + "?view=trials" },
+      ]
+    : [];
+  const items = [...menu, ...tasks];
+  const priorities = roles.some((role) => ["ADMIN", "SUPER_ADMIN"].includes(role))
+    ? ["transactions", "booking", "training"]
+    : roles.includes("FRONT_DESK")
+      ? ["booking", "transactions", "trial-create"]
+      : roles.includes("COACH")
+        ? ["training", "trial-followup", "members"]
+        : roles.includes("FINANCE")
+          ? ["transactions", "finance"]
+          : ["games", "events", "alliance"];
+  return priorities.flatMap((key) => {
+    const item = items.find((candidate) => candidate.key === key);
+    if (!item) return [];
+    if (item.key === "training")
+      return [{ ...item, title: "今日课表", route: item.route + "?view=lessons" }];
+    if (item.key === "members" && roles.includes("COACH"))
+      return [{ ...item, title: "学员档案" }];
+    return [item];
+  });
+}
 export function workspaceMenu(roles: AppRole[]): WorkspaceItem[] {
   const titles: Record<string, string> = {
     venue: "场地维护",

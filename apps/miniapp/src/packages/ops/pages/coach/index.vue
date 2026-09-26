@@ -26,7 +26,8 @@ import TrainingSchedule from "./sections/TrainingSchedule.vue";
 import LessonAttendance from "./sections/LessonAttendance.vue";
 import ConsumptionCorrections from "./sections/ConsumptionCorrections.vue";
 
-import { computed, onUnmounted, ref, watch } from "vue";
+import { computed, getCurrentInstance, onUnmounted, ref, watch } from "vue";
+import { preserveTrainingSelection, useTrainingFormNavigation, type TrainingCreationResult } from "./actions/form-navigation";
 import OperationsTabs from "../../components/OperationsTabs.vue";
 import LessonList from "./sections/LessonList.vue";
 import { today, venueDateKey } from "../../../../utils/format";
@@ -42,6 +43,8 @@ import { useCoachRulesActions } from "./actions/rules.js";
 import { useCoachCorrectionsActions } from "./actions/corrections.js";
 import { useCoachAttendanceActions } from "./actions/attendance.js";
 const task = useOperationTask();
+const pageInstance = getCurrentInstance();
+const lastCreated = ref<TrainingCreationResult | null>(null);
 
 const session = useSessionStore();
 
@@ -131,12 +134,6 @@ const {
   trialLinkLead,
 } = useTrainingTrialForm();
 
-// Preserve the selected identity when a refresh changes the directory order.
-watch(trialStudents, (students, previous) => {
-  const selected = previous[trialStudentIndex.value];
-  if (selected) trialStudentIndex.value = students.findIndex(student => student.id === selected.id);
-}, { flush: 'sync' });
-
 const {
   ruleMaxSessions,
   ruleMaxValidityDays,
@@ -206,11 +203,18 @@ const {
   enrollments,
   trials,
 });
-// Keep the same person selected if refreshing changes directory ordering.
-watch(trialStudents, (next, previous) => { const id = previous[trialStudentIndex.value]?.id; if (id) trialStudentIndex.value = next.findIndex(item => item.id === id); }, {flush:'sync'});
-watch(trialMembers, (next, previous) => { const id = previous[trialMemberIndex.value]?.id; if (id) trialMemberIndex.value = next.findIndex(item => item.id === id); }, {flush:'sync'});
-watch(leads, (next, previous) => { const id = previous[trialLeadIndex.value]?.id; if (id) trialLeadIndex.value = next.findIndex(item => item.id === id); }, {flush:'sync'});
-watch(trialSubjectIndex, () => { trialSessionIndex.value = 0; });
+// Refreshes preserve identities, never replace a removed selection with another person.
+preserveTrainingSelection(trialStudents, trialStudentIndex);
+preserveTrainingSelection(trialMembers, trialMemberIndex);
+preserveTrainingSelection(leads, trialLeadIndex);
+preserveTrainingSelection(activeProducts, classProductIndex);
+preserveTrainingSelection(sessionClasses, sessionClassIndex);
+preserveTrainingSelection(schedulableTrialSessions, trialSessionIndex);
+const formNavigation = useTrainingFormNavigation({
+  products: activeProducts, classes: sessionClasses, sessions: schedulableTrialSessions,
+  productIndex: classProductIndex, classIndex: sessionClassIndex, trialSessionIndex,
+});
+watch(trialSubjectIndex, () => { trialSessionIndex.value = -1; });
 watch(() => selectedTrialClass.value?.coachId, (coachId) => {
   trialCoachId.value = coachId || "";
 }, { immediate: true });
@@ -245,12 +249,7 @@ const { loading, errorMessage, load, dispose } = useCoachLoadingActions({
     courtData.reset();
   },
   async afterRefresh(isCurrent) {
-    if (classProductIndex.value >= activeProducts.value.length)
-      classProductIndex.value = 0;
-    if (sessionClassIndex.value >= sessionClasses.value.length)
-      sessionClassIndex.value = 0;
-    if (trialSessionIndex.value >= schedulableTrialSessions.value.length)
-      trialSessionIndex.value = 0;
+    formNavigation.applySelection();
     if (canCreateSession.value) await loadCourtAvailability();
     if (isCurrent()) await navigation.apply();
   },
@@ -281,7 +280,9 @@ async function runCreation(
   errorMessage.value = "";
   uni.showLoading({ title: "创建中", mask: true });
   try {
-    await operation();
+    const result = await operation();
+    const kind = ({ "create-product": "product", "create-class": "class", "create-session": "session" } as const)[key as "create-product" | "create-class" | "create-session"];
+    lastCreated.value = kind && result && typeof result === "object" && "id" in result && typeof result.id === "string" ? { kind, id: result.id } : null;
     actionMessage.value = successMessage;
     await load();
     uni.showToast({ title: "创建成功", icon: "success" });
@@ -496,13 +497,25 @@ const filteredLessons = computed(() => lessons.value.filter(lesson => {
 const detailLessons = computed(() => lessons.value.filter(lesson => lesson.id === lessonId.value));
 function openLesson(id: string) { uni.navigateTo({ url:`/packages/ops/pages/coach/index?lessonId=${encodeURIComponent(id)}` }); }
 function openProductEditor(product: TrainingProductView) { uni.navigateTo({url:`/packages/ops/pages/coach/index?view=edit-product&productId=${encodeURIComponent(product.id)}`}); }
-function openCreation(view: string) { uni.navigateTo({ url:`/packages/ops/pages/coach/index?view=${view}` }); }
+function openCreation(view: string, context: Record<string, string> = {}) { formNavigation.open(view, context); }
+function finishCreation() {
+  const page = pageInstance?.proxy as { getOpenerEventChannel?: () => { emit: (event: string, value: unknown) => void } } | null;
+  if (lastCreated.value) page?.getOpenerEventChannel?.().emit("trainingCreated", lastCreated.value);
+  uni.navigateBack({ fail: () => uni.redirectTo({ url: `/packages/ops/pages/coach/index?view=${activeView.value === "create-session" ? "lessons" : "products"}` }) });
+}
 watch(activeView, () => { if (!isCreationPage.value && !lessonId.value) uni.pageScrollTo({ scrollTop:0, duration:0 }); });
 
 const requestedProductId = ref('');
 const editingProduct = computed(() => products.value.find(product => product.id === requestedProductId.value));
 watch(editingProduct, product => { if (product && !editingProductId.value) beginProductEdit(product); });
-onLoad(options => { navigation.setQuery(options); requestedProductId.value = typeof options?.productId === 'string' ? options.productId : ''; });
+onLoad(options => {
+  navigation.setQuery(options);
+  requestedProductId.value = typeof options?.productId === 'string' ? options.productId : '';
+  if (activeView.value === "create-class" && requestedProductId.value) formNavigation.selectOnRefresh({ kind: "product", id: requestedProductId.value });
+  if (activeView.value === "create-session" && typeof options?.classId === "string") formNavigation.selectOnRefresh({ kind: "class", id: options.classId });
+  const audience = audienceOptions.findIndex(item => item.value === options?.audience);
+  if (activeView.value === "create-product" && audience >= 0) productAudienceIndex.value = audience;
+});
 onShow(load);
 onUnmounted(dispose);
 </script>
@@ -521,7 +534,7 @@ onUnmounted(dispose);
     <LessonList v-if="activeView === 'lessons' && !lessonId" v-model:filter="lessonFilter" v-model:search="lessonSearch" :lessons="filteredLessons" :loading="loading" :can-create="canCreateSession" :students-for="studentsFor" @open="openLesson" @create="openCreation('create-session')" />
     <view v-if="lessonId && !loading && !detailLessons.length" class="card empty">未找到该课次，可能已移除或当前账号无权查看。</view>
 
-    <view v-if="errorMessage && !sessionValidationField && !['create-product', 'create-class'].includes(activeView)" class="card error-panel">
+    <view v-if="errorMessage && !sessionValidationField && !isCreationPage" class="card error-panel">
       <view
         ><text class="panel-title">操作未完成</text
         ><text class="muted">{{ errorMessage }}</text></view
@@ -552,6 +565,10 @@ onUnmounted(dispose);
       v-model:trialLeadIndex="trialLeadIndex"
       :trialStudents="trialStudents"
       :canCreateSession="canCreateSession"
+      :canConfigureTraining="canConfigureTraining"
+      :products="products"
+      :coachOptions="coachOptions"
+      @setup="openCreation"
       @select-student="(student) => { trialData.selectStudent(student); trialStudentIndex = 0 }"
       v-model:trialStudentIndex="trialStudentIndex"
       :trialLinkLead="trialLinkLead"
@@ -563,7 +580,7 @@ onUnmounted(dispose);
       :selectedTrialClass="selectedTrialClass"
       :selectedTrialProduct="selectedTrialProduct"
       :coachDisplayName="coachDisplayName"
-      :trialCoachId="trialCoachId"
+      v-model:trialCoachId="trialCoachId"
       :trialSourceOptions="trialSourceOptions"
       v-model:trialSourceIndex="trialSourceIndex"
       v-model:trialReason="trialReason"
@@ -603,7 +620,7 @@ onUnmounted(dispose);
       :decideYouthRule="decideYouthRule"
     />
 
-    <YouthRuleNotice v-if="['products', 'create-product', 'edit-product'].includes(activeView) && canConfigureTraining && !activeYouthRule && !loading"
+    <YouthRuleNotice v-if="canConfigureTraining && !activeYouthRule && !loading && (activeView === 'products' || (activeView === 'create-product' && audienceOptions[productAudienceIndex]?.value !== 'ADULT') || (activeView === 'edit-product' && editingProduct?.audience !== 'ADULT'))"
       :active-rule="activeYouthRule" :rules="youthRules" @settings="openCreation('rules')" />
 
     <view v-if="activeView === 'products' && !lessonId && canConfigureTraining" class="creation-shortcuts"><button class="primary" @tap="openCreation('create-product')">新增课程</button><button class="secondary" @tap="openCreation('create-class')">新增班级</button></view>
@@ -632,6 +649,8 @@ onUnmounted(dispose);
 
     <TrainingConfiguration
       v-if="['create-product', 'create-class'].includes(activeView) && canConfigureTraining"
+      @saved="finishCreation"
+      @setup="openCreation"
       :form-type="activeView === 'create-product' ? 'product' : 'class'"
       :error-field="catalogValidationField"
       @clear-error="clearCatalogError"
@@ -673,6 +692,10 @@ onUnmounted(dispose);
 
     <TrainingSchedule
       v-if="activeView === 'create-session' && canCreateSession"
+      @saved="finishCreation"
+      @setup="openCreation"
+      :canConfigureTraining="canConfigureTraining"
+      :hasProducts="activeProducts.length > 0"
       :error-message="errorMessage"
       :error-field="sessionValidationField"
       :canCreateSession="canCreateSession"

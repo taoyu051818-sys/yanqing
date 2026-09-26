@@ -326,6 +326,27 @@
   font-size: 28rpx;
   line-height: 1.6;
 }
+.success-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  padding-top: 20rpx;
+  font-size: 26rpx;
+  line-height: 1.6;
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+.continue-booking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  margin-top: 18rpx;
+}
+.continue-booking-actions button {
+  flex: 1 1 240rpx;
+  min-height: 48px;
+  margin: 0;
+}
 .booking-sheet > .secondary {
   margin-top: 18rpx;
 }

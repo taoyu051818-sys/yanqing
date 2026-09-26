@@ -137,6 +137,7 @@ export function useOrderPayment(
     let nativePaymentStarted = false;
     const channel = paymentChannel.value;
     if (
+      !channel ||
       !paymentChoices.value.some(
         (item) => item.channel === channel && !item.disabled,
       )

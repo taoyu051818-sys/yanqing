@@ -28,6 +28,7 @@ function initializePage(path: string) {
       },
     }),
     onUnmounted: () => {},
+    getCurrentInstance: () => null,
     onScopeDispose: () => {},
     nextTick: () => Promise.resolve(),
     watch: () => {},

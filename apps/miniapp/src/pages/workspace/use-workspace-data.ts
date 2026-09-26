@@ -4,10 +4,16 @@ import { canViewOperatingData } from '../../config/workspace'
 import { useSessionStore } from '../../stores/session'
 import { money, today } from '../../utils/format'
 
+interface WorkspaceDashboard {
+  collections?: { grossPaymentCents?: number }
+  revenue?: { realizedRevenueCents?: number }
+  venue?: { utilizationRate?: number; bookingCount?: number }
+}
+
 export function useWorkspaceData() {
   const session = useSessionStore()
   const loading = ref(false), loadError = ref(''), workItems = ref<WorkItem[]>([])
-  const dataLoading = ref(false), dataError = ref(''), dashboard = ref<Record<string, any> | null>(null)
+  const dataLoading = ref(false), dataError = ref(''), dashboard = ref<WorkspaceDashboard | null>(null)
   const days = ref(1)
   let workRequest = 0, dataRequest = 0
   const scope = () => `${session.user?.id || ''}:${session.roles.join(',')}`
@@ -15,7 +21,6 @@ export function useWorkspaceData() {
   watch(scope, clear)
   onUnmounted(clear)
   async function loadWork() {
-    await session.hydrate()
     if (!session.isOperator) return
     const request = ++workRequest, actor = scope()
     loading.value = true; loadError.value = ''
@@ -42,10 +47,10 @@ export function useWorkspaceData() {
   const periodLabel = computed(() => days.value === 1 ? `${today()} · 北京时间` : `${today(1 - days.value)} 至 ${today()} · 北京时间`)
   const metrics = computed(() => {
     const d = dashboard.value
-    const amount = (value: unknown) => d && typeof value === 'number' ? money(value) : '—'
+    const amount = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? money(value) : '—'
     return [
       { label:'已收金额', value:amount(d?.collections?.grossPaymentCents), note:'含充值与培训预收' },
-      { label:'场地使用率', value: typeof d?.venue?.utilizationRate === 'number' ? `${d.venue.utilizationRate}%` : '—', note:'已订场地小时 / 可售小时' },
+      { label:'场地预约率', value: typeof d?.venue?.utilizationRate === 'number' && Number.isFinite(d.venue.utilizationRate) ? `${d.venue.utilizationRate}%` : '—', note:'已订场地小时 / 可售小时' },
       { label:'场地预约数', value: typeof d?.venue?.bookingCount === 'number' ? String(d.venue.bookingCount) : '—', note:'所选日期内的场地预约' },
       { label:'已实现收入', value:amount(d?.revenue?.realizedRevenueCents), note:'按履约确认，已扣退款' },
     ]

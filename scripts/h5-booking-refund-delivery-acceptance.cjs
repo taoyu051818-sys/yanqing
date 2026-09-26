@@ -1,0 +1,105 @@
+const { chromium } = require('playwright');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const base = process.env.OPS_UI_BASE_URL || 'http://127.0.0.1:5208';
+if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base)) throw new Error('Use a local mock build');
+const output = path.resolve('output/role-workflows-2026-09-26/booking-refund');
+require('node:fs').mkdirSync(output, { recursive: true });
+(async () => {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 375, height: 812 }, reducedMotion: 'reduce' });
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.route('**/*', route => route.request().url().startsWith(base + '/') ? route.continue() : route.abort());
+    const go = async route => { await page.goto(base + '/#' + route); await page.waitForTimeout(600); };
+    const button = label => page.locator('uni-button').filter({ hasText: new RegExp('^\\s*' + label + '\\s*$') });
+    const snapshot = async name => { await page.waitForTimeout(300); await page.screenshot({ path: path.join(output, name + '.png') }); };
+    await go('/packages/admin/pages/switch/index');
+    assert.equal(await page.evaluate(async () => (await import('/src/services/http.ts')).isMockMode), true);
+    await page.getByText('超级管理端', { exact: true }).click();
+    await page.getByText('代会员订场', { exact: true }).click();
+    await page.locator('.inline-member-search .member-option').first().click();
+    const member = await page.locator('.dock-member').innerText();
+    await page.evaluate(async () => {
+      const { endpoints } = await import('/src/services/api.ts');
+      window.originalCreateBooking = endpoints.createBooking;
+      window.bookingCommands = [];
+      window.bookingResults = [];
+      endpoints.createBooking = async command => {
+        window.bookingCommands.push(command);
+        const result = await window.originalCreateBooking(command);
+        window.bookingResults.push(result);
+        return result;
+      };
+    });
+    const book = async () => {
+      await page.locator('.court:not(.override):not(.disabled)').first().click();
+      await button('核对代订').click();
+      await button('确认代订').click();
+      await page.getByText('同一会员再订', { exact: true }).waitFor();
+      await page.waitForTimeout(500);
+    };
+    await book();
+    assert.match(await page.locator('.success-summary').innerText(), /订单号/);
+    await snapshot('01-assisted-success-375');
+    await button('同一会员再订').click();
+    assert.equal(await page.locator('.dock-member').innerText(), member);
+    assert.equal(await page.locator('.court.selected').count(), 0);
+    await book();
+    const commands = await page.evaluate(() => window.bookingCommands);
+    assert.equal(commands.length, 2);
+    assert.equal(commands[0].memberId, commands[1].memberId);
+    assert.notEqual(commands[0].creationIdempotencyKey, commands[1].creationIdempotencyKey);
+    await page.setViewportSize({ width: 812, height: 375 });
+    await snapshot('02-assisted-success-landscape');
+    const successBox = await page.locator('.dialog-window').boundingBox();
+    assert(successBox.y >= 0, 'Success card must remain inside short viewport');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await button('为下一位订场').click();
+    await page.locator('.inline-member-search').waitFor();
+    assert.equal(await page.locator('.court.selected').count(), 0);
+    assert.match(await page.locator('.dock-member').innerText(), /选择代订会员/);
+    await snapshot('03-next-member-375');
+    const id = await page.evaluate(async () => {
+      const { endpoints } = await import('/src/services/api.ts');
+      const order = window.bookingResults[0];
+      await endpoints.payOrder(order.id, { channel: 'OFFLINE_CASH', idempotencyKey: 'local-ui-cash-payment' });
+      return order.id;
+    });
+    await go('/pages/order/detail?id=' + encodeURIComponent(id) + '&management=1');
+    await page.evaluate(async () => {
+      const { endpoints } = await import('/src/services/api.ts');
+      window.originalOrder = endpoints.order;
+      window.originalRefund = endpoints.directRefundOrder;
+      window.refundCommands = [];
+      endpoints.directRefundOrder = async (...args) => {
+        window.refundCommands.push(args);
+        const result = await window.originalRefund(...args);
+        endpoints.order = async () => { throw Error('验收模拟：订单同步失败'); };
+        return result;
+      };
+    });
+    await button('直接退款').click();
+    await button('行程有变').click();
+    await page.locator('.reason-actions .primary').click();
+    await page.locator('.refund-result').waitFor();
+    assert.match(await page.locator('.refund-result').innerText(), /退款已完成/);
+    assert.equal(await button('直接退款').count(), 0);
+    assert.match(await page.locator('.load-error').innerText(), /订单同步失败/);
+    await snapshot('04-refund-accepted-refresh-failed');
+    await button('刷新退款进度').click();
+    assert.equal(await page.evaluate(() => window.refundCommands.length), 1);
+    await page.evaluate(async () => { (await import('/src/services/api.ts')).endpoints.order = window.originalOrder; });
+    await button('刷新退款进度').click();
+    await page.getByText('已退款', { exact: true }).first().waitFor();
+    assert.equal(await page.locator('.refund-result').count(), 0);
+    assert.equal(await button('直接退款').count(), 0);
+    await snapshot('05-refund-synced');
+    await page.reload();
+    await page.getByText('已退款', { exact: true }).first().waitFor();
+    assert.equal(await button('直接退款').count(), 0);
+    assert.deepEqual(errors, []);
+    console.log('PASS: assisted receipt, explicit same/next member, no repeated slot, 375/landscape, accepted refund despite failed refresh, refresh recovery and reopen. All commands used isolated local mock data.');
+  } finally { await browser.close(); }
+})().catch(e => { console.error(e); process.exitCode = 1; });

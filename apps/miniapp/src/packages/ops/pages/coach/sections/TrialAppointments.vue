@@ -4,13 +4,14 @@ import type {
   TrainingLeadSummary,
   TrainingStudentSummary,
 } from "../../../../../types/training-operations";
-import type { TrainingSessionView } from "@yanqing/shared";
+import type { TrainingProductView, TrainingSessionView } from "@yanqing/shared";
 
+import { trialSessionOptions, trialSetupGap } from "../actions/trial-availability";
 import TrialPersonSearch from "./TrialPersonSearch.vue";
 import { useUnsavedForm } from "../../../composables/use-unsaved-form";
 import { toRefs, computed, ref, watch } from "vue";
 import StatusBadge from "../../../../../components/StatusBadge.vue";
-import { shortDate } from "../../../../../utils/format";
+import { dateTimeRange, shortDate } from "../../../../../utils/format";
 import { opsDeepLinkDomId } from "../../../utils/work-item-deep-link";
 
 const changingPerson = ref(false),
@@ -18,16 +19,14 @@ const changingPerson = ref(false),
 function openTrialForm() {
   uni.navigateTo({ url: "/packages/ops/pages/coach/index?view=create-trial" });
 }
-function openSchedule() {
-  uni.navigateTo({
-    url: "/packages/ops/pages/coach/index?view=create-session",
-  });
-}
 const props = defineProps<{
   formOnly: boolean;
   errorMessage: string;
   trials: TrainingTrialView[];
   canCreateSession: boolean;
+  canConfigureTraining: boolean;
+  products: TrainingProductView[];
+  coachOptions: { id: string; displayName: string }[];
   canManageTrials: boolean;
   trialSubjectOptions: string[];
   trialSubjectIndex: number;
@@ -67,6 +66,8 @@ const props = defineProps<{
   convertTrial: (trial: any) => void;
 }>();
 const emit = defineEmits<{
+  (event: "setup", view: string, context?: Record<string, string>): void;
+  (event: "update:trialCoachId", value: string): void;
   (event: "update:trialSubjectIndex", value: number): void;
   (event: "select-student", student: TrainingStudentSummary): void;
   (event: "update:trialMemberIndex", value: number): void;
@@ -130,10 +131,20 @@ const trialReason = computed({
   get: () => props.trialReason,
   set: (value) => emit("update:trialReason", value),
 });
+const sessionOptions = computed(() => trialSessionOptions(props.schedulableTrialSessions));
+const setupGap = computed(() => trialSetupGap(props.products, props.trialSubjectIndex === 2, props.schedulableTrialSessions.length > 0));
+const canFixGap = computed(() => setupGap.value?.permission === "configure" ? props.canConfigureTraining : props.canCreateSession);
+const availableCoaches = computed(() => props.coachOptions.filter(coach => coach.id));
+const coachIndex = computed(() => availableCoaches.value.findIndex(coach => coach.id === props.trialCoachId));
+function openSetup() {
+  const gap = setupGap.value;
+  if (gap) emit("setup", gap.view, gap.context);
+}
 const { markSaved } = useUnsavedForm(
   () => [
     props.selectedTrialSubject?.id || "",
     props.selectedTrialSession?.id || "",
+    props.trialCoachId,
     props.trialSourceIndex,
     props.trialReason,
     props.trialLinkLead,
@@ -182,7 +193,7 @@ async function save() {
       v-if="formOnly && canManageTrials"
       class="card creation-form trial-form"
     >
-      <text class="field-label">试听学员</text>
+      <text class="field-label">1. 选择试听学员</text>
       <TrialPersonSearch
         v-if="!selectedTrialSubject || changingPerson"
         :students="trialStudents"
@@ -228,41 +239,39 @@ async function save() {
           ></picker
         >
         <picker
-          :range="schedulableTrialSessions"
-          :value="trialSessionIndex"
+          v-if="sessionOptions.length"
+          :range="sessionOptions"
+          range-key="label"
+          :value="Math.max(0, trialSessionIndex)"
           @change="changeTrialSession"
           ><view
-            ><text class="field-label">上课时间</text
+            ><text class="field-label">2. 选择上课时间</text
             ><view class="picker-value"
               >{{
                 selectedTrialSession
                   ? `${selectedTrialClass?.name || selectedTrialSession.class?.name} · ${shortDate(selectedTrialSession.startsAt)}`
-                  : "暂无可预约课次"
+                  : "请选择上课时间"
               }}
               ›</view
             ></view
           ></picker
         >
-        <view v-if="!schedulableTrialSessions.length" class="trial-context">
-          <text>暂无适合所选学员的课次，请先为对应课程的班级排课。</text>
-          <button v-if="canCreateSession" class="secondary" @tap="openSchedule">
-            去排课
-          </button>
-          <text v-else>请联系管理员或教练排课后，再预约试听。</text>
+        <view v-if="setupGap && !loading" class="trial-context trial-prerequisite">
+          <text class="setup-title">{{ setupGap.title }}</text>
+          <text>{{ setupGap.detail }}</text>
+          <button v-if="canFixGap" class="secondary" @tap="openSetup">{{ setupGap.label }}</button>
+          <text v-else>请联系管理员补齐配置后，再继续预约。</text>
+          <text v-if="canFixGap" class="muted">学员和已填内容会保留。</text>
         </view>
-        <view v-else class="trial-context">
-          <text>产品：{{ selectedTrialProduct?.name || "—" }}</text>
-          <text>班级：{{ selectedTrialClass?.name || "—" }}</text>
-          <text
-            >时段：{{
-              selectedTrialSession
-                ? `${shortDate(selectedTrialSession.startsAt)} 至 ${shortDate(selectedTrialSession.endsAt)}`
-                : "—"
-            }}</text
-          >
+        <view v-else-if="selectedTrialSession" class="trial-context trial-session-context">
+          <text>课程：{{ selectedTrialProduct?.name || "—" }}</text>
+          <text>时段：{{ dateTimeRange(selectedTrialSession.startsAt, selectedTrialSession.endsAt) }}</text>
         </view>
-        <view class="form-grid">
-          <view
+        <view v-if="selectedTrialSession" class="form-grid">
+          <picker v-if="canConfigureTraining && availableCoaches.length" :range="availableCoaches" range-key="displayName" :value="Math.max(0, coachIndex)" @change="emit('update:trialCoachId', availableCoaches[Number(($event.detail as any).value)]?.id || '')">
+            <view><text class="field-label">试听教练</text><view class="picker-value">{{ coachDisplayName(trialCoachId, '请选择教练') }} ›</view></view>
+          </picker>
+          <view v-else
             ><text class="field-label">试听教练</text
             ><view class="picker-value readonly-value">{{
               coachDisplayName(trialCoachId)
@@ -281,6 +290,7 @@ async function save() {
             ></picker
           >
         </view>
+        <text v-if="selectedTrialSession && !trialCoachId" class="trial-error">{{ canConfigureTraining && availableCoaches.length ? '请选择负责本次试听的教练。' : '该班级尚未分配教练，请联系管理员后再预约。' }}</text>
         <button class="ghost" @tap="showNote = !showNote">
           {{ showNote ? "收起备注" : "添加备注（选填）" }}
         </button>
@@ -304,6 +314,8 @@ async function save() {
         ><text v-if="errorMessage" class="trial-error" role="alert">{{
           errorMessage
         }}</text>
+        <text v-if="!selectedTrialSubject" class="trial-review">先搜索并选择学员，再选择上课时间。</text>
+        <text v-else-if="!selectedTrialSession" class="trial-review">{{ setupGap ? setupGap.title : '请选择上课时间' }}</text>
         <button
           class="primary full-button"
           :loading="actionKey === 'create-trial'"
@@ -435,6 +447,20 @@ async function save() {
 <style scoped src="../page.css"></style>
 
 <style scoped>
+.trial-prerequisite, .trial-session-context {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  padding: 24rpx;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.trial-prerequisite button {
+  width: 100%;
+  margin: 4rpx 0;
+  min-height: 48px;
+  font-size: 15px;
+}
 .trial-form-page {
   padding-bottom: calc(170rpx + env(safe-area-inset-bottom));
 }

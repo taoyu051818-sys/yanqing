@@ -59,7 +59,10 @@ prepare)
   tar -xzf "$archive" --no-same-owner -C "$candidate"
   (cd "$candidate" && sha256sum -c FILES.sha256 > "$receipt/files-verified.log")
   test "$("$node" -p "JSON.parse(require('fs').readFileSync(process.argv[1])).commit" "$candidate/RELEASE.json")" = "$commit"
-  cp -a "$previous/node_modules" "$candidate/node_modules"
+  # Releases never install or modify dependencies in place. Reuse immutable
+  # files on the same volume; the dependency/schema fingerprint check below
+  # must pass before rehearsal or activation. Keep build outputs independent.
+  cp -al "$previous/node_modules" "$candidate/node_modules"
   cp -a "$previous/apps/api/node_modules" "$candidate/apps/api/node_modules"
   printf '%s\n' "$previous" > "$receipt/previous-release"
   cp "$override" "$receipt/90-release.conf"
