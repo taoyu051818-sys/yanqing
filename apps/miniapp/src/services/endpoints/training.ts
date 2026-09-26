@@ -14,6 +14,8 @@ import type {
 import type {
   TrainingProductView,
   TrainingSessionView,
+  TrainingSessionQuery,
+  TrainingSessionPage,
   TrainingEnrollmentView,
 } from "@yanqing/shared";
 import { api } from "../http";
@@ -112,5 +114,15 @@ export const trainingEndpoints = {
     api.post(`/training/sessions/${sessionId}/attendance/makeup`, data),
   completeTrainingSession: (sessionId: string, data: object = {}) =>
     api.post(`/training/sessions/${sessionId}/complete`, data),
-  trainingSessions: () => api.get<TrainingSessionView[]>("/training/sessions"),
+  trainingSessionPage: (query: TrainingSessionQuery = {}) => api.get<TrainingSessionPage>("/training/sessions/search", query),
+  trainingSession: (id: string) => api.get<TrainingSessionView>(`/training/sessions/${encodeURIComponent(id)}`),
+  // Selector consumers need the full eligible set, not an arbitrary first 100.
+  trainingSessions: async (query: TrainingSessionQuery = {}) => {
+    const items: TrainingSessionView[] = [];
+    for (let page = 1; ; page++) {
+      const result = await api.get<TrainingSessionPage>("/training/sessions/search", { ...query, page, pageSize: 100 });
+      items.push(...result.items);
+      if (!result.hasMore) return [...new Map(items.map(item => [item.id, item])).values()];
+    }
+  },
 };

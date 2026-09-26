@@ -161,7 +161,7 @@ describe('functional domain module wiring and HTTP contracts', () => {
     vi.restoreAllMocks();
   });
 
-  it('preserves all 57 route, role and public-access declarations with no additions or omissions', () => {
+  it('preserves all 59 route, role and public-access declarations including paginated session reads', () => {
     const actual: object[] = [];
     for (const [name, controller] of Object.entries(controllers)) {
       for (const method of Object.getOwnPropertyNames(controller.prototype)) {
@@ -198,11 +198,11 @@ describe('functional domain module wiring and HTTP contracts', () => {
     );
     const sort = (items: object[]) =>
       items.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-    expect(actual).toHaveLength(57);
+    expect(actual).toHaveLength(59);
     expect(sort(actual)).toEqual(sort(expected));
     expect(
       new Set(routes.map((route) => `${route.verb} ${route.path}`)).size,
-    ).toBe(57);
+    ).toBe(59);
   });
 
   it('dispatches every existing HTTP route to its owning domain provider, including static routes', async () => {

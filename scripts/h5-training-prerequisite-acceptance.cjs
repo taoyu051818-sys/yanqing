@@ -4,11 +4,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const base = process.env.OPS_UI_BASE_URL || 'http://127.0.0.1:5208';
 if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base)) throw new Error('Use a local mock build');
-const dir = path.resolve('output/role-workflows-2026-09-26/training');
+const dir = path.resolve(process.env.OPS_UI_OUTPUT_DIR || 'output/ui-acceptance', 'training');
 fs.mkdirSync(dir, { recursive: true });
 (async () => {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
-  const page = await browser.newPage({ viewport: { width: 375, height: 812 } });
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ timezoneId: "Asia/Shanghai", viewport: { width: 375, height: 812 } });
+  await page.clock.setFixedTime(new Date("2030-09-26T09:00:00+08:00"));
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('dialog', dialog => dialog.accept());

@@ -5,15 +5,17 @@ import { describe, expect, it } from 'vitest'
 // Exercise the complete task, including computed selection, with controlled transport timing.
 function fixture() {
   const pending: Record<string,{resolve:(data:unknown)=>void;reject:(cause:Error)=>void}>={}
-  const endpoints={availability:(day:string)=>new Promise((resolve,reject)=>{pending[day]={resolve,reject}})}
+  const endpoints: any={availability:(day:string)=>new Promise((resolve,reject)=>{pending[day]={resolve,reject}})}
   const { useBookingAvailability } = loadTaskScript(new URL('./use-booking-availability.ts', import.meta.url), id => {
     if (id === 'vue') return vue
     if (id.endsWith('/services/api')) return { endpoints }
     if (id.endsWith('/utils/format')) return { today: () => '2026-09-09' }
     throw new Error(id)
   })
-  const task = useBookingAvailability({ assisted: vue.ref(false), isSubmitting: () => false, onSelectionChange: () => {} })
-  return { ...task, pending }
+  endpoints.assistedAvailability = endpoints.availability
+  const assisted = vue.ref(false)
+  const task = useBookingAvailability({ assisted, isSubmitting: () => false, onSelectionChange: () => {} })
+  return { ...task, pending, assisted }
 }
 describe('booking date query ownership',()=>{
   it('ignores an old success arriving after the selected date response',async()=>{
@@ -31,3 +33,23 @@ describe('booking date query ownership',()=>{
     expect(f.data.value.date).toBe(f.date.value)
   })
 })
+
+it('clears the previous grid when a new date fails, and restores only the retried date', async () => {
+  const f = fixture(); const old = f.load();
+  f.pending[f.date.value].resolve({date:f.date.value, slots:[], courts:[]}); await old;
+  f.date.value = '2026-09-10';
+  expect(f.data.value).toBeNull();
+  const next = f.load(); f.pending[f.date.value].reject(new Error('断网')); await next;
+  expect(f.visibleSlots.value).toEqual([]);
+  f.choose('court', {id:'slot', price:{priceCents:100}});
+  expect(f.selected.value).toBeNull();
+  expect(f.error.value).toBe('断网');
+  const retry = f.load(); f.pending[f.date.value].resolve({date:f.date.value, slots:[], courts:[]}); await retry;
+  expect(f.data.value.date).toBe('2026-09-10'); expect(f.error.value).toBe('');
+});
+it('discards an assisted response after switching to self booking', async () => {
+  const f = fixture(); f.assisted.value = true; const old = f.load();
+  f.assisted.value = false;
+  f.pending[f.date.value].resolve({date:f.date.value}); await old;
+  expect(f.data.value).toBeNull(); expect(f.loading.value).toBe(false);
+});

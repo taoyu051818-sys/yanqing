@@ -149,3 +149,19 @@ export interface PurchaseTrainingCommand {
   sourceChannel?: string;
   creationIdempotencyKey?: string;
 }
+
+/** Session lists are filtered on the server before pagination. Dates use Asia/Shanghai. */
+export interface TrainingSessionQuery {
+  page?: number;
+  pageSize?: number;
+  date?: string;
+  search?: string;
+  upcoming?: "true" | "false";
+  attendanceId?: string;
+}
+export interface TrainingSessionPage {
+  items: TrainingSessionView[];
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}

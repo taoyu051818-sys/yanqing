@@ -31,3 +31,7 @@ apps/api/prisma/*.db-journal
 apps/*/.env
 !.env.example
 !apps/*/.env.example
+
+# Local screenshots, release packages and scratch work; published evidence is linked from docs/project-status.md.
+output/
+tmp/

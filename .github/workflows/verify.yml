@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -36,6 +36,7 @@ jobs:
       - run: pnpm --dir apps/api prisma:generate
       - run: pnpm --dir apps/api db:deploy
       - run: pnpm --dir packages/shared build
+      - run: pnpm check:docs
       - run: pnpm lint
       - run: pnpm test:ops
       - run: pnpm test:release:miniapp
@@ -50,3 +51,37 @@ jobs:
         env:
           VITE_DATA_MODE: remote
           VITE_API_BASE_URL: https://api.yutechhn.cn/api/v1
+
+  core-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir packages/shared build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:ui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-ui-evidence
+          path: output/ui-acceptance
+          retention-days: 14
+
+  # Keep the protected check named "verify": both API/database and UI must pass.
+  verify:
+    needs: [quality, core-ui]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all verification jobs
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          UI_RESULT: ${{ needs.core-ui.result }}
+        run: test "$QUALITY_RESULT" = success && test "$UI_RESULT" = success

@@ -30,7 +30,7 @@ import { computed, getCurrentInstance, onUnmounted, ref, watch } from "vue";
 import { preserveTrainingSelection, useTrainingFormNavigation, type TrainingCreationResult } from "./actions/form-navigation";
 import OperationsTabs from "../../components/OperationsTabs.vue";
 import LessonList from "./sections/LessonList.vue";
-import { today, venueDateKey } from "../../../../utils/format";
+import { today } from "../../../../utils/format";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import OperationsFrame from "../../components/OperationsFrame.vue";
 import OperationTask from "../../components/OperationTask.vue";
@@ -50,7 +50,13 @@ const session = useSessionStore();
 
 const dataScope = () =>
   `${session.user?.id || ""}:${[...session.roles].sort().join(",")}`;
-const teaching = useCoachTeachingData(dataScope);
+const lessonFilter = ref("today");
+const lessonSearch = ref("");
+const teaching = useCoachTeachingData(dataScope, () => ({
+  ...(lessonFilter.value === "all" ? {} : { date: today(lessonFilter.value === "tomorrow" ? 1 : 0) }),
+  search: lessonSearch.value.trim(),
+}), () => navigation.sessionQuery());
+const { items: filteredLessons, hasMore: moreLessons, loading: lessonsLoading, error: lessonsError } = teaching.list;
 const catalog = useCoachCatalogData(dataScope);
 const trialData = useCoachTrialData(dataScope);
 const rulesData = useCoachYouthRuleData(dataScope);
@@ -65,8 +71,6 @@ const navigation = useCoachNavigation({
   trials,
 });
 const { focusedRecord, activeView, lessonId } = navigation;
-const lessonFilter = ref("today");
-const lessonSearch = ref("");
 const sessionValidationField = ref("");
 
 const actionKey = ref("");
@@ -489,11 +493,13 @@ const coachTabs = computed(() => [
   ...(canConfigureTraining.value ? [{ key:'rules', title:'限制' }] : []),
   { key:'corrections', title:'复核', count:requestedCorrections.value.length },
 ]);
-const filteredLessons = computed(() => lessons.value.filter(lesson => {
-  const date = venueDateKey(lesson.startsAt);
-  return (lessonFilter.value === 'all' || date === today(lessonFilter.value === 'tomorrow' ? 1 : 0)) &&
-    String(lesson.class?.name || '').includes(lessonSearch.value.trim());
-}));
+let lessonSearchTimer: ReturnType<typeof setTimeout> | undefined;
+watch([lessonFilter, lessonSearch], () => {
+  clearTimeout(lessonSearchTimer);
+  teaching.list.reset();
+  lessonSearchTimer = setTimeout(() => { if (mayViewTraining.value) void teaching.list.refresh(); }, 250);
+});
+onUnmounted(() => clearTimeout(lessonSearchTimer));
 const detailLessons = computed(() => lessons.value.filter(lesson => lesson.id === lessonId.value));
 function openLesson(id: string) { uni.navigateTo({ url:`/packages/ops/pages/coach/index?lessonId=${encodeURIComponent(id)}` }); }
 function openProductEditor(product: TrainingProductView) { uni.navigateTo({url:`/packages/ops/pages/coach/index?view=edit-product&productId=${encodeURIComponent(product.id)}`}); }
@@ -531,7 +537,7 @@ onUnmounted(dispose);
   >
     <OperationTask :task="task" />
     <OperationsTabs v-if="!lessonId && !isCreationPage" v-model="activeView" :items="coachTabs" label="培训分类" />
-    <LessonList v-if="activeView === 'lessons' && !lessonId" v-model:filter="lessonFilter" v-model:search="lessonSearch" :lessons="filteredLessons" :loading="loading" :can-create="canCreateSession" :students-for="studentsFor" @open="openLesson" @create="openCreation('create-session')" />
+    <LessonList v-if="activeView === 'lessons' && !lessonId" v-model:filter="lessonFilter" v-model:search="lessonSearch" :lessons="filteredLessons" :loading="loading || lessonsLoading" :error="lessonsError" :has-more="moreLessons" @more="teaching.list.more()" @retry="teaching.list.retry()" :can-create="canCreateSession" :students-for="studentsFor" @open="openLesson" @create="openCreation('create-session')" />
     <view v-if="lessonId && !loading && !detailLessons.length" class="card empty">未找到该课次，可能已移除或当前账号无权查看。</view>
 
     <view v-if="errorMessage && !sessionValidationField && !isCreationPage" class="card error-panel">

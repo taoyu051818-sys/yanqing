@@ -2,6 +2,8 @@
 
 面向延庆羽毛球馆的全栈业务系统，覆盖会员及前台、教练、球局主理人、赛事、联盟商户、财务和管理员等运营角色。会员与员工移动端采用 uni-app + Vue 3 微信小程序，集中管理使用独立 Vue 3 PC 后台；两端共用 NestJS + Prisma + PostgreSQL。`legacy/web` 中的 Next.js 界面是上游原型参考，不连接本系统 API，不属于生产运行路径或业务验收范围。
 
+当前任务、版本交付状态与验收统一从 [项目状态](docs/project-status.md) 进入。
+
 ## 已实现范围
 
 - 可配置场地数量、营业时间、地址与位置、版本化价格规则；支持 10 分钟锁场、支付后确认、扫码签到和到期履约确认。具体数量和时间以球馆配置为准。
@@ -59,7 +61,7 @@ VITE_DATA_MODE=remote
 pnpm dev:miniapp
 ```
 
-然后在微信开发者工具导入 `apps/miniapp/dist/dev/mp-weixin`。生产构建执行 `pnpm build:miniapp`，导入 `apps/miniapp/dist/build/mp-weixin`。当前仓库已配置项目 AppID `wx25610460bc96894b`，构建产物的 `project.config.json` 固定为微信小程序模式（`compileType: "miniprogram"`）。必须在微信公众平台为该小程序配置 HTTPS API 合法域名，并确保上传微信号具有该 AppID 的开发者权限。
+然后在微信开发者工具导入 `apps/miniapp/dist/dev/mp-weixin`。`pnpm build:miniapp` 用于开发构建，默认可能使用 mock。正式上传必须使用 `pnpm release:miniapp:prepare` 和 `pnpm release:miniapp:upload`，它们固定远端 API、校验源码与产物、保留独立快照和机器回执；不能手工上传可变的 dist 目录。当前仓库已配置项目 AppID `wx25610460bc96894b`，构建产物的 `project.config.json` 固定为微信小程序模式（`compileType: "miniprogram"`）。必须在微信公众平台为该小程序配置 HTTPS API 合法域名，并确保上传微信号具有该 AppID 的开发者权限。
 
 微信开发者工具导入、测试 AppID、模拟/远端联调、角色切换、上传和真机验收请按 [docs/wechat-devtools.md](docs/wechat-devtools.md) 操作；不要导入 `apps/miniapp` 源码目录或 `dist` 上一级目录。
 
@@ -78,6 +80,9 @@ V1 支持人员查询与超级管理员授权、五类业务配置、待办概�
 ## 一键校验
 
 ```bash
+pnpm check:docs    # 检查 Git 暂存区/CI 中的文档相对链接
+pnpm exec playwright install chromium # 首次安装界面测试浏览器
+pnpm test:ui       # 独立 mock 服务，培训/课表/代订/退款界面回归
 pnpm verify        # 领域规则、API 单元/E2E、API 构建、小程序与 PC 后台构建
 pnpm verify:full   # 额外确认 legacy/web 视觉原型仍可构建
 pnpm build         # 构建 NestJS API、微信小程序与 PC 后台
