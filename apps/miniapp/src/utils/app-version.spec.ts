@@ -33,4 +33,15 @@ describe('installed application identity', () => {
     await expect(checkServiceConnection()).rejects.toThrow('本地演示');
     expect(request).not.toHaveBeenCalled();
   });
+  it('rejects an empty readiness response with a retryable message', async () => {
+    vi.stubGlobal('__APP_RELEASE__', build);
+    let receive: (value: unknown) => void = () => {};
+    vi.stubGlobal('uni', { request: (options: any) => { receive = options.success; } });
+    const { checkServiceConnection } = await import('./app-version');
+    const pending = checkServiceConnection();
+    const assertion = expect(pending).rejects.toThrow('暂时未就绪');
+    // The real callback arrives after the Promise executor has returned.
+    expect(() => receive({ statusCode: 200, data: null })).not.toThrow();
+    await assertion;
+  });
 });

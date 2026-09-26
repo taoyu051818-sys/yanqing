@@ -10,7 +10,7 @@ let alive = true;
 onUnmounted(() => { alive = false; });
 async function check() {
   if (busy.value) return;
-  busy.value = true; status.value = ''; failed.value = false;
+  busy.value = true; status.value = ''; failed.value = false; serverRevision.value = '';
   try {
     const revision = await checkServiceConnection();
     if (alive) { serverRevision.value = revision.slice(0, 7); status.value = '连接正常'; }

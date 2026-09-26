@@ -39,7 +39,7 @@ export function checkServiceConnection(): Promise<string> {
     method: 'GET', timeout: 10000,
     success: response => {
       const body = response.data as { code?: number; data?: { status?: string; revision?: string; checks?: { database?: string } } };
-      if (response.statusCode === 200 && body.code === 0 && body.data?.status === 'ok' && body.data.checks?.database === 'ok') {
+      if (response.statusCode === 200 && body?.code === 0 && body.data?.status === 'ok' && body.data.checks?.database === 'ok') {
         resolve(body.data.revision || '');
       } else reject(new Error('服务暂时未就绪，请稍后重试。'));
     },
