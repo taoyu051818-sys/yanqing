@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import GuestState from "../../components/GuestState.vue";
+import AboutVersion from './AboutVersion.vue';
 import {
   captureAuthSession,
   isAuthSessionCurrent,
@@ -160,6 +161,7 @@ function clearPrivateState() {
 }
 watch(useAccessToken(), clearPrivateState, { flush: "sync" });
 async function loadSettings() {
+  if (settingsSection.value === 'about') return;
   if (!session.isAuthenticated) {
     clearPrivateState();
     return;
@@ -182,25 +184,27 @@ onLoad((query) => {
   settingsSection.value = String(query?.section || "");
   if (settingsSection.value)
     uni.setNavigationBarTitle({
-      title: settingsSection.value === "profile" ? "个人资料" : "隐私与账号",
+      title: settingsSection.value === 'about' ? '关于金羽会员' : settingsSection.value === "profile" ? "个人资料" : "隐私与账号",
     });
 });
 </script>
 <template>
   <view class="page safe-bottom">
     <GuestState
-      v-if="!session.isAuthenticated"
+      v-if="!session.isAuthenticated && settingsSection !== 'about'"
       title="资料与设置"
       description="头像、昵称和账号设置由你自主完善，登录后可查看和编辑。"
       action-text="登录管理个人资料"
       @login="requestMemberLogin('/pages/settings/index')"
     />
     <view
-      v-if="session.isAuthenticated && !settingsSection"
+      v-if="!settingsSection"
       class="settings-menu card"
-      ><button @tap="openSection('profile')">个人资料 ›</button
-      ><button @tap="openSection('privacy')">隐私与账号 ›</button></view
+      ><button v-if="session.isAuthenticated" @tap="openSection('profile')">个人资料 ›</button
+      ><button v-if="session.isAuthenticated" @tap="openSection('privacy')">隐私与账号 ›</button
+      ><button @tap="openSection('about')">关于金羽会员 ›</button></view
     >
+    <AboutVersion v-if="settingsSection === 'about'" />
     <view v-if="profileError && !session.user" class="card"
       ><text class="profile-error">{{ profileError }}</text
       ><button class="secondary" @tap="loadSettings">重试</button></view

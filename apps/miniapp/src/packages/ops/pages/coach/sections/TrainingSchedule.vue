@@ -7,6 +7,8 @@ const props = defineProps<{
   errorMessage?: string;
   errorField?: string;
   canCreateSession: boolean;
+  canConfigureTraining: boolean;
+  hasProducts: boolean;
   sessionClasses: any[];
   sessionClassIndex: number;
   selectedSessionClass: any;
@@ -27,9 +29,11 @@ const props = defineProps<{
   sessionReason: string;
   actionKey: string;
   loading: boolean;
-  createSession: () => Promise<void>;
+  createSession: () => Promise<boolean | undefined>;
 }>();
 const emit = defineEmits<{
+  (event: "saved"): void;
+  (event: "setup", view: string): void;
   (event: "update:sessionClassIndex", value: number): void;
   (event: "update:sessionStartTime", value: string): void;
   (event: "update:sessionEndTime", value: string): void;
@@ -77,12 +81,20 @@ watch(() => [props.errorField, props.errorMessage], async () => {
   await nextTick();
   uni.pageScrollTo({ selector:`#session-field-${props.errorField}`, offsetTop:-24, duration:200 });
 });
+async function save() {
+  if (await props.createSession()) { markSaved(); emit("saved"); }
+}
 </script>
 
 <template>
   <view class="schedule-page">
     <template v-if="canCreateSession">
 
+      <view v-if="!loading && !sessionClasses.length" class="card prerequisite-card">
+        <text class="panel-title">{{ hasProducts ? '还没有可排课的班级' : '先创建课程和班级' }}</text>
+        <text class="muted">{{ canConfigureTraining ? '补齐后返回，日期和已填内容会保留。' : '请联系管理员创建班级并分配教练。' }}</text>
+        <button v-if="canConfigureTraining" class="secondary" @tap="emit('setup', hasProducts ? 'create-class' : 'create-product')">{{ hasProducts ? '去建班级' : '去建课程' }}</button>
+      </view>
       <view class="card creation-form">
         <picker id="session-field-class"
           :range="sessionClasses"
@@ -167,14 +179,14 @@ watch(() => [props.errorField, props.errorMessage], async () => {
             placeholder="教学重点、器材或分组说明"
         /></view>
         <view id="session-field-reason"
-          ><text class="field-label">创建原因（必填）</text
+          ><text class="field-label">排课说明（选填）</text
           ><textarea
             v-model="sessionReason"
             :focus="errorField === 'reason' && Boolean(errorMessage)"
             :aria-invalid="errorField === 'reason' && Boolean(errorMessage)"
             class="reason-input"
             maxlength="300"
-            placeholder="说明本次排课依据"
+            placeholder="如有临时调整，可在此补充"
           />
           <text v-if="errorField === 'reason'" class="field-error" role="alert">{{ errorMessage }}</text>
         </view>
@@ -184,7 +196,7 @@ watch(() => [props.errorField, props.errorMessage], async () => {
           class="primary full-button"
           :loading="actionKey === 'create-session'"
           :disabled="loading || Boolean(actionKey) || !selectedSessionClass"
-          @tap="createSession"
+          @tap="save"
         >
           创建培训课次
         </button></view>

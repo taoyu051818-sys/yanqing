@@ -52,6 +52,7 @@ const canRefund = (order: OrderView) =>
     session.roles.some((role) =>
       ["FRONT_DESK", "ADMIN", "SUPER_ADMIN"].includes(role),
     )) &&
+  !aftersales.awaitingRefund(order.id) &&
   canRequestOrderRefund(
     order,
     management.value && canDirectRefund(session.roles),
@@ -93,6 +94,7 @@ const aftersales = useOrderAftersales(
 );
 const { refundingId, refundError, refundFeedback, cancelPending, refund } =
   aftersales;
+watch(orders, (items) => aftersales.syncRefunds(items));
 watch(
   [() => session.isAuthenticated, () => session.user?.id],
   () => {
@@ -293,7 +295,7 @@ onPullDownRefresh(() => load());
         </button></view
       >
       <view
-        v-if="refundFeedback?.orderId === order.id && !order.refunds?.length"
+        v-if="refundFeedback?.orderId === order.id && aftersales.awaitingRefund(order.id)"
         class="refund-result"
         role="status"
         aria-live="polite"

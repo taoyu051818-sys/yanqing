@@ -22,7 +22,7 @@ const props = defineProps<{
   productReason: string;
   actionKey: string;
   loading: boolean;
-  createProduct: () => Promise<void>;
+  createProduct: () => Promise<boolean | undefined>;
   activeProducts: TrainingProductView[];
   classProductIndex: number;
   selectedClassProduct: any;
@@ -43,9 +43,11 @@ const props = defineProps<{
   classAssistantCostYuan: string;
   classMaterialCostYuan: string;
   classReason: string;
-  createClass: () => Promise<void>;
+  createClass: () => Promise<boolean | undefined>;
 }>();
 const emit = defineEmits<{
+  (event: "saved"): void;
+  (event: "setup", view: string): void;
   (event: "clear-error"): void;
   (event: "update:productCode", value: string): void;
   (event: "update:productName", value: string): void;
@@ -199,6 +201,10 @@ watch(() => props.errorField, async field => {
   uni.pageScrollTo({ selector: '#training-' + field, duration: 200 });
 });
 function changed() { emit('clear-error'); }
+async function save() {
+  const succeeded = await (props.formType === "product" ? props.createProduct() : props.createClass());
+  if (succeeded) { markSaved(); emit("saved"); }
+}
 </script>
 
 <template>
@@ -279,7 +285,7 @@ function changed() { emit('clear-error'); }
               class="primary full-button"
               :loading="actionKey === 'create-product'"
               :disabled="loading || Boolean(actionKey)"
-              @tap="createProduct"
+              @tap="save"
             >
               创建并上架
             </button></view
@@ -290,6 +296,11 @@ function changed() { emit('clear-error'); }
         <view class="section-title"
           >创建培训班级 <text class="section-note">仅管理员</text></view
         >
+        <view v-if="!loading && !activeProducts.length" class="card prerequisite-card">
+          <text class="panel-title">先创建课程，再安排班级</text>
+          <text class="muted">课程确定价格和课次数；班级安排教练与上课时间。已填内容会保留。</text>
+          <button class="secondary" @tap="emit('setup', 'create-product')">去建课程</button>
+        </view>
         <view class="card creation-form">
           <picker
             :range="activeProducts"
@@ -353,6 +364,7 @@ function changed() { emit('clear-error'); }
             <picker
               :range="coachOptions"
               range-key="displayName"
+              :value="Math.max(0, coachOptions.findIndex(coach => coach.id === classCoachId))"
               @change="changeClassCoach"
               ><view
                 ><text class="field-label">主教练（选填）</text
@@ -368,6 +380,7 @@ function changed() { emit('clear-error'); }
           <picker
             :range="coachOptions"
             range-key="displayName"
+            :value="Math.max(0, coachOptions.findIndex(coach => coach.id === classAssistantId))"
             @change="changeClassAssistant"
             ><view
               ><text class="field-label">助教（选填）</text
@@ -418,7 +431,7 @@ function changed() { emit('clear-error'); }
               class="primary full-button"
               :loading="actionKey === 'create-class'"
               :disabled="loading || Boolean(actionKey) || !selectedClassProduct"
-              @tap="createClass"
+              @tap="save"
             >
               创建培训班级
             </button></view

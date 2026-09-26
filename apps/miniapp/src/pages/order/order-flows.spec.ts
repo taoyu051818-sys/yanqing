@@ -5,6 +5,7 @@ import type {
   OrderView,
   PaymentQuote,
   PaymentResult,
+  RefundResult,
 } from "@yanqing/shared";
 import { endpoints } from "../../services/api";
 import { saveAuthSession } from "../../services/auth-session";
@@ -121,6 +122,7 @@ beforeEach(() => {
   vi.mocked(endpoints.orders).mockResolvedValue(page([order()]));
   vi.mocked(endpoints.paymentOptions).mockResolvedValue(quote());
   vi.mocked(endpoints.payOrder).mockResolvedValue(paid());
+  vi.mocked(endpoints.refundOrder).mockResolvedValue({ id: "refund", status: "REQUESTED" });
 });
 afterEach(() => {
   vi.clearAllTimers();
@@ -390,7 +392,7 @@ describe("order aftersales", () => {
       const scope = useOrderActionScope();
       const load = vi.fn();
       const flow = useOrderAftersales(scope, load, () => false);
-      const result = deferred<unknown>();
+      const result = deferred<RefundResult>();
       vi.mocked(
         kind === "cancel"
           ? endpoints.cancelPendingOrder
@@ -407,7 +409,7 @@ describe("order aftersales", () => {
       saveAuthSession("second-token", "member-b");
       scope.reset();
       flow.reset();
-      result.resolve({});
+      result.resolve({ id: "refund", status: "REQUESTED" });
       await pending;
       expect(ui.showToast).not.toHaveBeenCalled();
       expect(load).not.toHaveBeenCalled();
@@ -438,7 +440,7 @@ describe("order countdown lifecycle", () => {
 it("administrator refund uses one direct command and reuses its key after an uncertain response", async () => {
   const flow = useOrderAftersales(useOrderActionScope(), vi.fn(), () => false, () => true);
   const venue = order("direct-paid", {status:"PAID", paidCents:5000, refundedCents:1000});
-  vi.mocked(endpoints.directRefundOrder).mockRejectedValueOnce(new Error("连接中断")).mockResolvedValueOnce({status:"PROCESSING"});
+  vi.mocked(endpoints.directRefundOrder).mockRejectedValueOnce(new Error("连接中断")).mockResolvedValueOnce({id:"direct-refund",status:"PROCESSING"});
   await flow.refund(venue,"会员取消预约");
   expect(flow.refundError.value).toContain("连接中断");
   await flow.refund(venue,"会员取消预约");
@@ -448,4 +450,51 @@ it("administrator refund uses one direct command and reuses its key after an unc
   expect(calls[0][1]).toMatchObject({amountCents:4000});
   expect(endpoints.refundOrder).not.toHaveBeenCalled();
   expect(ui.showToast).toHaveBeenLastCalledWith(expect.objectContaining({title:"退款处理中，无需再次审核"}));
+});
+
+it("does not issue a second refund after acceptance when the order refresh fails", async () => {
+  const load = vi.fn().mockRejectedValue(new Error("订单查询超时"));
+  const scope = useOrderActionScope();
+  const flow = useOrderAftersales(scope, load, () => false, () => true);
+  const venue = order("paid", { status: "PAID", paidCents: 5000 });
+  const result = deferred<RefundResult>();
+  vi.mocked(endpoints.directRefundOrder).mockReturnValueOnce(result.promise);
+  flow.refundingId.value = venue.id;
+  const pending = flow.refund(venue, "会员取消预约");
+  await flow.refund(venue, "会员取消预约");
+  expect(endpoints.directRefundOrder).toHaveBeenCalledOnce();
+  result.resolve({ id: "accepted", status: "PROCESSING" });
+  await pending;
+  expect(flow.refundingId.value).toBe("");
+  expect(flow.refundError.value).toBe("");
+  expect(flow.refundFeedback.value?.message).toContain("订单进度暂未同步");
+  expect(flow.canStartRefund(venue)).toBe(false);
+  await flow.refund(venue, "会员取消预约");
+  expect(endpoints.directRefundOrder).toHaveBeenCalledOnce();
+  flow.syncRefunds([venue]);
+  expect(flow.awaitingRefund(venue.id)).toBe(true);
+  const synced = order("paid", {
+    status: "REFUND_PENDING", paidCents: 5000,
+    refunds: [{ id: "accepted", status: "PROCESSING", amountCents: 5000, reason: "会员取消预约", requestedAt: "2026-09-26T01:00:00Z" }],
+  });
+  flow.syncRefunds([synced]);
+  expect(flow.awaitingRefund(venue.id)).toBe(false);
+  expect(flow.canStartRefund(synced)).toBe(false);
+  const reopened = useOrderAftersales(useOrderActionScope(), vi.fn(), () => false, () => true);
+  expect(reopened.canStartRefund(synced)).toBe(false);
+});
+
+it("releases the receipt guard only for its own refund and restores retry after a server rejection", async () => {
+  const flow = useOrderAftersales(useOrderActionScope(), vi.fn(), () => false);
+  const venue = order("paid", { status: "PAID", paidCents: 5000 });
+  await flow.refund(venue, "行程有变");
+  flow.syncRefunds([{
+    ...venue, refunds: [{ id: "unrelated", status: "REJECTED", amountCents: 5000, reason: "行程有变", requestedAt: "2026-09-26T01:00:00Z" }],
+  }]);
+  expect(flow.canStartRefund(venue)).toBe(false);
+  const rejected = {
+    ...venue, refunds: [{ id: "refund", status: "REJECTED" as const, amountCents: 5000, reason: "行程有变", requestedAt: "2026-09-26T01:00:00Z" }],
+  };
+  flow.syncRefunds([rejected]);
+  expect(flow.canStartRefund(rejected)).toBe(true);
 });

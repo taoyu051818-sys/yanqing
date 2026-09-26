@@ -5,6 +5,11 @@ import type {
   OrderPage,
   PaymentQuote,
   PaymentResult,
+  PayOrderCommand,
+  CancelPendingOrderCommand,
+  RequestRefundCommand,
+  ReviewRefundCommand,
+  RefundResult,
 } from "@yanqing/shared";
 import { api } from "../http";
 
@@ -20,18 +25,18 @@ export const ordersEndpoints = {
   order: (id: string) => api.get<OrderView>(`/orders/${id}`),
   paymentOptions: (id: string) =>
     api.get<PaymentQuote>(`/orders/${id}/payment-options`),
-  payOrder: (id: string, data: object) =>
+  payOrder: (id: string, data: PayOrderCommand) =>
     api.post<PaymentResult>(`/orders/${id}/pay`, data),
-  cancelPendingOrder: (id: string, data: object) =>
+  cancelPendingOrder: (id: string, data: CancelPendingOrderCommand) =>
     api.post(`/orders/${id}/cancel`, data),
-  refundOrder: (id: string, data: object) =>
-    api.post(`/orders/${id}/refunds`, data),
-  directRefundOrder: (id: string, data: object) =>
-    api.post<{ status: string }>(`/orders/${id}/refunds/direct`, data),
-  approveRefund: (refundId: string, data: object) =>
-    api.post<{ status: string }>(`/orders/refunds/${refundId}/approve`, data),
-  rejectRefund: (refundId: string, data: object = {}) =>
-    api.post(`/orders/refunds/${refundId}/reject`, data),
+  refundOrder: (id: string, data: RequestRefundCommand) =>
+    api.post<RefundResult>(`/orders/${id}/refunds`, data),
+  directRefundOrder: (id: string, data: RequestRefundCommand) =>
+    api.post<RefundResult>(`/orders/${id}/refunds/direct`, data),
+  approveRefund: (refundId: string, data: ReviewRefundCommand) =>
+    api.post<RefundResult>(`/orders/refunds/${refundId}/approve`, data),
+  rejectRefund: (refundId: string, data: ReviewRefundCommand) =>
+    api.post<RefundResult>(`/orders/refunds/${refundId}/reject`, data),
   nextOrder: () => api.get<OrderView | null>("/orders/me/next"),
   memberLedger: (params: Record<string, unknown>) =>
     api.get<LedgerPage>("/orders/me/ledger", params),

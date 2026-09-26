@@ -75,7 +75,7 @@ export function useCoachScheduleActions({
       const endsAt = sessionEndsAt.value;
       const startsTime = new Date(startsAt).getTime();
       const endsTime = new Date(endsAt).getTime();
-      const reason = requiredReason(sessionReason.value);
+      const reason = sessionReason.value.trim() ? requiredReason(sessionReason.value) : "安排培训课次";
       const note = sessionNote.value.trim();
       const courtIds = [...new Set(selectedCourtIds.value)].sort();
       field = "class";
@@ -137,6 +137,7 @@ export function useCoachScheduleActions({
         sessionNote.value = "";
         sessionReason.value = "";
       }
+      return succeeded;
     } catch (cause: any) {
       onValidationError?.(field);
       errorMessage.value = cause?.message || "培训课次表单校验失败。";

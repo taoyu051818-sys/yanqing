@@ -6,7 +6,7 @@ export function useTrainingTrialForm() {
   const trialMemberIndex = ref(-1);
   const trialLeadIndex = ref(-1);
   const trialStudentIndex = ref(-1);
-  const trialSessionIndex = ref(0);
+  const trialSessionIndex = ref(-1);
   const trialCoachId = ref("");
   const trialSourceOptions = [
     { value: "STORE_VISIT", label: "到店咨询" },

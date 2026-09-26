@@ -123,12 +123,6 @@ export function useCoachCatalogActions({
         },
         reason,
       };
-      const modal = await uni.showModal({
-        title: "确认创建课程产品",
-        content: `${name}\n${command.totalSessions} 课次 · 有效 ${command.validityDays} 天 · ${money(command.priceCents)}\n原因：${reason}`,
-        confirmText: "确认创建",
-      });
-      if (!modal.confirm) return;
       const succeeded = await runCreation(
         "create-product",
         "课程产品已创建并写入审计记录。",
@@ -148,6 +142,7 @@ export function useCoachCatalogActions({
         productName.value = "";
         productReason.value = "";
       }
+      return succeeded;
     } catch (cause: any) {
       reportFormError(cause, "课程产品表单校验失败。");
     }
@@ -291,12 +286,6 @@ export function useCoachCatalogActions({
         materialCostCents: trainingField("classMaterialCostYuan", () => yuanToCents(classMaterialCostYuan.value, "单课物料成本")),
         reason,
       };
-      const modal = await uni.showModal({
-        title: "确认创建培训班级",
-        content: `${name}\n${product.name} · ${weekdayOptions[classWeekdayIndex.value]} ${classStartTime.value}-${classEndTime.value}\n容量 ${command.capacity} 人\n每课成本：教练 ${money(command.coachCostCents)} · 助教 ${money(command.assistantCostCents)} · 物料 ${money(command.materialCostCents)}`,
-        confirmText: "确认创建",
-      });
-      if (!modal.confirm) return;
       const succeeded = await runCreation(
         "create-class",
         "培训班级已创建，可继续为其安排课次。",
@@ -317,6 +306,7 @@ export function useCoachCatalogActions({
         className.value = "";
         classReason.value = "";
       }
+      return succeeded;
     } catch (cause: any) {
       reportFormError(cause, "培训班级表单校验失败。");
     }

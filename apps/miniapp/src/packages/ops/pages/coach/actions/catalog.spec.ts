@@ -16,7 +16,8 @@ function setup() {
 it('creates the pictured course without requiring an operational explanation', async () => {
   const { form, createProduct } = setup();
   form.productAudienceIndex.value = form.audienceOptions.findIndex(item => item.value === 'ALL');
-  await createProduct();
+  expect(await createProduct()).toBe(true);
+  expect(uni.showModal).not.toHaveBeenCalled();
   expect(endpoints.createTrainingProduct).toHaveBeenCalledWith(expect.objectContaining({ code: '一对一', name: '一对一', audience: 'ALL', totalSessions: 12, priceCents: 128000, reason: '创建课程产品' }));
   expect(form.productName.value).toBe('');
 });

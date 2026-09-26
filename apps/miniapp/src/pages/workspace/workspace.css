@@ -17,3 +17,15 @@
 @media(min-width:768px) { .workspace-nav { max-width:750px; margin:auto; } }
 
 .workspace button { min-height:44px; }
+.today-summary { background:var(--color-surface); border-radius:24rpx; padding:0 24rpx 24rpx; }
+.summary-link { display:flex; width:100%; justify-content:space-between; align-items:center; gap:16rpx; padding:0; margin:0; color:var(--color-muted); font-size:26rpx; background:transparent; }
+.summary-more { display:flex; align-items:center; color:var(--color-primary); }
+.summary-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24rpx; }
+.summary-metric { min-width:0; }
+.summary-metric .metric-value { margin:8rpx 0; font-size:40rpx; }
+.summary-metric .muted { margin:0; }
+.summary-metric .metric-note { font-size:24rpx; line-height:1.5; }
+.shortcut-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16rpx; margin-bottom:28rpx; }
+.shortcut-tile { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16rpx; min-width:0; width:100%; min-height:156rpx; margin:0; padding:24rpx 8rpx; border-radius:24rpx; color:var(--color-foreground); background:var(--color-surface); font-size:28rpx; line-height:1.5; }
+.shortcut-tile text { white-space:normal; overflow-wrap:anywhere; }
+.workspace button:focus-visible { outline:2px solid var(--color-accent); outline-offset:-3px; }

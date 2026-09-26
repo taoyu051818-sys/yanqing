@@ -8,10 +8,12 @@ import StatusBadge from "../../components/StatusBadge.vue";
 import { useVenueProfile } from "../../composables/use-venue-profile";
 import { useSessionStore } from "../../stores/session";
 import {
+  canViewOperatingData,
   managementKeys,
   visibleWorkspaceTabs,
   workspaceGroups,
   workspaceMenu,
+  workspaceShortcuts,
   type WorkspaceTab,
 } from "../../config/workspace";
 import { workQueueRoute } from "../../config/operations";
@@ -58,32 +60,18 @@ const groups = computed(() =>
 const managementItems = computed(() =>
   menu.value.filter((item) => managementKeys.includes(item.key)),
 );
-const shortcuts = computed(() =>
-  menu.value
-    .filter((item) =>
-      [
-        "transactions",
-        "booking",
-        "today",
-        "training",
-        "games",
-        "events",
-        "alliance",
-        "finance",
-      ].includes(item.key),
-    )
-    .slice(0, 4),
-);
+const shortcuts = computed(() => workspaceShortcuts(session.roles));
+const showSummary = computed(() => canViewOperatingData(session.roles));
 const priorityItems = computed(() =>
   [...workItems.value]
     .sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0))
-    .slice(0, 4),
+    .slice(0, 3),
 );
 const urgentCount = computed(
   () => workItems.value.filter(isUrgentWorkItem).length,
 );
 const headings: Record<WorkspaceTab, string> = {
-  today: "今日待办",
+  today: "今日工作",
   business: "业务",
   data: "经营数据",
   manage: "管理",
@@ -106,6 +94,23 @@ function selectTab(tab: WorkspaceTab) {
   activeTab.value = tab;
   uni.pageScrollTo({ scrollTop: 0, duration: 0 });
   if (tab === "data") void loadData();
+  if (tab === "today" && showSummary.value) {
+    days.value = 1;
+    void loadData();
+  }
+}
+function openTodayData() {
+  days.value = 1;
+  selectTab("data");
+}
+async function refreshToday() {
+  // Hydrate once before choosing privileged reads; keep the queue and summary independent.
+  await session.hydrate();
+  void loadWork();
+  if (showSummary.value && ['today', 'data'].includes(activeTab.value)) {
+    if (activeTab.value === "today") days.value = 1;
+    void loadData();
+  }
 }
 function selectPeriod(value: number) {
   days.value = value;
@@ -116,8 +121,7 @@ function backToMember() {
 }
 onShow(async () => {
   void venue.refresh();
-  await loadWork();
-  if (activeTab.value === "data") void loadData();
+  await refreshToday();
 });
 </script>
 <template>
@@ -133,7 +137,7 @@ onShow(async () => {
       ></view>
       <view class="workspace-title"
         ><view
-          ><text class="title">{{ headings[activeTab] }}</text
+          ><text class="title">{{ activeTab === 'today' && showSummary ? '今日经营' : headings[activeTab] }}</text
           ><text class="muted">{{
             activeTab === "today"
               ? dateLabel
@@ -145,13 +149,34 @@ onShow(async () => {
           }}</text></view
         ><button
           v-if="activeTab === 'today'"
-          aria-label="刷新待办"
-          :disabled="loading"
-          @tap="loadWork"
+          aria-label="刷新今日工作"
+          :disabled="loading || dataLoading"
+          @tap="refreshToday"
         >
           <AppIcon name="refresh" :size="38" /></button
       ></view>
       <template v-if="activeTab === 'today'">
+        <view v-if="showSummary" class="today-summary">
+          <button class="summary-link" @tap="openTodayData">
+            <text>今日概况</text><view class="summary-more"><text>查看明细</text><AppIcon name="chevron" :size="24" /></view>
+          </button>
+          <view v-if="dataError" class="error" role="alert">
+            <text>{{ dataError }}</text><button @tap="loadData">重试</button>
+          </view>
+          <view v-else class="summary-metrics" :aria-busy="dataLoading">
+            <view v-for="metric in metrics.slice(0, 2)" :key="metric.label" class="summary-metric">
+              <text class="muted">{{ metric.label }}</text>
+              <text class="metric-value">{{ dataLoading ? '…' : metric.value }}</text>
+              <text class="metric-note">{{ metric.note }}</text>
+            </view>
+          </view>
+        </view>
+        <view class="section-heading"><text>常用操作</text><button @tap="selectTab('business')">全部业务<AppIcon name="chevron" :size="26" /></button></view>
+        <view class="shortcut-grid">
+          <button v-for="item in shortcuts" :key="item.key" class="shortcut-tile" hover-class="is-pressed" @tap="openRoute(item.route)">
+            <AppIcon :name="item.icon" :size="44" /><text>{{ item.title }}</text>
+          </button>
+        </view>
         <view v-if="loading" class="empty" role="status">正在同步待办…</view>
         <view v-else-if="loadError" class="error" role="alert"
           ><text>{{ loadError }}</text
@@ -186,25 +211,10 @@ onShow(async () => {
             ><view v-if="!priorityItems.length" class="empty"
               ><AppIcon name="success" :size="44" /><text
                 >当前没有待处理事项</text
-              ><text class="muted">可从业务入口继续处理日常工作。</text></view
+              ><text class="muted">可从上方入口继续处理日常工作。</text></view
             ></view
           >
         </template>
-        <view class="section-heading"><text>常用业务</text></view
-        ><view class="menu-group"
-          ><view class="menu-grid"
-            ><button
-              v-for="item in shortcuts"
-              :key="item.key"
-              class="menu-tile"
-              @tap="openRoute(item.route)"
-            >
-              <AppIcon :name="item.icon" :size="46" /><text>{{
-                item.title
-              }}</text>
-            </button></view
-          ></view
-        >
       </template>
       <template v-else-if="activeTab === 'business'">
         <view class="search-box"
