@@ -563,6 +563,42 @@
     "domain": "training",
     "controller": "TrainingScheduleController",
     "controllerFile": "training/schedule/training-schedule.controller.ts",
+    "method": "search",
+    "verb": "GET",
+    "path": "/api/v1/training/sessions/search",
+    "roles": [
+      "COACH",
+      "FRONT_DESK",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingScheduleService",
+    "serviceMethod": "searchSessions"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingScheduleController",
+    "controllerFile": "training/schedule/training-schedule.controller.ts",
+    "method": "detail",
+    "verb": "GET",
+    "path": "/api/v1/training/sessions/:sessionId",
+    "roles": [
+      "COACH",
+      "FRONT_DESK",
+      "FINANCE",
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "isPublic": false,
+    "provider": "TrainingScheduleService",
+    "serviceMethod": "getSession"
+  },
+  {
+    "domain": "training",
+    "controller": "TrainingScheduleController",
+    "controllerFile": "training/schedule/training-schedule.controller.ts",
     "method": "createSession",
     "verb": "POST",
     "path": "/api/v1/training/sessions",

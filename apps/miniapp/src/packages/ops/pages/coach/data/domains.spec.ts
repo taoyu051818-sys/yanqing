@@ -12,6 +12,8 @@ vi.mock("../../../../../services/api", () => ({
     trainingProducts: vi.fn(),
     governanceUsers: vi.fn(),
     trainingSessions: vi.fn(),
+    trainingSessionPage: vi.fn(),
+    trainingSession: vi.fn(),
     adminEnrollments: vi.fn(),
     trainingConsumeCorrections: vi.fn(),
     trainingTrials: vi.fn(),
@@ -35,6 +37,7 @@ beforeEach(() => {
     endpoints.youthTrainingRules,
   ])
     vi.mocked(method).mockResolvedValue([]);
+  vi.mocked(endpoints.trainingSessionPage).mockResolvedValue({ items: [], page: 1, pageSize: 50, hasMore: false });
   vi.mocked(endpoints.customerLeads).mockResolvedValue({
     items: [],
     total: 0,

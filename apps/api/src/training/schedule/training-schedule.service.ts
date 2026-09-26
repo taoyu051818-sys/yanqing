@@ -1,5 +1,5 @@
-import type { TrainingSessionView } from '@yanqing/shared';
-import { trainingSessionScope } from '../../common/auth/operation-scopes.js';
+import { queryTrainingSessions } from './training-session-query.js';
+import type { TrainingSessionQueryDto } from './training-session-query.dto.js';
 import {
   Inject,
   BadRequestException,
@@ -27,8 +27,6 @@ import type {
 import { orderCreationCommandHash } from '../../orders/order-creation-idempotency.js';
 import {
   assertOperationTimeWindow,
-  resolveOperationWindowConfiguration,
-  TRAINING_ATTENDANCE_WINDOW_PARAMETER,
   TRAINING_COMPLETION_WINDOW_PARAMETER,
 } from '../../common/time-window/operation-time-window.js';
 import {
@@ -57,127 +55,53 @@ const TRAINING_SESSION_OPERATOR_ROLES: readonly AppRole[] = [
 export class TrainingScheduleService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async listSessions(
-    actor?: AuthUser,
-  ): Promise<TrainingSessionView<Date, Prisma.Decimal>[]> {
-    const observedAt = new Date();
-    const [sessions, attendanceConfiguration, completionConfiguration] =
-      await Promise.all([
-        this.prisma.trainingSession.findMany({
-          where: trainingSessionScope(actor),
-          include: {
-            class: { include: { product: true } },
-            attendances: {
-              include: {
-                enrollment: {
-                  include: {
-                    buyer: { select: { displayName: true } },
-                    student: true,
-                  },
-                },
-              },
-            },
-          },
-          orderBy: { startsAt: 'desc' },
-          take: 100,
-        }),
-        resolveOperationWindowConfiguration(
-          this.prisma,
-          TRAINING_ATTENDANCE_WINDOW_PARAMETER,
-          { earlyMinutes: 30, lateMinutes: 120 },
-          observedAt,
-        ),
-        resolveOperationWindowConfiguration(
-          this.prisma,
-          TRAINING_COMPLETION_WINDOW_PARAMETER,
-          { earlyMinutes: 0, lateMinutes: 240 },
-          observedAt,
-        ),
-      ]);
-    const mayHistoricallyOverride = Boolean(
-      actor?.roles.some((role) =>
-        [AppRole.ADMIN, AppRole.SUPER_ADMIN].includes(role as never),
-      ),
-    );
-    const windowProjection = (
-      startsAt: Date,
-      endsAt: Date,
-      configuration: { earlyMinutes: number; lateMinutes: number },
-    ) => {
-      const opensAt = new Date(
-        startsAt.getTime() - configuration.earlyMinutes * 60_000,
-      );
-      const closesAt = new Date(
-        endsAt.getTime() + configuration.lateMinutes * 60_000,
-      );
-      const state =
-        observedAt < opensAt
-          ? ('NOT_OPEN' as const)
-          : observedAt <= closesAt
-            ? ('OPEN' as const)
-            : ('CLOSED' as const);
-      return {
-        opensAt: opensAt.toISOString(),
-        closesAt: closesAt.toISOString(),
-        state,
-        mayHistoricallyOverride: state === 'CLOSED' && mayHistoricallyOverride,
-      };
+  // Compatibility for already released miniapps; new clients use search + detail.
+  async listSessions(actor?: AuthUser) {
+    return queryTrainingSessions(this.prisma, actor, { take: 100 });
+  }
+
+  async searchSessions(query: TrainingSessionQueryDto, actor: AuthUser) {
+    const page = query.page || 1;
+    const pageSize = query.pageSize || 50;
+    const filters: Prisma.TrainingSessionWhereInput[] = [];
+    if (query.date) {
+      const start = new Date(`${query.date}T00:00:00+08:00`);
+      filters.push({
+        startsAt: { gte: start, lt: new Date(start.getTime() + 86_400_000) },
+      });
+    }
+    if (query.search?.trim())
+      filters.push({
+        class: { name: { contains: query.search.trim(), mode: 'insensitive' } },
+      });
+    if (query.upcoming === 'true')
+      filters.push({
+        status: TrainingSessionStatus.SCHEDULED,
+        endsAt: { gt: new Date() },
+      });
+    if (query.attendanceId)
+      filters.push({ attendances: { some: { id: query.attendanceId } } });
+    const rows = await queryTrainingSessions(this.prisma, actor, {
+      where: { AND: filters },
+      skip: (page - 1) * pageSize,
+      take: pageSize + 1,
+      upcoming: query.upcoming === 'true',
+    });
+    return {
+      items: rows.slice(0, pageSize),
+      page,
+      pageSize,
+      hasMore: rows.length > pageSize,
     };
-    return sessions.map((session) => ({
-      id: session.id,
-      classId: session.classId,
-      startsAt: session.startsAt,
-      endsAt: session.endsAt,
-      status: session.status,
-      courtCount: session.courtCount,
-      occupiedCourtHours: session.occupiedCourtHours,
-      note: session.note,
-      attendanceWindow: windowProjection(
-        session.startsAt,
-        session.endsAt,
-        attendanceConfiguration,
-      ),
-      completionWindow: windowProjection(
-        session.endsAt,
-        session.endsAt,
-        completionConfiguration,
-      ),
-      class: {
-        id: session.class.id,
-        name: session.class.name,
-        capacity: session.class.capacity,
-        active: session.class.active,
-        product: {
-          id: session.class.product.id,
-          name: session.class.product.name,
-          audience: session.class.product.audience,
-        },
-      },
-      attendances: session.attendances.map((attendance) => ({
-        id: attendance.id,
-        sessionId: attendance.sessionId,
-        enrollmentId: attendance.enrollmentId,
-        status: attendance.status,
-        consumedSessions: attendance.consumedSessions,
-        confirmedRevenueCents: attendance.confirmedRevenueCents,
-        growthPointsAwarded: attendance.growthPointsAwarded,
-        feedback: attendance.feedback,
-        checkedInAt: attendance.checkedInAt,
-        consumedAt: attendance.consumedAt,
-        enrollment: {
-          id: attendance.enrollment.id,
-          enrollmentNo: attendance.enrollment.enrollmentNo,
-          status: attendance.enrollment.status,
-          student: attendance.enrollment.student
-            ? {
-                id: attendance.enrollment.student.id,
-                displayName: attendance.enrollment.student.displayName,
-              }
-            : null,
-          buyer: attendance.enrollment.buyer,
-        },
-      })),
-    }));
+  }
+
+  async getSession(id: string, actor: AuthUser) {
+    const [row] = await queryTrainingSessions(this.prisma, actor, {
+      where: { id },
+      take: 1,
+    });
+    if (!row) throw new NotFoundException('课次不存在或当前账号无权查看');
+    return row;
   }
 
   async createSession(dto: CreateTrainingSessionDto, actor: AuthUser) {

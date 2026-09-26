@@ -1,4 +1,13 @@
-import { Inject, Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { TrainingSessionQueryDto } from './training-session-query.dto.js';
+import {
+  Inject,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles } from '../../common/auth/auth.decorators.js';
 import type { AuthUser } from '../../common/auth/auth-user.js';
@@ -28,6 +37,33 @@ export class TrainingScheduleController {
   )
   sessions(@CurrentUser() actor: AuthUser) {
     return this.schedule.listSessions(actor);
+  }
+
+  @Get('sessions/search')
+  @Roles(
+    AppRole.COACH,
+    AppRole.FRONT_DESK,
+    AppRole.FINANCE,
+    AppRole.ADMIN,
+    AppRole.SUPER_ADMIN,
+  )
+  search(
+    @Query() query: TrainingSessionQueryDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.schedule.searchSessions(query, actor);
+  }
+
+  @Get('sessions/:sessionId')
+  @Roles(
+    AppRole.COACH,
+    AppRole.FRONT_DESK,
+    AppRole.FINANCE,
+    AppRole.ADMIN,
+    AppRole.SUPER_ADMIN,
+  )
+  detail(@Param('sessionId') id: string, @CurrentUser() actor: AuthUser) {
+    return this.schedule.getSession(id, actor);
   }
 
   @Post('sessions')

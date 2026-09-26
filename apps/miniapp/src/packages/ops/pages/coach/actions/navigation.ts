@@ -65,6 +65,9 @@ export function useCoachNavigation({
         "id",
       ]);
       if (!record) {
+        record = lessons.value.find(lesson => findOpsDeepLinkRecord(lesson.attendances || [], deepLinkQuery.value, ["id", "sessionId"])) || null;
+      }
+      if (!record) {
         const attendances = enrollments.value.flatMap((enrollment) =>
           (enrollment.attendances || []).map((attendance) => ({
             ...attendance,
@@ -106,5 +109,12 @@ export function useCoachNavigation({
     });
   }
 
-  return { focusedRecord, activeView, lessonId, setQuery, apply: applyCoachDeepLink };
+  function sessionQuery() {
+    if (lessonId.value) return { id: lessonId.value };
+    const query = deepLinkQuery.value;
+    if (query.focus === "session") return { id: query.sessionId || query.id };
+    if (query.focus === "attendance") return query.sessionId ? { id: query.sessionId } : { attendanceId: query.attendanceId || query.id };
+    return {};
+  }
+  return { focusedRecord, activeView, lessonId, setQuery, sessionQuery, apply: applyCoachDeepLink };
 }

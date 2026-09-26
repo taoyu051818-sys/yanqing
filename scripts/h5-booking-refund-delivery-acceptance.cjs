@@ -3,12 +3,13 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const base = process.env.OPS_UI_BASE_URL || 'http://127.0.0.1:5208';
 if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base)) throw new Error('Use a local mock build');
-const output = path.resolve('output/role-workflows-2026-09-26/booking-refund');
+const output = path.resolve(process.env.OPS_UI_OUTPUT_DIR || 'output/ui-acceptance', 'booking-refund');
 require('node:fs').mkdirSync(output, { recursive: true });
 (async () => {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width: 375, height: 812 }, reducedMotion: 'reduce' });
+    const page = await browser.newPage({ timezoneId: "Asia/Shanghai", viewport: { width: 375, height: 812 }, reducedMotion: 'reduce' });
+  await page.clock.setFixedTime(new Date("2030-09-26T09:00:00+08:00"));
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.route('**/*', route => route.request().url().startsWith(base + '/') ? route.continue() : route.abort());

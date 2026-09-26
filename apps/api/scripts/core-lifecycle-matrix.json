@@ -25,7 +25,8 @@
     "files": [
       "test/training-refund-roster.integration.spec.ts",
       "test/training-audience.integration.spec.ts",
-      "test/training-batch.integration.spec.ts"
+      "test/training-batch.integration.spec.ts",
+      "test/training-session-query.integration.spec.ts"
     ]
   },
   "reporting": {

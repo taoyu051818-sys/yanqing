@@ -149,6 +149,7 @@ it("lets a second tap clear a selection without submitting a booking", () => {
   const f = fixture();
   f.bookingMode.value = "ASSISTED";
   const slot = { id: "s1", price: { priceCents: 6000 } };
+  f.data.value = { date: f.date.value, courts: [{ id: "c1" }], slots: [slot], bookings: [], closures: [] };
   f.choose("c1", slot);
   expect(f.selected.value).toEqual({ courtId: "c1", slotId: "s1" });
   f.choose("c1", slot);

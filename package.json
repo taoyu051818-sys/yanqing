@@ -29,13 +29,16 @@
     "build:admin": "pnpm --dir apps/admin build",
     "test:admin": "pnpm --dir apps/admin test",
     "test:core-lifecycle": "pnpm --dir apps/api test:core-lifecycle",
-    "test:ops": "node --test apps/api/scripts/ops/ops.test.mjs apps/api/scripts/ops/packaging.test.mjs && bash -n deploy/ops/release.sh && bash -n deploy/ops/run.sh"
+    "test:ops": "node --test apps/api/scripts/ops/ops.test.mjs apps/api/scripts/ops/packaging.test.mjs && bash -n deploy/ops/release.sh && bash -n deploy/ops/run.sh",
+    "test:ui": "node scripts/test-core-ui.mjs",
+    "check:docs": "node scripts/check-doc-links.mjs"
   },
   "devDependencies": {
     "lucide-react": "^1.16.0",
+    "mammoth": "^1.12.1",
+    "playwright": "1.62.1",
     "react": "^19",
     "react-dom": "^19",
-    "mammoth": "^1.12.1",
     "sharp": "0.35.3"
   }
 }

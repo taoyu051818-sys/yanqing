@@ -35,7 +35,8 @@ export async function handleTrainingSessionsGet(
   data: any,
   options: MockRouteOptions,
 ): Promise<MockRouteResult> {
-  if (url === "/training/sessions" && method === "GET") {
+  const detailMatch = url.match(/^\/training\/sessions\/([^/]+)$/);
+  if ((url === "/training/sessions" || detailMatch) && method === "GET") {
     requireMockRole("COACH", "FRONT_DESK", "FINANCE", "ADMIN", "SUPER_ADMIN");
     const roles = mockRoles();
     const ownClassOnly =
@@ -46,24 +47,28 @@ export async function handleTrainingSessionsGet(
           .flatMap((product) => product.classes || [])
           .filter(
             (trainingClass: any) =>
-              trainingClass.active !== false &&
               (trainingClass.coachId === mockUser().id ||
                 trainingClass.assistantId === mockUser().id),
           )
           .map((trainingClass: any) => trainingClass.id)
       : [];
-    return {
-      handled: true,
-      value: ok(
-        ownClassOnly
-          ? getTrainingSessions()
-              .filter((trainingSession) =>
-                ownedClassIds.includes(trainingSession.classId),
-              )
-              .map(mockTrainingSessionView)
-          : getTrainingSessions().map(mockTrainingSessionView),
-      ),
-    };
+    let rows = getTrainingSessions().filter(session => !ownClassOnly || ownedClassIds.includes(session.classId)).map(mockTrainingSessionView);
+    if (url === "/training/sessions/search") {
+      if (data.date) rows = rows.filter(session => mockShanghaiBusinessDate(new Date(session.startsAt)) === data.date);
+      if (data.search?.trim()) rows = rows.filter(session => session.class?.name?.toLowerCase().includes(data.search.trim().toLowerCase()));
+      if (data.upcoming === "true") rows = rows.filter(session => session.status === "SCHEDULED" && new Date(session.endsAt).getTime() > Date.now());
+      if (data.attendanceId) rows = rows.filter(session => session.attendances?.some((item: { id: string }) => item.id === data.attendanceId));
+      rows.sort((a,b) => ((new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime()) || b.id.localeCompare(a.id)) * (data.upcoming === "true" ? -1 : 1));
+      const page = Math.max(1, Number(data.page) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(data.pageSize) || 50));
+      return { handled: true, value: ok({ items: rows.slice((page-1)*pageSize, page*pageSize), page, pageSize, hasMore: rows.length > page*pageSize }) };
+    }
+    if (detailMatch) {
+      const row = rows.find(session => session.id === decodeURIComponent(detailMatch[1]));
+      if (!row) throw new Error("课次不存在或当前账号无权查看");
+      return { handled: true, value: ok(row) };
+    }
+    return { handled: true, value: ok(rows) };
   }
   return { handled: false };
 }

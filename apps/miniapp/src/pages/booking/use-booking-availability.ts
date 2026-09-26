@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from "vue";
+import { computed, ref, watch, type Ref } from "vue";
 import { endpoints } from "../../services/api";
 import type { CourtAvailability } from "../../types/domain";
 import { today } from "../../utils/format";
@@ -112,17 +112,27 @@ export function useBookingAvailability({
   );
 
   let availabilitySequence = 0;
+  // A grid belongs to one date and booking mode. Invalidate it synchronously,
+  // before a failed/new request can make yesterday's availability look current.
+  watch([date, assisted], () => {
+    availabilitySequence++;
+    data.value = null;
+    selected.value = null;
+    error.value = "";
+    loading.value = false;
+  }, { flush: "sync" });
   async function load(resetSelection = false) {
     const run = ++availabilitySequence;
     const requestedDate = date.value;
+    const requestedAssisted = assisted.value;
     loading.value = true;
     error.value = "";
     if (resetSelection) selected.value = null;
     try {
-      const availability = await (assisted.value
+      const availability = await (requestedAssisted
         ? endpoints.assistedAvailability(requestedDate)
         : endpoints.availability(requestedDate));
-      if (run !== availabilitySequence || requestedDate !== date.value) return;
+      if (run !== availabilitySequence || requestedDate !== date.value || requestedAssisted !== assisted.value) return;
       data.value = availability;
       if (
         selected.value &&
@@ -133,14 +143,17 @@ export function useBookingAvailability({
         uni.showToast({ title: "原时段已不可订，请重新选择", icon: "none" });
       }
     } catch (cause: any) {
-      if (run === availabilitySequence) error.value = cause.message;
+      if (run === availabilitySequence) {
+        data.value = null;
+        error.value = cause?.message || "场地预约情况加载失败，请重试";
+      }
     } finally {
       if (run === availabilitySequence) loading.value = false;
     }
   }
 
   function choose(courtId: string, slot: CourtAvailability["slots"][number]) {
-    if (loading.value || isSubmitting() || blockedReason(courtId, slot)) return;
+    if (loading.value || error.value || !data.value || data.value.date !== date.value || isSubmitting() || blockedReason(courtId, slot)) return;
     selected.value =
       selected.value?.courtId === courtId && selected.value.slotId === slot.id
         ? null
